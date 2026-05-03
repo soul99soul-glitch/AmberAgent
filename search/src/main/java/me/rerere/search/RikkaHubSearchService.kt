@@ -17,10 +17,10 @@ import me.rerere.search.SearchService.Companion.json
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-private const val TAG = "RikkaHubSearchService"
+private const val TAG = "AmberAgentSearchService"
 
 object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOptions> {
-    override val name: String = "RikkaHub"
+    override val name: String = "AmberAgent"
 
     @Composable
     override fun Description() {
@@ -92,7 +92,7 @@ object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOption
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.RikkaHubOptions
     ): Result<ScrapedResult> {
-        error("RikkaHub does not support scraping")
+        error("AmberAgent does not support scraping")
     }
 
     @Serializable

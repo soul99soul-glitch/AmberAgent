@@ -2,6 +2,9 @@ import com.android.build.api.dsl.Packaging
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
+import java.math.BigInteger
+import java.net.URI
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -18,7 +21,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub"
+        applicationId = "me.rerere.amberagent"
         minSdk = 26
         targetSdk = 37
         versionCode = 155
@@ -27,7 +30,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -38,7 +41,7 @@ android {
             val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
             isEnable = !isBuildingBundle
             reset()
-            include("arm64-v8a", "x86_64")
+            include("arm64-v8a")
             isUniversalApk = true
         }
     }
@@ -106,6 +109,7 @@ android {
     }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
+        getByName("main").assets.srcDir("$buildDir/generated/assets/embeddedTerminalRuntime")
     }
     androidResources {
         generateLocaleConfig = true
@@ -128,6 +132,58 @@ android {
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
         compilerOptions.optIn.add("androidx.navigation3.runtime.ExperimentalNavigation3Api")
     }
+}
+
+fun downloadRuntimeFile(localPath: String, remoteUrl: String, expectedChecksum: String? = null) {
+    val file = file(localPath)
+    if (file.exists() && file.length() > 0L && expectedChecksum == null) return
+    file.parentFile?.mkdirs()
+    val digest = MessageDigest.getInstance("SHA-256")
+    val connection = URI(remoteUrl).toURL().openConnection()
+    connection.getInputStream().use { input ->
+        file.outputStream().use { output ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val readBytes = input.read(buffer)
+                if (readBytes < 0) break
+                output.write(buffer, 0, readBytes)
+                digest.update(buffer, 0, readBytes)
+            }
+        }
+    }
+    var checksum = BigInteger(1, digest.digest()).toString(16)
+    while (checksum.length < 64) checksum = "0$checksum"
+    if (expectedChecksum != null && checksum != expectedChecksum) {
+        file.delete()
+        throw GradleException(
+            "Wrong checksum for $remoteUrl:\nExpected: $expectedChecksum\nActual:   $checksum"
+        )
+    }
+}
+
+val prepareEmbeddedTerminalRuntime by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/assets/embeddedTerminalRuntime/embedded-terminal-runtime")
+    outputs.dir(outputDir)
+    doLast {
+        val root = outputDir.get().asFile
+        root.mkdirs()
+        downloadRuntimeFile(
+            localPath = root.resolve("proot").absolutePath,
+            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/proot"
+        )
+        downloadRuntimeFile(
+            localPath = root.resolve("libtalloc.so.2").absolutePath,
+            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/libtalloc.so.2"
+        )
+        downloadRuntimeFile(
+            localPath = root.resolve("alpine.tar.gz").absolutePath,
+            remoteUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz"
+        )
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(prepareEmbeddedTerminalRuntime)
 }
 
 composeCompiler {
@@ -153,6 +209,7 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.documentfile:documentfile:1.1.0")
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.work.runtime.ktx)

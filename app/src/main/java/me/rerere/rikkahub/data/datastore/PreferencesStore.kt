@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
+import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
@@ -131,6 +132,7 @@ class SettingsStore(
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
         val QUICK_MESSAGES = stringPreferencesKey("quick_messages")
+        val AGENT_RUNTIME = stringPreferencesKey("agent_runtime")
 
         // 备份提醒
         val BACKUP_REMINDER_CONFIG = stringPreferencesKey("backup_reminder_config")
@@ -179,9 +181,13 @@ class SettingsStore(
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
-                providers = JsonInstant.decodeFromString(preferences[PROVIDERS] ?: "[]"),
-                assistants = JsonInstant.decodeFromString(preferences[ASSISTANTS] ?: "[]"),
-                dynamicColor = preferences[DYNAMIC_COLOR] != false,
+                providers = JsonInstant.decodeFromString<List<ProviderSetting>>(
+                    preferences[PROVIDERS] ?: "[]"
+                ).withAmberAgentProviderBranding(),
+                assistants = JsonInstant.decodeFromString<List<Assistant>>(
+                    preferences[ASSISTANTS] ?: "[]"
+                ).withAmberAgentAssistantBranding(),
+                dynamicColor = preferences[DYNAMIC_COLOR] ?: false,
                 themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
                 developerMode = preferences[DEVELOPER_MODE] == true,
                 displaySetting = JsonInstant.decodeFromString(preferences[DISPLAY_SETTING] ?: "{}"),
@@ -215,6 +221,9 @@ class SettingsStore(
                 quickMessages = preferences[QUICK_MESSAGES]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
+                agentRuntime = preferences[AGENT_RUNTIME]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: AgentRuntimeSetting(),
                 webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
@@ -258,7 +267,7 @@ class SettingsStore(
             }
             it.copy(
                 providers = providers,
-                assistants = assistants,
+                assistants = assistants.withAmberAgentAssistantBranding(),
                 ttsProviders = ttsProviders
             )
         }
@@ -369,6 +378,7 @@ class SettingsStore(
             preferences[MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
+            preferences[AGENT_RUNTIME] = JsonInstant.encodeToString(settings.agentRuntime)
             preferences[WEB_SERVER_ENABLED] = settings.webServerEnabled
             preferences[WEB_SERVER_PORT] = settings.webServerPort
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
@@ -460,7 +470,7 @@ class SettingsStore(
 data class Settings(
     @Transient
     val init: Boolean = false,
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = false,
     val themeId: String = PresetThemes[0].id,
     val developerMode: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
@@ -494,6 +504,7 @@ data class Settings(
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
+    val agentRuntime: AgentRuntimeSetting = AgentRuntimeSetting(),
     val webServerEnabled: Boolean = false,
     val webServerPort: Int = 8080,
     val webServerJwtEnabled: Boolean = false,
@@ -508,6 +519,51 @@ data class Settings(
         fun dummy() = Settings(init = true)
     }
 }
+
+@Serializable
+data class AgentRuntimeSetting(
+    val enableCoreMemory: Boolean = true,
+    val enableShortTermMemory: Boolean = true,
+    val enableLongTermMemory: Boolean = true,
+    val enableRecentChatsReference: Boolean = true,
+    val enableTimeReminder: Boolean = false,
+    val agentSoulMarkdown: String = DEFAULT_AGENT_SOUL_MARKDOWN,
+    val operationPreviewMode: AgentOperationPreviewMode = AgentOperationPreviewMode.ALWAYS,
+    val maxToolLoopSteps: Int = DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
+    val autoApproveAllToolCalls: Boolean = false,
+    val autoApproveHighRiskToolCalls: Boolean = false,
+)
+
+@Serializable
+enum class AgentOperationPreviewMode {
+    @SerialName("always")
+    ALWAYS,
+
+    @SerialName("auto")
+    AUTO,
+
+    @SerialName("hidden")
+    HIDDEN,
+}
+
+const val MIN_AGENT_TOOL_LOOP_STEPS = 16
+const val DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS = 256
+const val MAX_AGENT_TOOL_LOOP_STEPS = 512
+
+const val DEFAULT_AGENT_SOUL_MARKDOWN = """
+# agents.md
+
+You are AmberAgent, an agent-only Android assistant.
+
+- Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
+- Prefer the authorized /workspace for file work. Use terminal, system access, and screen automation tools only when they are necessary and allowed by the current trust policy.
+- Treat memory as layered:
+  - Core memory: durable behavior rules, identity, and explicit facts the user wants AmberAgent to carry into every conversation.
+  - Short-term memory: concise summaries of recent tasks or active projects that help continuity.
+  - Long-term memory: stable user preferences, recurring interests, plans, and factual context worth preserving beyond a single day.
+- Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
+- For visual web browsing, use the webview_open tool; do not try to launch Android System WebView as a standalone app.
+"""
 
 @Serializable
 enum class ChatFontFamily {
@@ -603,7 +659,9 @@ fun Settings.getCurrentChatModel(): Model? {
 }
 
 fun Settings.getCurrentAssistant(): Assistant {
-    return this.assistants.find { it.id == assistantId } ?: this.assistants.first()
+    return this.assistants.find { it.id == DEFAULT_ASSISTANT_ID }
+        ?: this.assistants.find { it.id == assistantId }
+        ?: this.assistants.first()
 }
 
 fun Settings.getAssistantById(id: Uuid): Assistant? {
@@ -643,8 +701,26 @@ internal val DEFAULT_ASSISTANT_ID = Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa3
 internal val DEFAULT_ASSISTANTS = listOf(
     Assistant(
         id = DEFAULT_ASSISTANT_ID,
-        name = "",
-        systemPrompt = ""
+        name = "AmberAgent",
+        systemPrompt = """
+            You are AmberAgent, an agent-only Android assistant.
+
+            Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
+            Prefer the authorized /workspace for file work. Use terminal and screen automation tools only when they are necessary and user-approved.
+            For visual web browsing, use the webview_open tool; do not try to launch Android System WebView as a standalone app.
+        """.trimIndent(),
+        localTools = listOf(
+            LocalToolOption.JavascriptEngine,
+            LocalToolOption.TimeInfo,
+            LocalToolOption.Clipboard,
+            LocalToolOption.Tts,
+            LocalToolOption.AskUser,
+            LocalToolOption.WorkspaceFiles,
+            LocalToolOption.Terminal,
+            LocalToolOption.ScreenAutomation,
+            LocalToolOption.SystemAccess,
+            LocalToolOption.WebView,
+        )
     ),
     Assistant(
         id = Uuid.parse("3d47790c-c415-4b90-9388-751128adb0a0"),
@@ -666,6 +742,48 @@ internal val DEFAULT_ASSISTANTS = listOf(
         """.trimIndent()
     ),
 )
+
+private fun List<ProviderSetting>.withAmberAgentProviderBranding(): List<ProviderSetting> = map { provider ->
+    when {
+        provider.name == "RikkaHub" && provider.id == DEFAULT_PROVIDERS.first().id -> {
+            provider.copyProvider(name = "AmberAgent")
+        }
+
+        else -> provider
+    }
+}
+
+private fun List<Assistant>.withAmberAgentAssistantBranding(): List<Assistant> = map { assistant ->
+    if (assistant.id == DEFAULT_ASSISTANT_ID) {
+        assistant.copy(
+            name = if (assistant.name in setOf("", "RikkaHub", "Amberagent")) {
+                "AmberAgent"
+            } else {
+                assistant.name
+            },
+            systemPrompt = assistant.systemPrompt.replace("Amberagent", "AmberAgent"),
+            localTools = (assistant.localTools + AMBER_AGENT_REQUIRED_LOCAL_TOOLS).distinct(),
+            enabledSkills = assistant.enabledSkills + AMBER_AGENT_REQUIRED_SKILLS,
+        )
+    } else {
+        assistant
+    }
+}
+
+private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS = listOf(
+    LocalToolOption.JavascriptEngine,
+    LocalToolOption.TimeInfo,
+    LocalToolOption.Clipboard,
+    LocalToolOption.Tts,
+    LocalToolOption.AskUser,
+    LocalToolOption.WorkspaceFiles,
+    LocalToolOption.Terminal,
+    LocalToolOption.ScreenAutomation,
+    LocalToolOption.SystemAccess,
+    LocalToolOption.WebView,
+)
+
+private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator")
 
 val DEFAULT_SYSTEM_TTS_ID = Uuid.parse("026a01a2-c3a0-4fd5-8075-80e03bdef200")
 private val DEFAULT_TTS_PROVIDERS = listOf(

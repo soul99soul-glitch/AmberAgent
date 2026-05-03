@@ -13,6 +13,7 @@ class SkillManager(
 ) {
     companion object {
         private const val TAG = "SkillManager"
+        private const val BUILTIN_SKILLS_ASSET_DIR = "builtin-skills"
     }
 
     fun getSkillsDir(): File {
@@ -31,6 +32,26 @@ class SkillManager(
                 parseSkillFile(skillFile, dir)
             }
             ?: emptyList()
+    }
+
+    suspend fun installBuiltinSkillsIfMissing() = withContext(Dispatchers.IO) {
+        val builtinSkillNames = context.assets.list(BUILTIN_SKILLS_ASSET_DIR).orEmpty()
+        builtinSkillNames.forEach { skillName ->
+            val targetDir = resolveSkillDir(skillName) ?: return@forEach
+            val marker = targetDir.resolve("SKILL.md")
+            if (marker.exists()) return@forEach
+
+            runCatching {
+                targetDir.mkdirs()
+                copyAssetDirectory(
+                    assetPath = "$BUILTIN_SKILLS_ASSET_DIR/$skillName",
+                    targetDir = targetDir,
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "installBuiltinSkillsIfMissing: Failed to install $skillName", error)
+                targetDir.deleteRecursively()
+            }
+        }
     }
 
     fun readSkillBody(skillName: String): String? {
@@ -150,6 +171,27 @@ class SkillManager(
             }
         }
         return null
+    }
+
+    private fun copyAssetDirectory(assetPath: String, targetDir: File) {
+        val children = context.assets.list(assetPath).orEmpty()
+        if (children.isEmpty()) {
+            targetDir.parentFile?.mkdirs()
+            context.assets.open(assetPath).use { input ->
+                targetDir.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return
+        }
+
+        targetDir.mkdirs()
+        children.forEach { child ->
+            copyAssetDirectory(
+                assetPath = "$assetPath/$child",
+                targetDir = targetDir.resolve(child),
+            )
+        }
     }
 
     private fun parseSkillFile(skillFile: File, skillDir: File): SkillMetadata? {

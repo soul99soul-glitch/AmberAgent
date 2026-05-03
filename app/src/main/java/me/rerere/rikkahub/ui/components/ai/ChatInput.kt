@@ -47,6 +47,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
@@ -83,6 +84,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -109,21 +111,27 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ArrowLeft01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.Package01
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.agent.SandboxActivityUiState
+import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -139,12 +147,15 @@ import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import me.rerere.rikkahub.ui.components.webview.WebView
+import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import org.koin.compose.koinInject
 import java.io.File
+import java.net.URLEncoder
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 
@@ -162,6 +173,11 @@ fun ChatInput(
     hazeState: HazeState,
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,
+    sandboxActivity: SandboxActivityUiState? = null,
+    onOpenSandbox: () -> Unit = {},
+    onCancelSandbox: (() -> Unit)? = null,
+    onPreviousSandbox: (() -> Unit)? = null,
+    onNextSandbox: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     onUpdateChatModel: (Model) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
@@ -174,6 +190,12 @@ fun ChatInput(
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
     val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val composerShape = RoundedCornerShape(
+        topStart = 32.dp,
+        topEnd = 32.dp,
+        bottomStart = 28.dp,
+        bottomEnd = 14.dp,
+    )
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -313,46 +335,15 @@ fun ChatInput(
     val filePickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNotEmpty()) {
-                val allowedMimeTypes = setOf(
-                    "text/plain", "text/html", "text/css", "text/javascript", "text/csv", "text/xml",
-                    "application/json", "application/javascript", "application/pdf",
-                    "application/msword",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "application/vnd.ms-excel",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-powerpoint",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    "application/epub+zip"
-                )
                 val documents = uris.mapNotNull { uri ->
                     val fileName = filesManager.getFileNameFromUri(uri) ?: "file"
-                    val mime = filesManager.getFileMimeType(uri) ?: "text/plain"
-                    val isAllowed = allowedMimeTypes.contains(mime) || mime.startsWith("text/") ||
-                        mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-                        mime == "application/pdf" ||
-                        fileName.endsWith(".txt", ignoreCase = true) ||
-                        fileName.endsWith(".md", ignoreCase = true) ||
-                        fileName.endsWith(".csv", ignoreCase = true) ||
-                        fileName.endsWith(".json", ignoreCase = true) ||
-                        fileName.endsWith(".js", ignoreCase = true) ||
-                        fileName.endsWith(".html", ignoreCase = true) ||
-                        fileName.endsWith(".css", ignoreCase = true) ||
-                        fileName.endsWith(".xml", ignoreCase = true) ||
-                        fileName.endsWith(".py", ignoreCase = true) ||
-                        fileName.endsWith(".java", ignoreCase = true) ||
-                        fileName.endsWith(".kt", ignoreCase = true) ||
-                        fileName.endsWith(".ts", ignoreCase = true) ||
-                        fileName.endsWith(".tsx", ignoreCase = true) ||
-                        fileName.endsWith(".markdown", ignoreCase = true) ||
-                        fileName.endsWith(".mdx", ignoreCase = true) ||
-                        fileName.endsWith(".yml", ignoreCase = true) ||
-                        fileName.endsWith(".yaml", ignoreCase = true)
-                    if (isAllowed) {
-                        val localUri = filesManager.createChatFilesByContents(listOf(uri))[0]
+                    val mime = filesManager.getFileMimeType(uri) ?: "application/octet-stream"
+                    val localUri = filesManager.createChatFilesByContents(listOf(uri)).firstOrNull()
+                    if (localUri != null) {
                         UIMessagePart.Document(url = localUri.toString(), fileName = fileName, mime = mime)
                     } else {
                         toaster.show(
-                            context.getString(R.string.chat_input_unsupported_file_type, fileName),
+                            context.getString(R.string.chat_input_file_upload_failed, fileName),
                             type = ToastType.Error
                         )
                         null
@@ -383,10 +374,21 @@ fun ChatInput(
                 .padding(horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            sandboxActivity?.let { activity ->
+                SandboxPeekBar(
+                    activity = activity,
+                    onOpen = onOpenSandbox,
+                    onCancel = onCancelSandbox?.takeIf { activity.canCancel },
+                    onPrevious = onPreviousSandbox,
+                    onNext = onNextSandbox,
+                    modifier = Modifier.align(Alignment.Start),
+                )
+            }
+
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.largeIncreased)
+                    .clip(composerShape)
                     .then(
                         if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
                             state = hazeState,
@@ -394,13 +396,15 @@ fun ChatInput(
                         )
                         else Modifier
                     ),
-                shape = MaterialTheme.shapes.largeIncreased,
-                tonalElevation = 0.dp,
+                shape = composerShape,
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                 color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
@@ -498,7 +502,7 @@ fun ChatInput(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
                                 .combinedClickable(
                                     enabled = loading || !state.isEmpty(),
@@ -512,13 +516,13 @@ fun ChatInput(
                                 )
                         ) {
                             val containerColor = when {
-                                loading -> MaterialTheme.colorScheme.errorContainer // 加载时，红色
-                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh // 禁用时(输入为空)，灰色
-                                else -> MaterialTheme.colorScheme.primary // 启用时(输入非空)，绿色/主题色
+                                loading -> MaterialTheme.colorScheme.tertiaryContainer
+                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                else -> MaterialTheme.colorScheme.primary
                             }
                             val contentColor = when {
-                                loading -> MaterialTheme.colorScheme.onErrorContainer
-                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) // 禁用时，内容用带透明度的灰色
+                                loading -> MaterialTheme.colorScheme.onTertiaryContainer
+                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                 else -> MaterialTheme.colorScheme.onPrimary
                             }
                             Surface(
@@ -597,16 +601,627 @@ fun ChatInput(
 }
 
 @Composable
+private fun SandboxPeekBar(
+    activity: SandboxActivityUiState,
+    onOpen: () -> Unit,
+    onCancel: (() -> Unit)?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AgentOperationPreviewPeek(
+            activity = activity,
+            onOpen = onOpen,
+            modifier = Modifier
+                .width(118.dp)
+                .height(78.dp),
+        )
+        SandboxStepPeek(
+            activity = activity,
+            onOpen = onOpen,
+            onCancel = onCancel,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            modifier = Modifier
+                .weight(1f)
+                .height(38.dp),
+        )
+    }
+}
+
+@Composable
+private fun AgentOperationPreviewPeek(
+    activity: SandboxActivityUiState,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val previewUrl = activity.operationPreviewUrl()
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onOpen() },
+        shape = RoundedCornerShape(16.dp),
+        color = if (previewUrl != null) MaterialTheme.colorScheme.surface else Color(0xFF05070B),
+        contentColor = Color(0xFFEAF2FF),
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+    ) {
+        if (previewUrl != null) {
+            WebOperationPreviewThumbnail(
+                url = previewUrl,
+                onOpen = onOpen,
+            )
+        } else {
+            Column(
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = activity.operationPreviewKind(),
+                    color = Color(0xFFFF5B93),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = activity.operationPreviewText(),
+                    color = Color(0xFF92E6A7),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebOperationPreviewThumbnail(
+    url: String,
+    onOpen: () -> Unit,
+) {
+    val state = rememberWebViewState(
+        url = url,
+        settings = {
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            textZoom = 85
+        },
+    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        WebView(
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            onCreated = { webView ->
+                webView.isFocusable = false
+                webView.isFocusableInTouchMode = false
+                webView.setOnTouchListener { _, _ -> true }
+            },
+            onUpdated = { webView ->
+                webView.setOnTouchListener { _, _ -> true }
+            },
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable { onOpen() },
+        )
+    }
+}
+
+@Composable
+private fun SandboxStepPeek(
+    activity: SandboxActivityUiState,
+    onOpen: () -> Unit,
+    onCancel: (() -> Unit)?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(15.dp))
+            .clickable { onOpen() },
+        shape = RoundedCornerShape(15.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.96f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 3.dp,
+        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SandboxStepStatusIcon(status = activity.status)
+            Text(
+                text = activity.title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (onCancel != null) {
+                IconButton(
+                    onClick = onCancel,
+                    modifier = Modifier.size(22.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Cancel01,
+                        contentDescription = stringResource(R.string.stop),
+                        tint = Color(0xFFE09A1B),
+                        modifier = Modifier.size(12.dp),
+                    )
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                SandboxStepArrow(
+                    enabled = onPrevious != null,
+                    onClick = onPrevious,
+                    left = true,
+                )
+                Text(
+                    text = activity.stepProgressText(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                SandboxStepArrow(
+                    enabled = onNext != null,
+                    onClick = onNext,
+                    left = false,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SandboxStepArrow(
+    enabled: Boolean,
+    onClick: (() -> Unit)?,
+    left: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .size(20.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (left) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
+            contentDescription = null,
+            modifier = Modifier.size(12.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 0.92f else 0.28f),
+        )
+    }
+}
+
+@Composable
+private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
+    Surface(
+        modifier = Modifier.size(20.dp),
+        shape = CircleShape,
+        color = sandboxStatusContainerColor(status),
+        contentColor = sandboxStatusOnContainerColor(status),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = when (status) {
+                    ToolActivityStatus.SUCCEEDED -> HugeIcons.Tick01
+                    ToolActivityStatus.FAILED,
+                    ToolActivityStatus.CANCELLED -> HugeIcons.Cancel01
+                    else -> HugeIcons.Code
+                },
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+            )
+        }
+    }
+}
+
+@Composable
+fun SandboxActivitySheet(
+    activity: SandboxActivityUiState,
+    onDismiss: () -> Unit,
+    onCancel: (() -> Unit)?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        BackHandler { onDismiss() }
+        Column(
+            modifier = Modifier
+                .fillMaxHeight(0.86f)
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val previewUrl = activity.operationPreviewUrl()
+            SandboxSheetHeader(
+                activity = activity,
+                isWebPreview = previewUrl != null,
+                onCancel = onCancel,
+                onPrevious = onPrevious,
+                onNext = onNext,
+            )
+
+            if (previewUrl != null) {
+                SandboxWebActivityContent(
+                    activity = activity,
+                    url = previewUrl,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+            } else {
+                SandboxToolActivityContent(
+                    activity = activity,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SandboxSheetHeader(
+    activity: SandboxActivityUiState,
+    isWebPreview: Boolean,
+    onCancel: (() -> Unit)?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SandboxStepStatusIcon(status = activity.status)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = activity.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val supporting = when {
+                    isWebPreview -> activity.operationPreviewUrl()?.webHostPreview().orEmpty()
+                    activity.runtime.isNotBlank() -> activity.runtime
+                    else -> activity.toolName
+                }
+                Text(
+                    text = supporting,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (activity.canCancel && onCancel != null) {
+                Surface(
+                    onClick = onCancel,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                ) {
+                    Text(
+                        text = "中断",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                    )
+                }
+            }
+            SandboxStepArrow(
+                enabled = onPrevious != null,
+                onClick = onPrevious,
+                left = true,
+            )
+            Text(
+                text = activity.stepProgressText(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            SandboxStepArrow(
+                enabled = onNext != null,
+                onClick = onNext,
+                left = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SandboxToolActivityContent(
+    activity: SandboxActivityUiState,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SandboxSheetCodeBlock(
+            title = "调用内容",
+            language = if (activity.toolName.startsWith("terminal_")) "shell" else "text",
+            content = activity.inputPreview.ifBlank { activity.title },
+        )
+        SandboxSheetCodeBlock(
+            title = "调用结果",
+            language = "text",
+            content = activity.outputTail.ifBlank {
+                if (activity.status == ToolActivityStatus.RUNNING || activity.status == ToolActivityStatus.WAITING_FOR_PERMISSION) {
+                    "等待工具返回输出..."
+                } else {
+                    "无输出"
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SandboxWebActivityContent(
+    activity: SandboxActivityUiState,
+    url: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            Text(
+                text = url,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        OperationWebPreview(
+            url = url,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun OperationWebPreview(
+    url: String,
+    modifier: Modifier = Modifier,
+) {
+    val state = rememberWebViewState(url = url)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        WebView(
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun SandboxSheetCodeBlock(
+    title: String,
+    language: String,
+    content: String,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = language,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                )
+            }
+            Text(
+                text = content,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+private fun sandboxStatusLabel(status: ToolActivityStatus): String = when (status) {
+    ToolActivityStatus.RUNNING -> "执行中"
+    ToolActivityStatus.WAITING_FOR_PERMISSION -> "待授权"
+    ToolActivityStatus.SUCCEEDED -> "成功"
+    ToolActivityStatus.FAILED -> "失败"
+    ToolActivityStatus.CANCELLED -> "已取消"
+}
+
+private fun sandboxStatusContainerColor(status: ToolActivityStatus): Color = when (status) {
+    ToolActivityStatus.RUNNING -> Color(0xFF34C96E)
+    ToolActivityStatus.WAITING_FOR_PERMISSION -> Color(0xFFFFC44D)
+    ToolActivityStatus.SUCCEEDED -> Color(0xFF34C96E)
+    ToolActivityStatus.FAILED -> Color(0xFFE45A5A)
+    ToolActivityStatus.CANCELLED -> Color(0xFFB8C0CC)
+}
+
+private fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = when (status) {
+    ToolActivityStatus.WAITING_FOR_PERMISSION,
+    ToolActivityStatus.CANCELLED -> Color(0xFF1B1C20)
+    else -> Color.White
+}
+
+private fun SandboxActivityUiState.operationPreviewKind(): String = when {
+    toolName == "search_web" -> "web search"
+    toolName == "scrape_web" || toolName == "webview_open" -> "webview"
+    toolName.startsWith("screen_") || toolName == "vlm_task" -> "screen"
+    toolName.startsWith("file_") -> "workspace"
+    toolName.startsWith("terminal_") -> "runtime"
+    toolName.startsWith("mcp__") -> "mcp"
+    else -> toolName
+}
+
+private fun SandboxActivityUiState.operationPreviewText(): String {
+    val previewUrl = operationPreviewUrl()
+    if (previewUrl != null) {
+        return buildString {
+            append(previewUrl.webHostPreview().compactForSandbox(30))
+            append('\n')
+            append(inputPreview.ifBlank { title }.compactForSandbox(42))
+            append('\n')
+            append(sandboxStatusLabel(status))
+        }
+    }
+
+    val command = inputPreview.ifBlank { title }
+    val tail = outputTail.trim()
+    return buildString {
+        append("• ")
+        append(command.compactForSandbox(28))
+        append('\n')
+        if (tail.isNotBlank()) {
+            append(tail.lines().takeLast(3).joinToString("\n").compactForSandbox(96))
+        } else {
+            append(runtime.ifBlank { sandboxStatusLabel(status) }.compactForSandbox(36))
+        }
+    }
+}
+
+private fun SandboxActivityUiState.operationPreviewUrl(): String? {
+    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_open") {
+        return null
+    }
+
+    val directInputUrl = inputPreview.firstHttpUrl()
+    if (directInputUrl != null) return directInputUrl
+
+    val outputUrl = outputTail.firstHttpUrl()
+    if (outputUrl != null) return outputUrl
+
+    if (toolName == "search_web" && inputPreview.isNotBlank()) {
+        return "https://www.google.com/search?q=${URLEncoder.encode(inputPreview, "UTF-8")}"
+    }
+
+    return null
+}
+
+private fun SandboxActivityUiState.stepProgressText(): String {
+    val current = stepIndex
+    val total = stepTotal
+    return if (current != null && total != null) {
+        "$current/$total"
+    } else {
+        sandboxStatusLabel(status)
+    }
+}
+
+private fun SandboxActivityUiState.terminalTranscript(): String = buildString {
+    append("$ ")
+    append(inputPreview.ifBlank { title })
+    append('\n')
+    if (runtime.isNotBlank()) {
+        append("正在调用内嵌 ")
+        append(runtime)
+        append(" 执行工具")
+        append('\n')
+    }
+    if (workspace.isNotBlank()) {
+        append("workspace: ")
+        append(workspace)
+        append('\n')
+    }
+    append("status: ")
+    append(sandboxStatusLabel(status))
+    append('\n')
+    if (outputTail.isNotBlank()) {
+        append('\n')
+        append(outputTail)
+    } else if (status == ToolActivityStatus.RUNNING || status == ToolActivityStatus.WAITING_FOR_PERMISSION) {
+        append('\n')
+        append("等待工具返回输出...")
+    }
+}
+
+private val HTTP_URL_REGEX = Regex("https?://[^\\s\"'<>),]+")
+
+private fun String.firstHttpUrl(): String? =
+    HTTP_URL_REGEX.find(this)?.value?.trimEnd('.', ',', ';', ')')
+
+private fun String.webHostPreview(): String =
+    runCatching { Uri.parse(this).host?.removePrefix("www.") }.getOrNull() ?: this
+
+private fun String.compactForSandbox(maxLength: Int): String {
+    val compact = trim().replace(Regex("\\s+"), " ")
+    return if (compact.length > maxLength) compact.take(maxLength - 1) + "…" else compact
+}
+
+@Composable
 private fun ActionIconButton(
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(36.dp),
+        modifier = Modifier.size(44.dp),
         shape = CircleShape,
         tonalElevation = 0.dp,
-        color = Color.Transparent,
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Box(
             modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center
@@ -716,8 +1331,8 @@ private fun TextInputRow(
             colors = TextFieldDefaults.colors().copy(
                 unfocusedIndicatorColor = Color.Transparent,
                 focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.74f),
             ),
             trailingIcon = {
                 if (isFocused) {

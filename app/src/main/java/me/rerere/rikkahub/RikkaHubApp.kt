@@ -28,6 +28,7 @@ import me.rerere.rikkahub.di.dataSourceModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -43,6 +44,7 @@ private const val TAG = "RikkaHubApp"
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
+const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -66,6 +68,9 @@ class RikkaHubApp : Application() {
 
         // sync upload files to DB
         syncManagedFiles()
+
+        // install bundled agent skills
+        installBuiltinSkills()
 
         // Init remote config
         get<FirebaseRemoteConfig>().apply {
@@ -113,6 +118,16 @@ class RikkaHubApp : Application() {
                 get<FilesManager>().syncFolder()
             }.onFailure {
                 Log.e(TAG, "syncManagedFiles failed", it)
+            }
+        }
+    }
+
+    private fun installBuiltinSkills() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<SkillManager>().installBuiltinSkillsIfMissing()
+            }.onFailure {
+                Log.e(TAG, "installBuiltinSkills failed", it)
             }
         }
     }
@@ -174,6 +189,14 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
+
+        val screenCaptureChannel = NotificationChannelCompat
+            .Builder(SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(getString(R.string.notification_channel_screen_capture))
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(screenCaptureChannel)
     }
 
     override fun onTerminate() {

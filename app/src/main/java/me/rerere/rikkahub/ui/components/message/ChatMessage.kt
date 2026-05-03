@@ -353,11 +353,18 @@ private fun MessagePartsBlock(
                             if (role == MessageRole.USER) {
                                 Surface(
                                     modifier = Modifier.animateContentSize(),
-                                    shape = MaterialTheme.shapes.medium,
+                                    shape = RoundedCornerShape(
+                                        topStart = 22.dp,
+                                        topEnd = 8.dp,
+                                        bottomEnd = 22.dp,
+                                        bottomStart = 22.dp,
+                                    ),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                     tonalElevation = 2.dp,
                                     onClick = { onUserMessageClick?.invoke() },
                                 ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
+                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
                                         MarkdownBlock(
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
@@ -372,10 +379,17 @@ private fun MessagePartsBlock(
                                 if (settings.displaySetting.showAssistantBubble) {
                                     Surface(
                                         modifier = Modifier.animateContentSize(),
-                                        shape = MaterialTheme.shapes.medium,
+                                        shape = RoundedCornerShape(
+                                            topStart = 8.dp,
+                                            topEnd = 22.dp,
+                                            bottomEnd = 22.dp,
+                                            bottomStart = 22.dp,
+                                        ),
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        contentColor = MaterialTheme.colorScheme.onSurface,
                                         tonalElevation = 2.dp,
                                     ) {
-                                        Column(modifier = Modifier.padding(8.dp)) {
+                                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
                                             MarkdownBlock(
                                                 content = part.text.replaceRegexes(
                                                     assistant = assistant,

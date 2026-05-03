@@ -264,6 +264,19 @@ class ChatVM(
         }
     }
 
+    fun setConversationAutoApproveToolCalls(enabled: Boolean) {
+        viewModelScope.launch {
+            val updatedConversation = conversation.value.copy(autoApproveToolCalls = enabled)
+            chatService.updateConversationState(_conversationId) {
+                it.copy(autoApproveToolCalls = enabled)
+            }
+            chatService.saveConversation(_conversationId, updatedConversation)
+            if (enabled) {
+                chatService.approvePendingAutoApprovableTools(_conversationId)
+            }
+        }
+    }
+
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
             conversationRepo.deleteConversation(conversation)

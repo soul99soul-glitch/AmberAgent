@@ -28,7 +28,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +48,7 @@ import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Clapping01
+import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Developer
 import me.rerere.hugeicons.stroke.GlobalSearch
@@ -60,13 +63,18 @@ import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share04
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.WavingHand01
+import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
+import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
+import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.isNotConfigured
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select
+import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.icons.DiscordIcon
 import me.rerere.rikkahub.ui.components.ui.icons.TencentQQIcon
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -86,6 +94,9 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     val filesManager: FilesManager = koinInject()
+    val toolLoopStepOptions = remember { listOf(64, 128, 256, 384, 512) }
+    val operationPreviewModeOptions = remember { AgentOperationPreviewMode.entries }
+    var showHighRiskAutoApproveDialog by remember { mutableStateOf(false) }
 
     if (settings.launchCount > 100 && (settings.launchCount - settings.sponsorAlertDismissedAt) >= 50) {
         AlertDialog(
@@ -108,6 +119,36 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     vm.updateSettings(settings.copy(sponsorAlertDismissedAt = settings.launchCount))
                 }) {
                     Text(stringResource(R.string.setting_page_sponsor_alert_dismiss))
+                }
+            },
+        )
+    }
+
+    if (showHighRiskAutoApproveDialog) {
+        AlertDialog(
+            onDismissRequest = { showHighRiskAutoApproveDialog = false },
+            icon = { Icon(HugeIcons.Alert01, null) },
+            title = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_confirm_title)) },
+            text = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_confirm_desc)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showHighRiskAutoApproveDialog = false
+                        vm.updateSettings(
+                            settings.copy(
+                                agentRuntime = settings.agentRuntime.copy(
+                                    autoApproveHighRiskToolCalls = true
+                                )
+                            )
+                        )
+                    }
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showHighRiskAutoApproveDialog = false }) {
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -195,17 +236,145 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_display_setting_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
                     )
+                }
+            }
+
+            item("agentRuntimeSettings") {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_agent_runtime)) },
+                ) {
                     item(
-                        onClick = { navController.navigate(Screen.Assistant) },
-                        leadingContent = { Icon(HugeIcons.LookTop, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_assistant_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_assistant)) },
+                        onClick = { navController.navigate(Screen.SettingAgentMemory) },
+                        leadingContent = { Icon(HugeIcons.Brain02, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_memory_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.Skills) },
+                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_skills_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_skills)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Extensions) },
                         leadingContent = { Icon(HugeIcons.Package, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingSandbox) },
+                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_sandbox_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_sandbox)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingSystemAccess) },
+                        leadingContent = { Icon(HugeIcons.Settings03, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_system_access_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_system_access)) },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.LookTop, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_operation_preview_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_operation_preview)) },
+                        trailingContent = {
+                            Select(
+                                options = operationPreviewModeOptions,
+                                selectedOption = settings.agentRuntime.operationPreviewMode,
+                                onOptionSelected = { mode ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                operationPreviewMode = mode
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = { mode ->
+                                    when (mode) {
+                                        AgentOperationPreviewMode.ALWAYS ->
+                                            stringResource(R.string.setting_page_agent_operation_preview_always)
+
+                                        AgentOperationPreviewMode.AUTO ->
+                                            stringResource(R.string.setting_page_agent_operation_preview_auto)
+
+                                        AgentOperationPreviewMode.HIDDEN ->
+                                            stringResource(R.string.setting_page_agent_operation_preview_hidden)
+                                    }
+                                },
+                                modifier = Modifier.width(116.dp),
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps)) },
+                        trailingContent = {
+                            Select(
+                                options = toolLoopStepOptions,
+                                selectedOption = settings.agentRuntime.maxToolLoopSteps.coerceIn(
+                                    MIN_AGENT_TOOL_LOOP_STEPS,
+                                    MAX_AGENT_TOOL_LOOP_STEPS,
+                                ),
+                                onOptionSelected = { steps ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                maxToolLoopSteps = steps
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = {
+                                    stringResource(R.string.setting_page_agent_tool_loop_steps_value, it)
+                                },
+                                modifier = Modifier.width(120.dp),
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Zap, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_auto_approve_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_auto_approve)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.autoApproveAllToolCalls,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                autoApproveAllToolCalls = checked
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Alert01, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.autoApproveHighRiskToolCalls,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        showHighRiskAutoApproveDialog = true
+                                    } else {
+                                        vm.updateSettings(
+                                            settings.copy(
+                                                agentRuntime = settings.agentRuntime.copy(
+                                                    autoApproveHighRiskToolCalls = false
+                                                )
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                        },
                     )
                 }
             }

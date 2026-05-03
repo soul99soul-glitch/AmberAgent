@@ -9,6 +9,16 @@ import me.rerere.highlight.Highlighter
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.AILoggingManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
+import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
+import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
+import me.rerere.rikkahub.data.agent.tools.TerminalTools
+import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.EmojiData
@@ -31,7 +41,47 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get())
+        WorkspaceManager(get())
+    }
+
+    single {
+        WorkspaceTools(get(), get())
+    }
+
+    single {
+        AgentToolActivityStore()
+    }
+
+    single {
+        AlpineRuntimeInstaller(get())
+    }
+
+    single {
+        TerminalRuntime(get(), get(), get())
+    }
+
+    single {
+        TerminalTools(get(), get())
+    }
+
+    single {
+        ScreenCaptureManager(get())
+    }
+
+    single {
+        ScreenAutomationTools(get(), get(), get())
+    }
+
+    single {
+        AgentPermissionBroker(get())
+    }
+
+    single {
+        SystemAccessTools(get(), get(), get())
+    }
+
+    single {
+        LocalTools(get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -78,6 +128,7 @@ val appModule = module {
             providerManager = get(),
             localTools = get(),
             mcpManager = get(),
+            activityStore = get(),
             filesManager = get(),
             skillManager = get()
         )

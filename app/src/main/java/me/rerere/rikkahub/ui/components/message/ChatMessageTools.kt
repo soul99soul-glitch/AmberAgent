@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.components.message
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -10,11 +14,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -28,6 +36,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -40,6 +49,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -66,10 +78,14 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Clipboard
+import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Eraser
+import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.MagicWand01
+import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.QuillWrite01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Search01
@@ -107,6 +123,24 @@ private object ToolNames {
     const val USE_SKILL = "use_skill"
 }
 
+private enum class AgentToolStatus {
+    RUNNING,
+    WAITING_FOR_PERMISSION,
+    SUCCEEDED,
+    FAILED,
+    CANCELLED,
+}
+
+private enum class AgentToolKind {
+    FILE,
+    TERMINAL,
+    MCP,
+    SCREEN,
+    WEB,
+    MEMORY,
+    GENERIC,
+}
+
 private object MemoryActions {
     const val CREATE = "create"
     const val EDIT = "edit"
@@ -127,16 +161,343 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
 
     ToolNames.SEARCH_WEB -> HugeIcons.Search01
     ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
+    "webview_open" -> HugeIcons.GlobalSearch
     ToolNames.GET_TIME_INFO -> HugeIcons.Time02
     ToolNames.CLIPBOARD -> HugeIcons.Clipboard
     ToolNames.TTS -> HugeIcons.VolumeHigh
     ToolNames.ASK_USER -> HugeIcons.BubbleChatQuestion
     ToolNames.USE_SKILL -> HugeIcons.MagicWand01
-    else -> HugeIcons.Tools
+    in setOf(
+        "file_list",
+        "file_read",
+        "file_write",
+        "file_edit",
+        "file_search",
+        "file_move"
+    ) -> HugeIcons.File02
+
+    in setOf(
+        "terminal_execute",
+        "terminal_session_start",
+        "terminal_session_exec",
+        "terminal_session_read",
+        "terminal_session_stop"
+    ) -> HugeIcons.Code
+
+    in setOf(
+        "screen_click",
+        "screen_long_click",
+        "screen_swipe",
+        "screen_input_text",
+        "screen_back",
+        "screen_home",
+        "screen_open_app",
+        "screen_read_ui",
+        "screen_screenshot",
+        "vlm_task"
+    ) -> HugeIcons.FullScreen
+
+    else -> if (toolName.startsWith("mcp__")) HugeIcons.Package else HugeIcons.Tools
+}
+
+private fun getToolKind(toolName: String) = when {
+    toolName in setOf(
+        "file_list",
+        "file_read",
+        "file_write",
+        "file_edit",
+        "file_search",
+        "file_move"
+    ) -> AgentToolKind.FILE
+
+    toolName in setOf(
+        "terminal_execute",
+        "terminal_session_start",
+        "terminal_session_exec",
+        "terminal_session_read",
+        "terminal_session_stop"
+    ) -> AgentToolKind.TERMINAL
+
+    toolName in setOf(
+        "screen_click",
+        "screen_long_click",
+        "screen_swipe",
+        "screen_input_text",
+        "screen_back",
+        "screen_home",
+        "screen_open_app",
+        "screen_read_ui",
+        "screen_screenshot",
+        "vlm_task"
+    ) -> AgentToolKind.SCREEN
+
+    toolName == ToolNames.SEARCH_WEB || toolName == ToolNames.SCRAPE_WEB || toolName == "webview_open" -> AgentToolKind.WEB
+    toolName == ToolNames.MEMORY -> AgentToolKind.MEMORY
+    toolName.startsWith("mcp__") -> AgentToolKind.MCP
+    else -> AgentToolKind.GENERIC
 }
 
 private fun JsonElement?.getStringContent(key: String): String? =
     this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.contentOrNull
+
+private fun String.compactToolPreview(maxLength: Int = 34): String {
+    val compact = trim().replace(Regex("\\s+"), " ")
+    return if (compact.length > maxLength) compact.take(maxLength - 1) + "…" else compact
+}
+
+private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): Boolean {
+    val jsonObject = content?.jsonObjectOrNull
+    val error = jsonObject?.getStringContent("error")
+    val exitCode = jsonObject?.get("exit_code")?.jsonPrimitiveOrNull?.intOrNull
+    return !error.isNullOrBlank() ||
+        (exitCode != null && exitCode != 0) ||
+        output.filterIsInstance<UIMessagePart.Text>().any { part ->
+            part.text.contains("\"error\"", ignoreCase = true) ||
+                part.text.contains("Exception", ignoreCase = true)
+        }
+}
+
+private fun toolStatusFromMessagePart(
+    tool: UIMessagePart.Tool,
+    loading: Boolean,
+    content: JsonElement?,
+): AgentToolStatus = when {
+    tool.approvalState is ToolApprovalState.Pending -> AgentToolStatus.WAITING_FOR_PERMISSION
+    tool.approvalState is ToolApprovalState.Denied -> AgentToolStatus.CANCELLED
+    !tool.isExecuted && loading -> AgentToolStatus.RUNNING
+    !tool.isExecuted -> AgentToolStatus.RUNNING
+    toolHasFailure(content = content, output = tool.output) -> AgentToolStatus.FAILED
+    else -> AgentToolStatus.SUCCEEDED
+}
+
+private data class AgentToolColors(
+    val container: Color,
+    val content: Color,
+    val statusContainer: Color,
+    val statusContent: Color,
+)
+
+@Composable
+private fun agentToolColors(status: AgentToolStatus): AgentToolColors = when (status) {
+    AgentToolStatus.RUNNING -> AgentToolColors(
+        container = MaterialTheme.colorScheme.primaryContainer,
+        content = MaterialTheme.colorScheme.onPrimaryContainer,
+        statusContainer = MaterialTheme.colorScheme.primary,
+        statusContent = MaterialTheme.colorScheme.onPrimary,
+    )
+
+    AgentToolStatus.WAITING_FOR_PERMISSION -> AgentToolColors(
+        container = MaterialTheme.colorScheme.tertiaryContainer,
+        content = MaterialTheme.colorScheme.onTertiaryContainer,
+        statusContainer = MaterialTheme.colorScheme.tertiary,
+        statusContent = MaterialTheme.colorScheme.onTertiary,
+    )
+
+    AgentToolStatus.SUCCEEDED -> AgentToolColors(
+        container = MaterialTheme.colorScheme.secondaryContainer,
+        content = MaterialTheme.colorScheme.onSecondaryContainer,
+        statusContainer = MaterialTheme.colorScheme.surface,
+        statusContent = MaterialTheme.colorScheme.secondary,
+    )
+
+    AgentToolStatus.FAILED -> AgentToolColors(
+        container = MaterialTheme.colorScheme.errorContainer,
+        content = MaterialTheme.colorScheme.onErrorContainer,
+        statusContainer = MaterialTheme.colorScheme.error,
+        statusContent = MaterialTheme.colorScheme.onError,
+    )
+
+    AgentToolStatus.CANCELLED -> AgentToolColors(
+        container = MaterialTheme.colorScheme.surfaceVariant,
+        content = MaterialTheme.colorScheme.onSurfaceVariant,
+        statusContainer = MaterialTheme.colorScheme.surface,
+        statusContent = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun toolStatusLabel(status: AgentToolStatus): String = when (status) {
+    AgentToolStatus.RUNNING -> "执行中"
+    AgentToolStatus.WAITING_FOR_PERMISSION -> "待授权"
+    AgentToolStatus.SUCCEEDED -> "成功"
+    AgentToolStatus.FAILED -> "失败"
+    AgentToolStatus.CANCELLED -> "已取消"
+}
+
+@Composable
+private fun toolKindLabel(kind: AgentToolKind, toolName: String): String = when (kind) {
+    AgentToolKind.FILE -> "文件"
+    AgentToolKind.TERMINAL -> "终端"
+    AgentToolKind.MCP -> "MCP"
+    AgentToolKind.SCREEN -> "屏幕"
+    AgentToolKind.WEB -> "网页"
+    AgentToolKind.MEMORY -> "记忆"
+    AgentToolKind.GENERIC -> toolName
+}
+
+@Composable
+private fun ToolStatusPill(
+    status: AgentToolStatus,
+    modifier: Modifier = Modifier,
+) {
+    val colors = agentToolColors(status)
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = colors.statusContainer,
+        contentColor = colors.statusContent,
+    ) {
+        Text(
+            text = toolStatusLabel(status),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun AgentToolCallCapsule(
+    title: String,
+    toolName: String,
+    icon: ImageVector,
+    kind: AgentToolKind,
+    status: AgentToolStatus,
+    loading: Boolean,
+    onClick: (() -> Unit)?,
+    approvalActions: (@Composable () -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = agentToolColors(status)
+    val shape = RoundedCornerShape(24.dp)
+    val kindDescription = toolKindLabel(kind, toolName)
+    Surface(
+        modifier = modifier
+            .wrapContentWidth(align = Alignment.Start)
+            .widthIn(max = 420.dp)
+            .clip(shape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable { onClick() }
+                } else {
+                    Modifier
+                }
+            )
+            .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
+        shape = shape,
+        color = colors.container,
+        contentColor = colors.content,
+        border = BorderStroke(1.dp, colors.content.copy(alpha = 0.08f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(26.dp),
+                shape = CircleShape,
+                color = colors.content.copy(alpha = 0.10f),
+                contentColor = colors.content,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (loading && status == AgentToolStatus.RUNNING) {
+                        DotLoading(size = 8.dp)
+                    } else {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = kindDescription,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = colors.content,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
+            )
+
+            if (approvalActions != null) {
+                approvalActions()
+            } else {
+                ToolStatusPill(status = status)
+            }
+        }
+    }
+}
+
+@Composable
+private fun toolDisplayTitle(
+    toolName: String,
+    arguments: JsonElement,
+    memoryAction: String?,
+): String = when (toolName) {
+    ToolNames.MEMORY -> when (memoryAction) {
+        MemoryActions.CREATE -> stringResource(R.string.chat_message_tool_create_memory)
+        MemoryActions.EDIT -> stringResource(R.string.chat_message_tool_edit_memory)
+        MemoryActions.DELETE -> stringResource(R.string.chat_message_tool_delete_memory)
+        else -> stringResource(R.string.chat_message_tool_call_generic, toolName)
+    }
+
+    ToolNames.SEARCH_WEB -> stringResource(
+        R.string.chat_message_tool_search_web,
+        arguments.getStringContent("query") ?: ""
+    )
+
+    ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
+    "webview_open" -> "打开网页 ${arguments.getStringContent("url")?.compactToolPreview(28).orEmpty()}"
+    ToolNames.GET_TIME_INFO -> stringResource(R.string.chat_message_tool_get_time)
+    ToolNames.CLIPBOARD -> when (memoryAction) {
+        ClipboardActions.READ -> stringResource(R.string.chat_message_tool_clipboard_read)
+        ClipboardActions.WRITE -> stringResource(R.string.chat_message_tool_clipboard_write)
+        else -> stringResource(R.string.chat_message_tool_call_generic, toolName)
+    }
+
+    ToolNames.TTS -> {
+        val preview = arguments.getStringContent("text")?.compactToolPreview(24) ?: ""
+        "Speaking: $preview"
+    }
+
+    ToolNames.USE_SKILL -> {
+        val skillName = arguments.getStringContent("name") ?: ""
+        val path = arguments.getStringContent("path")
+        if (path != null) "Skill: $skillName / $path" else "Skill: $skillName"
+    }
+
+    "file_list" -> "列出 workspace ${arguments.getStringContent("path")?.compactToolPreview(18).orEmpty()}"
+    "file_read" -> "读取文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
+    "file_write" -> "写入文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
+    "file_edit" -> "编辑文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
+    "file_search" -> "搜索文件 ${arguments.getStringContent("query")?.compactToolPreview(22).orEmpty()}"
+    "file_move" -> "移动文件 ${arguments.getStringContent("from")?.compactToolPreview(16).orEmpty()}"
+    "terminal_execute" -> "执行 Alpine 命令 ${arguments.getStringContent("command")?.compactToolPreview(22).orEmpty()}"
+    "terminal_session_start" -> "启动终端会话"
+    "terminal_session_exec" -> "终端会话执行 ${arguments.getStringContent("command")?.compactToolPreview(20).orEmpty()}"
+    "terminal_session_read" -> "读取终端输出"
+    "terminal_session_stop" -> "停止终端会话"
+    "screen_click" -> "点击屏幕"
+    "screen_long_click" -> "长按屏幕"
+    "screen_swipe" -> "滑动屏幕"
+    "screen_input_text" -> "输入文字"
+    "screen_back" -> "返回"
+    "screen_home" -> "回到桌面"
+    "screen_open_app" -> "打开应用 ${arguments.getStringContent("package")?.compactToolPreview(18).orEmpty()}"
+    "screen_read_ui" -> "读取当前 UI"
+    "screen_screenshot" -> "获取屏幕截图"
+    "vlm_task" -> "执行 VLM 手机任务"
+    else -> if (toolName.startsWith("mcp__")) {
+        "MCP ${toolName.removePrefix("mcp__").compactToolPreview(26)}"
+    } else {
+        stringResource(R.string.chat_message_tool_call_generic, toolName)
+    }
+}
 
 @Composable
 fun ChainOfThoughtScope.ChatMessageToolStep(
@@ -153,7 +514,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(true) }
     val eventBus: AppEventBus = koinInject()
     val scope = rememberCoroutineScope()
     val isPending = tool.approvalState is ToolApprovalState.Pending
@@ -170,122 +530,73 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         null
     }
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
+    val title = toolDisplayTitle(tool.toolName, arguments, memoryAction)
+    val status = toolStatusFromMessagePart(tool = tool, loading = loading, content = content)
 
-    val title = when (tool.toolName) {
-        ToolNames.MEMORY -> when (memoryAction) {
-            MemoryActions.CREATE -> stringResource(R.string.chat_message_tool_create_memory)
-            MemoryActions.EDIT -> stringResource(R.string.chat_message_tool_edit_memory)
-            MemoryActions.DELETE -> stringResource(R.string.chat_message_tool_delete_memory)
-            else -> stringResource(R.string.chat_message_tool_call_generic, tool.toolName)
-        }
+    val hasExtraContent = isDenied || images.isNotEmpty()
 
-        ToolNames.SEARCH_WEB -> stringResource(
-            R.string.chat_message_tool_search_web,
-            arguments.getStringContent("query") ?: ""
-        )
-
-        ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
-        ToolNames.GET_TIME_INFO -> stringResource(R.string.chat_message_tool_get_time)
-        ToolNames.CLIPBOARD -> when (memoryAction) {
-            ClipboardActions.READ -> stringResource(R.string.chat_message_tool_clipboard_read)
-            ClipboardActions.WRITE -> stringResource(R.string.chat_message_tool_clipboard_write)
-            else -> stringResource(R.string.chat_message_tool_call_generic, tool.toolName)
-        }
-
-        ToolNames.TTS -> {
-            val preview = arguments.getStringContent("text")?.let { text ->
-                if (text.length > 24) text.take(24) + "…" else text
-            } ?: ""
-            "Speaking: $preview"
-        }
-
-        ToolNames.USE_SKILL -> {
-            val skillName = arguments.getStringContent("name") ?: ""
-            val path = arguments.getStringContent("path")
-            if (path != null) "Skill: $skillName / $path" else "Skill: $skillName"
-        }
-
-        else -> stringResource(R.string.chat_message_tool_call_generic, tool.toolName)
-    }
-
-    // 判断是否有额外内容需要显示
-    val hasExtraContent = when (tool.toolName) {
-        ToolNames.MEMORY -> memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT) &&
-            content.getStringContent("content") != null
-
-        ToolNames.SEARCH_WEB -> content.getStringContent("answer") != null ||
-            (content?.jsonObject?.get("items")?.jsonArray?.isNotEmpty() == true)
-
-        ToolNames.SCRAPE_WEB -> arguments.getStringContent("url") != null
-        ToolNames.TTS -> arguments.getStringContent("text") != null
-        else -> false
-    } || isDenied || images.isNotEmpty()
-
-    ControlledChainOfThoughtStep(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        icon = {
-            if (loading) {
-                DotLoading(
-                    size = 10.dp
-                )
-            } else {
-                Icon(
-                    imageVector = getToolIcon(tool.toolName, memoryAction),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = LocalContentColor.current.copy(alpha = 0.7f)
-                )
-            }
-        },
-        label = {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = loading),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        extra = if (isPending && onToolApproval != null) {
-            {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilledTonalIconButton(
-                        onClick = { showDenyDialog = true },
-                        modifier = Modifier.size(28.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        AgentToolCallCapsule(
+            title = title,
+            toolName = tool.toolName,
+            icon = getToolIcon(tool.toolName, memoryAction),
+            kind = getToolKind(tool.toolName),
+            status = status,
+            loading = loading,
+            onClick = { showResult = true },
+            approvalActions = if (isPending && onToolApproval != null) {
+                {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = stringResource(R.string.chat_message_tool_deny),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    FilledTonalIconButton(
-                        onClick = { onToolApproval(tool.toolCallId, true, "") },
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = stringResource(R.string.chat_message_tool_approve),
-                            modifier = Modifier.size(14.dp)
-                        )
+                        ToolStatusPill(status = status)
+                        FilledTonalIconButton(
+                            onClick = { showDenyDialog = true },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Cancel01,
+                                contentDescription = stringResource(R.string.chat_message_tool_deny),
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                        FilledTonalIconButton(
+                            onClick = { onToolApproval(tool.toolCallId, true, "") },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Tick01,
+                                contentDescription = stringResource(R.string.chat_message_tool_approve),
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
                     }
                 }
-            }
-        } else {
-            null
-        },
-        onClick = if (content != null || isPending || images.isNotEmpty()) {
-            { showResult = true }
-        } else {
-            null
-        },
-        content = if (hasExtraContent) {
-            {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            } else {
+                null
+            },
+        )
+
+        if (hasExtraContent) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 32.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     if (tool.toolName == ToolNames.MEMORY &&
                         memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT)
                     ) {
@@ -293,7 +604,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = memoryContent,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -305,7 +616,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = answer,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -324,7 +635,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 Text(
                                     text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                                 )
                             }
                         }
@@ -334,7 +645,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         Text(
                             text = url,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                         )
                     }
                     if (tool.toolName == ToolNames.TTS) {
@@ -347,7 +658,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = text,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
@@ -391,10 +702,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     }
                 }
             }
-        } else {
-            null
-        },
-    )
+        }
+    }
 
     if (showDenyDialog && onToolApproval != null) {
         ToolDenyReasonDialog(

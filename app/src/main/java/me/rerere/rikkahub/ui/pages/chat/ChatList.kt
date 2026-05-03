@@ -37,7 +37,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -63,7 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -87,7 +86,9 @@ import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -98,16 +99,55 @@ import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
-import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
+import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
-import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
+
+private fun Conversation.latestRenderToken(): String {
+    val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
+    val part = message.parts.lastOrNull()
+    return buildString {
+        append(messageNodes.size)
+        append(':')
+        append(message.id)
+        append(':')
+        append(message.parts.size)
+        append(':')
+        append(part?.compactRenderToken().orEmpty())
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun UIMessagePart.compactRenderToken(): String = when (this) {
+    is UIMessagePart.Text -> "text:${text.length}:${text.takeLast(16)}"
+    is UIMessagePart.Reasoning -> "reasoning:${reasoning.length}:${finishedAt != null}"
+    is UIMessagePart.Tool -> {
+        val outputToken = output.lastOrNull()?.compactRenderToken().orEmpty()
+        "tool:$toolCallId:$toolName:$isExecuted:${approvalState.compactRenderToken()}:${output.size}:$outputToken"
+    }
+
+    is UIMessagePart.Image -> "image:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Video -> "video:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Audio -> "audio:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Document -> "document:$fileName:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Search -> "search"
+    is UIMessagePart.ToolCall -> "tool_call:$toolCallId:${arguments.length}:${approvalState.compactRenderToken()}"
+    is UIMessagePart.ToolResult -> "tool_result:$toolCallId:${content.hashCode()}"
+}
+
+private fun ToolApprovalState.compactRenderToken(): String = when (this) {
+    ToolApprovalState.Auto -> "auto"
+    ToolApprovalState.Pending -> "pending"
+    ToolApprovalState.Approved -> "approved"
+    is ToolApprovalState.Denied -> "denied:${reason.length}"
+    is ToolApprovalState.Answered -> "answered:${answer.length}"
+}
 
 @Composable
 fun ChatList(
@@ -208,7 +248,6 @@ private fun ChatListNormal(
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
     var isRecentScroll by remember { mutableStateOf(false) }
-    val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
 
@@ -228,15 +267,6 @@ private fun ChatListNormal(
         onDispose {
             activity?.volumeKeyListeners?.remove(listener)
         }
-    }
-
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
-        // println("lastPos = $lastPos, inputPos = $inputPos  | ${lastPos <= inputPos - 8}")
-        return lastPos <= inputPos - 8
     }
 
     // 聊天选择
@@ -261,16 +291,14 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动滚动到底部
         if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                            // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
-                        }
+            val latestRenderToken = conversation.latestRenderToken()
+            LaunchedEffect(loadingState, latestRenderToken, processingStatus) {
+                if (loadingState && !state.isScrollInProgress) {
+                    withFrameNanos { }
+                    val lastIndex = state.layoutInfo.totalItemsCount - 1
+                    if (lastIndex >= 0) {
+                        state.scrollToItem(lastIndex)
                     }
                 }
             }
@@ -362,7 +390,7 @@ private fun ChatListNormal(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        RabbitLoadingIndicator(
+                        PigLoadingIndicator(
                             modifier = Modifier.size(28.dp)
                         )
                         AnimatedVisibility(

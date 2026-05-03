@@ -1,12 +1,12 @@
 <div align="center">
   <img src="docs/icon.png" alt="App 图标" width="100" />
-  <h1>RikkaHub</h1>
+  <h1>AmberAgent</h1>
 
 一个原生Android LLM 聊天客户端，支持切换不同的供应商进行聊天 🤖💬
 
 [English](README.md) | [繁體中文](README_ZH_TW.md) | 简体中文
 
-点击链接加入群聊 👉 [【RikkaHub】](https://qm.qq.com/q/I8MSU0FkOu)
+点击链接加入群聊 👉 [【AmberAgent】](https://qm.qq.com/q/I8MSU0FkOu)
 
 </div>
 

@@ -18,6 +18,10 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
+import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
+import me.rerere.rikkahub.data.agent.tools.TerminalTools
+import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
 import java.time.ZonedDateTime
@@ -45,9 +49,36 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("ask_user")
     data object AskUser : LocalToolOption()
+
+    @Serializable
+    @SerialName("workspace_files")
+    data object WorkspaceFiles : LocalToolOption()
+
+    @Serializable
+    @SerialName("terminal")
+    data object Terminal : LocalToolOption()
+
+    @Serializable
+    @SerialName("screen_automation")
+    data object ScreenAutomation : LocalToolOption()
+
+    @Serializable
+    @SerialName("system_access")
+    data object SystemAccess : LocalToolOption()
+
+    @Serializable
+    @SerialName("webview")
+    data object WebView : LocalToolOption()
 }
 
-class LocalTools(private val context: Context, private val eventBus: AppEventBus) {
+class LocalTools(
+    private val context: Context,
+    private val eventBus: AppEventBus,
+    private val workspaceTools: WorkspaceTools,
+    private val terminalTools: TerminalTools,
+    private val screenAutomationTools: ScreenAutomationTools,
+    private val systemAccessTools: SystemAccessTools,
+) {
     val javascriptTool by lazy {
         Tool(
             name = "eval_javascript",
@@ -203,6 +234,51 @@ class LocalTools(private val context: Context, private val eventBus: AppEventBus
         )
     }
 
+    val webViewTool by lazy {
+        Tool(
+            name = "webview_open",
+            description = """
+                Open a URL in AmberAgent's live operation preview WebView.
+                Use this when the user wants visual webpage browsing or when search/scrape results need a page preview.
+                This tool does not extract page text by itself; use search_web or scrape_web when textual content is needed.
+                Do not try to open the Android System WebView package as an app; the preview WebView is embedded inside AmberAgent.
+            """.trimIndent().replace("\n", " "),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("url", buildJsonObject {
+                            put("type", "string")
+                            put("description", "The http or https URL to open in the AmberAgent WebView preview")
+                        })
+                        put("reason", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Short reason for opening the page")
+                        })
+                    },
+                    required = listOf("url")
+                )
+            },
+            execute = {
+                val params = it.jsonObject
+                val url = params["url"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?: error("url is required")
+                require(url.startsWith("http://") || url.startsWith("https://")) {
+                    "Only http and https URLs can be opened in WebView"
+                }
+                val payload = buildJsonObject {
+                    put("url", url)
+                    put("runtime", "webview")
+                    put("status", "opened")
+                    params["reason"]?.jsonPrimitive?.contentOrNull?.takeIf { reason -> reason.isNotBlank() }?.let { reason ->
+                        put("reason", reason)
+                    }
+                    put("note", "Tap the operation preview to expand the WebView panel.")
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
+            }
+        )
+    }
+
     val ttsTool by lazy {
         Tool(
             name = "text_to_speech",
@@ -320,6 +396,21 @@ class LocalTools(private val context: Context, private val eventBus: AppEventBus
         }
         if (options.contains(LocalToolOption.AskUser)) {
             tools.add(askUserTool)
+        }
+        if (options.contains(LocalToolOption.WorkspaceFiles)) {
+            tools.addAll(workspaceTools.getTools())
+        }
+        if (options.contains(LocalToolOption.Terminal)) {
+            tools.addAll(terminalTools.getTools())
+        }
+        if (options.contains(LocalToolOption.ScreenAutomation)) {
+            tools.addAll(screenAutomationTools.getTools())
+        }
+        if (options.contains(LocalToolOption.SystemAccess)) {
+            tools.addAll(systemAccessTools.getTools())
+        }
+        if (options.contains(LocalToolOption.WebView)) {
+            tools.add(webViewTool)
         }
         return tools
     }

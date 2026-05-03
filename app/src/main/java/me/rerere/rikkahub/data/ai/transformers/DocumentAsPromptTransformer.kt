@@ -70,10 +70,35 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> parseDocxAsText(file)
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> parsePptxAsText(file)
                 "application/epub+zip" -> parseEpubAsText(file)
-                else -> file.readText()
+                else -> {
+                    if (document.isLikelyTextFile()) {
+                        file.readText()
+                    } else {
+                        buildString {
+                            appendLine("[BINARY_OR_ARCHIVE_FILE]")
+                            appendLine("name: ${document.fileName}")
+                            appendLine("mime: ${document.mime}")
+                            appendLine("size_bytes: ${file.length()}")
+                            appendLine("local_path: ${file.absolutePath}")
+                            appendLine("The file is attached but was not inlined as text. Use available tools, such as terminal_execute, to inspect, extract, or process it.")
+                        }
+                    }
+                }
             }
         }.getOrElse {
             "[ERROR, failed to read file: ${document.fileName}]"
         }
+    }
+
+    private fun UIMessagePart.Document.isLikelyTextFile(): Boolean {
+        if (mime.startsWith("text/")) return true
+        return fileName.substringAfterLast('.', missingDelimiterValue = "")
+            .lowercase() in setOf(
+                "txt", "md", "markdown", "mdx", "csv", "json", "jsonl", "xml", "html", "htm",
+                "css", "js", "ts", "tsx", "jsx", "py", "java", "kt", "kts", "swift", "go",
+                "rs", "c", "h", "cpp", "hpp", "cs", "sh", "bash", "zsh", "fish", "rb",
+                "php", "sql", "yml", "yaml", "toml", "ini", "conf", "gradle", "properties",
+                "log", "svg"
+            )
     }
 }

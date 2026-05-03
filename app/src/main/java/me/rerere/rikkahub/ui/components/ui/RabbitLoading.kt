@@ -13,7 +13,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.context.LocalSettings
 
 @Composable
-fun RabbitLoadingIndicator(modifier: Modifier = Modifier) {
+fun PigLoadingIndicator(modifier: Modifier = Modifier) {
     val useAppIconStyleLoadingIndicator = LocalSettings.current.displaySetting.useAppIconStyleLoadingIndicator
     val primaryColor = MaterialTheme.colorScheme.primary.toArgb()
 
@@ -22,7 +22,7 @@ fun RabbitLoadingIndicator(modifier: Modifier = Modifier) {
             modifier = modifier,
             factory = { context ->
                 ImageView(context).apply {
-                    val drawable = AppCompatResources.getDrawable(context, R.drawable.rabbit) as? AnimatedVectorDrawable
+                    val drawable = AppCompatResources.getDrawable(context, R.drawable.pig) as? AnimatedVectorDrawable
                     setImageDrawable(drawable)
                     drawable?.setTint(primaryColor)
                     drawable?.start()

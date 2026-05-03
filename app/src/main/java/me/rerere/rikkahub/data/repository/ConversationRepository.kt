@@ -48,6 +48,13 @@ class ConversationRepository(
         }
     }
 
+    suspend fun getRecentConversations(limit: Int = 10): List<Conversation> {
+        return conversationDAO.getRecentConversations(limit).map { entity ->
+            val nodes = loadMessageNodes(entity.id)
+            conversationEntityToConversation(entity, nodes)
+        }
+    }
+
     fun getConversationsOfAssistant(assistantId: Uuid): Flow<List<Conversation>> {
         return conversationDAO
             .getConversationsOfAssistant(assistantId.toString())
@@ -272,7 +279,8 @@ class ConversationRepository(
             updateAt = conversation.updateAt.toEpochMilli(),
             assistantId = conversation.assistantId.toString(),
             chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
-            isPinned = conversation.isPinned
+            isPinned = conversation.isPinned,
+            autoApproveToolCalls = conversation.autoApproveToolCalls,
         )
     }
 
@@ -289,6 +297,7 @@ class ConversationRepository(
             assistantId = Uuid.parse(conversationEntity.assistantId),
             chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
             isPinned = conversationEntity.isPinned,
+            autoApproveToolCalls = conversationEntity.autoApproveToolCalls,
         )
     }
 

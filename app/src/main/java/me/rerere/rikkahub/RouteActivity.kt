@@ -97,6 +97,7 @@ import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
@@ -105,7 +106,9 @@ import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderPage
+import me.rerere.rikkahub.ui.pages.setting.SettingSandboxPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
+import me.rerere.rikkahub.ui.pages.setting.SettingSystemAccessPage
 import me.rerere.rikkahub.ui.pages.setting.SettingTTSPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
@@ -398,6 +401,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingAboutPage()
                             }
 
+                            entry<Screen.SettingAgentMemory> {
+                                SettingAgentMemoryPage()
+                            }
+
                             entry<Screen.SettingSearch> {
                                 SettingSearchPage()
                             }
@@ -416,6 +423,14 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingFiles> {
                                 SettingFilesPage()
+                            }
+
+                            entry<Screen.SettingSandbox> {
+                                SettingSandboxPage()
+                            }
+
+                            entry<Screen.SettingSystemAccess> {
+                                SettingSystemAccessPage()
                             }
 
                             entry<Screen.SettingWeb> {
@@ -587,6 +602,9 @@ sealed interface Screen : NavKey {
     data object SettingAbout : Screen
 
     @Serializable
+    data object SettingAgentMemory : Screen
+
+    @Serializable
     data object SettingSearch : Screen
 
     @Serializable
@@ -600,6 +618,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingFiles : Screen
+
+    @Serializable
+    data object SettingSandbox : Screen
+
+    @Serializable
+    data object SettingSystemAccess : Screen
 
     @Serializable
     data object SettingWeb : Screen

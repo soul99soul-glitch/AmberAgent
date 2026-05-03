@@ -22,7 +22,7 @@ object TimeReminderTransformer : InputMessageTransformer {
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        if (!ctx.assistant.enableTimeReminder) return messages
+        if (!ctx.settings.agentRuntime.enableTimeReminder) return messages
         return applyTimeReminder(messages)
     }
 }

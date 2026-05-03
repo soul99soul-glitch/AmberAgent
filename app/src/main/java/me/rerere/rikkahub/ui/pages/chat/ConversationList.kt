@@ -1,15 +1,20 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Forward02
 import me.rerere.hugeicons.stroke.Pin
 import me.rerere.hugeicons.stroke.PinOff
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Delete01
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -81,7 +87,6 @@ fun ColumnScope.ConversationList(
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
     onPin: (Conversation) -> Unit = {},
-    onMoveToAssistant: (Conversation) -> Unit = {}
 ) {
     var hasScrolledToCurrent by remember(current.id) { mutableStateOf(false) }
 
@@ -156,7 +161,6 @@ fun ColumnScope.ConversationList(
                         onDelete = onDelete,
                         onRegenerateTitle = onRegenerateTitle,
                         onPin = onPin,
-                        onMoveToAssistant = onMoveToAssistant,
                         modifier = Modifier.animateItem()
                     )
                 }
@@ -226,7 +230,6 @@ private fun ConversationItem(
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
     onPin: (Conversation) -> Unit = {},
-    onMoveToAssistant: (Conversation) -> Unit = {},
     onClick: (Conversation) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -260,9 +263,9 @@ private fun ConversationItem(
             Text(
                 text = conversation.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
 
             // 置顶图标
             AnimatedVisibility(conversation.isPinned) {
@@ -274,15 +277,7 @@ private fun ConversationItem(
                 )
             }
             AnimatedVisibility(loading) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.extendColors.green6)
-                        .size(4.dp)
-                        .semantics {
-                            contentDescription = "Loading"
-                        }
-                )
+                ConversationRunningIndicator()
             }
             DropdownMenu(
                 expanded = showDropdownMenu,
@@ -321,19 +316,6 @@ private fun ConversationItem(
 
                 DropdownMenuItem(
                     text = {
-                        Text(stringResource(R.string.chat_page_move_to_assistant))
-                    },
-                    onClick = {
-                        onMoveToAssistant(conversation)
-                        showDropdownMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(HugeIcons.Forward02, null)
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
                         Text(stringResource(id = R.string.chat_page_delete))
                     },
                     onClick = {
@@ -346,5 +328,57 @@ private fun ConversationItem(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ConversationRunningIndicator(
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "conversation-running")
+    val pulseScale by transition.animateFloat(
+        initialValue = 0.72f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "conversation-running-scale",
+    )
+    val pulseAlpha by transition.animateFloat(
+        initialValue = 0.75f,
+        targetValue = 0.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "conversation-running-alpha",
+    )
+    val runningColor = MaterialTheme.colorScheme.primary
+
+    Box(
+        modifier = modifier
+            .size(18.dp)
+            .semantics {
+                contentDescription = "Running"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .scale(pulseScale)
+                .border(
+                    width = 1.5.dp,
+                    color = runningColor.copy(alpha = pulseAlpha),
+                    shape = CircleShape,
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.extendColors.green6)
+                .size(5.dp),
+        )
     }
 }

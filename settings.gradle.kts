@@ -32,7 +32,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "rikkahub"
+rootProject.name = "amberagent"
 include(":app")
 include(":highlight")
 include(":ai")

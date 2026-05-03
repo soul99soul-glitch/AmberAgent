@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission
+    android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+    tools:ignore="ScopedStorage" />
+
+  <application>
+    <receiver
+      android:name=".debug.AmberAgentSmokeReceiver"
+      android:enabled="true"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="me.rerere.amberagent.debug.SMOKE_TERMINAL" />
+        <action android:name="me.rerere.amberagent.debug.SMOKE_SCREEN" />
+        <action android:name="me.rerere.amberagent.debug.SMOKE_SCREENSHOT" />
+        <action android:name="me.rerere.amberagent.debug.SMOKE_SYSTEM_ACCESS" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

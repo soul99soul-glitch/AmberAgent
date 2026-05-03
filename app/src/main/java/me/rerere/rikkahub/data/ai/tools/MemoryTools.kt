@@ -19,19 +19,23 @@ import java.time.LocalDate
 
 fun buildMemoryTools(
     json: Json,
-    onCreation: suspend (String) -> AssistantMemory,
+    onCreation: suspend (String, String) -> AssistantMemory,
     onUpdate: suspend (Int, String) -> AssistantMemory,
     onDelete: suspend (Int) -> Unit
 ): List<Tool> = listOf(
     Tool(
         name = "memory_tool",
         description = """
-            The memory tool stores long-term information across conversations.
+            The memory tool stores layered information across AmberAgent conversations.
             Use `action` to control the operation: `create` (add), `edit` (update), `delete` (remove).
+            Use `scope` for create:
+            - `core`: durable identity, behavior rules, or explicit facts the user wants injected everywhere.
+            - `short_term`: concise summaries of the active project or recent conversations.
+            - `long_term`: stable preferences, recurring interests, plans, and factual context.
             - No relevant record: `create` + `content`
             - Existing relevant record: `edit` + `id` + `content`
             - Outdated/irrelevant record: `delete` + `id`
-            Memories will automatically appear in the <memories> tag in later conversations.
+            Memories will automatically appear in later conversations when the corresponding memory module is enabled.
             Do not store sensitive information (e.g., ethnicity, religion, sexual orientation, political views, sex life, criminal records).
             You may store: preferred name, preferences, plans, work-related notes, chat style preferences, first chat time, etc.
             Do not show memory content directly in the conversation unless the user explicitly asks.
@@ -39,7 +43,8 @@ fun buildMemoryTools(
             Similar memories should be merged; prefer updating existing records.
 
             Examples:
-            {"action":"create","content":"User prefers brief replies and is more active on weekends."}
+            {"action":"create","scope":"long_term","content":"User prefers brief replies and is more active on weekends."}
+            {"action":"create","scope":"short_term","content":"Current thread is about building AmberAgent Android agent features."}
             {"action":"edit","id":12,"content":"User’s preferred name updated to “A-Xing”, prefers Chinese replies."}
             {"action":"delete","id":7}
         """.trimIndent(),
@@ -62,6 +67,18 @@ fun buildMemoryTools(
                         put("type", "integer")
                         put("description", "The id of the memory record (required for edit/delete)")
                     })
+                    put("scope", buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "enum",
+                            buildJsonArray {
+                                add("core")
+                                add("short_term")
+                                add("long_term")
+                            }
+                        )
+                        put("description", "The memory scope for create. Defaults to long_term.")
+                    })
                     put("content", buildJsonObject {
                         put("type", "string")
                         put("description", "The content of the memory record (required for create/edit)")
@@ -76,7 +93,11 @@ fun buildMemoryTools(
             val payload = when (action) {
                 "create" -> {
                     val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
-                    json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content))
+                    val scope = params["scope"]?.jsonPrimitive?.contentOrNull ?: "long_term"
+                    require(scope in setOf("core", "short_term", "long_term")) {
+                        "scope must be one of [core, short_term, long_term]"
+                    }
+                    json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(scope, content))
                 }
 
                 "edit" -> {

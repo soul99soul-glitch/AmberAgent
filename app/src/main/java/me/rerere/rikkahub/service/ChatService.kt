@@ -67,6 +67,9 @@ import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
+import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -128,6 +131,7 @@ class ChatService(
     private val providerManager: ProviderManager,
     private val localTools: LocalTools,
     val mcpManager: McpManager,
+    private val activityStore: AgentToolActivityStore,
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
 ) {
@@ -446,6 +450,62 @@ class ChatService(
         session.setJob(job)
     }
 
+    fun approvePendingAutoApprovableTools(conversationId: Uuid) {
+        val session = getOrCreateSession(conversationId)
+        if (session.isGenerating) return
+
+        val job = appScope.launch {
+            try {
+                val conversation = session.state.value
+                var changed = false
+
+                val updatedNodes = conversation.messageNodes.map { node ->
+                    node.copy(
+                        messages = node.messages.map { msg ->
+                            msg.copy(
+                                parts = msg.parts.map { part ->
+                                    when {
+                                        part is UIMessagePart.Tool &&
+                                            part.isPending &&
+                                            part.toolName != "ask_user" -> {
+                                            changed = true
+                                            part.copy(approvalState = ToolApprovalState.Approved)
+                                        }
+
+                                        else -> part
+                                    }
+                                }
+                            )
+                        }
+                    )
+                }
+
+                if (!changed) return@launch
+
+                saveConversation(
+                    conversationId = conversationId,
+                    conversation = conversation.copy(messageNodes = updatedNodes)
+                )
+
+                val hasPendingTools = updatedNodes.any { node ->
+                    node.currentMessage.parts.any { part ->
+                        part is UIMessagePart.Tool && part.isPending
+                    }
+                }
+
+                if (!hasPendingTools) {
+                    handleMessageComplete(conversationId)
+                }
+
+                _generationDoneFlow.emit(conversationId)
+            } catch (e: Exception) {
+                addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
+            }
+        }
+
+        session.setJob(job)
+    }
+
     // ---- 处理消息补全 ----
 
     private suspend fun handleMessageComplete(
@@ -497,16 +557,23 @@ class ChatService(
                     }
                 },
                 assistant = settings.getCurrentAssistant(),
-                memories = if (settings.getCurrentAssistant().useGlobalMemory) {
+                memories = if (settings.agentRuntime.enableCoreMemory) {
                     memoryRepository.getGlobalMemories()
                 } else {
-                    memoryRepository.getMemoriesOfAssistant(settings.assistantId.toString())
+                    emptyList()
                 },
                 inputTransformers = buildList {
                     addAll(inputTransformers)
                     add(templateTransformer)
                 },
                 outputTransformers = outputTransformers,
+                autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls ||
+                    conversation.autoApproveToolCalls,
+                autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
+                maxSteps = settings.agentRuntime.maxToolLoopSteps.coerceIn(
+                    MIN_AGENT_TOOL_LOOP_STEPS,
+                    MAX_AGENT_TOOL_LOOP_STEPS,
+                ),
                 tools = buildList {
                     if (settings.enableWebSearch) {
                         addAll(createSearchTools(settings))
@@ -529,8 +596,21 @@ class ChatService(
                                 description = tool.description ?: "",
                                 parameters = { tool.inputSchema },
                                 needsApproval = tool.needsApproval,
-                                execute = {
-                                    mcpManager.callTool(tool.name, it.jsonObject)
+                                execute = { input ->
+                                    val toolCallId = activityStore.startTool(
+                                        toolName = "mcp__${tool.name}",
+                                        title = "调用 MCP 工具",
+                                        inputPreview = input.toString(),
+                                        runtime = "MCP",
+                                    )
+                                    try {
+                                        val result = mcpManager.callTool(tool.name, input.jsonObject)
+                                        activityStore.complete(toolCallId, result.toolOutputPreview())
+                                        result
+                                    } catch (error: Throwable) {
+                                        activityStore.fail(toolCallId, error)
+                                        throw error
+                                    }
                                 },
                             )
                         )
@@ -1269,3 +1349,11 @@ class ChatService(
         saveConversation(conversationId, updatedConversation)
     }
 }
+
+private fun List<UIMessagePart>.toolOutputPreview(): String =
+    joinToString("\n") { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text
+            else -> part.toString()
+        }
+    }.takeLast(1_600)

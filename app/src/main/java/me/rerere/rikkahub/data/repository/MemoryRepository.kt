@@ -9,6 +9,8 @@ import me.rerere.rikkahub.data.model.AssistantMemory
 class MemoryRepository(private val memoryDAO: MemoryDAO) {
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
+        const val SHORT_TERM_MEMORY_ID = "__short_term__"
+        const val LONG_TERM_MEMORY_ID = "__long_term__"
     }
 
     fun getMemoriesOfAssistantFlow(assistantId: String): Flow<List<AssistantMemory>> =
@@ -30,6 +32,28 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
 
     suspend fun getGlobalMemories(): List<AssistantMemory> {
         return memoryDAO.getMemoriesOfAssistant(GLOBAL_MEMORY_ID)
+            .map { AssistantMemory(it.id, it.content) }
+    }
+
+    fun getShortTermMemoriesFlow(): Flow<List<AssistantMemory>> =
+        memoryDAO.getMemoriesOfAssistantFlow(SHORT_TERM_MEMORY_ID)
+            .map { entities ->
+                entities.map { AssistantMemory(it.id, it.content) }
+            }
+
+    suspend fun getShortTermMemories(): List<AssistantMemory> {
+        return memoryDAO.getMemoriesOfAssistant(SHORT_TERM_MEMORY_ID)
+            .map { AssistantMemory(it.id, it.content) }
+    }
+
+    fun getLongTermMemoriesFlow(): Flow<List<AssistantMemory>> =
+        memoryDAO.getMemoriesOfAssistantFlow(LONG_TERM_MEMORY_ID)
+            .map { entities ->
+                entities.map { AssistantMemory(it.id, it.content) }
+            }
+
+    suspend fun getLongTermMemories(): List<AssistantMemory> {
+        return memoryDAO.getMemoriesOfAssistant(LONG_TERM_MEMORY_ID)
             .map { AssistantMemory(it.id, it.content) }
     }
 

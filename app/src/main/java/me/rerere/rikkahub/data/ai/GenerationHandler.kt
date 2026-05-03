@@ -49,6 +49,19 @@ import java.util.Locale
 import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
+private const val ASK_USER_TOOL_NAME = "ask_user"
+
+internal fun shouldPauseForToolApproval(
+    toolDef: Tool?,
+    tool: UIMessagePart.Tool,
+    autoApproveTools: Boolean,
+    autoApproveHighRiskTools: Boolean = false,
+): Boolean {
+    if (toolDef?.needsApproval != true) return false
+    if (tool.approvalState !is ToolApprovalState.Auto) return false
+    val canAutoApprove = toolDef.allowsAutoApproval || autoApproveHighRiskTools
+    return !(autoApproveTools && tool.toolName != ASK_USER_TOOL_NAME && canAutoApprove)
+}
 
 @Serializable
 sealed interface GenerationChunk {
@@ -76,6 +89,8 @@ class GenerationHandler(
         tools: List<Tool> = emptyList(),
         maxSteps: Int = 256,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
+        autoApproveTools: Boolean = false,
+        autoApproveHighRiskTools: Boolean = false,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -87,16 +102,21 @@ class GenerationHandler(
 
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
-                if (assistant?.enableMemory == true) {
-                    val memoryAssistantId = if (assistant.useGlobalMemory) {
-                        MemoryRepository.GLOBAL_MEMORY_ID
-                    } else {
-                        assistant.id.toString()
-                    }
+                if (
+                    settings.agentRuntime.enableCoreMemory ||
+                    settings.agentRuntime.enableShortTermMemory ||
+                    settings.agentRuntime.enableLongTermMemory
+                ) {
                     buildMemoryTools(
                         json = json,
-                        onCreation = { content ->
-                            memoryRepo.addMemory(memoryAssistantId, content)
+                        onCreation = { scope, content ->
+                            val bucket = when (scope) {
+                                "core" -> MemoryRepository.GLOBAL_MEMORY_ID
+                                "short_term" -> MemoryRepository.SHORT_TERM_MEMORY_ID
+                                "long_term" -> MemoryRepository.LONG_TERM_MEMORY_ID
+                                else -> MemoryRepository.LONG_TERM_MEMORY_ID
+                            }
+                            memoryRepo.addMemory(bucket, content)
                         },
                         onUpdate = { id, content ->
                             memoryRepo.updateContent(id, content)
@@ -183,7 +203,12 @@ class GenerationHandler(
                     val toolDef = toolsInternal.find { it.name == tool.toolName }
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
-                        toolDef?.needsApproval == true && tool.approvalState is ToolApprovalState.Auto -> {
+                        shouldPauseForToolApproval(
+                            toolDef = toolDef,
+                            tool = tool,
+                            autoApproveTools = autoApproveTools,
+                            autoApproveHighRiskTools = autoApproveHighRiskTools,
+                        ) -> {
                             hasPendingApproval = true
                             tool.copy(approvalState = ToolApprovalState.Pending)
                         }
@@ -336,21 +361,47 @@ class GenerationHandler(
         stream: Boolean,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     ) {
+        val coreMemories = if (settings.agentRuntime.enableCoreMemory) {
+            memories.orEmpty()
+        } else {
+            emptyList()
+        }
+        val shortTermMemories = if (settings.agentRuntime.enableShortTermMemory) {
+            memoryRepo.getShortTermMemories()
+        } else {
+            emptyList()
+        }
+        val longTermMemories = if (settings.agentRuntime.enableLongTermMemory) {
+            memoryRepo.getLongTermMemories()
+        } else {
+            emptyList()
+        }
         val internalMessages = buildList {
             val system = buildString {
+                append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
+
                 // 如果助手有系统提示，则添加到消息中
                 if (assistant.systemPrompt.isNotBlank()) {
+                    if (isNotBlank()) appendLine()
                     append(assistant.systemPrompt)
                 }
 
-                // 记忆
-                if (assistant.enableMemory) {
+                // Agent memory layers
+                if (settings.agentRuntime.enableCoreMemory) {
                     appendLine()
-                    append(buildMemoryPrompt(memories = memories))
+                    append(buildCoreMemoryPrompt(memories = coreMemories))
                 }
-                if (assistant.enableRecentChatsReference) {
+                if (settings.agentRuntime.enableShortTermMemory) {
                     appendLine()
-                    append(buildRecentChatsPrompt(assistant, conversationRepo))
+                    append(buildShortTermMemoryPrompt(memories = shortTermMemories))
+                }
+                if (settings.agentRuntime.enableRecentChatsReference) {
+                    appendLine()
+                    append(buildRecentChatsPrompt(conversationRepo))
+                }
+                if (settings.agentRuntime.enableLongTermMemory) {
+                    appendLine()
+                    append(buildLongTermMemoryPrompt(memories = longTermMemories))
                 }
 
                 // 工具prompt

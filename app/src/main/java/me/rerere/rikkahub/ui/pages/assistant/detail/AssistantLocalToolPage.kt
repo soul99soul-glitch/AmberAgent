@@ -156,6 +156,76 @@ private fun AssistantLocalToolContent(
                     )
                 }
             )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_workspace_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_workspace_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.WorkspaceFiles),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.WorkspaceFiles, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_terminal_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_terminal_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.Terminal),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.Terminal, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_screen_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_screen_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.ScreenAutomation),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.ScreenAutomation, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_system_access_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_system_access_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.SystemAccess),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.SystemAccess, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_webview_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_webview_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.WebView),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.WebView, it) }
+                    )
+                }
+            )
         }
     }
 }
