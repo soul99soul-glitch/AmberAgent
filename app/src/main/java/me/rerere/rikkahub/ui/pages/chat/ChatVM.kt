@@ -23,6 +23,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
+import me.rerere.rikkahub.LAST_CONVERSATION_ID_PREF
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -85,7 +86,7 @@ class ChatVM(
         }
 
         // 记住对话ID, 方便下次启动恢复
-        context.writeStringPreference("lastConversationId", _conversationId.toString())
+        context.writeStringPreference(LAST_CONVERSATION_ID_PREF, _conversationId.toString())
     }
 
     override fun onCleared() {

@@ -23,6 +23,7 @@ class AmberAgentToolDefaultsTest {
                     LocalToolOption.ScreenAutomation,
                     LocalToolOption.SystemAccess,
                     LocalToolOption.WebView,
+                    LocalToolOption.ICloudDrive,
                 )
             )
         )

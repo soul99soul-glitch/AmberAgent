@@ -38,8 +38,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.LAUNCH_START_MODE_PREF
+import me.rerere.rikkahub.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
+import me.rerere.rikkahub.LaunchStartMode
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.migrateLaunchStartMode
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -48,10 +52,19 @@ import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
+import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceString
 import me.rerere.rikkahub.ui.pages.setting.components.PresetThemeButtonGroup
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+
+@Composable
+private fun LaunchStartMode.launchStartModeLabel(): String = when (this) {
+    LaunchStartMode.AUTO -> stringResource(R.string.setting_display_page_launch_start_mode_auto)
+    LaunchStartMode.LAST_SESSION -> stringResource(R.string.setting_display_page_launch_start_mode_last_session)
+    LaunchStartMode.NEW_CHAT -> stringResource(R.string.setting_display_page_launch_start_mode_new_chat)
+    LaunchStartMode.HOME -> stringResource(R.string.setting_display_page_launch_start_mode_home)
+}
 
 @Composable
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
@@ -165,22 +178,54 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                var createNewConversationOnStart by rememberSharedPreferenceBoolean(
-                    "create_new_conversation_on_start",
+                var launchStartModeRaw by rememberSharedPreferenceString(
+                    LAUNCH_START_MODE_PREF,
+                    null
+                )
+                var legacyCreateNewConversationOnStart by rememberSharedPreferenceBoolean(
+                    LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF,
                     true
+                )
+                val launchStartMode = migrateLaunchStartMode(
+                    storedMode = launchStartModeRaw,
+                    legacyCreateNewConversationOnStart = legacyCreateNewConversationOnStart,
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_page_general_settings)) },
                 ) {
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = createNewConversationOnStart,
-                                onCheckedChange = { createNewConversationOnStart = it }
-                            )
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_launch_start_mode_title)) },
+                        supportingContent = {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.setting_display_page_launch_start_mode_desc))
+                                SingleChoiceSegmentedButtonRow(
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    LaunchStartMode.entries.forEachIndexed { index, mode ->
+                                        SegmentedButton(
+                                            selected = launchStartMode == mode,
+                                            onClick = {
+                                                launchStartModeRaw = mode.name
+                                                legacyCreateNewConversationOnStart = mode == LaunchStartMode.NEW_CHAT
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(
+                                                index = index,
+                                                count = LaunchStartMode.entries.size
+                                            ),
+                                            label = {
+                                                Text(
+                                                    text = mode.launchStartModeLabel(),
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         },
                     )
                     item(

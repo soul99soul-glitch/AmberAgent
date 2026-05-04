@@ -38,6 +38,8 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.hasExplicitReasoningContentField
+import me.rerere.ai.ui.reasoningContentPresentMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
@@ -413,10 +415,11 @@ class ChatCompletionsAPI(
 
     private fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
         val filteredMessages = messages.filter { it.isValidToUpload() }
+        val lastUserIndex = filteredMessages.indexOfLast { it.role == MessageRole.USER }
 
-        filteredMessages.forEach { message ->
+        filteredMessages.forEachIndexed { index, message ->
             if (message.role == MessageRole.ASSISTANT) {
-                addAssistantMessages(message, includeReasoning = true)
+                addAssistantMessages(message, includeReasoning = index > lastUserIndex)
             } else {
                 addNonAssistantMessage(message)
             }
@@ -494,7 +497,8 @@ class ChatCompletionsAPI(
             }
         }
         val hasReasoning = !reasoningPart?.reasoning.isNullOrBlank()
-        if (!hasUsableContent && !hasReasoning && tools.isEmpty()) {
+        val shouldEmitReasoningContent = hasReasoning || reasoningPart?.hasExplicitReasoningContentField() == true
+        if (!hasUsableContent && !shouldEmitReasoningContent && tools.isEmpty()) {
             return null
         }
 
@@ -502,8 +506,8 @@ class ChatCompletionsAPI(
             put("role", "assistant")
 
             // reasoning_content
-            if (hasReasoning) {
-                put("reasoning_content", reasoningPart.reasoning)
+            if (shouldEmitReasoningContent) {
+                put("reasoning_content", reasoningPart?.reasoning.orEmpty())
             }
 
             // content
@@ -608,6 +612,7 @@ class ChatCompletionsAPI(
 
         // 也许支持其他模态的输出content?
         val content = jsonObject["content"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+        val hasReasoningContent = jsonObject.containsKey("reasoning_content")
         val reasoning = jsonObject["reasoning_content"]?.jsonPrimitiveOrNull?.contentOrNull
             ?: jsonObject["reasoning"]?.jsonPrimitiveOrNull?.contentOrNull
             ?: jsonObject["content"]?.takeIf { it is JsonArray }?.let { arr ->
@@ -623,12 +628,13 @@ class ChatCompletionsAPI(
         return UIMessage(
             role = role,
             parts = buildList {
-                if (!reasoning.isNullOrEmpty()) {
+                if (hasReasoningContent || !reasoning.isNullOrEmpty()) {
                     add(
                         UIMessagePart.Reasoning(
-                            reasoning = reasoning,
+                            reasoning = reasoning.orEmpty(),
                             createdAt = Clock.System.now(),
-                            finishedAt = null
+                            finishedAt = null,
+                            metadata = if (hasReasoningContent) reasoningContentPresentMetadata() else null
                         )
                     )
                 }

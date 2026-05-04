@@ -7,6 +7,12 @@ fun interface ModelData<T> {
     fun getData(modelId: String): T
 }
 
+data class ModelSessionDefaultGroup(
+    val id: String,
+    val label: String,
+    val selector: ModelSelector,
+)
+
 object ModelRegistry {
     private val GPT4O = defineModel {
         tokens("gpt", "4", "o")
@@ -395,6 +401,59 @@ object ModelRegistry {
     val QWEN_MT = defineModel {
         tokens("qwen", "mt")
     }
+
+    private val OPENAI_REASONING_SERIES = defineGroup {
+        add(
+            OPENAI_O_MODELS,
+            GPT_OSS,
+            GPT_5,
+            GPT_5_1,
+            GPT_5_2,
+            GPT_5_4,
+            GPT_5_4_MINI,
+            GPT_5_4_NANO,
+            GPT_5_5,
+        )
+    }
+
+    private val DEEPSEEK_REASONING_SERIES = defineGroup {
+        add(DEEPSEEK_R1, DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO, DEEPSEEK_V3_1, DEEPSEEK_V3_2)
+    }
+
+    private val QWEN_REASONING_SERIES = defineGroup {
+        add(QWEN_3, QWEN_3_5, QWEN_3_6)
+    }
+
+    val SESSION_DEFAULT_GROUPS = listOf(
+        ModelSessionDefaultGroup(
+            id = "openai_reasoning",
+            label = "OpenAI reasoning",
+            selector = OPENAI_REASONING_SERIES,
+        ),
+        ModelSessionDefaultGroup(
+            id = "claude",
+            label = "Claude",
+            selector = CLAUDE_SERIES,
+        ),
+        ModelSessionDefaultGroup(
+            id = "gemini",
+            label = "Gemini",
+            selector = GEMINI_SERIES,
+        ),
+        ModelSessionDefaultGroup(
+            id = "deepseek_reasoning",
+            label = "DeepSeek reasoning",
+            selector = DEEPSEEK_REASONING_SERIES,
+        ),
+        ModelSessionDefaultGroup(
+            id = "qwen_reasoning",
+            label = "Qwen reasoning",
+            selector = QWEN_REASONING_SERIES,
+        ),
+    )
+
+    fun sessionDefaultGroupForModel(modelId: String): ModelSessionDefaultGroup? =
+        SESSION_DEFAULT_GROUPS.firstOrNull { it.selector.match(modelId) }
 
     private val ALL_MODELS = listOf(
         GPT4O,

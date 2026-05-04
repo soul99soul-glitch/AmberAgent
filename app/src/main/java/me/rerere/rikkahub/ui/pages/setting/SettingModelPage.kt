@@ -49,9 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
@@ -59,6 +62,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
+import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -98,6 +102,10 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
+                ModelGroupSessionDefaultsSetting(settings = settings, vm = vm)
+            }
+
+            item {
                 DefaultTitleModelSetting(settings = settings, vm = vm)
             }
 
@@ -115,6 +123,96 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 DefaultCompressModelSetting(settings = settings, vm = vm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelGroupSessionDefaultsSetting(
+    settings: Settings,
+    vm: SettingVM
+) {
+    fun updateDefault(groupId: String, block: (ModelGroupSessionDefault) -> ModelGroupSessionDefault) {
+        val existing = settings.modelGroupSessionDefaults.firstOrNull { it.groupId == groupId }
+            ?: ModelGroupSessionDefault(groupId = groupId)
+        val updated = block(existing)
+        vm.updateSettings(
+            settings.copy(
+                modelGroupSessionDefaults = settings.modelGroupSessionDefaults
+                    .filterNot { it.groupId == groupId } + updated
+            )
+        )
+    }
+
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.outlinedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = stringResource(R.string.setting_model_page_group_session_defaults),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = stringResource(R.string.setting_model_page_group_session_defaults_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            ModelRegistry.SESSION_DEFAULT_GROUPS.forEach { group ->
+                val current = settings.modelGroupSessionDefaults.firstOrNull { it.groupId == group.id }
+                    ?: ModelGroupSessionDefault(groupId = group.id)
+                FormItem(
+                    label = { Text(group.label) },
+                    description = {
+                        Text(stringResource(R.string.setting_model_page_group_session_defaults_group_desc))
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ReasoningButton(
+                            reasoningLevel = current.reasoningLevel,
+                            onUpdateReasoningLevel = { level ->
+                                updateDefault(group.id) {
+                                    it.copy(reasoningLevel = level)
+                                }
+                            }
+                        )
+                        OutlinedTextField(
+                            value = current.contextMessageSize.takeIf { it > 0 }?.toString().orEmpty(),
+                            onValueChange = { text ->
+                                updateDefault(group.id) {
+                                    it.copy(
+                                        contextMessageSize = text.toIntOrNull()
+                                            ?.takeIf { size -> size > 0 }
+                                            ?: 0
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = {
+                                Text(stringResource(R.string.assistant_page_context_message_size))
+                            },
+                            placeholder = {
+                                Text(stringResource(R.string.assistant_page_context_message_unlimited))
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                        )
+                    }
+                }
             }
         }
     }

@@ -5,11 +5,14 @@ import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Build
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import me.rerere.rikkahub.R
 
 /**
@@ -20,6 +23,7 @@ class NotificationConfig {
     var content: String = ""
     var subText: String? = null
     var smallIcon: Int = R.drawable.small_icon
+    var largeIcon: Int? = null
     var autoCancel: Boolean = false
     var ongoing: Boolean = false
     var onlyAlertOnce: Boolean = false
@@ -27,6 +31,7 @@ class NotificationConfig {
     var visibility: Int = NotificationCompat.VISIBILITY_PRIVATE
     var contentIntent: PendingIntent? = null
     var useBigTextStyle: Boolean = false
+    var actions: List<NotificationActionConfig> = emptyList()
 
     // Live Update 相关
     var requestPromotedOngoing: Boolean = false
@@ -35,6 +40,12 @@ class NotificationConfig {
     // 默认通知效果
     var useDefaults: Boolean = false
 }
+
+data class NotificationActionConfig(
+    val icon: Int = 0,
+    val title: String,
+    val intent: PendingIntent,
+)
 
 object NotificationUtil {
 
@@ -95,6 +106,12 @@ object NotificationUtil {
             config.subText?.let { setSubText(it) }
             config.category?.let { setCategory(it) }
             config.contentIntent?.let { setContentIntent(it) }
+            config.largeIcon?.let { iconRes ->
+                ContextCompat.getDrawable(context, iconRes)?.toNotificationBitmap()?.let { setLargeIcon(it) }
+            }
+            config.actions.forEach { action ->
+                addAction(action.icon, action.title, action.intent)
+            }
 
             if (config.useBigTextStyle) {
                 setStyle(NotificationCompat.BigTextStyle().bigText(config.content))
@@ -128,6 +145,18 @@ object NotificationUtil {
      */
     fun cancelAll(context: Context) {
         NotificationManagerCompat.from(context).cancelAll()
+    }
+}
+
+private fun android.graphics.drawable.Drawable.toNotificationBitmap(): Bitmap {
+    if (this is android.graphics.drawable.BitmapDrawable && bitmap != null) {
+        return bitmap
+    }
+    val size = maxOf(intrinsicWidth, intrinsicHeight).takeIf { it > 0 } ?: 128
+    return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
+        val canvas = Canvas(bitmap)
+        setBounds(0, 0, canvas.width, canvas.height)
+        draw(canvas)
     }
 }
 

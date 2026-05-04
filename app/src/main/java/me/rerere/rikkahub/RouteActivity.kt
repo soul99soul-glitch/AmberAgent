@@ -70,6 +70,7 @@ import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
+import me.rerere.rikkahub.ui.hooks.containsPreference
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
@@ -97,9 +98,13 @@ import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentExecutionPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentPermissionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
+import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalPage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
@@ -235,16 +240,22 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
-        val startScreen = Screen.Chat(
-            id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
-                Uuid.random().toString()
+        val startScreen = remember {
+            val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
+                readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
             } else {
-                readStringPreference(
-                    "lastConversationId",
-                    Uuid.random().toString()
-                ) ?: Uuid.random().toString()
+                null
             }
-        )
+            val startMode = migrateLaunchStartMode(
+                storedMode = readStringPreference(LAUNCH_START_MODE_PREF),
+                legacyCreateNewConversationOnStart = legacyCreateNew,
+            )
+            resolveLaunchStartScreen(
+                mode = startMode,
+                lastConversationId = readStringPreference(LAST_CONVERSATION_ID_PREF),
+                newConversationId = Uuid.random().toString(),
+            )
+        }
 
         val backStack = rememberNavBackStack(startScreen)
         SideEffect { this@RouteActivity.navStack = backStack }
@@ -405,6 +416,18 @@ class RouteActivity : ComponentActivity() {
                                 SettingAgentMemoryPage()
                             }
 
+                            entry<Screen.SettingAgentExtensions> {
+                                SettingAgentExtensionsPage()
+                            }
+
+                            entry<Screen.SettingAgentExecution> {
+                                SettingAgentExecutionPage()
+                            }
+
+                            entry<Screen.SettingAgentPermissions> {
+                                SettingAgentPermissionsPage()
+                            }
+
                             entry<Screen.SettingSearch> {
                                 SettingSearchPage()
                             }
@@ -427,6 +450,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingSandbox> {
                                 SettingSandboxPage()
+                            }
+
+                            entry<Screen.SettingExperimental> {
+                                SettingExperimentalPage()
                             }
 
                             entry<Screen.SettingSystemAccess> {
@@ -595,6 +622,15 @@ sealed interface Screen : NavKey {
     data object SettingAgentMemory : Screen
 
     @Serializable
+    data object SettingAgentExtensions : Screen
+
+    @Serializable
+    data object SettingAgentExecution : Screen
+
+    @Serializable
+    data object SettingAgentPermissions : Screen
+
+    @Serializable
     data object SettingSearch : Screen
 
     @Serializable
@@ -611,6 +647,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingSandbox : Screen
+
+    @Serializable
+    data object SettingExperimental : Screen
 
     @Serializable
     data object SettingSystemAccess : Screen

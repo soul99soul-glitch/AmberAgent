@@ -26,6 +26,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.MessageStreamAccumulator
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
@@ -39,6 +40,7 @@ import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -49,6 +51,7 @@ import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
 private const val ASK_USER_TOOL_NAME = "ask_user"
+private const val STREAM_UI_FLUSH_INTERVAL_MS = 50L
 
 internal fun shouldPauseForToolApproval(
     toolDef: Tool?,
@@ -355,6 +358,7 @@ class GenerationHandler(
         } else {
             emptyList()
         }
+        val sessionDefaults = settings.resolveSessionDefaults(assistant, model)
         val internalMessages = buildList {
             val system = buildString {
                 append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
@@ -390,7 +394,7 @@ class GenerationHandler(
                 }
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
-            addAll(messages.limitContext(assistant.contextMessageSize))
+            addAll(messages.limitContext(sessionDefaults.contextMessageSize))
         }.transforms(
             transformers = transformers,
             context = context,
@@ -405,9 +409,9 @@ class GenerationHandler(
             model = model,
             temperature = assistant.temperature,
             topP = assistant.topP,
-            maxTokens = assistant.maxTokens,
+            maxTokens = sessionDefaults.maxTokens,
             tools = tools,
-            reasoningLevel = assistant.reasoningLevel,
+            reasoningLevel = sessionDefaults.reasoningLevel,
             customHeaders = buildList {
                 addAll(assistant.customHeaders)
                 addAll(model.customHeaders)
@@ -426,23 +430,23 @@ class GenerationHandler(
                     stream = true
                 )
             )
+            val accumulator = MessageStreamAccumulator(messages, model)
+            var lastFlushAt = 0L
             providerImpl.streamText(
                 providerSetting = provider,
                 messages = internalMessages,
                 params = params
-            ).collect {
-                messages = messages.handleMessageChunk(chunk = it, model = model)
-                it.usage?.let { usage ->
-                    messages = messages.mapIndexed { index, message ->
-                        if (index == messages.lastIndex) {
-                            message.copy(usage = message.usage.merge(usage))
-                        } else {
-                            message
-                        }
-                    }
+            ).collect { chunk ->
+                accumulator.append(chunk)
+                val now = System.currentTimeMillis()
+                if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
+                    messages = accumulator.snapshot()
+                    onUpdateMessages(messages)
+                    lastFlushAt = now
                 }
-                onUpdateMessages(messages)
             }
+            messages = accumulator.snapshot()
+            onUpdateMessages(messages)
         } else {
             aiLoggingManager.addLog(
                 AILogging.Generation(

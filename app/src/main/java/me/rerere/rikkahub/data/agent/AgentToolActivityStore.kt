@@ -93,6 +93,21 @@ class AgentToolActivityStore {
         }
     }
 
+    fun cancel(toolCallId: String, output: String = "") {
+        _sandboxActivity.update { current ->
+            if (current?.toolCallId == toolCallId) {
+                current.copy(
+                    status = ToolActivityStatus.CANCELLED,
+                    outputTail = output.trim().takeLast(MAX_OUTPUT_TAIL_CHARS),
+                    endedAtEpochMillis = System.currentTimeMillis(),
+                    canCancel = false,
+                )
+            } else {
+                current
+            }
+        }
+    }
+
     fun clear(toolCallId: String) {
         _sandboxActivity.update { current ->
             if (current?.toolCallId == toolCallId) null else current

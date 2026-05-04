@@ -625,6 +625,11 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
             "scrape_web",
             "webview_open",
             "webview_read",
+            "icloud_status",
+            "icloud_list",
+            "icloud_read",
+            "icloud_write",
+            "icloud_search",
             "file_list",
             "file_read",
             "file_write",
@@ -664,6 +669,11 @@ private fun UIMessagePart.Tool.sandboxTitle(): String {
         "scrape_web" -> "打开网页 ${input.getFirstStringContent("url", "link", "uri").orEmpty().compactSandboxText(24)}"
         "webview_open" -> "打开网页 ${input.getStringContent("url").orEmpty().compactSandboxText(24)}"
         "webview_read" -> "读取网页内容"
+        "icloud_status" -> "检查 iCloud 挂载"
+        "icloud_list" -> "列出 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(18)}"
+        "icloud_read" -> "读取 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
+        "icloud_write" -> "写入 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
+        "icloud_search" -> "搜索 iCloud ${input.getStringContent("query").orEmpty().compactSandboxText(20)}"
         "file_list" -> "列出 workspace ${input.getStringContent("path").orEmpty().compactSandboxText(18)}"
         "file_read" -> "读取文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
         "file_write" -> "写入文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
@@ -700,6 +710,8 @@ private fun UIMessagePart.Tool.inputPreview(): String {
         "scrape_web" -> input.getFirstStringContent("url", "link", "uri")
         "webview_open" -> input.getStringContent("url")
         "webview_read" -> input.getStringContent("url")
+        "icloud_list", "icloud_read", "icloud_write" -> input.getStringContent("path")
+        "icloud_search" -> input.getStringContent("query")
         "terminal_execute", "terminal_session_exec" -> input.getStringContent("command")
         "file_list", "file_read", "file_write", "file_edit" -> input.getStringContent("path")
         "file_search" -> input.getStringContent("query")
@@ -716,6 +728,7 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName == "scrape_web" -> "webview"
     toolName == "webview_open" -> "webview"
     toolName == "webview_read" -> "webview"
+    toolName.startsWith("icloud_") -> "icloud-web-mount"
     toolName == "terminal_execute" -> "alpine-proot-stage1"
     toolName.startsWith("terminal_session_") -> "android-shell-stage0"
     toolName.startsWith("file_") -> "saf-workspace"
@@ -726,6 +739,7 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
 
 private fun UIMessagePart.Tool.defaultWorkspace(): String = when {
     toolName.startsWith("terminal_") || toolName.startsWith("file_") -> "/workspace"
+    toolName.startsWith("icloud_") -> "/icloud"
     else -> ""
 }
 

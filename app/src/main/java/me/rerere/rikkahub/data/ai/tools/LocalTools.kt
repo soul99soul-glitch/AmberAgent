@@ -20,6 +20,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
@@ -73,6 +74,10 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("webview")
     data object WebView : LocalToolOption()
+
+    @Serializable
+    @SerialName("icloud_drive")
+    data object ICloudDrive : LocalToolOption()
 }
 
 class LocalTools(
@@ -85,6 +90,7 @@ class LocalTools(
     private val workspaceArtifactTools: WorkspaceArtifactTools,
     private val permissionBroker: AgentPermissionBroker,
     private val webViewOperationStore: WebViewOperationStore,
+    private val iCloudDriveTools: ICloudDriveTools,
 ) {
     val javascriptTool by lazy {
         Tool(
@@ -611,7 +617,7 @@ class LocalTools(
                 properties = buildJsonObject {
                     put("category", buildJsonObject {
                         put("type", "string")
-                        put("description", "Optional category filter: workspace, terminal, web, webview, screen, system, memory, skill, mcp, utility.")
+                        put("description", "Optional category filter: workspace, cloud, terminal, web, webview, screen, system, memory, skill, mcp, utility.")
                     })
                     put("query", buildJsonObject {
                         put("type", "string")
@@ -812,6 +818,9 @@ class LocalTools(
             tools.add(webViewLinksTool)
             tools.add(webViewOpenLinkTool)
         }
+        if (options.contains(LocalToolOption.ICloudDrive)) {
+            tools.addAll(iCloudDriveTools.getTools())
+        }
         tools.add(permissionsStatusTool)
         tools.add(runPlanUpdateTool)
         return tools
@@ -820,6 +829,7 @@ class LocalTools(
     private fun Tool.category(): String = when {
         name.startsWith("file_") || name.startsWith("archive_") ||
             name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
+        name.startsWith("icloud_") -> "cloud"
         name.startsWith("terminal_") -> "terminal"
         name in setOf("search_web", "scrape_web", "http_request") -> "web"
         name.startsWith("webview_") -> "webview"

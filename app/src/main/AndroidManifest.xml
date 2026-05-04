@@ -148,6 +148,10 @@
       android:name="com.yalantis.ucrop.UCropActivity"
       android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+    <receiver
+      android:name=".data.agent.AgentNotificationActionReceiver"
+      android:exported="false" />
+
     <service
       android:name=".service.WebServerService"
       android:exported="false"

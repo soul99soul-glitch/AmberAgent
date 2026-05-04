@@ -86,6 +86,10 @@ fun Context.readBooleanPreference(key: String, defaultValue: Boolean = false): B
     return getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE).getBoolean(key, defaultValue)
 }
 
+fun Context.containsPreference(key: String): Boolean {
+    return getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE).contains(key)
+}
+
 fun SharedPreferences.getStringFlowForKey(keyForString: String, defaultValue: String? = null) =
     callbackFlow {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->

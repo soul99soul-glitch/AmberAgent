@@ -293,8 +293,9 @@ private fun ChatListNormal(
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             val latestRenderToken = conversation.latestRenderToken()
-            LaunchedEffect(loadingState, latestRenderToken, processingStatus) {
-                if (loadingState && !state.isScrollInProgress) {
+            LaunchedEffect(loadingState, latestRenderToken, processingStatus, conversation.messageNodes.size) {
+                if (loadingState && !state.isScrollInProgress && state.isNearListEnd()) {
+                    withFrameNanos { }
                     withFrameNanos { }
                     val lastIndex = state.layoutInfo.totalItemsCount - 1
                     if (lastIndex >= 0) {
@@ -318,7 +319,7 @@ private fun ChatListNormal(
 
         LazyColumn(
             state = state,
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
+            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 96.dp + innerPadding.calculateBottomPadding()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
@@ -557,6 +558,13 @@ private fun extractMatchingSnippet(
     } else {
         snippet
     }
+}
+
+private fun LazyListState.isNearListEnd(bufferItems: Int = 2): Boolean {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) return true
+    val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
+    return lastVisibleIndex >= totalItems - 1 - bufferItems
 }
 
 private fun buildHighlightedText(

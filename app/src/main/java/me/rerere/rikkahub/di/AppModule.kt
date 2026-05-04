@@ -11,9 +11,13 @@ import me.rerere.rikkahub.data.ai.AILoggingManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
+import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
+import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
@@ -48,6 +52,22 @@ val appModule = module {
 
     single {
         WorkspaceTools(get(), get())
+    }
+
+    single {
+        ICloudDriveCookieProvider()
+    }
+
+    single {
+        ICloudDriveClient(get(), get())
+    }
+
+    single {
+        ICloudDriveManager(get(), get(), get())
+    }
+
+    single {
+        ICloudDriveTools(get(), get())
     }
 
     single {
@@ -95,7 +115,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

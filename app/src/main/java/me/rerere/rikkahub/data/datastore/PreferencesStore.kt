@@ -21,6 +21,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
@@ -94,6 +95,7 @@ class SettingsStore(
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
+        val MODEL_GROUP_SESSION_DEFAULTS = stringPreferencesKey("model_group_session_defaults")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -176,6 +178,9 @@ class SettingsStore(
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
+                modelGroupSessionDefaults = preferences[MODEL_GROUP_SESSION_DEFAULTS]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyList(),
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -357,6 +362,7 @@ class SettingsStore(
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
+            preferences[MODEL_GROUP_SESSION_DEFAULTS] = JsonInstant.encodeToString(settings.modelGroupSessionDefaults)
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -489,6 +495,7 @@ data class Settings(
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
+    val modelGroupSessionDefaults: List<ModelGroupSessionDefault> = emptyList(),
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
@@ -519,6 +526,20 @@ data class Settings(
         fun dummy() = Settings(init = true)
     }
 }
+
+@Serializable
+data class ModelGroupSessionDefault(
+    val groupId: String,
+    val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
+    val contextMessageSize: Int = 0,
+    val maxTokens: Int? = null,
+)
+
+data class ResolvedSessionDefaults(
+    val reasoningLevel: ReasoningLevel,
+    val contextMessageSize: Int,
+    val maxTokens: Int?,
+)
 
 @Serializable
 data class AgentRuntimeSetting(
@@ -565,6 +586,7 @@ You are AmberAgent, an agent-only Android assistant.
   - Long-term memory: stable user preferences, recurring interests, plans, and factual context worth preserving beyond a single day.
 - Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
 - If you are unsure which skills are installed or enabled, call skills_list before use_skill.
+- If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
 - For webpage tasks:
   - When the user asks to open, browse, view, inspect, or visually verify a webpage, call webview_open early so the live preview shows the page.
   - After webview_open, call webview_read when you need the current page title, readable text, or links from the opened preview.
@@ -661,6 +683,31 @@ fun List<ProviderSetting>.findModelById(uuid: Uuid): Model? {
     return null
 }
 
+fun Settings.getModelGroupSessionDefault(model: Model): ModelGroupSessionDefault? {
+    val groupId = ModelRegistry.sessionDefaultGroupForModel(model.modelId)?.id ?: return null
+    return modelGroupSessionDefaults.firstOrNull { it.groupId == groupId }
+}
+
+fun Settings.resolveSessionDefaults(
+    assistant: Assistant,
+    model: Model,
+): ResolvedSessionDefaults {
+    val groupDefault = getModelGroupSessionDefault(model)
+    return ResolvedSessionDefaults(
+        reasoningLevel = if (assistant.reasoningLevel == ReasoningLevel.AUTO) {
+            groupDefault?.reasoningLevel ?: assistant.reasoningLevel
+        } else {
+            assistant.reasoningLevel
+        },
+        contextMessageSize = if (assistant.contextMessageSize == 0) {
+            groupDefault?.contextMessageSize ?: assistant.contextMessageSize
+        } else {
+            assistant.contextMessageSize
+        },
+        maxTokens = assistant.maxTokens ?: groupDefault?.maxTokens,
+    )
+}
+
 fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
 }
@@ -715,6 +762,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
             Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
             Prefer the authorized /workspace for file work. Use terminal and screen automation tools only when they are necessary and user-approved.
             If you are unsure which skills are installed or enabled, call skills_list before use_skill.
+            If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
             For webpage tasks, call webview_open early when the user asks to open, browse, view, inspect, or visually verify a page. After webview_open, call webview_read when you need the opened page title, readable text, or links. Use search_web or scrape_web when you need search results or deeper extraction. Do not try to launch Android System WebView as a standalone app.
         """.trimIndent(),
         localTools = listOf(
@@ -728,6 +776,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
             LocalToolOption.ScreenAutomation,
             LocalToolOption.SystemAccess,
             LocalToolOption.WebView,
+            LocalToolOption.ICloudDrive,
         )
     ),
     Assistant(
@@ -789,6 +838,7 @@ private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS = listOf(
     LocalToolOption.ScreenAutomation,
     LocalToolOption.SystemAccess,
     LocalToolOption.WebView,
+    LocalToolOption.ICloudDrive,
 )
 
 private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator")

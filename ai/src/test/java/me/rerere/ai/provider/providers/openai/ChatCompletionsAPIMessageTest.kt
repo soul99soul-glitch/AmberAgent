@@ -1,13 +1,17 @@
 package me.rerere.ai.provider.providers.openai
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.hasExplicitReasoningContentField
 import me.rerere.ai.util.KeyRoulette
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -37,6 +41,36 @@ class ChatCompletionsAPIMessageTest {
         )
         method.isAccessible = true
         return method.invoke(api, messages) as JsonArray
+    }
+
+    private fun invokeParseMessage(message: JsonObject): UIMessage {
+        val method = ChatCompletionsAPI::class.java.getDeclaredMethod(
+            "parseMessage",
+            JsonObject::class.java
+        )
+        method.isAccessible = true
+        return method.invoke(api, message) as UIMessage
+    }
+
+    @Test
+    fun `empty reasoning_content should round trip without visible placeholder text`() {
+        val parsed = invokeParseMessage(
+            buildJsonObject {
+                put("role", "assistant")
+                put("reasoning_content", "")
+                put("content", "ok")
+            }
+        )
+
+        val reasoning = parsed.parts.filterIsInstance<UIMessagePart.Reasoning>().single()
+        assertEquals("", reasoning.reasoning)
+        assertTrue(reasoning.hasExplicitReasoningContentField())
+
+        val result = invokeBuildMessages(listOf(UIMessage.user("hello"), parsed))
+        val assistant = result[1].jsonObject
+        assertTrue(assistant.containsKey("reasoning_content"))
+        assertEquals("", assistant["reasoning_content"]?.jsonPrimitive?.content)
+        assertEquals("ok", assistant["content"]?.jsonPrimitive?.content)
     }
 
     @Test

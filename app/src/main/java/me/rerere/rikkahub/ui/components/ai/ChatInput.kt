@@ -1275,6 +1275,7 @@ private fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = w
 private fun SandboxActivityUiState.operationPreviewKind(): String = when {
     toolName == "search_web" -> "web search"
     toolName == "scrape_web" || toolName == "webview_open" || toolName == "webview_read" -> "webview"
+    toolName.startsWith("icloud_") -> "icloud"
     toolName.startsWith("screen_") || toolName == "vlm_task" -> "screen"
     toolName.startsWith("file_") -> "workspace"
     toolName.startsWith("terminal_") -> "runtime"
@@ -1364,6 +1365,8 @@ private fun SandboxActivityUiState.terminalTranscript(): String = buildString {
 }
 
 private val HTTP_URL_REGEX = Regex("https?://[^\\s\"'<>),]+")
+private const val MAX_SLASH_COMMANDS = 6
+private const val MAX_SLASH_COMMAND_TITLE_CHARS = 32
 
 private fun String.firstHttpUrl(): String? =
     HTTP_URL_REGEX.find(this)?.value?.trimEnd('.', ',', ';', ')')
@@ -1437,6 +1440,16 @@ private fun TextInputRow(
 
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
+        val slashQuery = state.textContent.text.toString().slashCommandQuery()
+        val slashCommands = remember(quickMessages, slashQuery) {
+            slashQuery?.let { query ->
+                quickMessages.filter { quickMessage ->
+                    query.isBlank() ||
+                        quickMessage.title.contains(query, ignoreCase = true) ||
+                        quickMessage.content.contains(query, ignoreCase = true)
+                }
+            }.orEmpty()
+        }
         val receiveContentListener = remember(
             settings.displaySetting.pasteLongTextAsFile, settings.displaySetting.pasteLongTextThreshold
         ) {
@@ -1472,6 +1485,15 @@ private fun TextInputRow(
                     else -> transferableContent
                 }
             }
+        }
+        if (isFocused && slashQuery != null) {
+            SlashCommandPanel(
+                quickMessages = slashCommands,
+                hasAnyQuickMessage = quickMessages.isNotEmpty(),
+                onSelect = { quickMessage ->
+                    state.setMessageText(quickMessage.content)
+                },
+            )
         }
         TextField(
             state = state.textContent,
@@ -1525,6 +1547,106 @@ private fun TextInputRow(
 }
 
 @Composable
+private fun SlashCommandPanel(
+    quickMessages: List<QuickMessage>,
+    hasAnyQuickMessage: Boolean,
+    onSelect: (QuickMessage) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+    ) {
+        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            when {
+                !hasAnyQuickMessage -> SlashCommandEmptyRow(
+                    text = stringResource(R.string.chat_input_slash_command_empty)
+                )
+
+                quickMessages.isEmpty() -> SlashCommandEmptyRow(
+                    text = stringResource(R.string.chat_input_slash_command_no_match)
+                )
+
+                else -> {
+                    quickMessages.take(MAX_SLASH_COMMANDS).forEachIndexed { index, quickMessage ->
+                        SlashCommandRow(
+                            quickMessage = quickMessage,
+                            onClick = { onSelect(quickMessage) },
+                        )
+                        if (index < quickMessages.take(MAX_SLASH_COMMANDS).lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 58.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlashCommandRow(
+    quickMessage: QuickMessage,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(38.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "/",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                val fallbackTitle = stringResource(R.string.extension_content_unnamed)
+                Text(
+                    text = "/${quickMessage.slashTitle(fallbackTitle)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = quickMessage.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlashCommandEmptyRow(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+    )
+}
+
+@Composable
 private fun QuickMessageButton(
     quickMessages: List<QuickMessage>,
     state: ChatInputState,
@@ -1572,6 +1694,19 @@ private fun QuickMessageButton(
         }
     }
 }
+
+private fun String.slashCommandQuery(): String? {
+    if (!startsWith("/")) return null
+    val query = drop(1)
+    return query.takeIf { it.none { char -> char.isWhitespace() } }
+}
+
+private fun QuickMessage.slashTitle(fallback: String): String =
+    title.ifBlank { content.lineSequence().firstOrNull().orEmpty() }
+        .trim()
+        .replace(Regex("\\s+"), "-")
+        .take(MAX_SLASH_COMMAND_TITLE_CHARS)
+        .ifBlank { fallback }
 
 @Composable
 private fun MediaFileInputRow(

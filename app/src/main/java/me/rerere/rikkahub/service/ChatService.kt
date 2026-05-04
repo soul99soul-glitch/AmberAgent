@@ -596,7 +596,7 @@ class ChatService(
                     MAX_AGENT_TOOL_LOOP_STEPS,
                 ),
                 tools = createRunTools(settings),
-            ).onCompletion {
+            ).onCompletion { cause ->
                 cancelLiveUpdateNotification(conversationId)
 
                 // 可能被取消了，或者意外结束，兜底更新
@@ -610,7 +610,11 @@ class ChatService(
                 cleanupRunResourcesIfDone(conversationId, updatedConversation)
 
                 // Show notification if app is not in foreground
-                if (!isForeground.value && settings.displaySetting.enableNotificationOnMessageGeneration) {
+                if (
+                    cause == null &&
+                    !isForeground.value &&
+                    settings.displaySetting.enableNotificationOnMessageGeneration
+                ) {
                     sendGenerationDoneNotification(conversationId, senderName)
                 }
             }.collect { chunk ->
@@ -1371,9 +1375,12 @@ class ChatService(
 
     // 停止当前会话生成任务（不清理会话缓存）
     suspend fun stopGeneration(conversationId: Uuid) {
-        val job = sessions[conversationId]?.getJob() ?: return
-        job.cancel()
-        runCatching { job.join() }
+        val job = sessions[conversationId]?.getJob()
+        if (job != null) {
+            job.cancel()
+            runCatching { job.join() }
+        }
+        cancelLiveUpdateNotification(conversationId)
         trustedRunToolNames.remove(conversationId)
         screenCaptureManager.releaseSession()
 

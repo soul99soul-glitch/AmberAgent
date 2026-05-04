@@ -807,41 +807,23 @@ private fun Paragraph(
 
 @Composable
 private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier) {
-    // 提取表格的标题行和数据行
-    val headerNode = node.children.find { it.type == GFMElementTypes.HEADER }
-    val rowNodes = node.children.filter { it.type == GFMElementTypes.ROW }
-
-    // 计算列数（从标题行获取）
-    val columnCount = headerNode?.children?.count { it.type == GFMTokenTypes.CELL } ?: 0
-
-    // 检查是否有足够的列来显示表格
-    if (columnCount == 0) return
-
-    // 提取表头单元格文本
-    val headerCells =
-        headerNode?.children?.filter { it.type == GFMTokenTypes.CELL }?.map { it.getTextInNode(content).trim() }
-            ?: emptyList()
-
-    // 提取所有行的数据
-    val rows = rowNodes.map { rowNode ->
-        rowNode.children.filter { it.type == GFMTokenTypes.CELL }.map { it.getTextInNode(content).trim() }
-    }
+    val tableData = extractMarkdownTableData(node = node, content = content) ?: return
 
     // 创建表头composable列表
-    val headers = List(columnCount) { columnIndex ->
+    val headers = List(tableData.columnCount) { columnIndex ->
         @Composable {
             MarkdownBlock(
-                content = if (columnIndex < headerCells.size) headerCells[columnIndex] else "",
+                content = tableData.headers.getOrElse(columnIndex) { "" },
             )
         }
     }
 
     // 创建行数据composable列表
-    val rowComposables = rows.map { rowData ->
-        List(columnCount) { columnIndex ->
+    val rowComposables = tableData.rows.map { rowData ->
+        List(tableData.columnCount) { columnIndex ->
             @Composable {
                 MarkdownBlock(
-                    content = if (columnIndex < rowData.size) rowData[columnIndex] else "",
+                    content = rowData.getOrElse(columnIndex) { "" },
                 )
             }
         }
@@ -852,8 +834,36 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
         headers = headers,
         rows = rowComposables,
         modifier = modifier.padding(vertical = 8.dp),
-        columnMinWidths = List(columnCount) { 80.dp },
-        columnMaxWidths = List(columnCount) { 200.dp },
+        columnMinWidths = List(tableData.columnCount) { 80.dp },
+        columnMaxWidths = List(tableData.columnCount) { 200.dp },
+    )
+}
+
+internal data class MarkdownTableData(
+    val columnCount: Int,
+    val headers: List<String>,
+    val rows: List<List<String>>,
+)
+
+internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownTableData? {
+    val headerNode = node.children.find { it.type == GFMElementTypes.HEADER }
+    val rowNodes = node.children.filter { it.type == GFMElementTypes.ROW }
+    val columnCount = headerNode?.children?.count { it.type == GFMTokenTypes.CELL } ?: 0
+    if (columnCount == 0) return null
+
+    val headerCells = headerNode?.children
+        ?.filter { it.type == GFMTokenTypes.CELL }
+        ?.map { it.getTextInNode(content).trim() }
+        ?: emptyList()
+    val rows = rowNodes.map { rowNode ->
+        rowNode.children
+            .filter { it.type == GFMTokenTypes.CELL }
+            .map { it.getTextInNode(content).trim() }
+    }
+    return MarkdownTableData(
+        columnCount = columnCount,
+        headers = headerCells,
+        rows = rows,
     )
 }
 

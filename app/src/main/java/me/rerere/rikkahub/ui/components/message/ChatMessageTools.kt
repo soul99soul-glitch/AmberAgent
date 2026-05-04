@@ -79,6 +79,7 @@ import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Clipboard
 import me.rerere.hugeicons.stroke.Code
+import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Eraser
 import me.rerere.hugeicons.stroke.File02
@@ -163,6 +164,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
     ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
     "webview_open" -> HugeIcons.GlobalSearch
     "webview_read" -> HugeIcons.GlobalSearch
+    in setOf("icloud_status", "icloud_list", "icloud_read", "icloud_write", "icloud_search") -> HugeIcons.Database02
     ToolNames.GET_TIME_INFO -> HugeIcons.Time02
     ToolNames.CLIPBOARD -> HugeIcons.Clipboard
     ToolNames.TTS -> HugeIcons.VolumeHigh
@@ -233,6 +235,7 @@ private fun getToolKind(toolName: String) = when {
     ) -> AgentToolKind.SCREEN
 
     toolName == ToolNames.SEARCH_WEB || toolName == ToolNames.SCRAPE_WEB || toolName == "webview_open" || toolName == "webview_read" -> AgentToolKind.WEB
+    toolName.startsWith("icloud_") -> AgentToolKind.FILE
     toolName == ToolNames.MEMORY -> AgentToolKind.MEMORY
     toolName.startsWith("mcp__") -> AgentToolKind.MCP
     else -> AgentToolKind.GENERIC
@@ -455,6 +458,11 @@ private fun toolDisplayTitle(
     ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
     "webview_open" -> "打开网页 ${arguments.getStringContent("url")?.compactToolPreview(28).orEmpty()}"
     "webview_read" -> "读取当前网页"
+    "icloud_status" -> "检查 iCloud 挂载"
+    "icloud_list" -> "列出 iCloud ${arguments.getStringContent("path")?.compactToolPreview(18).orEmpty()}"
+    "icloud_read" -> "读取 iCloud ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
+    "icloud_write" -> "写入 iCloud ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
+    "icloud_search" -> "搜索 iCloud ${arguments.getStringContent("query")?.compactToolPreview(22).orEmpty()}"
     ToolNames.GET_TIME_INFO -> stringResource(R.string.chat_message_tool_get_time)
     ToolNames.CLIPBOARD -> when (memoryAction) {
         ClipboardActions.READ -> stringResource(R.string.chat_message_tool_clipboard_read)

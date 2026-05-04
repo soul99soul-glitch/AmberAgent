@@ -226,6 +226,20 @@ private fun AssistantLocalToolContent(
                     )
                 }
             )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_icloud_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_icloud_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.ICloudDrive),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.ICloudDrive, it) }
+                    )
+                }
+            )
         }
     }
 }
