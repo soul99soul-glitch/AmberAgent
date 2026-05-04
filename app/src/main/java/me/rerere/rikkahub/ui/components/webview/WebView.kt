@@ -28,11 +28,12 @@ private const val TAG = "WebView"
 
 internal class MyWebChromeClient(
     private val state: WebViewState,
-    private val onProgressChanged: (WebView?, Int) -> Unit,
+    private val onProgressChangedCallback: (WebView?, Int) -> Unit,
 ) : WebChromeClient() {
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
+        super.onProgressChanged(view, newProgress)
         state.loadingProgress = newProgress / 100f
-        onProgressChanged(view, newProgress)
+        onProgressChangedCallback(view, newProgress)
     }
 
     override fun onReceivedTitle(view: WebView?, title: String?) {
