@@ -2,7 +2,11 @@ package me.rerere.rikkahub.data.agent.tools
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -29,7 +33,12 @@ class ScreenAutomationTools(
         screenBackTool,
         screenHomeTool,
         screenOpenAppTool,
+        screenOpenUrlTool,
         screenReadUiTool,
+        screenFindTextTool,
+        screenTapTextTool,
+        screenWaitForTextTool,
+        screenScrollUntilTool,
         screenScreenshotTool,
         vlmTaskTool,
     )
@@ -174,6 +183,30 @@ class ScreenAutomationTools(
         }
     )
 
+    private val screenOpenUrlTool = Tool(
+        name = "screen_open_url",
+        description = "Open an http/https URL with Android ACTION_VIEW. Prefer webview_open for in-app visual preview; use this when the user wants the system browser/app.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("url", stringProp("http or https URL to open."))
+                },
+                required = listOf("url")
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            trackScreenTool("screen_open_url", "打开 URL", input, runtime = "Android Intent") {
+                val url = input.requiredString("url")
+                require(url.startsWith("http://") || url.startsWith("https://")) {
+                    "Only http and https URLs are allowed"
+                }
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                result(true)
+            }
+        }
+    )
+
     private val screenReadUiTool = Tool(
         name = "screen_read_ui",
         description = "Read the current Accessibility UI tree for screen reasoning.",
@@ -189,6 +222,132 @@ class ScreenAutomationTools(
                 val service = requireService()
                 textJson {
                     put("ui_tree", service.dumpUiTree(input.int("max_nodes") ?: 120))
+                }
+            }
+        }
+    )
+
+    private val screenFindTextTool = Tool(
+        name = "screen_find_text",
+        description = "Find text in the current Accessibility UI tree and return matching node bounds.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("text", stringProp("Text to find."))
+                    put("max_nodes", integerProp("Maximum nodes to scan. Defaults to 160."))
+                },
+                required = listOf("text")
+            )
+        },
+        execute = { input ->
+            trackScreenTool("screen_find_text", "查找屏幕文字", input) {
+                val matches = requireService().findTextNodes(
+                    query = input.requiredString("text"),
+                    maxNodes = input.int("max_nodes") ?: 160,
+                )
+                textJson {
+                    put("matches", buildJsonArray {
+                        matches.forEachIndexed { index, match ->
+                            add(match.toJson(index))
+                        }
+                    })
+                }
+            }
+        }
+    )
+
+    private val screenTapTextTool = Tool(
+        name = "screen_tap_text",
+        description = "Tap the first Accessibility node containing the requested text.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("text", stringProp("Text to tap."))
+                    put("max_nodes", integerProp("Maximum nodes to scan. Defaults to 160."))
+                },
+                required = listOf("text")
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            trackScreenTool("screen_tap_text", "点击文字", input) {
+                val service = requireService()
+                val match = service.findTextNodes(
+                    query = input.requiredString("text"),
+                    maxNodes = input.int("max_nodes") ?: 160,
+                ).firstOrNull() ?: error("Text not found on screen: ${input.requiredString("text")}")
+                val ok = service.tap(match.bounds.exactCenterX(), match.bounds.exactCenterY())
+                textJson {
+                    put("success", ok)
+                    put("match", match.toJson(0))
+                }
+            }
+        }
+    )
+
+    private val screenWaitForTextTool = Tool(
+        name = "screen_wait_for_text",
+        description = "Wait until text appears in the Accessibility UI tree.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("text", stringProp("Text to wait for."))
+                    put("timeout_ms", integerProp("Timeout in milliseconds. Defaults to 10000."))
+                    put("interval_ms", integerProp("Polling interval in milliseconds. Defaults to 500."))
+                },
+                required = listOf("text")
+            )
+        },
+        execute = { input ->
+            trackScreenTool("screen_wait_for_text", "等待屏幕文字", input) {
+                val deadline = System.currentTimeMillis() + (input.long("timeout_ms") ?: 10_000L).coerceIn(500L, 60_000L)
+                val interval = (input.long("interval_ms") ?: 500L).coerceIn(100L, 3_000L)
+                val service = requireService()
+                var matches = emptyList<me.rerere.rikkahub.data.automation.AccessibilityTextMatch>()
+                while (System.currentTimeMillis() < deadline) {
+                    matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
+                    if (matches.isNotEmpty()) break
+                    delay(interval)
+                }
+                textJson {
+                    put("found", matches.isNotEmpty())
+                    put("matches", buildJsonArray { matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) } })
+                }
+            }
+        }
+    )
+
+    private val screenScrollUntilTool = Tool(
+        name = "screen_scroll_until",
+        description = "Swipe repeatedly until target text appears in the Accessibility UI tree.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("text", stringProp("Text to find."))
+                    put("direction", stringProp("Swipe direction: down, up, left, or right. Defaults to down."))
+                    put("max_swipes", integerProp("Maximum swipes. Defaults to 8."))
+                },
+                required = listOf("text")
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            trackScreenTool("screen_scroll_until", "滚动查找文字", input) {
+                val service = requireService()
+                val maxSwipes = (input.int("max_swipes") ?: 8).coerceIn(1, 20)
+                val direction = input.string("direction") ?: "down"
+                var matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
+                var swipes = 0
+                while (matches.isEmpty() && swipes < maxSwipes) {
+                    swipeByDirection(service, direction)
+                    swipes++
+                    delay(450)
+                    matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
+                }
+                textJson {
+                    put("found", matches.isNotEmpty())
+                    put("swipes", swipes)
+                    put("matches", buildJsonArray { matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) } })
                 }
             }
         }
@@ -274,6 +433,35 @@ class ScreenAutomationTools(
 
     private fun result(success: Boolean) = textJson {
         put("success", success)
+    }
+
+    private suspend fun swipeByDirection(service: AmberAccessibilityService, direction: String): Boolean {
+        val width = context.resources.displayMetrics.widthPixels.toFloat()
+        val height = context.resources.displayMetrics.heightPixels.toFloat()
+        return when (direction) {
+            "up" -> service.swipe(width * 0.5f, height * 0.35f, width * 0.5f, height * 0.75f)
+            "left" -> service.swipe(width * 0.75f, height * 0.5f, width * 0.25f, height * 0.5f)
+            "right" -> service.swipe(width * 0.25f, height * 0.5f, width * 0.75f, height * 0.5f)
+            else -> service.swipe(width * 0.5f, height * 0.75f, width * 0.5f, height * 0.35f)
+        }
+    }
+
+    private fun me.rerere.rikkahub.data.automation.AccessibilityTextMatch.toJson(index: Int) = buildJsonObject {
+        put("index", index)
+        put("text", text)
+        put("content_description", contentDescription)
+        put("class_name", className)
+        put("view_id", viewId.orEmpty())
+        put("clickable", clickable)
+        put("enabled", enabled)
+        put("bounds", buildJsonObject {
+            put("left", bounds.left)
+            put("top", bounds.top)
+            put("right", bounds.right)
+            put("bottom", bounds.bottom)
+            put("center_x", bounds.exactCenterX().toDouble())
+            put("center_y", bounds.exactCenterY().toDouble())
+        })
     }
 
     private fun stringProp(description: String) = buildJsonObject {

@@ -3,19 +3,28 @@ package me.rerere.rikkahub.data.ai.tools
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
+import java.io.ByteArrayInputStream
+import java.util.zip.ZipInputStream
 
 fun createSkillTools(
     enabledSkills: Set<String>,
     allSkills: List<SkillMetadata>,
     skillManager: SkillManager,
+    settingsStore: SettingsStore,
+    workspaceManager: WorkspaceManager,
 ): List<Tool> {
     val available = allSkills.filter { it.name in enabledSkills }
     val installedNames = allSkills.map { it.name }.toSet()
@@ -71,6 +80,11 @@ fun createSkillTools(
             )
         )
 
+        add(skillValidateTool(skillManager, workspaceManager))
+        add(skillImportTool(skillManager, settingsStore, workspaceManager))
+        add(skillEnableTool(settingsStore, enable = true))
+        add(skillEnableTool(settingsStore, enable = false))
+
         if (available.isEmpty()) return@buildList
 
         add(
@@ -121,6 +135,121 @@ fun createSkillTools(
     }
 }
 
+private fun skillValidateTool(skillManager: SkillManager, workspaceManager: WorkspaceManager) = Tool(
+    name = "skill_validate",
+    description = "Validate an installed skill by name or a /workspace skill folder/zip before import.",
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Installed skill name.")
+                })
+                put("workspace_path", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Workspace skill folder, SKILL.md, or zip archive.")
+                })
+            }
+        )
+    },
+    execute = { input ->
+        val name = input.jsonObject["name"]?.jsonPrimitive?.contentOrNull
+        val workspacePath = input.jsonObject["workspace_path"]?.jsonPrimitive?.contentOrNull
+        val files = when {
+            !name.isNullOrBlank() -> mapOf("SKILL.md" to (skillManager.readSkillContent(name) ?: ""))
+            !workspacePath.isNullOrBlank() -> collectWorkspaceSkillFiles(workspaceManager, workspacePath)
+            else -> error("name or workspace_path is required")
+        }
+        val skillMd = files["SKILL.md"].orEmpty()
+        val frontmatter = SkillFrontmatterParser.parse(skillMd)
+        val issues = buildList {
+            if (skillMd.isBlank()) add("缺少 SKILL.md")
+            if (frontmatter["name"].isNullOrBlank()) add("SKILL.md 缺少 name")
+            if (frontmatter["description"].isNullOrBlank()) add("SKILL.md 缺少 description")
+        }
+        val payload = buildJsonObject {
+            put("valid", issues.isEmpty())
+            put("name", frontmatter["name"].orEmpty())
+            put("description", frontmatter["description"].orEmpty())
+            put("file_count", files.size)
+            put("contains_mcp_config", files.containsKey("mcp.json"))
+            put("issues", buildJsonArray { issues.forEach { add(it) } })
+        }
+        listOf(UIMessagePart.Text(payload.toString()))
+    }
+)
+
+private fun skillImportTool(
+    skillManager: SkillManager,
+    settingsStore: SettingsStore,
+    workspaceManager: WorkspaceManager,
+) = Tool(
+    name = "skill_import",
+    description = "Import a skill folder, SKILL.md file, or zip archive from /workspace. Imported skills are enabled by default.",
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("workspace_path", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Workspace path to a skill folder, SKILL.md, or zip archive.")
+                })
+            },
+            required = listOf("workspace_path")
+        )
+    },
+    needsApproval = true,
+    execute = { input ->
+        val workspacePath = input.jsonObject["workspace_path"]?.jsonPrimitive?.contentOrNull ?: error("workspace_path is required")
+        val files = collectWorkspaceSkillFiles(workspaceManager, workspacePath)
+        val skillMd = files["SKILL.md"] ?: error("Skill package does not contain SKILL.md")
+        val frontmatter = SkillFrontmatterParser.parse(skillMd)
+        val name = frontmatter["name"]?.takeIf { it.isNotBlank() } ?: error("SKILL.md missing name")
+        require(!frontmatter["description"].isNullOrBlank()) { "SKILL.md missing description" }
+        val saved = skillManager.saveSkillFilesAtomically(name, files)
+        require(saved) { "Failed to save skill files" }
+        updateEnabledSkill(settingsStore, name, enable = true)
+        val payload = buildJsonObject {
+            put("success", true)
+            put("name", name)
+            put("file_count", files.size)
+            put("enabled", true)
+            put("contains_mcp_config", files.containsKey("mcp.json"))
+        }
+        listOf(UIMessagePart.Text(payload.toString()))
+    }
+)
+
+private fun skillEnableTool(settingsStore: SettingsStore, enable: Boolean) = Tool(
+    name = if (enable) "skill_enable" else "skill_disable",
+    description = if (enable) {
+        "Enable an installed skill for the default AmberAgent."
+    } else {
+        "Disable an installed skill for the default AmberAgent."
+    },
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Skill name.")
+                })
+            },
+            required = listOf("name")
+        )
+    },
+    needsApproval = true,
+    execute = { input ->
+        val name = input.jsonObject["name"]?.jsonPrimitive?.contentOrNull ?: error("name is required")
+        updateEnabledSkill(settingsStore, name, enable)
+        val payload = buildJsonObject {
+            put("success", true)
+            put("name", name)
+            put("enabled", enable)
+        }
+        listOf(UIMessagePart.Text(payload.toString()))
+    }
+)
+
 private fun buildSkillArray(skills: List<SkillMetadata>) = buildJsonArray {
     skills.forEach { skill ->
         add(
@@ -137,4 +266,74 @@ private fun buildSkillArray(skills: List<SkillMetadata>) = buildJsonArray {
             }
         )
     }
+}
+
+private suspend fun updateEnabledSkill(settingsStore: SettingsStore, name: String, enable: Boolean) {
+    settingsStore.update { settings ->
+        val currentId = settings.getCurrentAssistant().id
+        settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id != currentId) return@map assistant
+                val next = if (enable) assistant.enabledSkills + name else assistant.enabledSkills - name
+                assistant.copy(enabledSkills = next)
+            }
+        )
+    }
+}
+
+private suspend fun collectWorkspaceSkillFiles(workspaceManager: WorkspaceManager, workspacePath: String): Map<String, String> {
+    val normalized = workspacePath.trim().removePrefix("/workspace/").trim('/')
+    require(normalized.isNotBlank()) { "workspace_path must not be empty" }
+    val bytes = runCatching { workspaceManager.readBytes(normalized) }.getOrNull()
+    if (bytes != null) {
+        if (normalized.endsWith(".zip", ignoreCase = true)) {
+            return unzipSkillFiles(bytes)
+        }
+        val relativeName = normalized.substringAfterLast('/').ifBlank { "SKILL.md" }
+        return mapOf(relativeName to bytes.decodeToString())
+    }
+
+    val files = linkedMapOf<String, String>()
+    suspend fun walk(dir: String, root: String) {
+        workspaceManager.list(dir).forEach { entry ->
+            val relative = entry.path.removePrefix(root).trim('/')
+            if (entry.directory) {
+                walk(entry.path, root)
+            } else if (isLikelyTextSkillFile(entry.name)) {
+                files[relative.ifBlank { entry.name }] = workspaceManager.readBytes(entry.path).decodeToString()
+            }
+        }
+    }
+    walk(normalized, normalized)
+    return files
+}
+
+private fun unzipSkillFiles(bytes: ByteArray): Map<String, String> {
+    val files = linkedMapOf<String, String>()
+    ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+        while (true) {
+            val entry = zip.nextEntry ?: break
+            if (entry.isDirectory) continue
+            val clean = entry.name.trim('/').substringAfter('/')
+            val name = clean.ifBlank { entry.name.substringAfterLast('/') }
+            if (name.isBlank() || name.contains("..") || !isLikelyTextSkillFile(name)) continue
+            files[name] = zip.readBytes().decodeToString()
+        }
+    }
+    return files
+}
+
+private fun isLikelyTextSkillFile(name: String): Boolean {
+    val lower = name.lowercase()
+    return lower == "skill.md" ||
+        lower == "mcp.json" ||
+        lower.endsWith(".md") ||
+        lower.endsWith(".json") ||
+        lower.endsWith(".txt") ||
+        lower.endsWith(".yaml") ||
+        lower.endsWith(".yml") ||
+        lower.endsWith(".js") ||
+        lower.endsWith(".ts") ||
+        lower.endsWith(".py") ||
+        lower.endsWith(".sh")
 }

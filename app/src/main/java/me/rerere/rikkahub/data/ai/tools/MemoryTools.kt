@@ -19,10 +19,125 @@ import java.time.LocalDate
 
 fun buildMemoryTools(
     json: Json,
+    onList: suspend (String) -> List<AssistantMemory>,
     onCreation: suspend (String, String) -> AssistantMemory,
     onUpdate: suspend (Int, String) -> AssistantMemory,
     onDelete: suspend (Int) -> Unit
 ): List<Tool> = listOf(
+    Tool(
+        name = "memory_list",
+        description = "List AmberAgent memory entries by type: core, short_term, long_term, or all.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("type", buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "enum",
+                            buildJsonArray {
+                                add("core")
+                                add("short_term")
+                                add("long_term")
+                                add("all")
+                            }
+                        )
+                        put("description", "Memory type to list. Defaults to all.")
+                    })
+                }
+            )
+        },
+        execute = { input ->
+            val type = input.jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: "all"
+            require(type in setOf("core", "short_term", "long_term", "all")) {
+                "type must be core, short_term, long_term, or all"
+            }
+            val entries = if (type == "all") {
+                listOf("core", "short_term", "long_term").flatMap { scope -> onList(scope).map { scope to it } }
+            } else {
+                onList(type).map { type to it }
+            }
+            val payload = buildJsonObject {
+                put("type", type)
+                put("count", entries.size)
+                put("memories", buildJsonArray {
+                    entries.forEach { (scope, memory) ->
+                        add(memory.toJson(scope))
+                    }
+                })
+            }
+            listOf(UIMessagePart.Text(payload.toString()))
+        }
+    ),
+    Tool(
+        name = "memory_write",
+        description = "Create a new AmberAgent memory entry. Core and long-term memory should be stable and important; short-term memory is for current project/task continuity.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("type", buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "enum",
+                            buildJsonArray {
+                                add("core")
+                                add("short_term")
+                                add("long_term")
+                            }
+                        )
+                        put("description", "Memory type. Defaults to long_term.")
+                    })
+                    put("content", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Memory content.")
+                    })
+                    put("source", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional source note.")
+                    })
+                },
+                required = listOf("content")
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            val type = input.jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: "long_term"
+            require(type in setOf("core", "short_term", "long_term")) {
+                "type must be core, short_term, or long_term"
+            }
+            val content = input.jsonObject["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
+            val source = input.jsonObject["source"]?.jsonPrimitive?.contentOrNull
+            val finalContent = if (source.isNullOrBlank()) content else "$content\nSource: $source"
+            val payload = json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(type, finalContent))
+            listOf(UIMessagePart.Text(payload.toString()))
+        }
+    ),
+    Tool(
+        name = "memory_delete",
+        description = "Delete an AmberAgent memory entry by id. This is high risk and always requires explicit approval.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("id", buildJsonObject {
+                        put("type", "integer")
+                        put("description", "Memory id to delete.")
+                    })
+                },
+                required = listOf("id")
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            val id = input.jsonObject["id"]?.jsonPrimitive?.intOrNull ?: error("id is required")
+            onDelete(id)
+            val payload = buildJsonObject {
+                put("success", true)
+                put("id", id)
+            }
+            listOf(UIMessagePart.Text(payload.toString()))
+        }
+    ),
     Tool(
         name = "memory_tool",
         description = """
@@ -121,3 +236,9 @@ fun buildMemoryTools(
         }
     )
 )
+
+private fun AssistantMemory.toJson(scope: String) = buildJsonObject {
+    put("id", id)
+    put("type", scope)
+    put("content", content)
+}

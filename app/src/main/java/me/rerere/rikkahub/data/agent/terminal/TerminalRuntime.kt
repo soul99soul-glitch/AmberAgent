@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import java.io.BufferedWriter
+import java.io.IOException
 import java.io.File
 import java.io.OutputStreamWriter
 import java.util.concurrent.ConcurrentHashMap
@@ -64,11 +65,19 @@ class TerminalRuntime(
                     val process = processBuilder.start()
                     val output = StringBuffer()
                     val outputReader = thread(name = "amberagent-terminal-output-$sessionId") {
-                        process.inputStream.bufferedReader().useLines { lines ->
-                            lines.forEach { line ->
+                        try {
+                            process.inputStream.bufferedReader().useLines { lines ->
+                                lines.forEach { line ->
+                                    output.appendLine(line)
+                                    activityStore.appendOutput(sessionId, line)
+                                    runCatching { onOutputLine?.invoke(line) }
+                                }
+                            }
+                        } catch (error: IOException) {
+                            if (process.isAlive) {
+                                val line = "Terminal output stream closed: ${error.message.orEmpty()}"
                                 output.appendLine(line)
                                 activityStore.appendOutput(sessionId, line)
-                                onOutputLine?.invoke(line)
                             }
                         }
                     }
@@ -81,7 +90,7 @@ class TerminalRuntime(
                         val timeoutLine = "Command timed out after ${timeoutMillis}ms."
                         output.appendLine(timeoutLine)
                         activityStore.appendOutput(sessionId, timeoutLine)
-                        onOutputLine?.invoke(timeoutLine)
+                        runCatching { onOutputLine?.invoke(timeoutLine) }
                         TIMEOUT_EXIT_CODE
                     }
                     outputReader.join(1_000)

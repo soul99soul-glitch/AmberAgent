@@ -112,6 +112,14 @@ class GenerationHandler(
                 ) {
                     buildMemoryTools(
                         json = json,
+                        onList = { scope ->
+                            when (scope) {
+                                "core" -> memoryRepo.getGlobalMemories()
+                                "short_term" -> memoryRepo.getShortTermMemories()
+                                "long_term" -> memoryRepo.getLongTermMemories()
+                                else -> emptyList()
+                            }
+                        },
                         onCreation = { scope, content ->
                             val bucket = when (scope) {
                                 "core" -> MemoryRepository.GLOBAL_MEMORY_ID

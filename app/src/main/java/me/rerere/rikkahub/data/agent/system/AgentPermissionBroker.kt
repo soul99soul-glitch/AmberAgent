@@ -447,7 +447,15 @@ object AgentPermissionRegistry {
             title = "应用列表与启动",
             description = "读取可启动应用列表并打开指定应用。",
             risk = AgentPermissionRisk.Normal,
-            toolNames = listOf("apps_list", "app_open"),
+            toolNames = listOf("apps_list", "app_open", "app_info"),
+        ),
+        AgentPermissionCapability(
+            id = "installed_apps_full_access",
+            title = "全量应用列表",
+            description = "高级实验能力。读取设备上更完整的已安装包列表；Google Play 会限制此权限。",
+            risk = AgentPermissionRisk.High,
+            debugOnly = true,
+            toolNames = listOf("apps_installed_list"),
         ),
     )
 }

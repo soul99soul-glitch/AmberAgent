@@ -54,6 +54,7 @@ import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
+import me.rerere.rikkahub.data.ai.tools.createMcpManagementTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.files.SkillManager
@@ -68,6 +69,7 @@ import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
@@ -136,6 +138,7 @@ class ChatService(
     private val screenCaptureManager: ScreenCaptureManager,
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
+    private val workspaceManager: WorkspaceManager,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -599,6 +602,15 @@ class ChatService(
                             enabledSkills = assistant.enabledSkills,
                             allSkills = skillManager.listSkills(),
                             skillManager = skillManager,
+                            settingsStore = settingsStore,
+                            workspaceManager = workspaceManager,
+                        )
+                    )
+                    addAll(
+                        createMcpManagementTools(
+                            settingsStore = settingsStore,
+                            mcpManager = mcpManager,
+                            skillManager = skillManager,
                         )
                     )
                     mcpManager.getAllAvailableTools().forEach { tool ->
@@ -627,6 +639,7 @@ class ChatService(
                             )
                         )
                     }
+                    add(localTools.createToolsListTool(this.toList()))
                 },
             ).onCompletion {
                 cancelLiveUpdateNotification(conversationId)

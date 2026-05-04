@@ -65,10 +65,17 @@ class WorkspaceManager(private val context: Context) {
             ?: error("Unable to read file: $relativePath")
     }
 
+    suspend fun readBytes(relativePath: String): ByteArray = withContext(Dispatchers.IO) {
+        val file = requireDocument(relativePath)
+        require(file.isFile) { "Not a file: $relativePath" }
+        context.contentResolver.openInputStream(file.uri)?.use { it.readBytes() }
+            ?: error("Unable to read file: $relativePath")
+    }
+
     suspend fun writeText(relativePath: String, content: String, append: Boolean = false): WorkspaceEntry =
         withContext(Dispatchers.IO) {
             val normalized = requireFilePath(relativePath)
-            val file = requireOrCreateFile(relativePath)
+            val file = requireOrCreateFile(relativePath, "text/plain")
             val mode = if (append) "wa" else "wt"
             context.contentResolver.openOutputStream(file.uri, mode)?.bufferedWriter()?.use {
                 it.write(content)
@@ -81,6 +88,27 @@ class WorkspaceManager(private val context: Context) {
                 mimeType = file.type
             )
         }
+
+    suspend fun writeBytes(
+        relativePath: String,
+        bytes: ByteArray,
+        mimeType: String = "application/octet-stream",
+        append: Boolean = false,
+    ): WorkspaceEntry = withContext(Dispatchers.IO) {
+        val normalized = requireFilePath(relativePath)
+        val file = requireOrCreateFile(relativePath, mimeType)
+        val mode = if (append) "wa" else "w"
+        context.contentResolver.openOutputStream(file.uri, mode)?.use {
+            it.write(bytes)
+        } ?: error("Unable to write file: $relativePath")
+        WorkspaceEntry(
+            path = normalized,
+            name = file.name.orEmpty(),
+            directory = false,
+            sizeBytes = file.length(),
+            mimeType = file.type
+        )
+    }
 
     suspend fun editText(relativePath: String, oldText: String, newText: String, replaceAll: Boolean): EditResult =
         withContext(Dispatchers.IO) {
@@ -226,11 +254,14 @@ class WorkspaceManager(private val context: Context) {
             }
     }
 
-    private fun requireOrCreateFile(relativePath: String): DocumentFile {
+    private fun requireOrCreateFile(
+        relativePath: String,
+        mimeType: String = "application/octet-stream",
+    ): DocumentFile {
         val normalized = requireFilePath(relativePath)
         val parent = requireOrCreateParent(relativePath)
         val name = normalized.substringAfterLast("/")
-        return parent.findFile(name) ?: parent.createFile("text/plain", name)
+        return parent.findFile(name) ?: parent.createFile(mimeType, name)
         ?: error("Unable to create $relativePath")
     }
 

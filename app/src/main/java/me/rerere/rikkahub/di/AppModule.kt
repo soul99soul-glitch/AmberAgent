@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
+import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
@@ -47,6 +48,10 @@ val appModule = module {
 
     single {
         WorkspaceTools(get(), get())
+    }
+
+    single {
+        WorkspaceArtifactTools(get(), get(), get())
     }
 
     single {
@@ -86,11 +91,11 @@ val appModule = module {
     }
 
     single {
-        SystemAccessTools(get(), get(), get())
+        SystemAccessTools(get(), get(), get(), get())
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -137,7 +142,8 @@ val appModule = module {
             liveStatusNotifier = get(),
             screenCaptureManager = get(),
             filesManager = get(),
-            skillManager = get()
+            skillManager = get(),
+            workspaceManager = get(),
         )
     }
 

@@ -74,6 +74,41 @@ class AmberAccessibilityService : AccessibilityService() {
         return lines.joinToString("\n")
     }
 
+    fun findTextNodes(query: String, maxNodes: Int = 120): List<AccessibilityTextMatch> {
+        val root = rootInActiveWindow ?: return emptyList()
+        val needle = query.trim()
+        if (needle.isBlank()) return emptyList()
+        val results = mutableListOf<AccessibilityTextMatch>()
+        var visited = 0
+
+        fun visit(node: AccessibilityNodeInfo) {
+            if (visited >= maxNodes) return
+            visited++
+            val text = node.text?.toString().orEmpty()
+            val description = node.contentDescription?.toString().orEmpty()
+            val haystack = "$text\n$description"
+            if (haystack.contains(needle, ignoreCase = true)) {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                results += AccessibilityTextMatch(
+                    text = text,
+                    contentDescription = description,
+                    className = node.className?.toString().orEmpty(),
+                    viewId = node.viewIdResourceName,
+                    bounds = Rect(rect),
+                    clickable = node.isClickable,
+                    enabled = node.isEnabled,
+                )
+            }
+            repeat(node.childCount) { index ->
+                node.getChild(index)?.let(::visit)
+            }
+        }
+
+        visit(root)
+        return results
+    }
+
     private suspend fun gesture(path: Path, durationMillis: Long): Boolean =
         suspendCancellableCoroutine { continuation ->
             val gesture = GestureDescription.Builder()
@@ -102,3 +137,13 @@ class AmberAccessibilityService : AccessibilityService() {
         fun getActiveService(): AmberAccessibilityService? = activeService
     }
 }
+
+data class AccessibilityTextMatch(
+    val text: String,
+    val contentDescription: String,
+    val className: String,
+    val viewId: String?,
+    val bounds: Rect,
+    val clickable: Boolean,
+    val enabled: Boolean,
+)
