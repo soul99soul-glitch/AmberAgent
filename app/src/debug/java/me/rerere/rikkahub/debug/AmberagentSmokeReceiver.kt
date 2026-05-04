@@ -8,6 +8,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
@@ -15,6 +17,8 @@ import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.service.ChatService
 import org.koin.core.context.GlobalContext
 import java.time.Instant
 
@@ -28,11 +32,12 @@ class AmberAgentSmokeReceiver : BroadcastReceiver() {
                     ACTION_SCREEN -> runScreenSmoke(context, intent)
                     ACTION_SCREENSHOT -> runScreenshotSmoke(context)
                     ACTION_SYSTEM_ACCESS -> runSystemAccessSmoke(context, intent)
+                    ACTION_AGENT_TOOL -> runAgentToolSmoke(context, intent)
                     else -> error("Unknown smoke action: ${intent.action}")
                 }
             } catch (error: Throwable) {
                 writeReport(context, "smoke_error.txt", errorReport(error))
-                Log.e(TAG, "terminal smoke failed", error)
+                Log.e(TAG, "smoke failed", error)
             } finally {
                 pendingResult.finish()
             }
@@ -159,6 +164,39 @@ class AmberAgentSmokeReceiver : BroadcastReceiver() {
         Log.i(TAG, "system access smoke completed: ${outputFile.absolutePath}")
     }
 
+    private suspend fun runAgentToolSmoke(context: Context, intent: Intent) {
+        val koin = GlobalContext.get()
+        val settings = koin.get<SettingsStore>().settingsFlow.first()
+        val chatService = withContext(Dispatchers.Main) {
+            koin.get<ChatService>()
+        }
+        val tools = chatService.createDebugRunTools(settings)
+        val toolName = intent.getStringExtra(EXTRA_TOOL_NAME) ?: "tools_list"
+        val args = intent.getStringExtra(EXTRA_ARGS_JSON) ?: "{}"
+        val tool = tools.firstOrNull { it.name == toolName } ?: error("Unknown agent tool: $toolName")
+        if (tool.needsApproval && !intent.getBooleanExtra(EXTRA_ALLOW_HIGH_RISK, false)) {
+            error("Refusing high-risk smoke tool without $EXTRA_ALLOW_HIGH_RISK=true: $toolName")
+        }
+        val result = tool.execute(Json.parseToJsonElement(args))
+        val report = buildString {
+            appendLine("timestamp=${Instant.now()}")
+            appendLine("debug_only=true")
+            appendLine("tool=$toolName")
+            appendLine("args=$args")
+            appendLine("available_tool_count=${tools.size}")
+            appendLine("output_begin")
+            result.forEach { part ->
+                when (part) {
+                    is UIMessagePart.Text -> appendLine(part.text)
+                    else -> appendLine(part.toString())
+                }
+            }
+            appendLine("output_end")
+        }
+        val outputFile = writeReport(context, "agent_tool.txt", report)
+        Log.i(TAG, "agent tool smoke completed: ${outputFile.absolutePath}")
+    }
+
     private fun writeReport(context: Context, name: String, report: String) =
         context.filesDir
             .resolve("amberagent/smoke/$name")
@@ -184,6 +222,7 @@ class AmberAgentSmokeReceiver : BroadcastReceiver() {
         private const val ACTION_SCREEN = "me.rerere.amberagent.debug.SMOKE_SCREEN"
         private const val ACTION_SCREENSHOT = "me.rerere.amberagent.debug.SMOKE_SCREENSHOT"
         private const val ACTION_SYSTEM_ACCESS = "me.rerere.amberagent.debug.SMOKE_SYSTEM_ACCESS"
+        private const val ACTION_AGENT_TOOL = "me.rerere.amberagent.debug.SMOKE_AGENT_TOOL"
         private const val EXTRA_COMMAND = "command"
         private const val EXTRA_TIMEOUT_MS = "timeout_ms"
         private const val EXTRA_OPERATION = "operation"

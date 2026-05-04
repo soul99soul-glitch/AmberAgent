@@ -136,6 +136,7 @@ val appModule = module {
             generationHandler = get(),
             templateTransformer = get(),
             providerManager = get(),
+            json = get(),
             localTools = get(),
             mcpManager = get(),
             activityStore = get(),

@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -54,6 +55,7 @@ import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
+import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagementTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
@@ -73,6 +75,7 @@ import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -131,6 +134,7 @@ class ChatService(
     private val generationHandler: GenerationHandler,
     private val templateTransformer: TemplateTransformer,
     private val providerManager: ProviderManager,
+    private val json: Json,
     private val localTools: LocalTools,
     val mcpManager: McpManager,
     private val activityStore: AgentToolActivityStore,
@@ -591,56 +595,7 @@ class ChatService(
                     MIN_AGENT_TOOL_LOOP_STEPS,
                     MAX_AGENT_TOOL_LOOP_STEPS,
                 ),
-                tools = buildList {
-                    if (settings.enableWebSearch) {
-                        addAll(createSearchTools(settings))
-                    }
-                    val assistant = settings.getCurrentAssistant()
-                    addAll(localTools.getTools(assistant.localTools))
-                    addAll(
-                        createSkillTools(
-                            enabledSkills = assistant.enabledSkills,
-                            allSkills = skillManager.listSkills(),
-                            skillManager = skillManager,
-                            settingsStore = settingsStore,
-                            workspaceManager = workspaceManager,
-                        )
-                    )
-                    addAll(
-                        createMcpManagementTools(
-                            settingsStore = settingsStore,
-                            mcpManager = mcpManager,
-                            skillManager = skillManager,
-                        )
-                    )
-                    mcpManager.getAllAvailableTools().forEach { tool ->
-                        add(
-                            Tool(
-                                name = "mcp__" + tool.name,
-                                description = tool.description ?: "",
-                                parameters = { tool.inputSchema },
-                                needsApproval = tool.needsApproval,
-                                execute = { input ->
-                                    val toolCallId = activityStore.startTool(
-                                        toolName = "mcp__${tool.name}",
-                                        title = "调用 MCP 工具",
-                                        inputPreview = input.toString(),
-                                        runtime = "MCP",
-                                    )
-                                    try {
-                                        val result = mcpManager.callTool(tool.name, input.jsonObject)
-                                        activityStore.complete(toolCallId, result.toolOutputPreview())
-                                        result
-                                    } catch (error: Throwable) {
-                                        activityStore.fail(toolCallId, error)
-                                        throw error
-                                    }
-                                },
-                            )
-                        )
-                    }
-                    add(localTools.createToolsListTool(this.toList()))
-                },
+                tools = createRunTools(settings),
             ).onCompletion {
                 cancelLiveUpdateNotification(conversationId)
 
@@ -1321,6 +1276,97 @@ class ChatService(
         }
 
         updateConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+    }
+
+    internal fun createDebugRunTools(settings: Settings): List<Tool> = createRunTools(settings)
+
+    private fun createRunTools(settings: Settings): List<Tool> = buildList {
+        if (settings.enableWebSearch) {
+            addAll(createSearchTools(settings))
+        }
+        val assistant = settings.getCurrentAssistant()
+        addAll(localTools.getTools(assistant.localTools))
+        addAll(
+            createSkillTools(
+                enabledSkills = assistant.enabledSkills,
+                allSkills = skillManager.listSkills(),
+                skillManager = skillManager,
+                settingsStore = settingsStore,
+                workspaceManager = workspaceManager,
+            )
+        )
+        addAll(
+            createMcpManagementTools(
+                settingsStore = settingsStore,
+                mcpManager = mcpManager,
+                skillManager = skillManager,
+            )
+        )
+        mcpManager.getAllAvailableTools().forEach { tool ->
+            add(
+                Tool(
+                    name = "mcp__" + tool.name,
+                    description = tool.description ?: "",
+                    parameters = { tool.inputSchema },
+                    needsApproval = tool.needsApproval,
+                    execute = { input ->
+                        val toolCallId = activityStore.startTool(
+                            toolName = "mcp__${tool.name}",
+                            title = "调用 MCP 工具",
+                            inputPreview = input.toString(),
+                            runtime = "MCP",
+                        )
+                        try {
+                            val result = mcpManager.callTool(tool.name, input.jsonObject)
+                            activityStore.complete(toolCallId, result.toolOutputPreview())
+                            result
+                        } catch (error: Throwable) {
+                            activityStore.fail(toolCallId, error)
+                            throw error
+                        }
+                    },
+                )
+            )
+        }
+        addAll(createMemoryTools(settings))
+        add(localTools.createToolsListTool(this.toList()))
+    }
+
+    private fun createMemoryTools(settings: Settings): List<Tool> {
+        if (
+            !settings.agentRuntime.enableCoreMemory &&
+            !settings.agentRuntime.enableShortTermMemory &&
+            !settings.agentRuntime.enableLongTermMemory
+        ) {
+            return emptyList()
+        }
+        return buildMemoryTools(
+            json = json,
+            onList = { scope ->
+                when (scope) {
+                    "core" -> memoryRepository.getGlobalMemories()
+                    "short_term" -> memoryRepository.getShortTermMemories()
+                    "long_term" -> memoryRepository.getLongTermMemories()
+                    else -> emptyList()
+                }
+            },
+            onCreation = { scope, content ->
+                memoryRepository.addMemory(memoryBucket(scope), content)
+            },
+            onUpdate = { id, content ->
+                memoryRepository.updateContent(id, content)
+            },
+            onDelete = { id ->
+                memoryRepository.deleteMemory(id)
+            }
+        )
+    }
+
+    private fun memoryBucket(scope: String): String = when (scope) {
+        "core" -> MemoryRepository.GLOBAL_MEMORY_ID
+        "short_term" -> MemoryRepository.SHORT_TERM_MEMORY_ID
+        "long_term" -> MemoryRepository.LONG_TERM_MEMORY_ID
+        else -> MemoryRepository.LONG_TERM_MEMORY_ID
     }
 
     // 停止当前会话生成任务（不清理会话缓存）

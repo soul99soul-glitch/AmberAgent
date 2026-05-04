@@ -63,13 +63,13 @@ class TerminalRuntime(
                         processBuilder.environment()[key] = value
                     }
                     val process = processBuilder.start()
-                    val output = StringBuffer()
+                    val output = TerminalOutputBuffer(MAX_OUTPUT_CHARS)
                     val outputReader = thread(name = "amberagent-terminal-output-$sessionId") {
                         try {
                             process.inputStream.bufferedReader().useLines { lines ->
                                 lines.forEach { line ->
                                     output.appendLine(line)
-                                    activityStore.appendOutput(sessionId, line)
+                                    runCatching { activityStore.appendOutput(sessionId, line) }
                                     runCatching { onOutputLine?.invoke(line) }
                                 }
                             }
@@ -77,7 +77,7 @@ class TerminalRuntime(
                             if (process.isAlive) {
                                 val line = "Terminal output stream closed: ${error.message.orEmpty()}"
                                 output.appendLine(line)
-                                activityStore.appendOutput(sessionId, line)
+                                runCatching { activityStore.appendOutput(sessionId, line) }
                             }
                         }
                     }
@@ -89,15 +89,16 @@ class TerminalRuntime(
                         process.waitFor(1, TimeUnit.SECONDS)
                         val timeoutLine = "Command timed out after ${timeoutMillis}ms."
                         output.appendLine(timeoutLine)
-                        activityStore.appendOutput(sessionId, timeoutLine)
+                        runCatching { activityStore.appendOutput(sessionId, timeoutLine) }
                         runCatching { onOutputLine?.invoke(timeoutLine) }
                         TIMEOUT_EXIT_CODE
                     }
                     outputReader.join(1_000)
-                    activityStore.complete(sessionId, exitCode, output.toString())
+                    val finalOutput = output.snapshot()
+                    activityStore.complete(sessionId, exitCode, finalOutput)
                     TerminalResult(
                         exitCode = exitCode,
-                        output = output.toString(),
+                        output = finalOutput,
                         runtime = ALPINE_RUNTIME_NAME,
                         workspace = workingDir.absolutePath,
                         syncNote = ""
@@ -169,6 +170,7 @@ class TerminalRuntime(
     companion object {
         private const val DEFAULT_TIMEOUT_MS = 60_000L
         private const val DEFAULT_READ_BYTES = 64 * 1024
+        private const val MAX_OUTPUT_CHARS = 256 * 1024
         private const val TIMEOUT_EXIT_CODE = 124
         private const val ALPINE_RUNTIME_NAME = "alpine-proot-stage1"
         private const val SESSION_RUNTIME_NAME = "android-shell-stage0"
@@ -201,3 +203,30 @@ private data class TerminalSession(
     val writer: BufferedWriter,
     val workingDir: File,
 )
+
+private class TerminalOutputBuffer(
+    private val maxChars: Int,
+) {
+    private val buffer = StringBuilder()
+    private var omittedChars = 0
+
+    @Synchronized
+    fun appendLine(line: String) {
+        buffer.append(line).append('\n')
+        if (buffer.length > maxChars) {
+            val overflow = buffer.length - maxChars
+            buffer.delete(0, overflow)
+            omittedChars += overflow
+        }
+    }
+
+    @Synchronized
+    fun snapshot(): String {
+        val output = buffer.toString()
+        return if (omittedChars > 0) {
+            "Output truncated to the last $maxChars characters; omitted $omittedChars earlier characters.\n$output"
+        } else {
+            output
+        }
+    }
+}
