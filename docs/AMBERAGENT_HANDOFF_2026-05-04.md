@@ -14,10 +14,10 @@ Current branch:
 amberagent/v0.5-wip
 ```
 
-Latest local commit at handoff:
+Latest verified code commit at handoff:
 
 ```text
-6067312a feat(agent): expand tool surface for 0.8.0
+7a724625 fix(agent): harden terminal output and tool introspection
 ```
 
 Current packaged APK:
@@ -95,6 +95,30 @@ Last successful checks:
 git diff --check
 ```
 
+Additional recheck from this continuation:
+
+```bash
+./gradlew :app:compileDebugKotlin --no-daemon --stacktrace
+./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.data.agent.workspace.WorkspacePathsTest' --no-daemon --stacktrace
+./gradlew :app:assembleDebug --no-daemon --stacktrace
+```
+
+Smoke target:
+
+```text
+medium_phone AVD via adb emulator-5554
+```
+
+Smoke results:
+
+- `terminal_execute` long-output smoke used Alpine/proot with a temporary AVD workspace. It ran 20,000 output lines, returned `exit_code=0`, `runtime=alpine-proot-stage1`, `aarch64`, Alpine `3.21.0`, and `/sbin/apk`. Output was intentionally capped with `Output truncated to the last 262144 characters...`. No app crash markers or `read interrupted` markers appeared in logcat.
+- Safe Mode was forced by setting the crash flag, then launching `RouteActivity`. UI tree showed `Safe Mode`, `Current Agent: AmberAgent`, `Crash Report`, and `Copy`; `Switch Assistant` / `切换助手` was absent.
+- `apps_list` returned 22 launcher apps on the AVD.
+- `apps_installed_list` default returned 2 non-system apps; with `include_system=true, limit=1000`, it returned 248 packages.
+- `tools_list` via debug smoke reported `available_tool_count=90`, `enabled_count=89`; it included `apps_list`, `apps_installed_list`, `permissions_status`, `skills_list`, `memory_list`, `memory_write`, and `memory_delete`.
+- `permissions_status` returned 24 capabilities, including granted `apps` and `installed_apps_full_access`, mixed runtime permission states, and special-access-needed entries.
+- `skills_list` returned `installed_count=1`, `enabled_count=1`, with built-in `skill-creator` available and no missing enabled skills.
+
 APK metadata checked with `aapt`:
 
 ```text
@@ -156,7 +180,7 @@ So v0.8.0 has not yet been installed from this session onto a physical phone aft
   - `command -v apk=/sbin/apk`
   - file created inside `/workspace` synced back to SAF workspace.
 
-### Crash Fix From Latest Turn
+### Terminal Long Output Hardening
 
 User saw Safe Mode after dependency installation with stack:
 
@@ -172,6 +196,8 @@ Fix:
 - `TerminalRuntime` output thread now catches `IOException`.
 - If the process stream closes while the process is ending or being destroyed, this no longer becomes an uncaught background-thread crash.
 - `onOutputLine` callback is wrapped with `runCatching` so UI callback failure cannot crash the terminal worker.
+- UI activity output append is also wrapped so status UI failures do not stop output draining.
+- `terminal_execute` result output is capped to the last 256 KiB with an explicit truncation notice, preventing long install logs from bloating memory and model/tool output.
 
 File:
 
@@ -292,7 +318,7 @@ app/src/main/java/me/rerere/rikkahub/data/agent/workspace/WorkspaceManager.kt
 
 - `ocr_image` is stage1 and currently does not provide a real local OCR runtime unless a dependency is later wired in. It should clearly say no local OCR runtime or use a future VLM fallback.
 - `terminal_session_*` remains `android-shell-stage0`; do not describe it as Alpine/proot session.
-- `tools_list` is registered in `ChatService` from a snapshot of local/search/skill/MCP tools. Memory tools are appended inside `GenerationHandler`, so check whether `tools_list` currently includes memory tools before claiming full introspection coverage.
+- `tools_list` is now built from the same ChatService runtime tool set that is passed into generation, including memory tools when memory is enabled. It still reports enabled/generated tools only; disabled-tool enumeration remains stage1-limited.
 - `skill_import` is conservative and mostly imports text-like Skill files. Binary assets in skills may need follow-up support.
 - `apps_installed_list` uses `QUERY_ALL_PACKAGES`, which is acceptable for an experimental sideload APK but may not be Play-compliant.
 - WebView read/preview had prior work, but the user still reported issues with WebView readability, screenshot thumbnail cropping, and repeated MediaProjection approval. Verify current behavior before claiming it is solved.
@@ -303,23 +329,23 @@ app/src/main/java/me/rerere/rikkahub/data/agent/workspace/WorkspaceManager.kt
 These are the best next test targets:
 
 1. Dependency install crash:
-   - Reproduce with a terminal command that installs packages or produces long output.
-   - Confirm Safe Mode no longer appears.
+   - Rechecked with a 20,000-line `terminal_execute` smoke on AVD. No Safe Mode or app crash markers appeared.
+   - Still worth repeating with a real dependency install on a user's configured physical device workspace.
 
 2. Safe Mode:
-   - Force or observe a crash and confirm there is no "切换助手" button.
+   - Forced Safe Mode on AVD. No "切换助手" / "Switch Assistant" entry was present.
 
 3. App list:
-   - Confirm `apps_list` now returns launcher apps beyond the previous 8 exposed apps.
-   - Confirm `apps_installed_list` returns a broader installed-package list.
+   - `apps_list` returned 22 launcher apps on AVD.
+   - `apps_installed_list` returned 248 packages when `include_system=true`.
 
 4. Tool discovery:
-   - Ask the Agent "你有哪些工具？" and see whether it calls `tools_list`.
-   - Confirm categories/permissions/risk are readable.
+   - Debug smoke executed the same ChatService runtime tool set. `tools_list` reported 90 available tools and included system, skill, permission, and memory tools.
+   - Still worth asking a configured model "你有哪些工具？" to verify model behavior, not just tool availability.
 
 5. Skill visibility:
-   - Import a Skill package.
-   - Confirm it appears, is enabled, and `skills_list` sees it.
+   - `skills_list` sees the built-in `skill-creator` as installed/enabled on fresh AVD.
+   - Importing the user's Minis Skill package still needs a real package/workspace test.
    - Confirm `skill_import` can handle the user's Minis Skill package if it is text-based enough.
 
 6. WebView:
@@ -383,7 +409,7 @@ Use several layers, not just one:
 1. Local Git commits
    - Commit after each coherent stage.
    - Keep commit messages descriptive.
-   - Current anchor commit is `6067312a`.
+   - Current verified code anchor is `7a724625`.
 
 2. Handoff markdown
    - This file is the human-readable bridge for the next session.
@@ -418,17 +444,23 @@ Copy this into the next Codex session:
 /Users/arquiel/Downloads/AI/rikkashit/rikkahub/docs/AMBERAGENT_HANDOFF_2026-05-04.md
 
 当前本地 Git 锚点：
-6067312a feat(agent): expand tool surface for 0.8.0
+7a724625 fix(agent): harden terminal output and tool introspection
 
 当前 APK：
 /Users/arquiel/Downloads/AmberAgent-v0.8.0-arm64-debug.apk
 
 当前目标：
-不要重开大坑。先从 handoff 里的 “User-Reported Open Issues To Recheck” 开始，优先验证并修复：
-1. 安装依赖/长输出 terminal_execute 是否还会触发 Safe Mode。
-2. Safe Mode 是否已经没有“切换助手”入口。
-3. apps_list / apps_installed_list 是否能解决只能读到 8 个应用的问题。
-4. tools_list / permissions_status / skills_list 是否能让 Agent 知道自己有哪些工具和 Skill。
+不要重开大坑。上轮已经在 AVD 上验证：
+- 长输出 terminal_execute 不触发 Safe Mode，输出被截断到 256KiB。
+- Safe Mode 没有“切换助手”入口。
+- apps_list 返回 22 个 launcher apps；apps_installed_list include_system=true 返回 248 个包。
+- tools_list / permissions_status / skills_list 可从 Agent 运行时工具集看到系统、权限、Skill 和 memory 工具。
+
+下一步优先补真实用户环境验证：
+1. 在已配置 SAF workspace 的真机上跑一次真实依赖安装类 terminal_execute。
+2. 问配置好的 Agent “你有哪些工具？”确认模型会主动调用 tools_list。
+3. 导入用户的 Minis Skill 包，确认 skill_import / skills_list / skill_enable 路径。
+4. 继续 WebView、Permissions、Memory 后续 open issues。
 
 固定环境：
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
