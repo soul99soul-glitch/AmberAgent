@@ -2,8 +2,10 @@ package me.rerere.rikkahub.ui.components.ai
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.util.Log
+import android.webkit.WebView as AndroidWebView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
@@ -37,6 +39,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,6 +79,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -132,6 +137,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
+import me.rerere.rikkahub.data.agent.webview.WebViewLink
+import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -154,6 +161,8 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import org.koin.compose.koinInject
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
 import kotlin.time.Duration.Companion.seconds
@@ -687,6 +696,19 @@ private fun WebOperationPreviewThumbnail(
     url: String,
     onOpen: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val webViewOperationStore: WebViewOperationStore = koinInject()
+    val webState by webViewOperationStore.state.collectAsState()
+    val isCurrentPreview = webState.requestedUrl == url || webState.url == url
+    val thumbnailFile = webState.thumbnailPath
+        .takeIf { isCurrentPreview && it.isNotBlank() }
+        ?.let(::File)
+        ?.takeIf { it.exists() && it.length() > 0L }
+    LaunchedEffect(url, isCurrentPreview) {
+        if (!isCurrentPreview) {
+            webViewOperationStore.open(url)
+        }
+    }
     val state = rememberWebViewState(
         url = url,
         settings = {
@@ -696,18 +718,47 @@ private fun WebOperationPreviewThumbnail(
         },
     )
     Box(modifier = Modifier.fillMaxSize()) {
-        WebView(
-            state = state,
-            modifier = Modifier.fillMaxSize(),
-            onCreated = { webView ->
-                webView.isFocusable = false
-                webView.isFocusableInTouchMode = false
-                webView.setOnTouchListener { _, _ -> true }
-            },
-            onUpdated = { webView ->
-                webView.setOnTouchListener { _, _ -> true }
-            },
-        )
+        if (thumbnailFile != null) {
+            AsyncImage(
+                model = thumbnailFile,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            WebView(
+                state = state,
+                modifier = Modifier
+                    .requiredSize(width = 336.dp, height = 252.dp)
+                    .graphicsLayer {
+                        scaleX = 0.35f
+                        scaleY = 0.35f
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    },
+                onCreated = { webView ->
+                    webView.isFocusable = false
+                    webView.isFocusableInTouchMode = false
+                    webView.setOnTouchListener { _, _ -> true }
+                },
+                onUpdated = { webView ->
+                    webView.setOnTouchListener { _, _ -> true }
+                },
+                onProgressChanged = { webView, progress ->
+                    webViewOperationStore.updateLoading(webView?.url ?: url, progress)
+                },
+                onPageStarted = { webView, pageUrl ->
+                    webViewOperationStore.updateLoading(pageUrl ?: webView?.url ?: url, 1)
+                },
+                onPageFinished = { webView, pageUrl ->
+                    val resolvedUrl = pageUrl ?: webView?.url ?: url
+                    webViewOperationStore.updateLoading(resolvedUrl, 100)
+                    webView?.let {
+                        extractReadablePage(it, webViewOperationStore)
+                        captureWebViewThumbnail(it, webViewOperationStore, context)
+                    }
+                },
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1026,6 +1077,15 @@ private fun OperationWebPreview(
     url: String,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val webViewOperationStore: WebViewOperationStore = koinInject()
+    val webState by webViewOperationStore.state.collectAsState()
+    val isCurrentPreview = webState.requestedUrl == url || webState.url == url
+    LaunchedEffect(url, isCurrentPreview) {
+        if (!isCurrentPreview) {
+            webViewOperationStore.open(url)
+        }
+    }
     val state = rememberWebViewState(url = url)
     Surface(
         modifier = modifier,
@@ -1037,8 +1097,114 @@ private fun OperationWebPreview(
         WebView(
             state = state,
             modifier = Modifier.fillMaxSize(),
+            onProgressChanged = { webView, progress ->
+                webViewOperationStore.updateLoading(webView?.url ?: url, progress)
+            },
+            onPageStarted = { webView, pageUrl ->
+                webViewOperationStore.updateLoading(pageUrl ?: webView?.url ?: url, 1)
+            },
+            onPageFinished = { webView, pageUrl ->
+                val resolvedUrl = pageUrl ?: webView?.url ?: url
+                webViewOperationStore.updateLoading(resolvedUrl, 100)
+                webView?.let {
+                    extractReadablePage(it, webViewOperationStore)
+                    captureWebViewThumbnail(it, webViewOperationStore, context)
+                }
+            },
         )
     }
+}
+
+private fun extractReadablePage(
+    webView: AndroidWebView,
+    store: WebViewOperationStore,
+) {
+    val script = """
+        (function() {
+          const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 40).map((a) => {
+            let href = '';
+            try { href = new URL(a.getAttribute('href'), location.href).href; } catch (_) { href = a.href || ''; }
+            const title = (a.innerText || a.textContent || href || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+            return { title, url: href };
+          }).filter((item) => item.url);
+          return JSON.stringify({
+            title: document.title || '',
+            url: location.href,
+            text: ((document.body && document.body.innerText) || '').slice(0, 40000),
+            links
+          });
+        })();
+    """.trimIndent()
+    webView.post {
+        webView.evaluateJavascript(script) { raw ->
+            runCatching {
+                if (raw.isNullOrBlank() || raw == "null") return@runCatching
+                val decoded = JSONArray("[$raw]").getString(0)
+                val payload = JSONObject(decoded)
+                val linksJson = payload.optJSONArray("links")
+                val links = buildList {
+                    if (linksJson != null) {
+                        for (index in 0 until linksJson.length()) {
+                            val item = linksJson.optJSONObject(index) ?: continue
+                            val linkUrl = item.optString("url").trim()
+                            if (linkUrl.isBlank()) continue
+                            add(
+                                WebViewLink(
+                                    title = item.optString("title").ifBlank { linkUrl },
+                                    url = linkUrl,
+                                )
+                            )
+                        }
+                    }
+                }
+                store.updateReadablePage(
+                    url = payload.optString("url").ifBlank { webView.url },
+                    title = payload.optString("title"),
+                    readableText = payload.optString("text"),
+                    links = links,
+                )
+            }.onFailure {
+                Log.w("ChatInput", "Failed to extract WebView readable content", it)
+            }
+        }
+    }
+}
+
+private fun captureWebViewThumbnail(
+    webView: AndroidWebView,
+    store: WebViewOperationStore,
+    context: android.content.Context,
+) {
+    webView.postDelayed({
+        runCatching {
+            val width = webView.width
+            val height = webView.height
+            if (width <= 0 || height <= 0) return@runCatching
+
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            webView.draw(canvas)
+
+            val cropWidth = minOf(bitmap.width, bitmap.height * 4 / 3)
+            val cropHeight = minOf(bitmap.height, bitmap.width * 3 / 4)
+            val cropX = ((bitmap.width - cropWidth) / 2).coerceAtLeast(0)
+            val cropped = Bitmap.createBitmap(bitmap, cropX, 0, cropWidth, cropHeight)
+            if (cropped !== bitmap) {
+                bitmap.recycle()
+            }
+
+            val dir = File(context.filesDir, "amberagent/artifacts/webview-thumbnails")
+            dir.mkdirs()
+            val output = File(dir, "webview-${System.currentTimeMillis()}.png")
+            output.outputStream().use { stream ->
+                cropped.compress(Bitmap.CompressFormat.PNG, 92, stream)
+            }
+            cropped.recycle()
+            store.updateThumbnail(webView.url, output.absolutePath)
+        }.onFailure {
+            Log.w("ChatInput", "Failed to capture WebView thumbnail", it)
+        }
+    }, 500L)
 }
 
 @Composable
@@ -1108,7 +1274,7 @@ private fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = w
 
 private fun SandboxActivityUiState.operationPreviewKind(): String = when {
     toolName == "search_web" -> "web search"
-    toolName == "scrape_web" || toolName == "webview_open" -> "webview"
+    toolName == "scrape_web" || toolName == "webview_open" || toolName == "webview_read" -> "webview"
     toolName.startsWith("screen_") || toolName == "vlm_task" -> "screen"
     toolName.startsWith("file_") -> "workspace"
     toolName.startsWith("terminal_") -> "runtime"
@@ -1143,7 +1309,7 @@ private fun SandboxActivityUiState.operationPreviewText(): String {
 }
 
 private fun SandboxActivityUiState.operationPreviewUrl(): String? {
-    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_open") {
+    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_open" && toolName != "webview_read") {
         return null
     }
 

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.automation
 
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -24,6 +25,9 @@ class ScreenCaptureManager(private val context: Context) {
     private var pendingCapture: CompletableDeferred<ScreenCaptureResult>? = null
 
     @Volatile
+    private var sessionActive: Boolean = false
+
+    @Volatile
     var lastResult: ScreenCaptureResult? = null
         private set
 
@@ -32,10 +36,18 @@ class ScreenCaptureManager(private val context: Context) {
             check(pendingCapture == null) { "Screen capture is already in progress" }
             CompletableDeferred<ScreenCaptureResult>().also { pending ->
                 pendingCapture = pending
-                context.startActivity(
-                    Intent(context, ScreenCapturePermissionActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
+                if (sessionActive) {
+                    ContextCompat.startForegroundService(
+                        context,
+                        Intent(context, ScreenCaptureService::class.java)
+                            .setAction(ScreenCaptureService.ACTION_CAPTURE_EXISTING)
+                    )
+                } else {
+                    context.startActivity(
+                        Intent(context, ScreenCapturePermissionActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
             }
         }
         return try {
@@ -57,6 +69,20 @@ class ScreenCaptureManager(private val context: Context) {
     internal fun fail(error: Throwable) {
         pendingCapture?.completeExceptionally(error)
         pendingCapture = null
+    }
+
+    internal fun markSessionActive(active: Boolean) {
+        sessionActive = active
+    }
+
+    fun releaseSession() {
+        if (!sessionActive) return
+        sessionActive = false
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, ScreenCaptureService::class.java)
+                .setAction(ScreenCaptureService.ACTION_STOP_SESSION)
+        )
     }
 
     companion object {

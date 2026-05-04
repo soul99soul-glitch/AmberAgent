@@ -101,6 +101,9 @@ private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MAT
 val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
 private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
+private val BARE_WEB_URL_REGEX = Regex(
+    """(?<![\w/@:\[(])((?:[A-Za-z0-9-]+\.)+(?:com|net|org|io|ai|cn|co|dev|app|me|info|xyz|news)(?:/[^\s<>()\[\]{}"']*)?)"""
+)
 
 // 预处理markdown内容
 private fun preProcess(content: String): String {
@@ -133,8 +136,32 @@ private fun preProcess(content: String): String {
         }
     }
 
-    return result
+    return linkifyBareUrlsOutsideCode(result)
 }
+
+private fun linkifyBareUrlsOutsideCode(content: String): String {
+    val output = StringBuilder(content.length)
+    var cursor = 0
+    CODE_BLOCK_REGEX.findAll(content).forEach { match ->
+        if (cursor < match.range.first) {
+            output.append(linkifyBareUrlSegment(content.substring(cursor, match.range.first)))
+        }
+        output.append(match.value)
+        cursor = match.range.last + 1
+    }
+    if (cursor < content.length) {
+        output.append(linkifyBareUrlSegment(content.substring(cursor)))
+    }
+    return output.toString()
+}
+
+private fun linkifyBareUrlSegment(segment: String): String =
+    BARE_WEB_URL_REGEX.replace(segment) { match ->
+        val raw = match.value
+        val url = raw.trimEnd('.', ',', ';', ':', '。', '，', '；', '：')
+        val trailing = raw.removePrefix(url)
+        "[$url](https://$url)$trailing"
+    }
 
 @Preview(showBackground = true)
 @Composable

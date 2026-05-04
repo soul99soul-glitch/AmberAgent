@@ -20,7 +20,7 @@ class ScreenCapturePermissionActivity : ComponentActivity() {
             ContextCompat.startForegroundService(
                 this,
                 Intent(this, ScreenCaptureService::class.java).apply {
-                    action = ScreenCaptureService.ACTION_CAPTURE
+                    action = ScreenCaptureService.ACTION_START_SESSION_CAPTURE
                     putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
                     putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
                 }

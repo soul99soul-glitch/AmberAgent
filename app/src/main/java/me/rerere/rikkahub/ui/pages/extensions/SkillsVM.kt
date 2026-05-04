@@ -7,9 +7,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.files.SkillScanIssue
 import java.util.LinkedHashMap
 import org.json.JSONArray
 import java.net.HttpURLConnection
@@ -17,24 +20,31 @@ import java.net.URL
 
 class SkillsVM(
     private val skillManager: SkillManager,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
     private val _skills = MutableStateFlow<List<SkillMetadata>>(emptyList())
     val skills = _skills.asStateFlow()
+    private val _skillIssues = MutableStateFlow<List<SkillScanIssue>>(emptyList())
+    val skillIssues = _skillIssues.asStateFlow()
+    val settings = settingsStore.settingsFlow
 
     init {
         loadSkills()
     }
 
-    private fun loadSkills() {
+    fun loadSkills() {
         viewModelScope.launch(Dispatchers.IO) {
-            _skills.value = skillManager.listSkills()
+            refreshSkills()
         }
     }
 
     fun saveSkill(name: String, content: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             val result = skillManager.saveSkill(name, content)
-            _skills.value = skillManager.listSkills()
+            if (result != null) {
+                enableSkill(result.name)
+            }
+            refreshSkills()
             withContext(Dispatchers.Main) {
                 onResult(result != null)
             }
@@ -44,7 +54,7 @@ class SkillsVM(
     fun deleteSkill(name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             skillManager.deleteSkill(name)
-            _skills.value = skillManager.listSkills()
+            refreshSkills()
         }
     }
 
@@ -99,11 +109,32 @@ class SkillsVM(
                     return@launch
                 }
 
-                _skills.value = skillManager.listSkills()
+                enableSkill(name)
+                refreshSkills()
                 withContext(Dispatchers.Main) { onResult(true, name) }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { onResult(false, e.message ?: "未知错误") }
             }
+        }
+    }
+
+    private suspend fun refreshSkills() {
+        _skills.value = skillManager.listSkills()
+        _skillIssues.value = skillManager.listSkillIssues()
+    }
+
+    private suspend fun enableSkill(name: String) {
+        settingsStore.update { settings ->
+            val currentAssistantId = settings.getCurrentAssistant().id
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == currentAssistantId) {
+                        assistant.copy(enabledSkills = assistant.enabledSkills + name)
+                    } else {
+                        assistant
+                    }
+                }
+            )
         }
     }
 

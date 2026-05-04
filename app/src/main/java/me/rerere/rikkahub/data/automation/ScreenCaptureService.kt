@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -39,43 +40,64 @@ private const val TAG = "ScreenCaptureService"
 class ScreenCaptureService : Service() {
     private val captureManager: ScreenCaptureManager by inject()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var captureSession: ActiveCaptureSession? = null
+    private val idleStopRunnable = Runnable {
+        releaseCaptureSession(stopProjection = true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action != ACTION_CAPTURE) {
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        startForegroundCompat()
-        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
-        val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(EXTRA_RESULT_DATA)
-        }
-        if (resultCode == 0 || resultData == null) {
-            captureManager.fail(IllegalArgumentException("Missing MediaProjection result data"))
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        serviceScope.launch {
-            runCatching {
-                captureOnce(resultCode, resultData)
-            }.onSuccess { result ->
-                captureManager.complete(result)
-            }.onFailure { error ->
-                Log.e(TAG, "screen capture failed", error)
-                captureManager.fail(error)
+        when (intent?.action) {
+            ACTION_START_SESSION_CAPTURE -> {
+                startForegroundCompat()
+                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+                val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
+                }
+                if (resultCode == 0 || resultData == null) {
+                    captureManager.fail(IllegalArgumentException("Missing MediaProjection result data"))
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+                serviceScope.launch {
+                    captureFromNewSession(resultCode, resultData, startId)
+                }
+                return START_NOT_STICKY
             }
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf(startId)
+
+            ACTION_CAPTURE_EXISTING -> {
+                startForegroundCompat()
+                serviceScope.launch {
+                    captureFromExistingSession(startId)
+                }
+                return START_NOT_STICKY
+            }
+
+            ACTION_STOP_SESSION -> {
+                startForegroundCompat()
+                releaseCaptureSession(stopProjection = true)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+
+            else -> {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
         }
-        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(idleStopRunnable)
+        releaseCaptureSession(stopProjection = true)
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -108,7 +130,42 @@ class ScreenCaptureService : Service() {
         .setOnlyAlertOnce(true)
         .build()
 
-    private suspend fun captureOnce(resultCode: Int, resultData: Intent): ScreenCaptureResult {
+    private suspend fun captureFromNewSession(resultCode: Int, resultData: Intent, startId: Int) {
+        runCatching {
+            val session = ensureCaptureSession(resultCode, resultData)
+            captureOnce(session)
+        }.onSuccess { result ->
+            captureManager.complete(result)
+            scheduleIdleStop()
+        }.onFailure { error ->
+            Log.e(TAG, "screen capture failed", error)
+            captureManager.fail(error)
+            releaseCaptureSession(stopProjection = true)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+        }
+    }
+
+    private suspend fun captureFromExistingSession(startId: Int) {
+        runCatching {
+            val session = captureSession
+                ?: error("No active screen capture session. Please approve screen capture again.")
+            captureOnce(session)
+        }.onSuccess { result ->
+            captureManager.complete(result)
+            scheduleIdleStop()
+        }.onFailure { error ->
+            Log.e(TAG, "screen capture failed", error)
+            captureManager.markSessionActive(false)
+            captureManager.fail(error)
+            releaseCaptureSession(stopProjection = true)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+        }
+    }
+
+    private fun ensureCaptureSession(resultCode: Int, resultData: Intent): ActiveCaptureSession {
+        captureSession?.let { return it }
         val metrics = captureMetrics()
         val imageReader = ImageReader.newInstance(
             metrics.widthPixels,
@@ -120,13 +177,14 @@ class ScreenCaptureService : Service() {
         val projection = requireNotNull(projectionManager.getMediaProjection(resultCode, resultData)) {
             "MediaProjection permission result did not create a projection"
         }
-        var stopped = false
         val projectionCallback = object : MediaProjection.Callback() {
             override fun onStop() {
-                stopped = true
+                releaseCaptureSession(stopProjection = false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
         }
-        projection.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
+        projection.registerCallback(projectionCallback, mainHandler)
         val virtualDisplay = requireNotNull(
             projection.createVirtualDisplay(
                 "AmberAgentScreenCapture",
@@ -136,11 +194,27 @@ class ScreenCaptureService : Service() {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.surface,
                 null,
-                Handler(Looper.getMainLooper())
+                mainHandler
             )
         ) { "MediaProjection failed to create a virtual display" }
+        return ActiveCaptureSession(
+            projection = projection,
+            projectionCallback = projectionCallback,
+            imageReader = imageReader,
+            virtualDisplay = virtualDisplay,
+            metrics = metrics,
+        ).also {
+            captureSession = it
+            captureManager.markSessionActive(true)
+        }
+    }
+
+    private suspend fun captureOnce(session: ActiveCaptureSession): ScreenCaptureResult {
         return try {
-            val bitmap = imageReader.awaitBitmap(metrics.widthPixels, metrics.heightPixels)
+            val bitmap = session.imageReader.awaitBitmap(
+                session.metrics.widthPixels,
+                session.metrics.heightPixels
+            )
             val output = createOutputFile()
             output.outputStream().use { stream ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
@@ -148,48 +222,70 @@ class ScreenCaptureService : Service() {
             bitmap.recycle()
             ScreenCaptureResult(
                 file = output,
-                width = metrics.widthPixels,
-                height = metrics.heightPixels,
+                width = session.metrics.widthPixels,
+                height = session.metrics.heightPixels,
                 sizeBytes = output.length(),
                 createdAt = Instant.now()
             )
         } finally {
-            virtualDisplay.release()
-            imageReader.close()
-            if (!stopped) projection.stop()
-            projection.unregisterCallback(projectionCallback)
+            session.imageReader.setOnImageAvailableListener(null, null)
         }
     }
 
     private suspend fun ImageReader.awaitBitmap(width: Int, height: Int): Bitmap =
         withTimeout(10_000L) {
+            acquireLatestImage()?.use { image ->
+                return@withTimeout image.toBitmap(width, height)
+            }
             suspendCancellableCoroutine { continuation ->
                 setOnImageAvailableListener(
                     { reader ->
                         val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
                         image.use {
-                            val plane = it.planes.first()
-                            val rowPadding = plane.rowStride - plane.pixelStride * width
-                            val paddedWidth = width + rowPadding / plane.pixelStride
-                            val paddedBitmap = Bitmap.createBitmap(
-                                paddedWidth,
-                                height,
-                                Bitmap.Config.ARGB_8888
-                            )
-                            paddedBitmap.copyPixelsFromBuffer(plane.buffer)
-                            val cropped = Bitmap.createBitmap(paddedBitmap, 0, 0, width, height)
-                            paddedBitmap.recycle()
                             setOnImageAvailableListener(null, null)
-                            if (continuation.isActive) continuation.resume(cropped)
+                            if (continuation.isActive) continuation.resume(it.toBitmap(width, height))
                         }
                     },
-                    Handler(Looper.getMainLooper())
+                    mainHandler
                 )
                 continuation.invokeOnCancellation {
                     setOnImageAvailableListener(null, null)
                 }
             }
         }
+
+    private fun android.media.Image.toBitmap(width: Int, height: Int): Bitmap {
+        val plane = planes.first()
+        val rowPadding = plane.rowStride - plane.pixelStride * width
+        val paddedWidth = width + rowPadding / plane.pixelStride
+        val paddedBitmap = Bitmap.createBitmap(
+            paddedWidth,
+            height,
+            Bitmap.Config.ARGB_8888
+        )
+        paddedBitmap.copyPixelsFromBuffer(plane.buffer)
+        val cropped = Bitmap.createBitmap(paddedBitmap, 0, 0, width, height)
+        paddedBitmap.recycle()
+        return cropped
+    }
+
+    private fun scheduleIdleStop() {
+        mainHandler.removeCallbacks(idleStopRunnable)
+        mainHandler.postDelayed(idleStopRunnable, IDLE_STOP_DELAY_MS)
+    }
+
+    private fun releaseCaptureSession(stopProjection: Boolean) {
+        val session = captureSession ?: return
+        captureSession = null
+        mainHandler.removeCallbacks(idleStopRunnable)
+        runCatching { session.virtualDisplay.release() }
+        runCatching { session.imageReader.close() }
+        runCatching { session.projection.unregisterCallback(session.projectionCallback) }
+        if (stopProjection) {
+            runCatching { session.projection.stop() }
+        }
+        captureManager.markSessionActive(false)
+    }
 
     private fun captureMetrics(): DisplayMetrics {
         val metrics = DisplayMetrics()
@@ -213,9 +309,20 @@ class ScreenCaptureService : Service() {
     }
 
     companion object {
-        const val ACTION_CAPTURE = "me.rerere.amberagent.action.SCREEN_CAPTURE"
+        const val ACTION_START_SESSION_CAPTURE = "me.rerere.amberagent.action.SCREEN_CAPTURE_START_SESSION"
+        const val ACTION_CAPTURE_EXISTING = "me.rerere.amberagent.action.SCREEN_CAPTURE_EXISTING"
+        const val ACTION_STOP_SESSION = "me.rerere.amberagent.action.SCREEN_CAPTURE_STOP_SESSION"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val NOTIFICATION_ID = 2101
+        private const val IDLE_STOP_DELAY_MS = 5 * 60_000L
     }
 }
+
+private data class ActiveCaptureSession(
+    val projection: MediaProjection,
+    val projectionCallback: MediaProjection.Callback,
+    val imageReader: ImageReader,
+    val virtualDisplay: VirtualDisplay,
+    val metrics: DisplayMetrics,
+)

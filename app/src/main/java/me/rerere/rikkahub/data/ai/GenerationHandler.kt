@@ -56,9 +56,11 @@ internal fun shouldPauseForToolApproval(
     tool: UIMessagePart.Tool,
     autoApproveTools: Boolean,
     autoApproveHighRiskTools: Boolean = false,
+    autoApprovedToolNames: Set<String> = emptySet(),
 ): Boolean {
     if (toolDef?.needsApproval != true) return false
     if (tool.approvalState !is ToolApprovalState.Auto) return false
+    if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME) return false
     val canAutoApprove = toolDef.allowsAutoApproval || autoApproveHighRiskTools
     return !(autoApproveTools && tool.toolName != ASK_USER_TOOL_NAME && canAutoApprove)
 }
@@ -91,6 +93,7 @@ class GenerationHandler(
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         autoApproveTools: Boolean = false,
         autoApproveHighRiskTools: Boolean = false,
+        autoApprovedToolNames: Set<String> = emptySet(),
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -208,6 +211,7 @@ class GenerationHandler(
                             tool = tool,
                             autoApproveTools = autoApproveTools,
                             autoApproveHighRiskTools = autoApproveHighRiskTools,
+                            autoApprovedToolNames = autoApprovedToolNames,
                         ) -> {
                             hasPendingApproval = true
                             tool.copy(approvalState = ToolApprovalState.Pending)

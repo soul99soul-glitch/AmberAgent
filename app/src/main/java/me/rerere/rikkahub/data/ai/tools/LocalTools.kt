@@ -22,6 +22,7 @@ import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
 import java.time.ZonedDateTime
@@ -78,6 +79,7 @@ class LocalTools(
     private val terminalTools: TerminalTools,
     private val screenAutomationTools: ScreenAutomationTools,
     private val systemAccessTools: SystemAccessTools,
+    private val webViewOperationStore: WebViewOperationStore,
 ) {
     val javascriptTool by lazy {
         Tool(
@@ -239,8 +241,9 @@ class LocalTools(
             name = "webview_open",
             description = """
                 Open a URL in AmberAgent's live operation preview WebView.
-                Use this when the user wants visual webpage browsing or when search/scrape results need a page preview.
-                This tool does not extract page text by itself; use search_web or scrape_web when textual content is needed.
+                Prefer this early when the user asks to open, browse, view, inspect, or visually verify a webpage, or when search results should be shown in the live preview.
+                After opening, call webview_read when you need the current page title, readable text, or links.
+                Use search_web or scrape_web when you need search results or deeper page extraction.
                 Do not try to open the Android System WebView package as an app; the preview WebView is embedded inside AmberAgent.
             """.trimIndent().replace("\n", " "),
             parameters = {
@@ -265,6 +268,7 @@ class LocalTools(
                 require(url.startsWith("http://") || url.startsWith("https://")) {
                     "Only http and https URLs can be opened in WebView"
                 }
+                webViewOperationStore.open(url)
                 val payload = buildJsonObject {
                     put("url", url)
                     put("runtime", "webview")
@@ -275,6 +279,75 @@ class LocalTools(
                     put("note", "Tap the operation preview to expand the WebView panel.")
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
+            }
+        )
+    }
+
+    val webViewReadTool by lazy {
+        Tool(
+            name = "webview_read",
+            description = """
+                Read the currently opened AmberAgent WebView page.
+                Use after webview_open when you need the page title, readable visible text, current URL, or page links.
+                If the page is still loading, the tool returns status=loading instead of pretending content is available.
+            """.trimIndent().replace("\n", " "),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("max_chars", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Maximum readable text characters to return. Defaults to 8000.")
+                        })
+                        put("max_links", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Maximum links to return. Defaults to 20.")
+                        })
+                    }
+                )
+            },
+            execute = { input ->
+                val state = webViewOperationStore.state.value
+                if (!state.hasPage) {
+                    val payload = buildJsonObject {
+                        put("status", "no_page")
+                        put("error", "No WebView page is open. Call webview_open first.")
+                    }
+                    listOf(UIMessagePart.Text(payload.toString()))
+                } else {
+                    val maxChars = input.jsonObject["max_chars"]?.jsonPrimitive?.contentOrNull
+                        ?.toIntOrNull()
+                        ?.coerceIn(500, 40_000)
+                        ?: 8_000
+                    val maxLinks = input.jsonObject["max_links"]?.jsonPrimitive?.contentOrNull
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 40)
+                        ?: 20
+                    val payload = buildJsonObject {
+                        put("status", if (state.isLoading) "loading" else "ready")
+                        put("url", state.url)
+                        put("title", state.title)
+                        put("loading_progress", state.loadingProgress)
+                        put("text", state.readableText.take(maxChars))
+                        put(
+                            "links",
+                            kotlinx.serialization.json.buildJsonArray {
+                                state.links.take(maxLinks).forEach { link ->
+                                    add(
+                                        buildJsonObject {
+                                            put("title", link.title)
+                                            put("url", link.url)
+                                        }
+                                    )
+                                }
+                            }
+                        )
+                        if (state.thumbnailPath.isNotBlank()) {
+                            put("thumbnail_path", state.thumbnailPath)
+                        }
+                        put("updated_at_ms", state.updatedAtEpochMillis)
+                    }
+                    listOf(UIMessagePart.Text(payload.toString()))
+                }
             }
         )
     }
@@ -411,6 +484,7 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.WebView)) {
             tools.add(webViewTool)
+            tools.add(webViewReadTool)
         }
         return tools
     }

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -11,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -68,6 +70,15 @@ fun AutoAIIcon(
         TextAvatar(text = name, modifier = modifier, loading = loading, color = color)
         return
     }
+    if (path == "amberagent.svg") {
+        AmberAgentIcon(
+            name = name,
+            modifier = modifier,
+            loading = loading,
+            color = color,
+        )
+        return
+    }
     AIIcon(
         path = path,
         name = name,
@@ -75,6 +86,26 @@ fun AutoAIIcon(
         loading = loading,
         color = color,
     )
+}
+
+@Composable
+private fun AmberAgentIcon(
+    name: String,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+    color: Color = MaterialTheme.colorScheme.secondaryContainer,
+) {
+    Surface(
+        modifier = modifier.size(24.dp),
+        shape = rememberAvatarShape(loading),
+        color = color,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.amberagent_pig_mark),
+            contentDescription = name,
+            modifier = Modifier.padding(4.dp),
+        )
+    }
 }
 
 @Preview

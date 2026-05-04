@@ -624,6 +624,7 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
             "search_web",
             "scrape_web",
             "webview_open",
+            "webview_read",
             "file_list",
             "file_read",
             "file_write",
@@ -662,6 +663,7 @@ private fun UIMessagePart.Tool.sandboxTitle(): String {
         "search_web" -> "网页搜索 ${input.getFirstStringContent("query", "q", "keyword", "keywords").orEmpty().compactSandboxText(20)}"
         "scrape_web" -> "打开网页 ${input.getFirstStringContent("url", "link", "uri").orEmpty().compactSandboxText(24)}"
         "webview_open" -> "打开网页 ${input.getStringContent("url").orEmpty().compactSandboxText(24)}"
+        "webview_read" -> "读取网页内容"
         "file_list" -> "列出 workspace ${input.getStringContent("path").orEmpty().compactSandboxText(18)}"
         "file_read" -> "读取文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
         "file_write" -> "写入文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
@@ -697,6 +699,7 @@ private fun UIMessagePart.Tool.inputPreview(): String {
         "search_web" -> input.getFirstStringContent("query", "q", "keyword", "keywords")
         "scrape_web" -> input.getFirstStringContent("url", "link", "uri")
         "webview_open" -> input.getStringContent("url")
+        "webview_read" -> input.getStringContent("url")
         "terminal_execute", "terminal_session_exec" -> input.getStringContent("command")
         "file_list", "file_read", "file_write", "file_edit" -> input.getStringContent("path")
         "file_search" -> input.getStringContent("query")
@@ -712,6 +715,7 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName == "search_web" -> "web-search"
     toolName == "scrape_web" -> "webview"
     toolName == "webview_open" -> "webview"
+    toolName == "webview_read" -> "webview"
     toolName == "terminal_execute" -> "alpine-proot-stage1"
     toolName.startsWith("terminal_session_") -> "android-shell-stage0"
     toolName.startsWith("file_") -> "saf-workspace"

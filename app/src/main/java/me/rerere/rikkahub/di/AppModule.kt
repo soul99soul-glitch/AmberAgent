@@ -9,6 +9,7 @@ import me.rerere.highlight.Highlighter
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.AILoggingManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
+import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
@@ -17,6 +18,7 @@ import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -52,6 +54,14 @@ val appModule = module {
     }
 
     single {
+        WebViewOperationStore()
+    }
+
+    single {
+        AgentLiveStatusNotifier(get())
+    }
+
+    single {
         AlpineRuntimeInstaller(get())
     }
 
@@ -80,7 +90,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -124,6 +134,8 @@ val appModule = module {
             localTools = get(),
             mcpManager = get(),
             activityStore = get(),
+            liveStatusNotifier = get(),
+            screenCaptureManager = get(),
             filesManager = get(),
             skillManager = get()
         )

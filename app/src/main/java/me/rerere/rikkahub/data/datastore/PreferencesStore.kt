@@ -529,6 +529,8 @@ data class AgentRuntimeSetting(
     val enableTimeReminder: Boolean = false,
     val agentSoulMarkdown: String = DEFAULT_AGENT_SOUL_MARKDOWN,
     val operationPreviewMode: AgentOperationPreviewMode = AgentOperationPreviewMode.ALWAYS,
+    val enableLiveStatusNotification: Boolean = true,
+    val hideSensitiveLiveStatus: Boolean = true,
     val maxToolLoopSteps: Int = DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
     val autoApproveAllToolCalls: Boolean = false,
     val autoApproveHighRiskToolCalls: Boolean = false,
@@ -562,7 +564,12 @@ You are AmberAgent, an agent-only Android assistant.
   - Short-term memory: concise summaries of recent tasks or active projects that help continuity.
   - Long-term memory: stable user preferences, recurring interests, plans, and factual context worth preserving beyond a single day.
 - Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
-- For visual web browsing, use the webview_open tool; do not try to launch Android System WebView as a standalone app.
+- If you are unsure which skills are installed or enabled, call skills_list before use_skill.
+- For webpage tasks:
+  - When the user asks to open, browse, view, inspect, or visually verify a webpage, call webview_open early so the live preview shows the page.
+  - After webview_open, call webview_read when you need the current page title, readable text, or links from the opened preview.
+  - Use search_web or scrape_web when you need search results or deeper text extraction.
+  - Do not try to launch Android System WebView as a standalone app.
 """
 
 @Serializable
@@ -707,7 +714,8 @@ internal val DEFAULT_ASSISTANTS = listOf(
 
             Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
             Prefer the authorized /workspace for file work. Use terminal and screen automation tools only when they are necessary and user-approved.
-            For visual web browsing, use the webview_open tool; do not try to launch Android System WebView as a standalone app.
+            If you are unsure which skills are installed or enabled, call skills_list before use_skill.
+            For webpage tasks, call webview_open early when the user asks to open, browse, view, inspect, or visually verify a page. After webview_open, call webview_read when you need the opened page title, readable text, or links. Use search_web or scrape_web when you need search results or deeper extraction. Do not try to launch Android System WebView as a standalone app.
         """.trimIndent(),
         localTools = listOf(
             LocalToolOption.JavascriptEngine,

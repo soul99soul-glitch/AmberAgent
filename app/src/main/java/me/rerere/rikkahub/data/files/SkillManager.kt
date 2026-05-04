@@ -34,6 +34,29 @@ class SkillManager(
             ?: emptyList()
     }
 
+    fun listSkillIssues(): List<SkillScanIssue> {
+        val skillsDir = getSkillsDir()
+        return skillsDir.listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { dir ->
+                val skillFile = dir.resolve("SKILL.md")
+                if (!skillFile.exists()) {
+                    return@mapNotNull SkillScanIssue(dir.name, "缺少 SKILL.md")
+                }
+                runCatching {
+                    val frontmatter = SkillFrontmatterParser.parse(skillFile.readText())
+                    when {
+                        frontmatter["name"].isNullOrBlank() -> SkillScanIssue(dir.name, "SKILL.md 缺少 name")
+                        frontmatter["description"].isNullOrBlank() -> SkillScanIssue(dir.name, "SKILL.md 缺少 description")
+                        else -> null
+                    }
+                }.getOrElse {
+                    SkillScanIssue(dir.name, "SKILL.md 解析失败")
+                }
+            }
+            ?: emptyList()
+    }
+
     suspend fun installBuiltinSkillsIfMissing() = withContext(Dispatchers.IO) {
         val builtinSkillNames = context.assets.list(BUILTIN_SKILLS_ASSET_DIR).orEmpty()
         builtinSkillNames.forEach { skillName ->
@@ -223,6 +246,11 @@ data class SkillMetadata(
 ) {
     val skillFile: File get() = skillDir.resolve("SKILL.md")
 }
+
+data class SkillScanIssue(
+    val directoryName: String,
+    val reason: String,
+)
 
 object SkillFrontmatterParser {
     private val frontmatterEndRegex = Regex("""\r?\n---(?:\r?\n|$)""")

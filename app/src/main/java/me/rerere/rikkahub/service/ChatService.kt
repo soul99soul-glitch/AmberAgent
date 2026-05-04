@@ -48,7 +48,6 @@ import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.ai.GenerationChunk
@@ -67,7 +66,9 @@ import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -86,7 +87,6 @@ import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.utils.sendNotification
-import me.rerere.rikkahub.utils.cancelNotification
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -132,12 +132,15 @@ class ChatService(
     private val localTools: LocalTools,
     val mcpManager: McpManager,
     private val activityStore: AgentToolActivityStore,
+    private val liveStatusNotifier: AgentLiveStatusNotifier,
+    private val screenCaptureManager: ScreenCaptureManager,
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
     private val _sessionsVersion = MutableStateFlow(0L)
+    private val trustedRunToolNames = ConcurrentHashMap<Uuid, Set<String>>()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -402,10 +405,14 @@ class ChatService(
         val job = appScope.launch {
             try {
                 val conversation = session.state.value
+                val approvedToolName = conversation.findToolName(toolCallId)
                 val newApprovalState = when {
                     answer != null -> ToolApprovalState.Answered(answer)
                     approved -> ToolApprovalState.Approved
                     else -> ToolApprovalState.Denied(reason)
+                }
+                if (approved && approvedToolName in screenSessionTrustTools()) {
+                    trustedRunToolNames[conversationId] = screenSessionTrustTools()
                 }
 
                 // Update the tool approval state
@@ -545,6 +552,12 @@ class ChatService(
 
             // start generating
             val session = getOrCreateSession(conversationId)
+            updateAgentLiveStatus(
+                conversationId = conversationId,
+                messages = conversation.currentMessages,
+                senderName = senderName,
+                settings = settings,
+            )
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -570,6 +583,7 @@ class ChatService(
                 autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls ||
                     conversation.autoApproveToolCalls,
                 autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
+                autoApprovedToolNames = trustedRunToolNames[conversationId].orEmpty(),
                 maxSteps = settings.agentRuntime.maxToolLoopSteps.coerceIn(
                     MIN_AGENT_TOOL_LOOP_STEPS,
                     MAX_AGENT_TOOL_LOOP_STEPS,
@@ -578,17 +592,15 @@ class ChatService(
                     if (settings.enableWebSearch) {
                         addAll(createSearchTools(settings))
                     }
-                    addAll(localTools.getTools(settings.getCurrentAssistant().localTools))
                     val assistant = settings.getCurrentAssistant()
-                    if (assistant.enabledSkills.isNotEmpty()) {
-                        addAll(
-                            createSkillTools(
-                                enabledSkills = assistant.enabledSkills,
-                                allSkills = skillManager.listSkills(),
-                                skillManager = skillManager,
-                            )
+                    addAll(localTools.getTools(assistant.localTools))
+                    addAll(
+                        createSkillTools(
+                            enabledSkills = assistant.enabledSkills,
+                            allSkills = skillManager.listSkills(),
+                            skillManager = skillManager,
                         )
-                    }
+                    )
                     mcpManager.getAllAvailableTools().forEach { tool ->
                         add(
                             Tool(
@@ -617,7 +629,6 @@ class ChatService(
                     }
                 },
             ).onCompletion {
-                // 取消 Live Update 通知
                 cancelLiveUpdateNotification(conversationId)
 
                 // 可能被取消了，或者意外结束，兜底更新
@@ -628,6 +639,7 @@ class ChatService(
                     updateAt = Instant.now()
                 )
                 updateConversation(conversationId, updatedConversation)
+                cleanupRunResourcesIfDone(conversationId, updatedConversation)
 
                 // Show notification if app is not in foreground
                 if (!isForeground.value && settings.displaySetting.enableNotificationOnMessageGeneration) {
@@ -640,16 +652,28 @@ class ChatService(
                             .updateCurrentMessages(chunk.messages)
                         updateConversation(conversationId, updatedConversation)
 
-                        // 如果应用不在前台，发送 Live Update 通知
-                        if (!isForeground.value && settings.displaySetting.enableNotificationOnMessageGeneration && settings.displaySetting.enableLiveUpdateNotification) {
-                            sendLiveUpdateNotification(conversationId, chunk.messages, senderName)
-                        }
+                        updateAgentLiveStatus(
+                            conversationId = conversationId,
+                            messages = chunk.messages,
+                            senderName = senderName,
+                            settings = settings,
+                        )
                     }
                 }
             }
         }.onFailure {
-            // 取消 Live Update 通知
-            cancelLiveUpdateNotification(conversationId)
+            trustedRunToolNames.remove(conversationId)
+            screenCaptureManager.releaseSession()
+            if (it is CancellationException || !settings.agentRuntime.enableLiveStatusNotification) {
+                cancelLiveUpdateNotification(conversationId)
+            } else {
+                liveStatusNotifier.notifyFailure(
+                    conversationId = conversationId,
+                    senderName = senderName,
+                    error = it,
+                    launchIntent = getPendingIntent(context, conversationId),
+                )
+            }
 
             it.printStackTrace()
             addError(it, conversationId, title = context.getString(R.string.error_title_generation))
@@ -658,6 +682,7 @@ class ChatService(
         }.onSuccess {
             val finalConversation = getConversationFlow(conversationId).value
             saveConversation(conversationId, finalConversation)
+            cleanupRunResourcesIfDone(conversationId, finalConversation)
 
             launchWithConversationReference(conversationId) {
                 generateTitle(conversationId, finalConversation)
@@ -667,6 +692,24 @@ class ChatService(
             }
         }
     }
+
+    private fun cleanupRunResourcesIfDone(conversationId: Uuid, conversation: Conversation) {
+        if (conversation.hasPendingOrUnexecutedTools()) return
+        trustedRunToolNames.remove(conversationId)
+        screenCaptureManager.releaseSession()
+    }
+
+    private fun screenSessionTrustTools(): Set<String> = setOf(
+        "screen_read_ui",
+        "screen_click",
+        "screen_long_click",
+        "screen_swipe",
+        "screen_input_text",
+        "screen_back",
+        "screen_home",
+        "screen_open_app",
+        "screen_screenshot",
+    )
 
     // ---- 检查无效消息 ----
 
@@ -937,83 +980,25 @@ class ChatService(
         }
     }
 
-    private fun getLiveUpdateNotificationId(conversationId: Uuid): Int {
-        return conversationId.hashCode() + 10000
-    }
-
-    private fun sendLiveUpdateNotification(
+    private fun updateAgentLiveStatus(
         conversationId: Uuid,
         messages: List<UIMessage>,
-        senderName: String
+        senderName: String,
+        settings: me.rerere.rikkahub.data.datastore.Settings,
     ) {
-        val lastMessage = messages.lastOrNull() ?: return
-        val parts = lastMessage.parts
-
-        // 确定当前状态
-        val (chipText, statusText, contentText) = determineNotificationContent(parts)
-
-        context.sendNotification(
-            channelId = CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID,
-            notificationId = getLiveUpdateNotificationId(conversationId)
-        ) {
-            title = senderName
-            content = contentText
-            subText = statusText
-            ongoing = true
-            onlyAlertOnce = true
-            category = NotificationCompat.CATEGORY_PROGRESS
-            useBigTextStyle = true
-            contentIntent = getPendingIntent(context, conversationId)
-            requestPromotedOngoing = true
-            shortCriticalText = chipText
-        }
-    }
-
-    private fun determineNotificationContent(parts: List<UIMessagePart>): Triple<String, String, String> {
-        // 检查最近的 part 来确定状态
-        val lastReasoning = parts.filterIsInstance<UIMessagePart.Reasoning>().lastOrNull()
-        val lastTool = parts.filterIsInstance<UIMessagePart.Tool>().lastOrNull()
-        val lastText = parts.filterIsInstance<UIMessagePart.Text>().lastOrNull()
-
-        return when {
-            // 正在执行工具
-            lastTool != null && !lastTool.isExecuted -> {
-                val toolName = lastTool.toolName.removePrefix("mcp__")
-                Triple(
-                    context.getString(R.string.notification_live_update_chip_tool),
-                    context.getString(R.string.notification_live_update_tool, toolName),
-                    lastTool.input.take(100)
-                )
-            }
-            // 正在思考（Reasoning 未结束）
-            lastReasoning != null && lastReasoning.finishedAt == null -> {
-                Triple(
-                    context.getString(R.string.notification_live_update_chip_thinking),
-                    context.getString(R.string.notification_live_update_thinking),
-                    lastReasoning.reasoning.takeLast(200)
-                )
-            }
-            // 正在写回复
-            lastText != null -> {
-                Triple(
-                    context.getString(R.string.notification_live_update_chip_writing),
-                    context.getString(R.string.notification_live_update_writing),
-                    lastText.text.takeLast(200)
-                )
-            }
-            // 默认状态
-            else -> {
-                Triple(
-                    context.getString(R.string.notification_live_update_chip_writing),
-                    context.getString(R.string.notification_live_update_title),
-                    ""
-                )
-            }
-        }
+        if (!settings.agentRuntime.enableLiveStatusNotification) return
+        liveStatusNotifier.notifyRunning(
+            conversationId = conversationId,
+            senderName = senderName,
+            messages = messages,
+            activity = activityStore.sandboxActivity.value,
+            hideSensitive = settings.agentRuntime.hideSensitiveLiveStatus,
+            launchIntent = getPendingIntent(context, conversationId),
+        )
     }
 
     private fun cancelLiveUpdateNotification(conversationId: Uuid) {
-        context.cancelNotification(getLiveUpdateNotificationId(conversationId))
+        liveStatusNotifier.cancel(conversationId)
     }
 
     private fun getPendingIntent(context: Context, conversationId: Uuid): PendingIntent {
@@ -1330,6 +1315,8 @@ class ChatService(
         val job = sessions[conversationId]?.getJob() ?: return
         job.cancel()
         runCatching { job.join() }
+        trustedRunToolNames.remove(conversationId)
+        screenCaptureManager.releaseSession()
 
         val currentConversation = getConversationFlow(conversationId).value
         val lastNode = currentConversation.messageNodes.lastOrNull() ?: return
@@ -1349,6 +1336,19 @@ class ChatService(
         saveConversation(conversationId, updatedConversation)
     }
 }
+
+private fun Conversation.findToolName(toolCallId: String): String? =
+    messageNodes.asSequence()
+        .flatMap { it.messages.asSequence() }
+        .flatMap { it.parts.asSequence() }
+        .filterIsInstance<UIMessagePart.Tool>()
+        .firstOrNull { it.toolCallId == toolCallId }
+        ?.toolName
+
+private fun Conversation.hasPendingOrUnexecutedTools(): Boolean =
+    currentMessages.lastOrNull()
+        ?.getTools()
+        ?.any { !it.isExecuted || it.isPending } == true
 
 private fun List<UIMessagePart>.toolOutputPreview(): String =
     joinToString("\n") { part ->

@@ -46,12 +46,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Puzzle
+import me.rerere.hugeicons.stroke.Refresh01
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.files.SkillScanIssue
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
@@ -66,6 +70,9 @@ fun SkillsPage() {
     val navController = LocalNavController.current
     val vm = koinViewModel<SkillsVM>()
     val skills by vm.skills.collectAsStateWithLifecycle()
+    val skillIssues by vm.skillIssues.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val enabledSkillNames = settings.getCurrentAssistant().enabledSkills
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -78,6 +85,11 @@ fun SkillsPage() {
             LargeFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.skills_page_title)) },
                 navigationIcon = { BackButton() },
+                actions = {
+                    IconButton(onClick = { vm.loadSkills() }) {
+                        Icon(HugeIcons.Refresh01, contentDescription = "刷新 Skill")
+                    }
+                },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
@@ -106,6 +118,19 @@ fun SkillsPage() {
             contentPadding = innerPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item {
+                SkillLibraryStatusCard(
+                    installedCount = skills.size,
+                    enabledCount = skills.count { it.name in enabledSkillNames },
+                    disabledCount = skills.count { it.name !in enabledSkillNames },
+                    issueCount = skillIssues.size,
+                )
+            }
+
+            items(skillIssues, key = { it.directoryName }) { issue ->
+                SkillIssueCard(issue = issue)
+            }
+
             if (skills.isEmpty()) {
                 item {
                     Column(
@@ -138,6 +163,7 @@ fun SkillsPage() {
             items(skills, key = { it.name }) { skill ->
                 SkillCard(
                     skill = skill,
+                    enabled = skill.name in enabledSkillNames,
                     onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
                     onDelete = { deleteTarget = skill },
                 )
@@ -191,8 +217,90 @@ fun SkillsPage() {
 }
 
 @Composable
+private fun SkillLibraryStatusCard(
+    installedCount: Int,
+    enabledCount: Int,
+    disabledCount: Int,
+    issueCount: Int,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Skill 库",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "已安装 $installedCount 个，已启用 $enabledCount 个，未启用 $disabledCount 个",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (issueCount > 0) {
+                Text(
+                    text = "$issueCount 个 Skill 目录格式异常，Agent 不会加载它们。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                Text(
+                    text = "Agent 会在每次运行前重新扫描已安装 Skill。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkillIssueCard(issue: SkillScanIssue) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Alert01,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = issue.directoryName,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                )
+                Text(
+                    text = "格式错误：${issue.reason}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SkillCard(
     skill: SkillMetadata,
+    enabled: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -237,6 +345,23 @@ private fun SkillCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.tertiary,
                     )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (enabled) "已启用" else "未启用",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (skill.skillDir.resolve("mcp.json").exists()) {
+                        Text(
+                            text = "包含 MCP 配置",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                 }
             }
             Box {

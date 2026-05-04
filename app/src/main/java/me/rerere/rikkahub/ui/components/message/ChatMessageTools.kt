@@ -162,6 +162,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
     ToolNames.SEARCH_WEB -> HugeIcons.Search01
     ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
     "webview_open" -> HugeIcons.GlobalSearch
+    "webview_read" -> HugeIcons.GlobalSearch
     ToolNames.GET_TIME_INFO -> HugeIcons.Time02
     ToolNames.CLIPBOARD -> HugeIcons.Clipboard
     ToolNames.TTS -> HugeIcons.VolumeHigh
@@ -231,7 +232,7 @@ private fun getToolKind(toolName: String) = when {
         "vlm_task"
     ) -> AgentToolKind.SCREEN
 
-    toolName == ToolNames.SEARCH_WEB || toolName == ToolNames.SCRAPE_WEB || toolName == "webview_open" -> AgentToolKind.WEB
+    toolName == ToolNames.SEARCH_WEB || toolName == ToolNames.SCRAPE_WEB || toolName == "webview_open" || toolName == "webview_read" -> AgentToolKind.WEB
     toolName == ToolNames.MEMORY -> AgentToolKind.MEMORY
     toolName.startsWith("mcp__") -> AgentToolKind.MCP
     else -> AgentToolKind.GENERIC
@@ -453,6 +454,7 @@ private fun toolDisplayTitle(
 
     ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
     "webview_open" -> "打开网页 ${arguments.getStringContent("url")?.compactToolPreview(28).orEmpty()}"
+    "webview_read" -> "读取当前网页"
     ToolNames.GET_TIME_INFO -> stringResource(R.string.chat_message_tool_get_time)
     ToolNames.CLIPBOARD -> when (memoryAction) {
         ClipboardActions.READ -> stringResource(R.string.chat_message_tool_clipboard_read)

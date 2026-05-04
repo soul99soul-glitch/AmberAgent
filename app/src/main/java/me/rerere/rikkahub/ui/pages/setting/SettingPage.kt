@@ -266,6 +266,44 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_system_access)) },
                     )
                     item(
+                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_status_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_status)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.enableLiveStatusNotification,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                enableLiveStatusNotification = checked
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.LookTop, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_status_privacy_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_status_privacy)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.hideSensitiveLiveStatus,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                hideSensitiveLiveStatus = checked
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
                         leadingContent = { Icon(HugeIcons.LookTop, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_operation_preview_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_operation_preview)) },

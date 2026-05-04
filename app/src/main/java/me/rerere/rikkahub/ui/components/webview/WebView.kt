@@ -19,15 +19,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 
 private const val TAG = "WebView"
 
-internal class MyWebChromeClient(private val state: WebViewState) : WebChromeClient() {
+internal class MyWebChromeClient(
+    private val state: WebViewState,
+    private val onProgressChanged: (WebView?, Int) -> Unit,
+) : WebChromeClient() {
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
         state.loadingProgress = newProgress / 100f
+        onProgressChanged(view, newProgress)
     }
 
     override fun onReceivedTitle(view: WebView?, title: String?) {
@@ -47,11 +52,16 @@ internal class MyWebChromeClient(private val state: WebViewState) : WebChromeCli
     }
 }
 
-internal class MyWebViewClient(private val state: WebViewState) : WebViewClient() {
+internal class MyWebViewClient(
+    private val state: WebViewState,
+    private val onPageStarted: (WebView?, String?) -> Unit,
+    private val onPageFinished: (WebView?, String?) -> Unit,
+) : WebViewClient() {
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
         state.isLoading = true
         state.currentUrl = url // Update current URL
+        onPageStarted(view, url)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
@@ -61,6 +71,7 @@ internal class MyWebViewClient(private val state: WebViewState) : WebViewClient(
         state.pageTitle = view?.title // Update title
         state.canGoBack = view?.canGoBack() == true
         state.canGoForward = view?.canGoForward() == true
+        onPageFinished(view, url)
     }
 }
 
@@ -71,10 +82,26 @@ fun WebView(
     modifier: Modifier = Modifier,
     onCreated: (WebView) -> Unit = {},
     onUpdated: (WebView) -> Unit = {},
+    onProgressChanged: (WebView?, Int) -> Unit = { _, _ -> },
+    onPageStarted: (WebView?, String?) -> Unit = { _, _ -> },
+    onPageFinished: (WebView?, String?) -> Unit = { _, _ -> },
 ) {
     // Remember the clients based on the state
-    val webChromeClient = remember { MyWebChromeClient(state) }
-    val webViewClient = remember { MyWebViewClient(state) }
+    val currentOnProgressChanged = rememberUpdatedState(onProgressChanged)
+    val currentOnPageStarted = rememberUpdatedState(onPageStarted)
+    val currentOnPageFinished = rememberUpdatedState(onPageFinished)
+    val webChromeClient = remember(state) {
+        MyWebChromeClient(state) { view, progress ->
+            currentOnProgressChanged.value(view, progress)
+        }
+    }
+    val webViewClient = remember(state) {
+        MyWebViewClient(
+            state = state,
+            onPageStarted = { view, url -> currentOnPageStarted.value(view, url) },
+            onPageFinished = { view, url -> currentOnPageFinished.value(view, url) },
+        )
+    }
 
     Box(
         modifier = modifier
