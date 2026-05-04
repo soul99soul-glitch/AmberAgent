@@ -742,7 +742,7 @@
   <string name="setting_page_agent_auto_approve_desc">Automatically approve file writes, terminal commands, MCP calls and screen actions in all conversations. User-question tools still require your answer.</string>
   <string name="setting_page_interaction_notification_settings">Interaction &amp;amp; Notifications</string>
   <string name="setting_page_mcp">MCP</string>
-  <string name="setting_page_mcp_desc">Configure MCP Servers</string>
+  <string name="setting_page_mcp_desc">Manage external MCP tool servers the Agent can call</string>
   <string name="setting_page_message_display_settings">Message Display</string>
   <string name="setting_page_model_and_services">Models &amp; Services</string>
   <string name="setting_page_no_share_app">No sharing app found</string>
@@ -916,6 +916,9 @@
   <string name="skill_detail_page_delete_file">Delete File</string>
   <string name="skill_detail_page_file_name">File Name</string>
   <string name="skill_detail_page_file_name_invalid">Invalid file name</string>
+  <string name="skill_detail_page_mcp_config_desc">This skill includes %1$d MCP server configuration(s).</string>
+  <string name="skill_detail_page_mcp_config_import">Import MCP</string>
+  <string name="skill_detail_page_mcp_config_title">Includes MCP config</string>
   <string name="skill_detail_page_new_file">New File</string>
   <string name="skill_detail_page_save">Save</string>
   <string name="skills_page_add_title">Add Skill</string>

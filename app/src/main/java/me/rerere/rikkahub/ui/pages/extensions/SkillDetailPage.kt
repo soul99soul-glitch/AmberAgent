@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,6 +65,7 @@ fun SkillDetailPage(skillName: String) {
     LaunchedEffect(skillName) { vm.init(skillName) }
 
     val tree by vm.tree.collectAsStateWithLifecycle()
+    val mcpConfig by vm.mcpConfig.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
 
@@ -95,6 +97,16 @@ fun SkillDetailPage(skillName: String) {
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding + PaddingValues(8.dp)),
         ) {
+            mcpConfig?.let { state ->
+                SkillMcpConfigCard(
+                    state = state,
+                    onImport = {
+                        vm.importMcpConfig { message ->
+                            toaster.show(message)
+                        }
+                    },
+                )
+            }
             FileTree(
                 nodes = tree,
                 depth = 0,
@@ -146,6 +158,58 @@ fun SkillDetailPage(skillName: String) {
         onDismiss = { deleteTarget = null },
     ) {
         Text(stringResource(R.string.skill_detail_page_delete_confirm, deleteTarget?.relativePath ?: ""))
+    }
+}
+
+@Composable
+private fun SkillMcpConfigCard(
+    state: SkillMcpConfigState,
+    onImport: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = Lucide.FileText,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.skill_detail_page_mcp_config_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = state.error ?: stringResource(
+                        R.string.skill_detail_page_mcp_config_desc,
+                        state.serverCount,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Button(
+                onClick = onImport,
+                enabled = state.error == null && state.serverCount > 0,
+            ) {
+                Text(stringResource(R.string.skill_detail_page_mcp_config_import))
+            }
+        }
     }
 }
 

@@ -19,6 +19,33 @@ Skills are modular, self-contained packages that extend AmberAgent with speciali
 3. Domain knowledge such as schemas, business rules, project conventions, or acceptance checks.
 4. Bundled resources such as scripts, references, templates, and assets.
 
+### Skills And MCP
+
+Keep Skills and MCP separate:
+
+- Skills explain when and how the agent should do specialized work.
+- MCP config explains where an external tool server lives, what transport it uses, and whether tools require approval.
+
+If a skill depends on an external MCP server, include an optional `mcp.json` next to `SKILL.md` instead of pretending the MCP server is part of the skill body.
+
+Use the standard shape:
+
+```json
+{
+  "mcpServers": {
+    "server-name": {
+      "type": "streamable_http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ..."
+      }
+    }
+  }
+}
+```
+
+Use `type: "sse"` only for SSE transports. Do not put secrets in examples unless the user explicitly provides them.
+
 ## Core Principles
 
 ### Concise Is Key
