@@ -43,6 +43,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.icloud.ICLOUD_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
@@ -52,42 +53,60 @@ import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.compose.koinInject
 
 @Composable
-fun SettingExperimentalPage(
+fun SettingExperimentalPage() {
+    val navController = LocalNavController.current
+
+    ExperimentalSettingsScaffold(
+        title = stringResource(R.string.setting_experimental_page_title),
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = innerPadding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                CardGroup(
+                    title = { Text(stringResource(R.string.setting_experimental_page_title)) },
+                ) {
+                    item(
+                        onClick = { navController.navigate(Screen.SettingExperimentalICloud) },
+                        leadingContent = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_icloud_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_icloud_desc)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingExperimentalOfficePro) },
+                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_officepro_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_officepro_desc)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingExperimentalICloudPage(
     iCloudDriveManager: ICloudDriveManager = koinInject(),
-    feishuOfficeManager: FeishuOfficeEnhancementManager = koinInject(),
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val iCloudState by iCloudDriveManager.state.collectAsStateWithLifecycle()
-    val officeState by feishuOfficeManager.state.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var showICloudLogin by remember { mutableStateOf(false) }
     var iCloudBusy by remember { mutableStateOf(false) }
     var iCloudVaultInput by remember(iCloudState.vaultPath) { mutableStateOf(iCloudState.vaultPath) }
-    var officeBusy by remember { mutableStateOf(false) }
-    var officePackageInput by remember(officeState.targetPackage) { mutableStateOf(officeState.targetPackage) }
-    var officeCandidates by remember { mutableStateOf("") }
     val iCloudSavedToast = stringResource(R.string.setting_icloud_saved)
-    val officeSavedToast = stringResource(R.string.setting_officepro_saved)
-    val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_experimental_page_title)) },
-                navigationIcon = { BackButton() },
-                scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
-            )
-        },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+    ExperimentalSettingsScaffold(
+        title = stringResource(R.string.setting_icloud_title),
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -198,6 +217,36 @@ fun SettingExperimentalPage(
                     )
                 }
             }
+        }
+    }
+    if (showICloudLogin && iCloudState.enabled) {
+        ICloudLoginDialog(
+            onDismiss = { showICloudLogin = false },
+        )
+    }
+}
+
+@Composable
+fun SettingExperimentalOfficeProPage(
+    feishuOfficeManager: FeishuOfficeEnhancementManager = koinInject(),
+) {
+    val officeState by feishuOfficeManager.state.collectAsStateWithLifecycle()
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    var officeBusy by remember { mutableStateOf(false) }
+    var officePackageInput by remember(officeState.targetPackage) { mutableStateOf(officeState.targetPackage) }
+    var officeCandidates by remember { mutableStateOf("") }
+    val officeSavedToast = stringResource(R.string.setting_officepro_saved)
+    val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
+
+    ExperimentalSettingsScaffold(
+        title = stringResource(R.string.setting_officepro_title),
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = innerPadding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item {
                 CardGroup(
                     title = { Text(stringResource(R.string.setting_officepro_section)) },
@@ -331,10 +380,27 @@ fun SettingExperimentalPage(
             }
         }
     }
-    if (showICloudLogin && iCloudState.enabled) {
-        ICloudLoginDialog(
-            onDismiss = { showICloudLogin = false },
-        )
+}
+
+@Composable
+private fun ExperimentalSettingsScaffold(
+    title: String,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior,
+                colors = CustomColors.topBarColors,
+            )
+        },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = CustomColors.topBarColors.containerColor,
+    ) { innerPadding ->
+        content(innerPadding)
     }
 }
 
