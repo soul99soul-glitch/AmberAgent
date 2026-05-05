@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -173,6 +174,7 @@ fun SettingExperimentalSubAgentPage(
                                 selectedOption = subAgent.maxConcurrentRuns.coerceIn(1, 3),
                                 onOptionSelected = { value -> update { it.copy(maxConcurrentRuns = value) } },
                                 optionToString = { it.toString() },
+                                modifier = Modifier.width(96.dp),
                             )
                         },
                     )
@@ -185,6 +187,7 @@ fun SettingExperimentalSubAgentPage(
                                 selectedOption = subAgent.maxTurns.coerceIn(2, 8),
                                 onOptionSelected = { value -> update { it.copy(maxTurns = value) } },
                                 optionToString = { it.toString() },
+                                modifier = Modifier.width(96.dp),
                             )
                         },
                     )
@@ -197,6 +200,7 @@ fun SettingExperimentalSubAgentPage(
                                 selectedOption = timeoutOptions.minBy { kotlin.math.abs(it - subAgent.timeoutMs) },
                                 onOptionSelected = { value -> update { it.copy(timeoutMs = value) } },
                                 optionToString = { "${it / 60_000} min" },
+                                modifier = Modifier.width(96.dp),
                             )
                         },
                     )
@@ -209,6 +213,7 @@ fun SettingExperimentalSubAgentPage(
                                 selectedOption = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
                                 onOptionSelected = { value -> update { it.copy(outputBudgetChars = value) } },
                                 optionToString = { "${it / 1000}k" },
+                                modifier = Modifier.width(96.dp),
                             )
                         },
                     )
