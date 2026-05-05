@@ -25,6 +25,7 @@ class TerminalTools(
         terminalJobWaitTool,
         terminalJobStopTool,
         terminalInstallPackagesTool,
+        terminalWorkspaceFlushTool,
         terminalSessionStartTool,
         terminalSessionExecTool,
         terminalSessionReadTool,
@@ -39,6 +40,7 @@ class TerminalTools(
                 properties = buildJsonObject {
                     put("command", stringProp("Command to run."))
                     put("timeout_ms", integerProp("Timeout in milliseconds. Defaults to 60000."))
+                    put("sync_workspace", booleanProp("For detached long commands, refresh the SAF workspace before start and flush changes back after completion."))
                 },
                 required = listOf("command")
             )
@@ -47,7 +49,8 @@ class TerminalTools(
         execute = { input ->
             val result = terminalRuntime.execute(
                 command = input.requiredString("command"),
-                timeoutMillis = input.long("timeout_ms") ?: 60_000L
+                timeoutMillis = input.long("timeout_ms") ?: 60_000L,
+                syncWorkspace = input.boolean("sync_workspace") ?: false,
             )
             textJson {
                 put("runtime", result.runtime)
@@ -72,6 +75,8 @@ class TerminalTools(
                     put("command", stringProp("Command to run."))
                     put("timeout_ms", integerProp("Job timeout in milliseconds. Defaults to 900000."))
                     put("runtime", stringProp("Runtime: builtin_alpine, android_shell, or termux_external. Defaults to settings."))
+                    put("sync_workspace", booleanProp("Refresh /workspace from SAF before start and flush changes back after completion. Use this when the command reads or writes user workspace files."))
+                    put("flush_workspace", booleanProp("Flush /workspace changes back to SAF after completion without refreshing before start."))
                 },
                 required = listOf("command")
             )
@@ -82,6 +87,8 @@ class TerminalTools(
                 command = input.requiredString("command"),
                 timeoutMillis = input.long("timeout_ms") ?: 15 * 60_000L,
                 runtime = TerminalRuntimeKind.fromWire(input.string("runtime")),
+                syncWorkspace = input.boolean("sync_workspace") ?: false,
+                flushWorkspace = input.boolean("flush_workspace") ?: false,
             )
             snapshot.toTextJson()
         }
@@ -160,6 +167,20 @@ class TerminalTools(
                 timeoutMillis = input.long("timeout_ms") ?: 0L,
                 runtime = TerminalRuntimeKind.fromWire(input.string("runtime")),
             ).toTextJson()
+        }
+    )
+
+    private val terminalWorkspaceFlushTool = Tool(
+        name = "terminal_workspace_flush",
+        description = "Flush the app-private /workspace mirror back to the user-authorized SAF workspace.",
+        parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
+        needsApproval = true,
+        execute = {
+            val result = terminalRuntime.flushWorkspace()
+            textJson {
+                put("status", "completed")
+                put("message", result)
+            }
         }
     )
 
@@ -285,6 +306,11 @@ class TerminalTools(
 
     private fun integerProp(description: String) = buildJsonObject {
         put("type", "integer")
+        put("description", description)
+    }
+
+    private fun booleanProp(description: String) = buildJsonObject {
+        put("type", "boolean")
         put("description", description)
     }
 

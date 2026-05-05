@@ -1140,7 +1140,7 @@
   <string name="setting_sandbox_terminal_runtime_android_shell">Android shell</string>
   <string name="setting_sandbox_terminal_runtime_termux">Termux</string>
   <string name="setting_sandbox_terminal_jobs_title">Concurrent Jobs</string>
-  <string name="setting_sandbox_terminal_jobs_desc">Maximum terminal jobs that can run at the same time.</string>
+  <string name="setting_sandbox_terminal_jobs_desc">Maximum terminal jobs that can run at the same time. Default is 1 to avoid concurrent /workspace writes.</string>
   <string name="setting_sandbox_terminal_jobs_value">%1$d jobs</string>
   <string name="setting_sandbox_terminal_output_title">Output Tail</string>
   <string name="setting_sandbox_terminal_output_desc">How much output each job keeps in tool results. Full logs stay in app storage.</string>

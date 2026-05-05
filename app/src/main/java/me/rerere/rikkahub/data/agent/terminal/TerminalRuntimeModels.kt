@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.terminal
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.io.File
 
 @Serializable
 enum class TerminalRuntimeKind(val wireName: String) {
@@ -94,28 +95,21 @@ internal object TerminalInstallPlanner {
             )
         }
 
-        val packageManagerPackages = linkedSetOf<String>()
+        val genericPackages = linkedSetOf<String>()
+        var needsFfmpeg = false
         var needsYtDlpFallback = false
         normalized.forEach { name ->
             when (name) {
                 "yt-dlp", "ytdlp" -> {
-                    packageManagerPackages += when (runtime) {
-                        TerminalRuntimeKind.TERMUX_EXTERNAL -> "python"
-                        else -> "python3"
-                    }
-                    if (runtime == TerminalRuntimeKind.BUILTIN_ALPINE) {
-                        packageManagerPackages += "py3-pip"
-                        packageManagerPackages += "ca-certificates"
-                    }
                     needsYtDlpFallback = true
                 }
 
                 "ffmpeg" -> {
-                    packageManagerPackages += "ffmpeg"
+                    needsFfmpeg = true
                 }
 
                 else -> {
-                    packageManagerPackages += name
+                    genericPackages += name
                 }
             }
         }
@@ -124,15 +118,16 @@ internal object TerminalInstallPlanner {
             append("set -e\n")
             when (runtime) {
                 TerminalRuntimeKind.BUILTIN_ALPINE -> {
-                    append("need_apk=\"\"\n")
+                    append("need_ffmpeg=0\n")
                     append("need_yt_dlp=0\n")
+                    append("need_apk=\"\"\n")
                     normalized.forEach { name ->
                         when (name) {
                             "ffmpeg" -> {
                                 append("if command -v ffmpeg >/dev/null 2>&1; then\n")
                                 append("  echo \"ffmpeg already available: ${'$'}(command -v ffmpeg)\"\n")
                                 append("else\n")
-                                append("  need_apk=\"${'$'}need_apk ffmpeg\"\n")
+                                append("  need_ffmpeg=1\n")
                                 append("fi\n")
                             }
 
@@ -140,7 +135,6 @@ internal object TerminalInstallPlanner {
                                 append("if command -v yt-dlp >/dev/null 2>&1; then\n")
                                 append("  echo \"yt-dlp already available: ${'$'}(command -v yt-dlp)\"\n")
                                 append("else\n")
-                                append("  need_apk=\"${'$'}need_apk yt-dlp python3 py3-pip ca-certificates\"\n")
                                 append("  need_yt_dlp=1\n")
                                 append("fi\n")
                             }
@@ -150,31 +144,41 @@ internal object TerminalInstallPlanner {
                             }
                         }
                     }
-                    if (packageManagerPackages.isNotEmpty()) {
-                        append("if [ -n \"${'$'}need_apk\" ]; then\n")
-                        append("  apk update\n")
-                        append("  apk add --no-cache ${'$'}need_apk\n")
+                    if (needsFfmpeg || needsYtDlpFallback || genericPackages.isNotEmpty()) {
+                        append("if [ \"${'$'}need_ffmpeg\" = \"1\" ] || [ \"${'$'}need_yt_dlp\" = \"1\" ] || [ -n \"${'$'}need_apk\" ]; then\n")
+                        append("  apk update || echo 'apk update failed; continuing with targeted installs.'\n")
                         append("else\n")
                         append("  echo 'Requested terminal packages are already available; skipping apk add.'\n")
                         append("fi\n")
                     }
+                    if (needsFfmpeg) {
+                        append("if [ \"${'$'}need_ffmpeg\" = \"1\" ]; then\n")
+                        append("  apk add --no-cache ffmpeg\n")
+                        append("fi\n")
+                    }
+                    if (genericPackages.isNotEmpty()) {
+                        append("if [ -n \"${'$'}need_apk\" ]; then\n")
+                        append("  apk add --no-cache ${'$'}need_apk\n")
+                        append("fi\n")
+                    }
                     if (needsYtDlpFallback) {
                         append("if [ \"${'$'}need_yt_dlp\" = \"1\" ] && ! command -v yt-dlp >/dev/null 2>&1; then\n")
-                        append("  apk add --no-cache yt-dlp || python3 -m pip install --break-system-packages --upgrade yt-dlp\n")
+                        append("  apk add --no-cache yt-dlp || { echo 'apk yt-dlp unavailable; falling back to pip.'; apk add --no-cache python3 py3-pip ca-certificates; python3 -m pip install --break-system-packages --upgrade yt-dlp; }\n")
                         append("fi\n")
                     }
                 }
 
                 TerminalRuntimeKind.TERMUX_EXTERNAL -> {
-                    append("need_pkg=\"\"\n")
+                    append("need_ffmpeg=0\n")
                     append("need_yt_dlp=0\n")
+                    append("need_pkg=\"\"\n")
                     normalized.forEach { name ->
                         when (name) {
                             "ffmpeg" -> {
                                 append("if command -v ffmpeg >/dev/null 2>&1; then\n")
                                 append("  echo \"ffmpeg already available: ${'$'}(command -v ffmpeg)\"\n")
                                 append("else\n")
-                                append("  need_pkg=\"${'$'}need_pkg ffmpeg\"\n")
+                                append("  need_ffmpeg=1\n")
                                 append("fi\n")
                             }
 
@@ -182,7 +186,6 @@ internal object TerminalInstallPlanner {
                                 append("if command -v yt-dlp >/dev/null 2>&1; then\n")
                                 append("  echo \"yt-dlp already available: ${'$'}(command -v yt-dlp)\"\n")
                                 append("else\n")
-                                append("  need_pkg=\"${'$'}need_pkg yt-dlp python\"\n")
                                 append("  need_yt_dlp=1\n")
                                 append("fi\n")
                             }
@@ -192,17 +195,26 @@ internal object TerminalInstallPlanner {
                             }
                         }
                     }
-                    if (packageManagerPackages.isNotEmpty()) {
-                        append("if [ -n \"${'$'}need_pkg\" ]; then\n")
-                        append("  pkg update -y\n")
-                        append("  pkg install -y ${'$'}need_pkg\n")
+                    if (needsFfmpeg || needsYtDlpFallback || genericPackages.isNotEmpty()) {
+                        append("if [ \"${'$'}need_ffmpeg\" = \"1\" ] || [ \"${'$'}need_yt_dlp\" = \"1\" ] || [ -n \"${'$'}need_pkg\" ]; then\n")
+                        append("  pkg update -y || echo 'pkg update failed; continuing with targeted installs.'\n")
                         append("else\n")
                         append("  echo 'Requested terminal packages are already available; skipping pkg install.'\n")
                         append("fi\n")
                     }
+                    if (needsFfmpeg) {
+                        append("if [ \"${'$'}need_ffmpeg\" = \"1\" ]; then\n")
+                        append("  pkg install -y ffmpeg\n")
+                        append("fi\n")
+                    }
+                    if (genericPackages.isNotEmpty()) {
+                        append("if [ -n \"${'$'}need_pkg\" ]; then\n")
+                        append("  pkg install -y ${'$'}need_pkg\n")
+                        append("fi\n")
+                    }
                     if (needsYtDlpFallback) {
                         append("if [ \"${'$'}need_yt_dlp\" = \"1\" ] && ! command -v yt-dlp >/dev/null 2>&1; then\n")
-                        append("  pkg install -y yt-dlp || python -m pip install --upgrade yt-dlp\n")
+                        append("  pkg install -y yt-dlp || { echo 'pkg yt-dlp unavailable; falling back to pip.'; pkg install -y python; python -m pip install --upgrade yt-dlp; }\n")
                         append("fi\n")
                     }
                 }
@@ -232,6 +244,38 @@ internal object TerminalInstallPlanner {
 private fun String.shellSafePackage(): String {
     require(Regex("[A-Za-z0-9._+:-]+").matches(this)) { "Unsupported package name: $this" }
     return this
+}
+
+internal class TerminalJobLog(
+    val file: File,
+    private val maxBytes: Int,
+) {
+    private var truncatedBytes = 0L
+
+    @Synchronized
+    fun append(text: String) {
+        file.parentFile?.mkdirs()
+        val incoming = text.toByteArray(Charsets.UTF_8)
+        val currentLength = file.takeIf { it.exists() }?.length() ?: 0L
+        if (currentLength + incoming.size <= maxBytes) {
+            file.appendBytes(incoming)
+            return
+        }
+
+        val note = "\n... [terminal log truncated; omitted %d earlier bytes] ...\n"
+        val existing = file.takeIf { it.exists() }?.readBytes() ?: ByteArray(0)
+        val combined = ByteArray(existing.size + incoming.size)
+        existing.copyInto(combined, destinationOffset = 0)
+        incoming.copyInto(combined, destinationOffset = existing.size)
+        val firstHeader = note.format(truncatedBytes).toByteArray(Charsets.UTF_8)
+        val firstKeepBytes = (maxBytes - firstHeader.size).coerceAtLeast(0)
+        val overflow = (combined.size - firstKeepBytes).coerceAtLeast(0)
+        truncatedBytes += overflow.toLong()
+        val header = note.format(truncatedBytes).toByteArray(Charsets.UTF_8)
+        val keepBytes = (maxBytes - header.size).coerceAtLeast(0)
+        val tail = combined.takeLast(keepBytes).toByteArray()
+        file.writeBytes(header + tail)
+    }
 }
 
 internal class TerminalOutputBuffer(

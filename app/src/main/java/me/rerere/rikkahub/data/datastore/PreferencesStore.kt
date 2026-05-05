@@ -557,7 +557,7 @@ data class AgentRuntimeSetting(
     val autoApproveAllToolCalls: Boolean = false,
     val autoApproveHighRiskToolCalls: Boolean = false,
     val terminalDefaultRuntime: TerminalRuntimeKind = TerminalRuntimeKind.BUILTIN_ALPINE,
-    val terminalMaxConcurrentJobs: Int = 2,
+    val terminalMaxConcurrentJobs: Int = 1,
     val terminalOutputTailChars: Int = 256 * 1024,
     val terminalInstallTimeoutMs: Long = 15 * 60_000L,
 )
@@ -585,7 +585,7 @@ You are AmberAgent, an agent-only Android assistant.
 
 - Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
 - Prefer the authorized /workspace for file work. Use terminal, system access, and screen automation tools only when they are necessary and allowed by the current trust policy.
-- For long terminal commands, package installation, downloads, or commands with large output, prefer terminal_job_start/read/wait/stop or terminal_install_packages instead of blocking on terminal_execute.
+- For long terminal commands, package installation, downloads, or commands with large output, prefer terminal_job_start/read/wait/stop or terminal_install_packages instead of blocking on terminal_execute. If a long job must read or write the user workspace, pass sync_workspace=true or call terminal_workspace_flush after it finishes.
 - Treat memory as layered:
   - Core memory: durable behavior rules, identity, and explicit facts the user wants AmberAgent to carry into every conversation.
   - Short-term memory: concise summaries of recent tasks or active projects that help continuity.

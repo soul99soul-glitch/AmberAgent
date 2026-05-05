@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
 
 class TerminalRuntimeModelsTest {
     @Test
@@ -32,6 +33,8 @@ class TerminalRuntimeModelsTest {
         assertTrue(plan.command.contains("command -v ffmpeg"))
         assertTrue(plan.command.contains("apk add --no-cache"))
         assertTrue(plan.command.contains("skipping apk add"))
+        assertTrue(plan.command.contains("apk add --no-cache yt-dlp ||"))
+        assertFalse(plan.command.contains("need_apk yt-dlp"))
         assertTrue(plan.command.contains("python3 -m pip install"))
         assertTrue(plan.command.contains("yt-dlp --version"))
         assertTrue(plan.command.contains("ffmpeg -version"))
@@ -48,6 +51,36 @@ class TerminalRuntimeModelsTest {
         assertTrue(plan.command.contains("pkg install -y"))
         assertTrue(plan.command.contains("python -m pip install"))
         assertFalse(plan.command.contains("apk add"))
+    }
+
+    @Test
+    fun installPlannerRejectsUnsafePackageNames() {
+        runCatching {
+            TerminalInstallPlanner.build(
+                packages = listOf("ffmpeg;rm -rf /"),
+                runtime = TerminalRuntimeKind.BUILTIN_ALPINE,
+            )
+        }.onSuccess {
+            throw AssertionError("Expected unsafe package name to be rejected")
+        }
+    }
+
+    @Test
+    fun terminalJobLogCapsFileSize() {
+        val file = Files.createTempFile("amberagent-terminal-log", ".log").toFile()
+        try {
+            val log = TerminalJobLog(file, maxBytes = 128)
+            repeat(20) { index ->
+                log.append("line-$index ${"x".repeat(32)}\n")
+            }
+
+            assertTrue(file.length() <= 128)
+            val text = file.readText()
+            assertTrue(text.contains("terminal log truncated"))
+            assertTrue(text.contains("line-19"))
+        } finally {
+            file.delete()
+        }
     }
 
     @Test

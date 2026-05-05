@@ -44,6 +44,7 @@ class TerminalRuntime(
     suspend fun execute(
         command: String,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
+        syncWorkspace: Boolean = false,
         onOutputLine: ((String) -> Unit)? = null,
     ): TerminalResult {
         val shouldDetach = timeoutMillis > SHORT_EXECUTE_TIMEOUT_MS || command.looksLikeLongRunningCommand()
@@ -53,7 +54,8 @@ class TerminalRuntime(
             runtime = TerminalRuntimeKind.BUILTIN_ALPINE,
             toolName = "terminal_execute",
             title = "执行 Alpine 命令",
-            syncWorkspace = !shouldDetach,
+            syncWorkspace = !shouldDetach || syncWorkspace,
+            flushWorkspace = shouldDetach && syncWorkspace,
             outputCallback = onOutputLine,
         )
         if (shouldDetach) {
@@ -92,6 +94,7 @@ class TerminalRuntime(
         title: String = "执行终端任务",
         isInstall: Boolean = false,
         syncWorkspace: Boolean = false,
+        flushWorkspace: Boolean = false,
         outputCallback: ((String) -> Unit)? = null,
     ): TerminalJobSnapshot = withContext(Dispatchers.IO) {
         val selectedRuntime = runtime ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
@@ -124,6 +127,7 @@ class TerminalRuntime(
             title = title,
             isInstall = isInstall,
             syncWorkspace = syncWorkspace,
+            flushWorkspace = flushWorkspace,
             outputCallback = outputCallback,
         )
         jobs[job.id] = job
@@ -166,6 +170,7 @@ class TerminalRuntime(
             title = "安装终端依赖",
             isInstall = true,
             syncWorkspace = false,
+            flushWorkspace = false,
         )
     }
 
@@ -194,6 +199,10 @@ class TerminalRuntime(
         val running = jobs.values.filter { it.status.get().running }
         running.forEach { stopJobInternal(it, reason) }
         running.size
+    }
+
+    suspend fun flushWorkspace(): String = withContext(Dispatchers.IO) {
+        workspaceManager.syncFromMirror()
     }
 
     fun handleTermuxResult(intent: Intent) {
@@ -325,16 +334,16 @@ class TerminalRuntime(
         title: String,
         isInstall: Boolean,
         syncWorkspace: Boolean,
+        flushWorkspace: Boolean,
         outputCallback: ((String) -> Unit)?,
     ): TerminalJob {
         val id = Uuid.random().toString()
-        val logDir = alpineRuntimeInstaller.tempDir.resolve("jobs").apply { mkdirs() }
+        val logDir = context.filesDir.resolve("amberagent/terminal-jobs").apply { mkdirs() }
         return TerminalJob(
             id = id,
             command = command,
             runtime = runtime,
             timeoutMillis = timeoutMillis,
-            logFile = logDir.resolve("$id.log"),
             output = TerminalOutputBuffer(
                 settingsStore.settingsFlow.value.agentRuntime.terminalOutputTailChars.coerceIn(
                     MIN_OUTPUT_TAIL_CHARS,
@@ -347,7 +356,12 @@ class TerminalRuntime(
             title = title,
             isInstall = isInstall,
             syncWorkspace = syncWorkspace,
+            flushWorkspace = flushWorkspace,
             outputCallback = outputCallback,
+            log = TerminalJobLog(
+                file = logDir.resolve("$id.log"),
+                maxBytes = MAX_JOB_LOG_BYTES,
+            ),
         )
     }
 
@@ -366,6 +380,7 @@ class TerminalRuntime(
             title = title,
             isInstall = false,
             syncWorkspace = false,
+            flushWorkspace = false,
             outputCallback = null,
         )
         jobs[job.id] = job
@@ -383,7 +398,7 @@ class TerminalRuntime(
                 alpineRuntimeInstaller.localBinDir.resolve("init-host").absolutePath,
                 "/bin/sh",
                 "-lc",
-                "cd /workspace && ${job.command}",
+                "export AMBERAGENT_JOB_ID=${job.id.shellQuoted()}; cd /workspace && ${job.command}",
             )
                 .directory(workingDir)
                 .redirectErrorStream(true)
@@ -437,7 +452,7 @@ class TerminalRuntime(
                 exitCode == 0 -> TerminalJobStatus.COMPLETED
                 else -> TerminalJobStatus.FAILED
             }
-            if (job.syncWorkspace && !job.isInstall) {
+            if ((job.syncWorkspace || job.flushWorkspace) && !job.isInstall) {
                 appendJobOutput(job, "Syncing /workspace changes back to SAF...\n")
                 runCatching { workspaceManager.syncFromMirror() }
                     .onFailure { appendJobOutput(job, "Workspace sync failed: ${it.message.orEmpty()}\n") }
@@ -551,13 +566,19 @@ class TerminalRuntime(
         exitCode: Int?,
         error: String?,
     ) {
-        val current = job.status.get()
-        if (current == TerminalJobStatus.CANCELLED && status != TerminalJobStatus.CANCELLED) return
-        job.status.set(status)
+        while (true) {
+            val current = job.status.get()
+            val allowCancelledFinalization = current == TerminalJobStatus.CANCELLED &&
+                status == TerminalJobStatus.CANCELLED &&
+                !job.completionNotified.get()
+            if (!current.running && !allowCancelledFinalization) return
+            if (job.status.compareAndSet(current, status)) break
+        }
         job.exitCode = exitCode
         job.error = error
         job.updatedAtMs = System.currentTimeMillis()
         if (job.isInstall) installRunning.set(false)
+        if (!job.completionNotified.compareAndSet(false, true)) return
         when (status) {
             TerminalJobStatus.COMPLETED -> activityStore.complete(job.id, exitCode ?: 0, job.output.snapshot())
             TerminalJobStatus.CANCELLED -> activityStore.cancel(job.id, job.output.snapshot())
@@ -571,10 +592,7 @@ class TerminalRuntime(
     private fun appendJobOutput(job: TerminalJob, text: String) {
         job.output.append(text)
         job.updatedAtMs = System.currentTimeMillis()
-        runCatching {
-            job.logFile.parentFile?.mkdirs()
-            job.logFile.appendText(text)
-        }
+        runCatching { job.log.append(text) }
         text.lineSequence()
             .filter { it.isNotBlank() }
             .forEach { line ->
@@ -584,15 +602,12 @@ class TerminalRuntime(
     }
 
     private fun terminateProcess(job: TerminalJob, process: Process) {
-        val pid = processPid(process)
+        val pid = processPid(process) ?: findJobProcessPid(job.id)
         pid?.let { killProcessTree(it, signal = "TERM") }
         runCatching { process.destroy() }
         runCatching { process.waitFor(1, TimeUnit.SECONDS) }
         if (process.isAlive) {
             pid?.let { killProcessTree(it, signal = "KILL") }
-            if (job.runtime == TerminalRuntimeKind.BUILTIN_ALPINE) {
-                killBuiltinRuntimeProcesses(job.command)
-            }
             runCatching { process.destroyForcibly() }
             runCatching { process.waitFor(1, TimeUnit.SECONDS) }
         }
@@ -614,6 +629,15 @@ class TerminalRuntime(
 
     private fun killProcessTree(pid: Long, signal: String) {
         val normalizedSignal = if (signal == "KILL") "9" else "15"
+        collectDescendantPids(pid)
+            .asReversed()
+            .forEach { childPid ->
+                runCatching {
+                    ProcessBuilder("/system/bin/kill", "-$normalizedSignal", childPid.toString())
+                        .start()
+                        .waitFor(1, TimeUnit.SECONDS)
+                }
+            }
         runCatching {
             ProcessBuilder("/system/bin/pkill", "-$normalizedSignal", "-P", pid.toString())
                 .start()
@@ -626,40 +650,41 @@ class TerminalRuntime(
         }
     }
 
-    private fun killBuiltinRuntimeProcesses(command: String) {
-        val prootPattern = alpineRuntimeInstaller.localBinDir.resolve("proot").absolutePath
-        val initHostPattern = alpineRuntimeInstaller.localBinDir.resolve("init-host").absolutePath
-        listOf("15", "9").forEach { signal ->
-            runCatching {
-                ProcessBuilder("/system/bin/pkill", "-$signal", "-f", prootPattern)
-                    .start()
-                    .waitFor(1, TimeUnit.SECONDS)
-            }
-            runCatching {
-                ProcessBuilder("/system/bin/pkill", "-$signal", "-f", initHostPattern)
-                    .start()
-                    .waitFor(1, TimeUnit.SECONDS)
-            }
-        }
-        command.killableProcessNames().forEach { processName ->
-            runCatching {
-                ProcessBuilder("/system/bin/pkill", "-9", processName)
-                    .start()
-                    .waitFor(1, TimeUnit.SECONDS)
+    private fun findJobProcessPid(jobId: String): Long? =
+        processRows()
+            .firstOrNull { row -> row.command.contains("AMBERAGENT_JOB_ID") && row.command.contains(jobId) }
+            ?.pid
+
+    private fun collectDescendantPids(rootPid: Long): List<Long> {
+        val childrenByParent = processRows().groupBy { it.parentPid }
+        val result = mutableListOf<Long>()
+        fun visit(parentPid: Long) {
+            childrenByParent[parentPid].orEmpty().forEach { child ->
+                result += child.pid
+                visit(child.pid)
             }
         }
+        visit(rootPid)
+        return result
     }
 
-    private fun String.killableProcessNames(): List<String> {
-        val tokens = split(Regex("\\s+|;|&&|\\|"))
-            .map { it.trim().substringAfterLast("/") }
-            .filter { it.matches(Regex("[A-Za-z0-9._+-]{2,32}")) }
-        val knownLongTasks = setOf(
-            "apk", "python", "python3", "pip", "pip3", "yt-dlp", "ffmpeg",
-            "sleep", "curl", "wget", "node", "npm", "pnpm", "yarn",
-        )
-        return tokens.filter { it in knownLongTasks }.distinct()
-    }
+    private fun processRows(): List<ProcessRow> = runCatching {
+        val process = ProcessBuilder("/system/bin/ps", "-ef").start()
+        val rows = process.inputStream.bufferedReader().useLines { lines ->
+            lines.drop(1).mapNotNull { line ->
+                val parts = line.trim().split(Regex("\\s+"), limit = 8)
+                val pid = parts.getOrNull(1)?.toLongOrNull() ?: return@mapNotNull null
+                val parentPid = parts.getOrNull(2)?.toLongOrNull() ?: return@mapNotNull null
+                ProcessRow(
+                    pid = pid,
+                    parentPid = parentPid,
+                    command = parts.getOrNull(7).orEmpty(),
+                )
+            }.toList()
+        }
+        process.waitFor(1, TimeUnit.SECONDS)
+        rows
+    }.getOrDefault(emptyList())
 
     private fun TerminalJob.toActivityState(): SandboxActivityUiState =
         SandboxActivityUiState(
@@ -682,7 +707,7 @@ class TerminalRuntime(
             exitCode = exitCode,
             running = status.get().running,
             outputTail = output.snapshot(),
-            outputLogPath = logFile.absolutePath,
+            outputLogPath = log.file.absolutePath,
             startedAtMs = startedAtMs,
             updatedAtMs = updatedAtMs,
             error = error,
@@ -704,6 +729,7 @@ class TerminalRuntime(
         private const val MAX_CONCURRENT_JOBS = 4
         private const val MIN_OUTPUT_TAIL_CHARS = 64 * 1024
         private const val MAX_OUTPUT_TAIL_CHARS = 512 * 1024
+        private const val MAX_JOB_LOG_BYTES = 8 * 1024 * 1024
 
         private const val TERMUX_PACKAGE_NAME = "com.termux"
         private const val TERMUX_PERMISSION_RUN_COMMAND = "com.termux.permission.RUN_COMMAND"
@@ -763,7 +789,6 @@ private data class TerminalJob(
     val command: String,
     val runtime: TerminalRuntimeKind,
     val timeoutMillis: Long,
-    val logFile: File,
     val output: TerminalOutputBuffer,
     val startedAtMs: Long,
     var updatedAtMs: Long,
@@ -771,8 +796,11 @@ private data class TerminalJob(
     val title: String,
     val isInstall: Boolean,
     val syncWorkspace: Boolean,
+    val flushWorkspace: Boolean,
     val outputCallback: ((String) -> Unit)?,
+    val log: TerminalJobLog,
     val status: AtomicReference<TerminalJobStatus> = AtomicReference(TerminalJobStatus.QUEUED),
+    val completionNotified: AtomicBoolean = AtomicBoolean(false),
     @Volatile var process: Process? = null,
     @Volatile var exitCode: Int? = null,
     @Volatile var error: String? = null,
@@ -786,4 +814,10 @@ private data class TerminalSession(
     val workingDir: File,
     val runtime: TerminalRuntimeKind,
     @Volatile var lastActivityMs: Long,
+)
+
+private data class ProcessRow(
+    val pid: Long,
+    val parentPid: Long,
+    val command: String,
 )

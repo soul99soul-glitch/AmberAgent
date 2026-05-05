@@ -18,8 +18,8 @@ class AlpineRuntimeInstaller(private val context: Context) {
             localBinDir.mkdirs()
             localLibDir.mkdirs()
             tempDir.mkdirs()
-            copyRuntimeAsset("embedded-terminal-runtime/proot", context.filesDir.resolve("proot"), executable = true)
-            copyRuntimeAsset("embedded-terminal-runtime/libtalloc.so.2", context.filesDir.resolve("libtalloc.so.2"))
+            copyRuntimeAsset("embedded-terminal-runtime/proot", context.filesDir.resolve("proot"), executable = true, overwrite = true)
+            copyRuntimeAsset("embedded-terminal-runtime/libtalloc.so.2", context.filesDir.resolve("libtalloc.so.2"), overwrite = true)
             copyRuntimeAsset(
                 assetCandidates = listOf(
                     "embedded-terminal-runtime/alpine.tar.gz",
@@ -27,8 +27,8 @@ class AlpineRuntimeInstaller(private val context: Context) {
                 ),
                 target = context.filesDir.resolve("alpine.tar.gz")
             )
-            copyRuntimeAsset("amberagent-terminal/init-host.sh", localBinDir.resolve("init-host"), executable = true)
-            copyRuntimeAsset("amberagent-terminal/init.sh", localBinDir.resolve("init"), executable = true)
+            copyRuntimeAsset("amberagent-terminal/init-host.sh", localBinDir.resolve("init-host"), executable = true, overwrite = true)
+            copyRuntimeAsset("amberagent-terminal/init.sh", localBinDir.resolve("init"), executable = true, overwrite = true)
             InstallStatus(
                 success = true,
                 message = "Alpine/proot runtime is installed.",
@@ -69,12 +69,22 @@ class AlpineRuntimeInstaller(private val context: Context) {
         return env
     }
 
-    private fun copyRuntimeAsset(assetPath: String, target: File, executable: Boolean = false) {
-        copyRuntimeAsset(listOf(assetPath), target, executable)
+    private fun copyRuntimeAsset(
+        assetPath: String,
+        target: File,
+        executable: Boolean = false,
+        overwrite: Boolean = false,
+    ) {
+        copyRuntimeAsset(listOf(assetPath), target, executable, overwrite)
     }
 
-    private fun copyRuntimeAsset(assetCandidates: List<String>, target: File, executable: Boolean = false) {
-        if (!target.exists() || target.length() == 0L) {
+    private fun copyRuntimeAsset(
+        assetCandidates: List<String>,
+        target: File,
+        executable: Boolean = false,
+        overwrite: Boolean = false,
+    ) {
+        if (overwrite || !target.exists() || target.length() == 0L) {
             val assetPath = assetCandidates.firstOrNull { candidate ->
                 runCatching { context.assets.open(candidate).close() }.isSuccess
             } ?: error("Missing runtime asset: ${assetCandidates.joinToString(" or ")}")

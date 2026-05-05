@@ -737,7 +737,7 @@
   <string name="setting_sandbox_terminal_runtime_android_shell">Android shell</string>
   <string name="setting_sandbox_terminal_runtime_termux">Termux</string>
   <string name="setting_sandbox_terminal_jobs_title">并发 Job</string>
-  <string name="setting_sandbox_terminal_jobs_desc">同一时间允许运行的终端任务数量。</string>
+  <string name="setting_sandbox_terminal_jobs_desc">同一时间允许运行的终端任务数量。默认 1，避免多个任务同时写 /workspace。</string>
   <string name="setting_sandbox_terminal_jobs_value">%1$d 个</string>
   <string name="setting_sandbox_terminal_output_title">输出尾部</string>
   <string name="setting_sandbox_terminal_output_desc">工具结果保留的输出尾部大小，完整日志仍保存在应用目录。</string>
