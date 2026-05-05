@@ -205,12 +205,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_display_setting_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
                     )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingModels) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.AiMagic) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
-                    )
                 }
             }
 
@@ -270,6 +264,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         leadingContent = { SettingLeadingIcon(HugeIcons.Brain02) },
                         supportingContent = { Text(stringResource(R.string.setting_page_providers_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingModels) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.AiMagic, tone = WorkspaceTone.Accent) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
