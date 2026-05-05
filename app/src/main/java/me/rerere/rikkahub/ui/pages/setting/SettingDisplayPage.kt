@@ -183,8 +183,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                         bottomEnd = 2.dp
                                     )
                                 ),
-                            headlineContent = { Text("Workspace White") },
-                            supportingContent = { Text("白色纸面 + 蓝色强调，不跟随系统动态色") },
+                            headlineContent = { Text("Notion style") },
+                            supportingContent = { Text("白色纸面 + 蓝色强调，后续补充深色工作区") },
                             colors = CustomColors.listItemColors,
                         )
                     } else {
@@ -308,20 +308,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
-                    if (displaySetting.enableNotificationOnMessageGeneration) {
-                        item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_live_update_notification)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_live_update_notification_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.enableLiveUpdateNotification,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(enableLiveUpdateNotification = it))
-                                    }
-                                )
-                            },
-                        )
-                    }
                 }
             }
 
@@ -614,32 +600,34 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 )
                             },
                         )
-                        item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_title)) },
-                            supportingContent = {
-                                Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_desc))
-                            },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.useAppIconStyleLoadingIndicator,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(useAppIconStyleLoadingIndicator = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.enableBlurEffect,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(enableBlurEffect = it))
-                                    }
-                                )
-                            },
-                        )
+                        if (!BuildConfig.NOTION_LIKE) {
+                            item(
+                                headlineContent = { Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_title)) },
+                                supportingContent = {
+                                    Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_desc))
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = displaySetting.useAppIconStyleLoadingIndicator,
+                                        onCheckedChange = {
+                                            updateDisplaySetting(displaySetting.copy(useAppIconStyleLoadingIndicator = it))
+                                        }
+                                    )
+                                },
+                            )
+                            item(
+                                headlineContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_title)) },
+                                supportingContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_desc)) },
+                                trailingContent = {
+                                    Switch(
+                                        checked = displaySetting.enableBlurEffect,
+                                        onCheckedChange = {
+                                            updateDisplaySetting(displaySetting.copy(enableBlurEffect = it))
+                                        }
+                                    )
+                                },
+                            )
+                        }
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },

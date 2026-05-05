@@ -267,7 +267,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.AiMagic, tone = WorkspaceTone.Accent) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.AiMagic) },
                         supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                     )

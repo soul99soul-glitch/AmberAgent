@@ -607,8 +607,8 @@
   <string name="setting_display_page_launch_start_mode_last_session">上次</string>
   <string name="setting_display_page_launch_start_mode_new_chat">新聊</string>
   <string name="setting_display_page_launch_start_mode_home">主页</string>
-  <string name="setting_display_page_enable_auto_scroll_desc">AI生成内容时自动滚动到底部</string>
-  <string name="setting_display_page_enable_auto_scroll_title">自动滚动</string>
+  <string name="setting_display_page_enable_auto_scroll_desc">AI 生成内容时，仅在接近底部时跟随滚动</string>
+  <string name="setting_display_page_enable_auto_scroll_title">生成时跟随</string>
   <string name="setting_display_page_enable_blur_effect_desc">在聊天输入栏启用模糊效果</string>
   <string name="setting_display_page_enable_blur_effect_title">启用模糊效果</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 语法渲染数学表达式和公式</string>
