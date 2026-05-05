@@ -69,7 +69,6 @@ class AgentLiveStatusNotifier(
             content = status.content
             subText = status.subText
             smallIcon = R.drawable.amberagent_live_status_icon
-            largeIcon = R.drawable.amberagent_live_status_icon
             ongoing = true
             onlyAlertOnce = true
             category = NotificationCompat.CATEGORY_PROGRESS
@@ -99,7 +98,6 @@ class AgentLiveStatusNotifier(
             content = senderName.ifBlank { context.getString(R.string.app_name) }
             subText = error::class.java.simpleName
             smallIcon = R.drawable.amberagent_live_status_icon
-            largeIcon = R.drawable.amberagent_live_status_icon
             autoCancel = true
             category = NotificationCompat.CATEGORY_STATUS
             contentIntent = launchIntent
