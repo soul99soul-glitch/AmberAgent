@@ -194,6 +194,18 @@ class WorkspaceManager(private val context: Context) {
         }
     }
 
+    suspend fun refreshMirrorFromWorkspace(): String = withContext(Dispatchers.IO) {
+        mirrorMutex.withLock {
+            refreshMirrorFromWorkspaceLocked()
+        }
+    }
+
+    suspend fun ensureMirrorWorkspace(): String = withContext(Dispatchers.IO) {
+        val root = ensureMirrorRoot()
+        require(root.mkdirs() || root.isDirectory) { "Unable to create workspace mirror: ${root.absolutePath}" }
+        "Using POSIX mirror workspace at ${root.absolutePath}. SAF sync was not required for this terminal job."
+    }
+
     suspend fun syncFromMirror(): String = withContext(Dispatchers.IO) {
         mirrorMutex.withLock {
             syncFromMirrorLocked()
@@ -221,6 +233,17 @@ class WorkspaceManager(private val context: Context) {
         }
         return "Synced SAF workspace to POSIX mirror at ${mirrorDir.absolutePath}. " +
             stats.summary()
+    }
+
+    private fun refreshMirrorFromWorkspaceLocked(): String {
+        val root = requireRoot()
+        val stats = MirrorSyncStats()
+        ensureMirrorRoot().mkdirs()
+        root.listFiles().forEach { child ->
+            copyDocumentToMirror(child, mirrorDir, stats)
+        }
+        return "Refreshed POSIX mirror from SAF workspace at ${mirrorDir.absolutePath}. " +
+            "Existing mirror-only files were preserved. " + stats.summary()
     }
 
     private fun syncFromMirrorLocked(): String {
@@ -346,6 +369,9 @@ class WorkspaceManager(private val context: Context) {
         if (!source.isFile) {
             stats.skip()
             return
+        }
+        if (target.exists() && target.isDirectory) {
+            require(target.deleteRecursively()) { "Unable to replace mirror directory: ${target.path}" }
         }
         target.parentFile?.mkdirs()
         val input = context.contentResolver.openInputStream(source.uri) ?: return stats.skip()

@@ -729,8 +729,10 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName == "webview_open" -> "webview"
     toolName == "webview_read" -> "webview"
     toolName.startsWith("icloud_") -> "icloud-web-mount"
-    toolName == "terminal_execute" -> "alpine-proot-stage1"
-    toolName.startsWith("terminal_session_") -> "android-shell-stage0"
+    toolName == "terminal_execute" ||
+        toolName == "terminal_install_packages" ||
+        toolName.startsWith("terminal_job_") -> "alpine-proot-stage1"
+    toolName.startsWith("terminal_session_") -> "alpine-proot-session"
     toolName.startsWith("file_") -> "saf-workspace"
     toolName.startsWith("screen_") || toolName == "vlm_task" -> "accessibility-service"
     toolName.startsWith("mcp__") -> "mcp"

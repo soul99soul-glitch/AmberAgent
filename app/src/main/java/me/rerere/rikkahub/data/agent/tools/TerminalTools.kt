@@ -1,12 +1,18 @@
 package me.rerere.rikkahub.data.agent.tools
 
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.terminal.TerminalJobSnapshot
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
 
 class TerminalTools(
     private val terminalRuntime: TerminalRuntime,
@@ -14,6 +20,11 @@ class TerminalTools(
 ) {
     fun getTools(): List<Tool> = listOf(
         terminalExecuteTool,
+        terminalJobStartTool,
+        terminalJobReadTool,
+        terminalJobWaitTool,
+        terminalJobStopTool,
+        terminalInstallPackagesTool,
         terminalSessionStartTool,
         terminalSessionExecTool,
         terminalSessionReadTool,
@@ -44,13 +55,117 @@ class TerminalTools(
                 put("exit_code", result.exitCode)
                 put("output", result.output)
                 put("sync_note", result.syncNote)
+                result.jobId?.let { put("job_id", it) }
+                result.status?.let { put("status", it) }
+                put("running", result.running)
+                put("output_log_path", result.outputLogPath)
             }
+        }
+    )
+
+    private val terminalJobStartTool = Tool(
+        name = "terminal_job_start",
+        description = "Start a long-running terminal command as a background job in the AmberAgent runtime workspace. Use terminal_job_read/wait/stop to observe or cancel it.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("command", stringProp("Command to run."))
+                    put("timeout_ms", integerProp("Job timeout in milliseconds. Defaults to 900000."))
+                    put("runtime", stringProp("Runtime: builtin_alpine, android_shell, or termux_external. Defaults to settings."))
+                },
+                required = listOf("command")
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            val snapshot = terminalRuntime.startJob(
+                command = input.requiredString("command"),
+                timeoutMillis = input.long("timeout_ms") ?: 15 * 60_000L,
+                runtime = TerminalRuntimeKind.fromWire(input.string("runtime")),
+            )
+            snapshot.toTextJson()
+        }
+    )
+
+    private val terminalJobReadTool = Tool(
+        name = "terminal_job_read",
+        description = "Read current status and output tail from a terminal job.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("job_id", stringProp("Job ID returned by terminal_job_start or terminal_install_packages."))
+                },
+                required = listOf("job_id")
+            )
+        },
+        execute = { input ->
+            terminalRuntime.readJob(input.requiredString("job_id")).toTextJson()
+        }
+    )
+
+    private val terminalJobWaitTool = Tool(
+        name = "terminal_job_wait",
+        description = "Wait for a terminal job to finish, or return its current status after the wait timeout.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("job_id", stringProp("Job ID returned by terminal_job_start or terminal_install_packages."))
+                    put("timeout_ms", integerProp("How long to wait in milliseconds. Defaults to 60000."))
+                },
+                required = listOf("job_id")
+            )
+        },
+        execute = { input ->
+            terminalRuntime.waitJob(
+                id = input.requiredString("job_id"),
+                timeoutMillis = input.long("timeout_ms") ?: 60_000L,
+            ).toTextJson()
+        }
+    )
+
+    private val terminalJobStopTool = Tool(
+        name = "terminal_job_stop",
+        description = "Stop a running terminal job.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("job_id", stringProp("Job ID returned by terminal_job_start or terminal_install_packages."))
+                },
+                required = listOf("job_id")
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            terminalRuntime.stopJob(input.requiredString("job_id")).toTextJson()
+        }
+    )
+
+    private val terminalInstallPackagesTool = Tool(
+        name = "terminal_install_packages",
+        description = "Install terminal dependencies such as ffmpeg or yt-dlp in the selected runtime. Returns a background job ID and verification output.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("packages", arrayProp("Package names to install, for example [\"ffmpeg\", \"yt-dlp\"]."))
+                    put("timeout_ms", integerProp("Install timeout in milliseconds. Defaults to 900000."))
+                    put("runtime", stringProp("Runtime: builtin_alpine or termux_external. Defaults to settings."))
+                },
+                required = listOf("packages")
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            terminalRuntime.installPackages(
+                packages = input.jsonObject["packages"]?.jsonArrayStrings().orEmpty(),
+                timeoutMillis = input.long("timeout_ms") ?: 0L,
+                runtime = TerminalRuntimeKind.fromWire(input.string("runtime")),
+            ).toTextJson()
         }
     )
 
     private val terminalSessionStartTool = Tool(
         name = "terminal_session_start",
-        description = "Start a persistent terminal session in the AmberAgent runtime workspace. Stage 0 sessions still use Android shell until Alpine PTY support is wired.",
+        description = "Start a persistent Alpine/proot terminal session in the AmberAgent runtime workspace. This is non-PTY; tmux/TUI support needs later PTY wiring.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = true,
         execute = { input ->
@@ -150,7 +265,7 @@ class TerminalTools(
             toolName = toolName,
             title = title,
             inputPreview = input.toString(),
-            runtime = "android-shell-stage0",
+            runtime = "builtin_alpine",
             workspace = "/workspace",
         )
         return try {
@@ -171,6 +286,28 @@ class TerminalTools(
     private fun integerProp(description: String) = buildJsonObject {
         put("type", "integer")
         put("description", description)
+    }
+
+    private fun arrayProp(description: String) = buildJsonObject {
+        put("type", "array")
+        put("description", description)
+        put("items", buildJsonObject { put("type", "string") })
+    }
+
+    private fun kotlinx.serialization.json.JsonElement.jsonArrayStrings(): List<String> =
+        jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull?.takeIf(String::isNotBlank) }
+
+    private fun TerminalJobSnapshot.toTextJson(): List<UIMessagePart> = textJson {
+        put("job_id", jobId)
+        put("runtime", runtime.wireName)
+        put("status", status.wireName)
+        exitCode?.let { put("exit_code", it) }
+        put("running", running)
+        put("output_tail", outputTail)
+        put("output_log_path", outputLogPath)
+        put("started_at_ms", startedAtMs)
+        put("updated_at_ms", updatedAtMs)
+        error?.let { put("error", it) }
     }
 
     private fun List<UIMessagePart>.previewText(): String =

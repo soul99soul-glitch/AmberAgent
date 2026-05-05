@@ -47,6 +47,7 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+  <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
   <uses-permission
     android:name="android.permission.QUERY_ALL_PACKAGES"
     tools:ignore="QueryAllPackagesPermission" />
@@ -59,6 +60,7 @@
     android:required="false" />
 
   <queries>
+    <package android:name="com.termux" />
     <intent>
       <action android:name="android.intent.action.TTS_SERVICE" />
     </intent>
@@ -150,6 +152,9 @@
 
     <receiver
       android:name=".data.agent.AgentNotificationActionReceiver"
+      android:exported="false" />
+    <receiver
+      android:name=".data.agent.terminal.TermuxCommandResultReceiver"
       android:exported="false" />
 
     <service

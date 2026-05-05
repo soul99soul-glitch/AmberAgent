@@ -31,6 +31,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
@@ -555,6 +556,10 @@ data class AgentRuntimeSetting(
     val maxToolLoopSteps: Int = DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
     val autoApproveAllToolCalls: Boolean = false,
     val autoApproveHighRiskToolCalls: Boolean = false,
+    val terminalDefaultRuntime: TerminalRuntimeKind = TerminalRuntimeKind.BUILTIN_ALPINE,
+    val terminalMaxConcurrentJobs: Int = 2,
+    val terminalOutputTailChars: Int = 256 * 1024,
+    val terminalInstallTimeoutMs: Long = 15 * 60_000L,
 )
 
 @Serializable
@@ -580,6 +585,7 @@ You are AmberAgent, an agent-only Android assistant.
 
 - Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
 - Prefer the authorized /workspace for file work. Use terminal, system access, and screen automation tools only when they are necessary and allowed by the current trust policy.
+- For long terminal commands, package installation, downloads, or commands with large output, prefer terminal_job_start/read/wait/stop or terminal_install_packages instead of blocking on terminal_execute.
 - Treat memory as layered:
   - Core memory: durable behavior rules, identity, and explicit facts the user wants AmberAgent to carry into every conversation.
   - Short-term memory: concise summaries of recent tasks or active projects that help continuity.

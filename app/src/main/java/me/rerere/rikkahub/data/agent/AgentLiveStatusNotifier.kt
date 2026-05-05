@@ -311,6 +311,8 @@ class AgentLiveStatusNotifier(
         when {
             contains("alpine", ignoreCase = true) -> "Alpine"
             contains("android-shell", ignoreCase = true) -> "Android Shell"
+            contains("android_shell", ignoreCase = true) -> "Android Shell"
+            contains("termux", ignoreCase = true) -> "Termux"
             isBlank() -> null
             else -> safeToolTitle()
         }

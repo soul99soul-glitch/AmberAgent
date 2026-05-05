@@ -71,6 +71,7 @@ import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
@@ -139,6 +140,7 @@ class ChatService(
     val mcpManager: McpManager,
     private val activityStore: AgentToolActivityStore,
     private val liveStatusNotifier: AgentLiveStatusNotifier,
+    private val terminalRuntime: TerminalRuntime,
     private val screenCaptureManager: ScreenCaptureManager,
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
@@ -1380,6 +1382,7 @@ class ChatService(
             job.cancel()
             runCatching { job.join() }
         }
+        terminalRuntime.cancelRunningJobs()
         cancelLiveUpdateNotification(conversationId)
         trustedRunToolNames.remove(conversationId)
         screenCaptureManager.releaseSession()

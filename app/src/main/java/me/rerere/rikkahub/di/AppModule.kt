@@ -91,7 +91,7 @@ val appModule = module {
     }
 
     single {
-        TerminalRuntime(get(), get(), get())
+        TerminalRuntime(get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -161,6 +161,7 @@ val appModule = module {
             mcpManager = get(),
             activityStore = get(),
             liveStatusNotifier = get(),
+            terminalRuntime = get(),
             screenCaptureManager = get(),
             filesManager = get(),
             skillManager = get(),
