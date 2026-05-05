@@ -19,16 +19,16 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 @Composable
-fun ShareHandlerPage(text: String, image: String?) {
+fun ShareHandlerPage(text: String, streamUris: List<String>) {
     val vm: ShareHandlerVM = koinViewModel(parameters = { parametersOf(text) })
     val navController = LocalNavController.current
 
-    LaunchedEffect(text, image) {
+    LaunchedEffect(text, streamUris) {
         vm.selectAmberAgent()
         navigateToChatPage(
             navigator = navController,
             initText = vm.shareText.base64Encode(),
-            initFiles = image?.let { listOf(it.toUri()) } ?: emptyList()
+            initFiles = streamUris.map { it.toUri() }
         )
     }
 

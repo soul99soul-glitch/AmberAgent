@@ -2,6 +2,7 @@ package me.rerere.rikkahub
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -196,26 +197,25 @@ class RouteActivity : ComponentActivity() {
 
     @Composable
     private fun ShareHandler(backStack: MutableList<NavKey>) {
-        val shareIntent = remember {
-            Intent().apply {
-                action = intent?.action
-                putExtra(Intent.EXTRA_TEXT, intent?.getStringExtra(Intent.EXTRA_TEXT))
-                putExtra(Intent.EXTRA_STREAM, intent?.getStringExtra(Intent.EXTRA_STREAM))
-                putExtra(Intent.EXTRA_PROCESS_TEXT, intent?.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT))
+        val shareAction = remember(intent) { intent?.action }
+        val shareText = remember(intent) { intent?.extractSharedText().orEmpty() }
+        val streamUris = remember(intent) {
+            when (intent?.action) {
+                Intent.ACTION_SEND -> intent?.extractSingleStreamUri().orEmpty()
+                Intent.ACTION_SEND_MULTIPLE -> intent?.extractMultipleStreamUris().orEmpty()
+                else -> emptyList()
             }
         }
 
-        LaunchedEffect(backStack) {
-            when (shareIntent.action) {
-                Intent.ACTION_SEND -> {
-                    val text = shareIntent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
-                    val imageUri = shareIntent.getStringExtra(Intent.EXTRA_STREAM)
-                    backStack.add(Screen.ShareHandler(text, imageUri))
+        LaunchedEffect(backStack, shareAction, shareText, streamUris) {
+            when (shareAction) {
+                Intent.ACTION_SEND,
+                Intent.ACTION_SEND_MULTIPLE -> {
+                    backStack.add(Screen.ShareHandler(text = shareText, streamUris = streamUris))
                 }
 
                 Intent.ACTION_PROCESS_TEXT -> {
-                    val text = shareIntent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString() ?: ""
-                    backStack.add(Screen.ShareHandler(text, null))
+                    backStack.add(Screen.ShareHandler(text = shareText, streamUri = null))
                 }
             }
         }
@@ -326,7 +326,9 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.ShareHandler> { key ->
                                 ShareHandlerPage(
                                     text = key.text,
-                                    image = key.streamUri
+                                    streamUris = key.streamUris.ifEmpty {
+                                        key.streamUri?.let { listOf(it) }.orEmpty()
+                                    }
                                 )
                             }
 
@@ -558,6 +560,31 @@ class RouteActivity : ComponentActivity() {
     }
 }
 
+private fun Intent.extractSharedText(): String {
+    val text = getStringExtra(Intent.EXTRA_TEXT)
+        ?: getStringExtra(Intent.EXTRA_HTML_TEXT)
+        ?: getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+        ?: ""
+    val subject = getStringExtra(Intent.EXTRA_SUBJECT).orEmpty()
+    return listOf(subject, text)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .joinToString("\n\n")
+}
+
+@Suppress("DEPRECATION")
+private fun Intent.extractSingleStreamUri(): List<String> =
+    getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        ?.let { listOf(it.toString()) }
+        .orEmpty()
+
+@Suppress("DEPRECATION")
+private fun Intent.extractMultipleStreamUris(): List<String> =
+    getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        ?.map { it.toString() }
+        .orEmpty()
+
 sealed interface Screen : NavKey {
     @Serializable
     data class Chat(
@@ -568,7 +595,11 @@ sealed interface Screen : NavKey {
     ) : Screen
 
     @Serializable
-    data class ShareHandler(val text: String, val streamUri: String? = null) : Screen
+    data class ShareHandler(
+        val text: String,
+        val streamUri: String? = null,
+        val streamUris: List<String> = emptyList()
+    ) : Screen
 
     @Serializable
     data object History : Screen

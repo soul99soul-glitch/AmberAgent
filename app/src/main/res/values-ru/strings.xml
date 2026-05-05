@@ -7,7 +7,7 @@
   <string name="about_page_version">Версия</string>
   <string name="about_page_website">Веб-сайт</string>
   <string name="add">Добавить</string>
-  <string name="app_name">AmberAgent</string>
+  <string name="app_name">Amber</string>
   <string name="assistant_detail_basic_desc">Настройте имя, аватар, модель и параметры</string>
   <string name="assistant_detail_extensions_desc">Управление внедрениями подсказок, лорбуками и навыками</string>
   <string name="assistant_detail_local_tools_desc">Включите локальные инструменты, например движок JavaScript</string>
