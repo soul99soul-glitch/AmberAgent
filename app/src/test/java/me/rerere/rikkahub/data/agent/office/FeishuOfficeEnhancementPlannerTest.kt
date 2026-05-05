@@ -58,6 +58,13 @@ class FeishuOfficeEnhancementPlannerTest {
             enabled = true,
             targetPackage = DEFAULT_FEISHU_OFFICE_PACKAGE,
             defaultTemplate = FeishuOfficeAnalysisTemplate.WHITEPAPER_SCORE,
+            includeNotificationsByDefault = true,
+            includeUsageByDefault = true,
+            includeCurrentScreenByDefault = true,
+            includeMcpHintsByDefault = true,
+            defaultOutputDir = "officepro",
+            maxWorkspaceDocs = 6,
+            maxReportChars = 20_000,
             installed = true,
             launchable = true,
             label = "小米办公 Pro",
@@ -96,6 +103,53 @@ class FeishuOfficeEnhancementPlannerTest {
     }
 
     @Test
+    fun dashboardSummaryReflectsMissingPermissionsAndMcpHints() {
+        val bundle = FeishuOfficeContextBundle(
+            state = testState(
+                accessibilityReady = false,
+                notificationReady = false,
+                usageReady = true,
+                capability = FeishuOfficeCapabilityLevel.SIGNALS,
+            ),
+            notifications = emptyList(),
+            usageStats = listOf(FeishuOfficeUsageSummary(DEFAULT_FEISHU_OFFICE_PACKAGE, "小米办公 Pro", 3L, 4L)),
+            screen = null,
+            workspaceSnippets = emptyList(),
+            screenError = "no accessibility",
+            mcpHints = FeishuOfficeEnhancementPlanner.defaultMcpHints(),
+            capturedAtMs = 5L,
+        )
+
+        val summary = FeishuOfficeEnhancementPlanner.buildDashboardSummary(bundle)
+        val digest = FeishuOfficeEnhancementPlanner.buildContextDigest(
+            template = FeishuOfficeAnalysisTemplate.TODO_RADAR,
+            bundle = bundle,
+            maxChars = 4_000,
+        )
+
+        assertTrue(summary.missingPermissions.contains("accessibility"))
+        assertTrue(summary.suggestedActions.any { it.contains("飞书 MCP") })
+        assertTrue(digest.contains("飞书 MCP 补强建议"))
+        assertTrue(digest.contains("screen_error"))
+    }
+
+    @Test
+    fun reportMarkdownHasStableSectionsAndTruncates() {
+        val draft = FeishuOfficeEnhancementPlanner.buildReportMarkdown(
+            title = "Q 代白皮书",
+            template = FeishuOfficeAnalysisTemplate.WHITEPAPER_SCORE,
+            digest = "上下文".repeat(10_000),
+            capturedAtMs = 6L,
+            maxChars = 8_000,
+        )
+
+        assertTrue(draft.markdown.contains("# Q 代白皮书"))
+        assertTrue(draft.markdown.contains("## 结论摘要"))
+        assertTrue(draft.markdown.contains("## 原始上下文摘录"))
+        assertTrue(draft.truncated)
+    }
+
+    @Test
     fun extractsVisibleTextFromAccessibilityDump() {
         val ui = """
             - android.widget.FrameLayout bounds=Rect(0, 0 - 100, 100)
@@ -108,4 +162,32 @@ class FeishuOfficeEnhancementPlannerTest {
         assertTrue(visible.contains("标题一"))
         assertTrue(visible.contains("搜索"))
     }
+
+    private fun testState(
+        accessibilityReady: Boolean = true,
+        notificationReady: Boolean = true,
+        usageReady: Boolean = true,
+        capability: FeishuOfficeCapabilityLevel = FeishuOfficeCapabilityLevel.FULL_READ_SIGNALS,
+    ) = FeishuOfficeEnhancementState(
+        enabled = true,
+        targetPackage = DEFAULT_FEISHU_OFFICE_PACKAGE,
+        defaultTemplate = FeishuOfficeAnalysisTemplate.WHITEPAPER_SCORE,
+        includeNotificationsByDefault = true,
+        includeUsageByDefault = true,
+        includeCurrentScreenByDefault = true,
+        includeMcpHintsByDefault = true,
+        defaultOutputDir = "officepro",
+        maxWorkspaceDocs = 6,
+        maxReportChars = 20_000,
+        installed = true,
+        launchable = true,
+        label = "小米办公 Pro",
+        accessibilityReady = accessibilityReady,
+        notificationReady = notificationReady,
+        usageReady = usageReady,
+        capability = capability,
+        lastKnownTitle = "Q 代卖点共识",
+        lastError = null,
+        updatedAtMs = 1L,
+    )
 }

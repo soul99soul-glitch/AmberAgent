@@ -48,19 +48,29 @@ class ToolRegistryTest {
 
     @Test
     fun officeProToolsUseOfficeCategory() {
-        val registry = ToolRegistry.from(listOf(stubTool("officepro_status")))
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool("officepro_dashboard"),
+                stubTool("officepro_capture_context"),
+                stubTool("officepro_make_report", needsApproval = true),
+            )
+        )
 
-        assertEquals("office", registry.metadata.single().category)
+        assertEquals(listOf("office", "office", "office"), registry.metadata.map { it.category })
+        assertTrue(registry.metadata.single { it.name == "officepro_make_report" }.needsApproval)
+        assertTrue(registry.metadata.single { it.name == "officepro_make_report" }.mutates)
     }
 
     private fun stubTool(
         name: String,
+        needsApproval: Boolean = false,
         execute: suspend (kotlinx.serialization.json.JsonElement) -> List<UIMessagePart> = {
             listOf(UIMessagePart.Text("ok"))
         },
     ) = Tool(
         name = name,
         description = "test tool",
+        needsApproval = needsApproval,
         execute = execute,
     )
 }

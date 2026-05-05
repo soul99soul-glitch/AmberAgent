@@ -1146,6 +1146,14 @@
   <string name="setting_officepro_candidates">Detected candidates:\n%1$s</string>
   <string name="setting_officepro_saved">Feishu Office setting saved</string>
   <string name="setting_officepro_detect_none">No Feishu Office candidate found</string>
+  <string name="setting_officepro_dashboard_section">Work Dashboard</string>
+  <string name="setting_officepro_output_dir">Report output folder</string>
+  <string name="setting_officepro_output_dir_desc">Folder relative to /workspace, for example officepro.</string>
+  <string name="setting_officepro_save_dashboard">Save Dashboard Settings</string>
+  <string name="setting_officepro_include_notifications">Include office notifications by default</string>
+  <string name="setting_officepro_include_usage">Include recent usage by default</string>
+  <string name="setting_officepro_include_screen">Read current screen by default</string>
+  <string name="setting_officepro_include_mcp_hints">Include Feishu MCP hints by default</string>
   <string name="setting_sandbox_runtime_section">Runtime</string>
   <string name="setting_sandbox_alpine_title">Alpine/proot One-shot Runtime</string>
   <string name="setting_sandbox_alpine_ready">alpine-proot-stage1 installed under %1$s</string>

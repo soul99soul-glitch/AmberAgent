@@ -235,6 +235,7 @@ fun SettingExperimentalOfficeProPage(
     val scope = rememberCoroutineScope()
     var officeBusy by remember { mutableStateOf(false) }
     var officePackageInput by remember(officeState.targetPackage) { mutableStateOf(officeState.targetPackage) }
+    var officeOutputDirInput by remember(officeState.defaultOutputDir) { mutableStateOf(officeState.defaultOutputDir) }
     var officeCandidates by remember { mutableStateOf("") }
     val officeSavedToast = stringResource(R.string.setting_officepro_saved)
     val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
@@ -285,6 +286,53 @@ fun SettingExperimentalOfficeProPage(
                                     onOptionSelected = { feishuOfficeManager.setDefaultTemplate(it) },
                                     modifier = Modifier.fillMaxWidth(),
                                     optionToString = { it.zhLabel },
+                                )
+                                OutlinedTextField(
+                                    value = officeOutputDirInput,
+                                    onValueChange = { officeOutputDirInput = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = officeState.enabled,
+                                    singleLine = true,
+                                    label = { Text(stringResource(R.string.setting_officepro_output_dir)) },
+                                    supportingText = { Text(stringResource(R.string.setting_officepro_output_dir_desc)) },
+                                )
+                                Button(
+                                    onClick = {
+                                        feishuOfficeManager.setDefaultOutputDir(officeOutputDirInput)
+                                        toaster.show(officeSavedToast)
+                                    },
+                                    enabled = officeState.enabled,
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                ) {
+                                    Text(stringResource(R.string.setting_officepro_save_dashboard), maxLines = 1)
+                                }
+                                Text(
+                                    text = stringResource(R.string.setting_officepro_dashboard_section),
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                OfficeProSwitchRow(
+                                    text = stringResource(R.string.setting_officepro_include_notifications),
+                                    checked = officeState.includeNotificationsByDefault,
+                                    enabled = officeState.enabled,
+                                    onCheckedChange = feishuOfficeManager::setIncludeNotificationsByDefault,
+                                )
+                                OfficeProSwitchRow(
+                                    text = stringResource(R.string.setting_officepro_include_usage),
+                                    checked = officeState.includeUsageByDefault,
+                                    enabled = officeState.enabled,
+                                    onCheckedChange = feishuOfficeManager::setIncludeUsageByDefault,
+                                )
+                                OfficeProSwitchRow(
+                                    text = stringResource(R.string.setting_officepro_include_screen),
+                                    checked = officeState.includeCurrentScreenByDefault,
+                                    enabled = officeState.enabled,
+                                    onCheckedChange = feishuOfficeManager::setIncludeCurrentScreenByDefault,
+                                )
+                                OfficeProSwitchRow(
+                                    text = stringResource(R.string.setting_officepro_include_mcp_hints),
+                                    checked = officeState.includeMcpHintsByDefault,
+                                    enabled = officeState.enabled,
+                                    onCheckedChange = feishuOfficeManager::setIncludeMcpHintsByDefault,
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -379,6 +427,30 @@ fun SettingExperimentalOfficeProPage(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OfficeProSwitchRow(
+    text: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
     }
 }
 

@@ -18,17 +18,20 @@ import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementPlanner
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementState
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeContextBundle
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeDashboardSummary
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeReportResult
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeScreenSnapshot
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeWorkspaceSnippet
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 
 class FeishuOfficeTools(
     private val manager: FeishuOfficeEnhancementManager,
-    private val workspaceManager: WorkspaceManager,
     private val activityStore: AgentToolActivityStore,
 ) {
     fun getTools(): List<Tool> = listOf(
         statusTool,
+        dashboardTool,
+        captureContextTool,
+        makeReportTool,
         openTool,
         readScreenTool,
         searchTool,
@@ -54,6 +57,107 @@ class FeishuOfficeTools(
                     }
                 })
                 put("notes", "v1 is read-first and semi-automatic. It does not read 小米办公 Pro private storage and does not write comments or send messages.")
+            }
+        },
+    )
+
+    private val dashboardTool = Tool(
+        name = "officepro_dashboard",
+        description = "Build a read-only 小米办公 Pro work dashboard with capability gaps, recent signals, Feishu MCP hints, and suggested next actions.",
+        parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
+        execute = {
+            trackOfficeTool("officepro_dashboard", "飞书办公驾驶舱", buildJsonObject { }) {
+                val state = manager.state.value
+                val bundle = manager.captureContext(
+                    workspacePaths = emptyList(),
+                    includeCurrentScreen = state.enabled && state.includeCurrentScreenByDefault,
+                    includeNotifications = state.enabled && state.includeNotificationsByDefault,
+                    includeUsage = state.enabled && state.includeUsageByDefault,
+                    includeMcpHints = state.includeMcpHintsByDefault,
+                )
+                val summary = FeishuOfficeEnhancementPlanner.buildDashboardSummary(bundle)
+                textJson {
+                    putState(bundle.state)
+                    putSummary(summary)
+                    putBundle(bundle, includeScreenTree = false)
+                }
+            }
+        },
+    )
+
+    private val captureContextTool = Tool(
+        name = "officepro_capture_context",
+        description = "Capture a bounded 小米办公 Pro work context from notifications, usage, current screen, Feishu MCP hints, and optional /workspace docs. Does not write files.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("template", enumProp("Workflow template.", FeishuOfficeAnalysisTemplate.entries.map { it.wireName }))
+                    put("workspace_paths", stringArrayProp("Optional /workspace document paths already shared/exported to AmberAgent."))
+                    put("include_current_screen", booleanProp("Read current Accessibility screen if available. Defaults to the setting value."))
+                    put("include_notifications", booleanProp("Include 小米办公 Pro active notifications. Defaults to the setting value."))
+                    put("include_usage", booleanProp("Include recent usage signals. Defaults to the setting value."))
+                    put("max_chars", integerProp("Maximum digest characters. Defaults to 12000; hard limit 30000."))
+                }
+            )
+        },
+        execute = { input ->
+            trackOfficeTool("officepro_capture_context", "捕获飞书办公上下文", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val template = FeishuOfficeAnalysisTemplate.fromWireName(input.string("template"))
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: state.includeCurrentScreenByDefault,
+                    includeNotifications = input.boolean("include_notifications") ?: state.includeNotificationsByDefault,
+                    includeUsage = input.boolean("include_usage") ?: state.includeUsageByDefault,
+                    includeMcpHints = state.includeMcpHintsByDefault,
+                )
+                val digest = FeishuOfficeEnhancementPlanner.buildContextDigest(
+                    template = template,
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: 12_000,
+                )
+                textJson {
+                    putState(bundle.state)
+                    put("template", template.wireName)
+                    putBundle(bundle, includeScreenTree = false)
+                    put("digest", digest)
+                }
+            }
+        },
+    )
+
+    private val makeReportTool = Tool(
+        name = "officepro_make_report",
+        description = "Create a Markdown report draft under /workspace from captured 小米办公 Pro context and optional exported documents. Requires approval because it writes a file.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("template", enumProp("Workflow template.", FeishuOfficeAnalysisTemplate.entries.map { it.wireName }))
+                    put("workspace_paths", stringArrayProp("Optional /workspace document paths already shared/exported to AmberAgent."))
+                    put("title", stringProp("Optional report title."))
+                    put("output_path", stringProp("Optional /workspace output path. Defaults to officepro/officepro-<template>-yyyyMMdd-HHmmss.md."))
+                    put("include_current_screen", booleanProp("Read current Accessibility screen if available. Defaults to the setting value."))
+                }
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            trackOfficeTool("officepro_make_report", "生成飞书办公报告", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val template = FeishuOfficeAnalysisTemplate.fromWireName(input.string("template"))
+                val result = manager.makeReport(
+                    template = template,
+                    workspacePaths = input.stringList("workspace_paths"),
+                    title = input.string("title"),
+                    outputPath = input.string("output_path"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: state.includeCurrentScreenByDefault,
+                )
+                textJson {
+                    putState(manager.state.value)
+                    putReport(result)
+                }
             }
         },
     )
@@ -153,26 +257,23 @@ class FeishuOfficeTools(
                 ensureEnabled()
                 val state = manager.state.value
                 val template = FeishuOfficeAnalysisTemplate.fromWireName(input.string("template"))
-                val screen = if (input.boolean("include_current_screen") ?: true) {
-                    runCatching { manager.readScreen(maxNodes = 180) }.getOrNull()
-                } else {
-                    null
-                }
-                val workspaceSnippets = readWorkspaceSnippets(input.stringList("workspace_paths"))
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: state.includeCurrentScreenByDefault,
+                    includeNotifications = state.includeNotificationsByDefault,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = state.includeMcpHintsByDefault,
+                )
                 val digest = FeishuOfficeEnhancementPlanner.buildContextDigest(
                     template = template,
-                    state = manager.state.value,
-                    notifications = manager.notificationSummaries(),
-                    usageStats = manager.usageSummaries(),
-                    screen = screen,
-                    workspaceSnippets = workspaceSnippets,
+                    bundle = bundle,
                     maxChars = input.int("max_chars") ?: 12_000,
                 )
                 textJson {
                     putState(state)
                     put("template", template.wireName)
                     put("digest", digest)
-                    put("workspace_paths_read", buildJsonArray { workspaceSnippets.forEach { add(it.path) } })
+                    put("workspace_paths_read", buildJsonArray { bundle.workspaceSnippets.forEach { add(it.path) } })
                 }
             }
         },
@@ -206,24 +307,17 @@ class FeishuOfficeTools(
         }
     }
 
-    private suspend fun readWorkspaceSnippets(paths: List<String>): List<FeishuOfficeWorkspaceSnippet> =
-        paths.take(8).mapNotNull { path ->
-            runCatching {
-                val content = workspaceManager.readText(path)
-                val maxChars = 5_000
-                FeishuOfficeWorkspaceSnippet(
-                    path = path,
-                    content = content.take(maxChars),
-                    totalChars = content.length,
-                    truncated = content.length > maxChars,
-                )
-            }.getOrNull()
-        }
-
     private fun kotlinx.serialization.json.JsonObjectBuilder.putState(state: FeishuOfficeEnhancementState) {
         put("enabled", state.enabled)
         put("target_package", state.targetPackage)
         put("label", state.label.orEmpty())
+        put("include_notifications_by_default", state.includeNotificationsByDefault)
+        put("include_usage_by_default", state.includeUsageByDefault)
+        put("include_current_screen_by_default", state.includeCurrentScreenByDefault)
+        put("include_mcp_hints_by_default", state.includeMcpHintsByDefault)
+        put("default_output_dir", state.defaultOutputDir)
+        put("max_workspace_docs", state.maxWorkspaceDocs)
+        put("max_report_chars", state.maxReportChars)
         put("installed", state.installed)
         put("launchable", state.launchable)
         put("accessibility_ready", state.accessibilityReady)
@@ -234,6 +328,67 @@ class FeishuOfficeTools(
         put("last_known_title", state.lastKnownTitle.orEmpty())
         put("last_error", state.lastError.orEmpty())
         put("updated_at_ms", state.updatedAtMs)
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putSummary(summary: FeishuOfficeDashboardSummary) {
+        put("dashboard", buildJsonObject {
+            put("capability", summary.capability.wireName)
+            put("missing_permissions", buildJsonArray { summary.missingPermissions.forEach { add(it) } })
+            put("notification_count", summary.notificationCount)
+            put("recent_title", summary.recentTitle.orEmpty())
+            put("suggested_actions", buildJsonArray { summary.suggestedActions.forEach { add(it) } })
+            put("updated_at_ms", summary.updatedAtMs)
+        })
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putBundle(
+        bundle: FeishuOfficeContextBundle,
+        includeScreenTree: Boolean,
+    ) {
+        put("captured_at_ms", bundle.capturedAtMs)
+        put("screen_error", bundle.screenError.orEmpty())
+        bundle.screen?.let { screen -> putScreen(screen, includeUiTree = includeScreenTree) }
+        put("notifications", buildJsonArray {
+            bundle.notifications.forEach { item ->
+                add(buildJsonObject {
+                    put("posted_at_ms", item.postedAtMs)
+                    put("title", item.title)
+                    put("text", item.text)
+                })
+            }
+        })
+        put("usage_stats", buildJsonArray {
+            bundle.usageStats.forEach { item ->
+                add(buildJsonObject {
+                    put("package_name", item.packageName)
+                    put("label", item.label)
+                    put("last_time_used_ms", item.lastTimeUsedMs)
+                    put("total_time_foreground_ms", item.totalTimeForegroundMs)
+                })
+            }
+        })
+        put("workspace_snippets", buildJsonArray {
+            bundle.workspaceSnippets.forEach { item ->
+                add(buildJsonObject {
+                    put("path", item.path)
+                    put("content", item.content)
+                    put("total_chars", item.totalChars)
+                    put("truncated", item.truncated)
+                })
+            }
+        })
+        put("mcp_hints", buildJsonArray { bundle.mcpHints.forEach { add(it) } })
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putReport(result: FeishuOfficeReportResult) {
+        put("report", buildJsonObject {
+            put("path", result.path)
+            put("title", result.title)
+            put("template", result.template.wireName)
+            put("truncated", result.truncated)
+            put("written_at_ms", result.writtenAtMs)
+            put("total_chars", result.totalChars)
+        })
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putScreen(
@@ -266,6 +421,12 @@ class FeishuOfficeTools(
         put("type", "string")
         put("description", description)
         put("enum", buildJsonArray { values.forEach { add(it) } })
+    }
+
+    private fun stringArrayProp(description: String) = buildJsonObject {
+        put("type", "array")
+        put("description", description)
+        put("items", buildJsonObject { put("type", "string") })
     }
 
     private fun JsonElement.stringList(name: String): List<String> =

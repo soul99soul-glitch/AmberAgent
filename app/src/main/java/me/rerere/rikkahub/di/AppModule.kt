@@ -73,11 +73,11 @@ val appModule = module {
     }
 
     single {
-        FeishuOfficeEnhancementManager(get(), get(), get(), get())
+        FeishuOfficeEnhancementManager(get(), get(), get(), get(), get())
     }
 
     single {
-        FeishuOfficeTools(get(), get(), get())
+        FeishuOfficeTools(get(), get())
     }
 
     single {

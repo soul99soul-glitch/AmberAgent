@@ -16,13 +16,18 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
 import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
+import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class FeishuOfficeEnhancementManager(
     private val context: Context,
     private val settingsStore: SettingsStore,
     private val permissionBroker: AgentPermissionBroker,
+    private val workspaceManager: WorkspaceManager,
     private val appScope: AppScope,
 ) {
     private val lastKnownTitle = MutableStateFlow<String?>(null)
@@ -53,6 +58,26 @@ class FeishuOfficeEnhancementManager(
 
     fun setDefaultTemplate(template: FeishuOfficeAnalysisTemplate) {
         appScope.launch { updateSetting { it.copy(defaultTemplate = template) } }
+    }
+
+    fun setIncludeNotificationsByDefault(enabled: Boolean) {
+        appScope.launch { updateSetting { it.copy(includeNotificationsByDefault = enabled) } }
+    }
+
+    fun setIncludeUsageByDefault(enabled: Boolean) {
+        appScope.launch { updateSetting { it.copy(includeUsageByDefault = enabled) } }
+    }
+
+    fun setIncludeCurrentScreenByDefault(enabled: Boolean) {
+        appScope.launch { updateSetting { it.copy(includeCurrentScreenByDefault = enabled) } }
+    }
+
+    fun setIncludeMcpHintsByDefault(enabled: Boolean) {
+        appScope.launch { updateSetting { it.copy(includeMcpHintsByDefault = enabled) } }
+    }
+
+    fun setDefaultOutputDir(outputDir: String) {
+        appScope.launch { updateSetting { it.copy(defaultOutputDir = sanitizeWorkspaceDir(outputDir)) } }
     }
 
     fun refresh() {
@@ -208,6 +233,89 @@ class FeishuOfficeEnhancementManager(
             .toList()
     }
 
+    suspend fun captureContext(
+        workspacePaths: List<String> = emptyList(),
+        includeCurrentScreen: Boolean = state.value.includeCurrentScreenByDefault,
+        includeNotifications: Boolean = state.value.includeNotificationsByDefault,
+        includeUsage: Boolean = state.value.includeUsageByDefault,
+        includeMcpHints: Boolean = state.value.includeMcpHintsByDefault,
+    ): FeishuOfficeContextBundle {
+        val current = state.value
+        var screenError: String? = null
+        val screen = if (includeCurrentScreen) {
+            runCatching { readScreen(maxNodes = 180) }
+                .onFailure { screenError = it.message ?: it.toString() }
+                .getOrNull()
+        } else {
+            null
+        }
+        return FeishuOfficeContextBundle(
+            state = state.value,
+            notifications = if (includeNotifications) notificationSummaries() else emptyList(),
+            usageStats = if (includeUsage) usageSummaries() else emptyList(),
+            screen = screen,
+            workspaceSnippets = readWorkspaceSnippets(workspacePaths, current.maxWorkspaceDocs),
+            screenError = screenError,
+            mcpHints = if (includeMcpHints) FeishuOfficeEnhancementPlanner.defaultMcpHints() else emptyList(),
+            capturedAtMs = System.currentTimeMillis(),
+        )
+    }
+
+    suspend fun dashboardSummary(): FeishuOfficeDashboardSummary =
+        state.value.let { current ->
+            FeishuOfficeEnhancementPlanner.buildDashboardSummary(
+                captureContext(
+                    workspacePaths = emptyList(),
+                    includeCurrentScreen = current.enabled && current.includeCurrentScreenByDefault,
+                    includeNotifications = current.enabled && current.includeNotificationsByDefault,
+                    includeUsage = current.enabled && current.includeUsageByDefault,
+                    includeMcpHints = current.includeMcpHintsByDefault,
+                )
+            )
+        }
+
+    suspend fun makeReport(
+        template: FeishuOfficeAnalysisTemplate,
+        workspacePaths: List<String>,
+        title: String?,
+        outputPath: String?,
+        includeCurrentScreen: Boolean,
+    ): FeishuOfficeReportResult {
+        val current = state.value
+        val reportTitle = title?.trim()?.takeIf { it.isNotBlank() }
+            ?: "${template.zhLabel} - 飞书办公增强报告"
+        val bundle = captureContext(
+            workspacePaths = workspacePaths,
+            includeCurrentScreen = includeCurrentScreen,
+            includeNotifications = current.includeNotificationsByDefault,
+            includeUsage = current.includeUsageByDefault,
+            includeMcpHints = current.includeMcpHintsByDefault,
+        )
+        val digest = FeishuOfficeEnhancementPlanner.buildContextDigest(
+            template = template,
+            bundle = bundle,
+            maxChars = current.maxReportChars,
+        )
+        val draft = FeishuOfficeEnhancementPlanner.buildReportMarkdown(
+            title = reportTitle,
+            template = template,
+            digest = digest,
+            capturedAtMs = bundle.capturedAtMs,
+            maxChars = current.maxReportChars,
+        )
+        val path = outputPath?.takeIf { it.isNotBlank() }
+            ?: defaultReportPath(current.defaultOutputDir, template, bundle.capturedAtMs)
+        val entry = workspaceManager.writeText(path, draft.markdown)
+        return FeishuOfficeReportResult(
+            path = entry.path,
+            title = reportTitle,
+            template = template,
+            truncated = draft.truncated,
+            writtenAtMs = bundle.capturedAtMs,
+            totalChars = draft.totalChars,
+        )
+    }
+
     private suspend fun updateSetting(block: (FeishuOfficeEnhancementSetting) -> FeishuOfficeEnhancementSetting) {
         settingsStore.update { settings ->
             settings.copy(
@@ -232,6 +340,13 @@ class FeishuOfficeEnhancementManager(
             enabled = setting.enabled,
             targetPackage = setting.targetPackage,
             defaultTemplate = setting.defaultTemplate,
+            includeNotificationsByDefault = setting.includeNotificationsByDefault,
+            includeUsageByDefault = setting.includeUsageByDefault,
+            includeCurrentScreenByDefault = setting.includeCurrentScreenByDefault,
+            includeMcpHintsByDefault = setting.includeMcpHintsByDefault,
+            defaultOutputDir = setting.defaultOutputDir,
+            maxWorkspaceDocs = setting.maxWorkspaceDocs,
+            maxReportChars = setting.maxReportChars,
             installed = installed,
             launchable = launchable,
             label = if (installed) appLabel(setting.targetPackage) else null,
@@ -282,6 +397,46 @@ class FeishuOfficeEnhancementManager(
     private fun requireAccessibilityService(): AmberAccessibilityService =
         AmberAccessibilityService.getActiveService()
             ?: error("AmberAgent Accessibility is not enabled. Enable Accessibility before reading 小米办公 Pro screens.")
+
+    private suspend fun readWorkspaceSnippets(
+        paths: List<String>,
+        limit: Int,
+    ): List<FeishuOfficeWorkspaceSnippet> =
+        paths.take(limit.coerceIn(1, 12)).mapNotNull { path ->
+            runCatching {
+                val content = workspaceManager.readText(path)
+                val maxChars = 5_000
+                FeishuOfficeWorkspaceSnippet(
+                    path = path,
+                    content = content.take(maxChars),
+                    totalChars = content.length,
+                    truncated = content.length > maxChars,
+                )
+            }.getOrNull()
+        }
+
+    private fun defaultReportPath(
+        outputDir: String,
+        template: FeishuOfficeAnalysisTemplate,
+        nowMs: Long,
+    ): String {
+        val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(nowMs))
+        return "${sanitizeWorkspaceDir(outputDir)}/officepro-${template.wireName}-$timestamp.md"
+    }
+
+    private fun sanitizeWorkspaceDir(raw: String): String {
+        val cleaned = raw.trim()
+            .removePrefix("/workspace/")
+            .removePrefix("workspace/")
+            .trim('/')
+            .replace('\\', '/')
+        val parts = cleaned.split("/").filter { it.isNotBlank() }
+        return if (parts.isEmpty() || parts.any { it == "." || it == ".." }) {
+            "officepro"
+        } else {
+            parts.joinToString("/")
+        }
+    }
 
     private companion object {
         val CANDIDATE_KEYWORDS = listOf("lark", "feishu", "飞书", "办公", "mioffice", "xiaomi")

@@ -743,6 +743,14 @@
   <string name="setting_officepro_candidates">检测到的候选：\n%1$s</string>
   <string name="setting_officepro_saved">飞书办公设置已保存</string>
   <string name="setting_officepro_detect_none">没有检测到飞书办公候选应用</string>
+  <string name="setting_officepro_dashboard_section">工作驾驶舱</string>
+  <string name="setting_officepro_output_dir">报告输出目录</string>
+  <string name="setting_officepro_output_dir_desc">相对于 /workspace 的目录，例如 officepro。</string>
+  <string name="setting_officepro_save_dashboard">保存驾驶舱设置</string>
+  <string name="setting_officepro_include_notifications">默认包含办公通知</string>
+  <string name="setting_officepro_include_usage">默认包含最近使用情况</string>
+  <string name="setting_officepro_include_screen">默认读取当前屏幕</string>
+  <string name="setting_officepro_include_mcp_hints">默认加入飞书 MCP 补强提示</string>
   <string name="setting_sandbox_runtime_section">运行时</string>
   <string name="setting_sandbox_alpine_title">Alpine/proot 一次性命令运行时</string>
   <string name="setting_sandbox_alpine_ready">alpine-proot-stage1 已安装：%1$s</string>
