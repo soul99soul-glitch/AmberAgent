@@ -662,7 +662,7 @@ private fun ContextUsageIndicator(
             )
         }
         Text(
-            text = "${usedTokens.formatNumber()}/${contextWindow?.formatNumber() ?: "--"} context",
+            text = "${usedTokens.formatNumber()}/${contextWindow?.formatNumber() ?: "--"} CONTEXT",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             color = workspace.muted.copy(alpha = 0.72f),
             maxLines = 1,
