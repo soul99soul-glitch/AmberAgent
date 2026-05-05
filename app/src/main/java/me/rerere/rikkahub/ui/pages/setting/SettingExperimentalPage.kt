@@ -276,10 +276,19 @@ fun SettingExperimentalICloudPage(
                                 ) {
                                     Button(
                                         onClick = {
-                                            iCloudDriveManager.setVaultPath(iCloudVaultInput)
-                                            toaster.show(iCloudSavedToast)
+                                            iCloudBusy = true
+                                            scope.launch {
+                                                runCatching {
+                                                    iCloudDriveManager.setVaultPath(iCloudVaultInput)
+                                                    toaster.show(iCloudSavedToast)
+                                                    iCloudDriveManager.probe()
+                                                }.onFailure { error ->
+                                                    toaster.show(error.message ?: error.toString())
+                                                }
+                                                iCloudBusy = false
+                                            }
                                         },
-                                        enabled = iCloudState.enabled,
+                                        enabled = iCloudState.enabled && !iCloudBusy,
                                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                                     ) {
                                         Text(stringResource(R.string.setting_icloud_save_path), maxLines = 1)
@@ -346,7 +355,14 @@ fun SettingExperimentalICloudPage(
     }
     if (showICloudLogin && iCloudState.enabled) {
         ICloudLoginDialog(
-            onDismiss = { showICloudLogin = false },
+            onDismiss = {
+                showICloudLogin = false
+                iCloudBusy = true
+                scope.launch {
+                    iCloudDriveManager.probe()
+                    iCloudBusy = false
+                }
+            },
         )
     }
 }

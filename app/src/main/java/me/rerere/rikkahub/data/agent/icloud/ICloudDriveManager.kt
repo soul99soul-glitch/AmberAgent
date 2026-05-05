@@ -26,15 +26,35 @@ class ICloudDriveManager(
 
     fun setVaultPath(path: String) {
         val normalized = ICloudDrivePath.normalizeUserPath(path)
+        val previous = _state.value
+        val readableBefore = previous.capability == ICloudDriveCapability.READ_ONLY ||
+            previous.capability == ICloudDriveCapability.READ_WRITE
+        val nextStatus = when {
+            !previous.enabled -> ICloudDriveStatus.NOT_CONFIGURED
+            readableBefore -> ICloudDriveStatus.READ_ONLY
+            previous.status == ICloudDriveStatus.ERROR -> ICloudDriveStatus.ERROR
+            else -> ICloudDriveStatus.LOGIN_REQUIRED
+        }
+        val nextCapability = when {
+            readableBefore -> ICloudDriveCapability.READ_ONLY
+            else -> ICloudDriveCapability.NONE
+        }
+        val message = when {
+            !previous.enabled -> null
+            readableBefore -> "iCloud Vault path saved. Run the read probe to validate this path."
+            previous.status == ICloudDriveStatus.ERROR -> previous.message
+            else -> "iCloud Vault path saved. Log in with WebView, then run the read probe."
+        }
+        val updatedAtMillis = System.currentTimeMillis()
         prefs.edit()
             .putString(KEY_VAULT_PATH, normalized)
             .putBoolean(KEY_WRITE_VALIDATED, false)
+            .putString(KEY_LAST_STATUS, nextStatus.wireName)
+            .putString(KEY_LAST_CAPABILITY, nextCapability.wireName)
+            .putString(KEY_LAST_MESSAGE, message)
+            .putLong(KEY_LAST_UPDATED_AT, updatedAtMillis)
             .apply()
-        _state.value = loadState().copy(
-            status = if (_state.value.enabled) ICloudDriveStatus.NOT_CONFIGURED else ICloudDriveStatus.NOT_CONFIGURED,
-            capability = ICloudDriveCapability.NONE,
-            message = null,
-        )
+        _state.value = loadState()
     }
 
     suspend fun probe(): ICloudDriveState = mutex.withLock {
@@ -179,7 +199,7 @@ class ICloudDriveManager(
         val writeValidated = prefs.getBoolean(KEY_WRITE_VALIDATED, false)
         val storedStatus = prefs.getString(KEY_LAST_STATUS, null)?.let { raw ->
             ICloudDriveStatus.entries.firstOrNull { it.wireName == raw }
-        }
+        }?.takeUnless { enabled && it == ICloudDriveStatus.NOT_CONFIGURED }
         val storedCapability = prefs.getString(KEY_LAST_CAPABILITY, null)?.let { raw ->
             ICloudDriveCapability.entries.firstOrNull { it.wireName == raw }
         }
@@ -188,7 +208,7 @@ class ICloudDriveManager(
         } else if (writeValidated) {
             ICloudDriveStatus.READ_WRITE
         } else {
-            ICloudDriveStatus.NOT_CONFIGURED
+            ICloudDriveStatus.LOGIN_REQUIRED
         }
         val defaultCapability = if (writeValidated) ICloudDriveCapability.READ_WRITE else ICloudDriveCapability.NONE
         return ICloudDriveState(
