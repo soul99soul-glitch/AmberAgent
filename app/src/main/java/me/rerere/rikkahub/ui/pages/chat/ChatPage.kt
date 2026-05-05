@@ -70,6 +70,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
@@ -105,6 +106,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
+    val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
@@ -198,6 +200,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
+                    contextCompacts = contextCompacts,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -230,6 +233,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
+                    contextCompacts = contextCompacts,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -257,6 +261,7 @@ private fun ChatPageContent(
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
+    contextCompacts: List<ConversationCompact>,
     drawerState: DrawerState,
     navController: Navigator,
     vm: ChatVM,
@@ -437,6 +442,7 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                contextCompacts = contextCompacts,
                 state = chatListState,
                 loading = loadingJob != null,
                 processingStatus = processingStatus,
@@ -825,6 +831,7 @@ private fun TopBar(
                     icon = HugeIcons.Menu03,
                     size = 42.dp,
                     iconSize = 24.dp,
+                    showBorder = false,
                     contentDescription = "Messages",
                 )
             }
@@ -850,8 +857,8 @@ private fun TopBar(
         },
         actions = {
             Row(
-                modifier = Modifier.padding(end = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(end = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 WorkspaceIconButton(
@@ -860,8 +867,8 @@ private fun TopBar(
                     },
                     icon = if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet,
                     contentDescription = "Chat Options",
-                    size = 42.dp,
-                    iconSize = 23.dp,
+                    size = 44.dp,
+                    iconSize = 24.dp,
                 )
 
                 WorkspaceIconButton(
@@ -871,8 +878,9 @@ private fun TopBar(
                     icon = HugeIcons.MessageAdd01,
                     contentDescription = "New Message",
                     tone = WorkspaceTone.Accent,
-                    size = 42.dp,
-                    iconSize = 23.dp,
+                    size = 44.dp,
+                    iconSize = 24.dp,
+                    containerColor = workspace.paper,
                 )
             }
         },

@@ -44,4 +44,13 @@ class MigrationBasicTest {
         helper.createDatabase(testDb, 15).close()
         helper.runMigrationsAndValidate(testDb, 16, true, Migration_15_16).close()
     }
+
+    @Test
+    fun migrate18To19AddsConversationContextTables() {
+        helper.createDatabase(testDb, 18).close()
+        val db = helper.runMigrationsAndValidate(testDb, 19, true, Migration_18_19)
+        db.query("SELECT COUNT(*) FROM conversation_compact").close()
+        db.query("SELECT COUNT(*) FROM conversation_context_event").close()
+        db.close()
+    }
 }

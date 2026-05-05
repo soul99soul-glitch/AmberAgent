@@ -61,6 +61,21 @@ class ToolRegistryTest {
         assertTrue(registry.metadata.single { it.name == "officepro_make_report" }.mutates)
     }
 
+    @Test
+    fun conversationContextToolsUseContextCategory() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool("conversation_context_status"),
+                stubTool("conversation_search"),
+                stubTool("conversation_expand"),
+                stubTool("conversation_compact"),
+            )
+        )
+
+        assertEquals(listOf("context", "context", "context", "context"), registry.metadata.map { it.category })
+        assertTrue(registry.metadata.single { it.name == "conversation_compact" }.mutates)
+    }
+
     private fun stubTool(
         name: String,
         needsApproval: Boolean = false,

@@ -28,6 +28,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.context.ConversationCompact
+import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
@@ -54,9 +56,13 @@ class ChatVM(
     private val analytics: FirebaseAnalytics,
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
+    private val contextRepository: ConversationContextRepository,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val contextCompacts: StateFlow<List<ConversationCompact>> =
+        contextRepository.getCompactsFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException

@@ -233,6 +233,7 @@ object ModelRegistry {
     private val DEEPSEEK_CHAT = defineModel {
         tokens("deepseek", "chat")
         toolAbility()
+        contextWindow(1_000_000)
     }
 
     private val DEEPSEEK_V3 = defineGroup {
@@ -247,16 +248,19 @@ object ModelRegistry {
     private val DEEPSEEK_REASONER = defineModel {
         tokens("deepseek", "reasoner")
         toolReasoningAbility()
+        contextWindow(1_000_000)
     }
 
     private val DEEPSEEK_V4_FLASH = defineModel {
         tokens("deepseek", "v", "4", "flash")
         toolReasoningAbility()
+        contextWindow(1_000_000)
     }
 
     private val DEEPSEEK_V4_PRO = defineModel {
         tokens("deepseek", "v", "4", "pro")
         toolReasoningAbility()
+        contextWindow(1_000_000)
     }
 
     private val DEEPSEEK_R1 = defineGroup {
@@ -538,6 +542,12 @@ object ModelRegistry {
             if (ModelAbility.TOOL in abilities) add(ModelAbility.TOOL)
             if (ModelAbility.REASONING in abilities) add(ModelAbility.REASONING)
         }
+    }
+
+    val MODEL_CONTEXT_WINDOW = ModelData { modelId ->
+        resolveModels(modelId)
+            .mapNotNull { it.contextWindowTokens }
+            .maxOrNull()
     }
 
     private fun resolveModels(modelId: String): List<ModelDefinition> {

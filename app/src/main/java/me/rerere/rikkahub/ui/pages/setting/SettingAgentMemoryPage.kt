@@ -191,6 +191,47 @@ fun SettingAgentMemoryPage() {
                         )
                     },
                 )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_title)) },
+                    supportingContent = {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(stringResource(R.string.setting_agent_memory_context_compaction_desc))
+                            Text(
+                                text = stringResource(R.string.setting_agent_memory_context_compaction_defaults),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.agentRuntime.contextCompaction.enabled,
+                            onCheckedChange = { enabled ->
+                                vm.updateAgentRuntime {
+                                    it.copy(
+                                        contextCompaction = it.contextCompaction.copy(enabled = enabled)
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.agentRuntime.contextCompaction.notifyOnly,
+                            onCheckedChange = { enabled ->
+                                vm.updateAgentRuntime {
+                                    it.copy(
+                                        contextCompaction = it.contextCompaction.copy(notifyOnly = enabled)
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
             }
 
             MemoryRecordsSection(

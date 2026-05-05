@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -13,9 +15,11 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -45,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -84,6 +89,7 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.icons.HeartIcon
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.toDp
@@ -92,6 +98,12 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 
+private val AmberAgentBuiltInProviderId = Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce")
+
+private fun ProviderSetting.isVisibleInModelPicker(): Boolean {
+    return !(builtIn && id == AmberAgentBuiltInProviderId)
+}
+
 @Composable
 fun ModelSelector(
     modelId: Uuid?,
@@ -99,48 +111,80 @@ fun ModelSelector(
     type: ModelType,
     modifier: Modifier = Modifier,
     onlyIcon: Boolean = false,
+    compact: Boolean = false,
     allowClear: Boolean = false,
     onSelect: (Model) -> Unit
 ) {
     var popup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val model = providers.findModelById(modelId ?: Uuid.random())
+    val visibleProviders = remember(providers) {
+        providers.fastFilter { it.isVisibleInModelPicker() }
+    }
+    val model = visibleProviders.findModelById(modelId ?: Uuid.random())
 
     if (!onlyIcon) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = {
-                    popup = true
-                },
+        if (compact) {
+            val workspace = workspaceColors()
+            Surface(
                 modifier = modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { popup = true },
+                shape = RoundedCornerShape(6.dp),
+                color = workspace.paper,
+                contentColor = workspace.ink,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
-                model?.modelId?.let {
-                    AutoAIIcon(
-                        it, Modifier
-                            .padding(end = 4.dp)
-                            .size(36.dp),
-                        color = Color.Transparent
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = 32.dp)
+                        .widthIn(max = 156.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = model?.compactDisplayName() ?: stringResource(R.string.model_list_select_model),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
                     )
                 }
-                Text(
-                    text = model?.displayName ?: stringResource(R.string.model_list_select_model),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
-            if (allowClear && model != null) {
-                IconButton(
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
                     onClick = {
-                        onSelect(Model())
-                    }
+                        popup = true
+                    },
+                    modifier = modifier
                 ) {
-                    Icon(
-                        imageVector = HugeIcons.Cancel01,
-                        contentDescription = "Clear"
+                    model?.modelId?.let {
+                        AutoAIIcon(
+                            it, Modifier
+                                .padding(end = 4.dp)
+                                .size(36.dp),
+                            color = Color.Transparent
+                        )
+                    }
+                    Text(
+                        text = model?.displayName ?: stringResource(R.string.model_list_select_model),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall
                     )
+                }
+                if (allowClear && model != null) {
+                    IconButton(
+                        onClick = {
+                            onSelect(Model())
+                        }
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = "Clear"
+                        )
+                    }
                 }
             }
         }
@@ -181,7 +225,7 @@ fun ModelSelector(
                     .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                val filteredProviderSettings = providers.fastFilter {
+                val filteredProviderSettings = visibleProviders.fastFilter {
                     it.enabled && it.models.fastAny { model -> model.type == type }
                 }
                 ModelList(
@@ -207,6 +251,25 @@ fun ModelSelector(
     }
 }
 
+private fun Model.compactDisplayName(): String {
+    val raw = displayName.ifBlank { modelId }.trim()
+    if (raw.isBlank()) return raw
+    return raw.split('-', '_', ' ')
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { token ->
+            when {
+                token.equals("deepseek", ignoreCase = true) -> "DeepSeek"
+                token.equals("gpt", ignoreCase = true) -> "GPT"
+                token.equals("claude", ignoreCase = true) -> "Claude"
+                token.equals("gemini", ignoreCase = true) -> "Gemini"
+                token.equals("qwen", ignoreCase = true) -> "Qwen"
+                token.matches(Regex("(?i)v\\d+")) -> token.uppercase()
+                token.length <= 2 && token.any { it.isDigit() } -> token.uppercase()
+                else -> token.replaceFirstChar { char -> char.uppercaseChar() }
+            }
+        }
+}
+
 @Composable
 private fun ColumnScope.ModelList(
     currentModel: Uuid? = null,
@@ -223,7 +286,8 @@ private fun ColumnScope.ModelList(
     val favoriteModels = settings.value.favoriteModels.mapNotNull { modelId ->
         val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
         if (model.type != modelType) return@mapNotNull null
-        val provider = model.findProvider(providers = settings.value.providers, checkOverwrite = false) ?: return@mapNotNull null
+        val provider = model.findProvider(providers = providers, checkOverwrite = false) ?: return@mapNotNull null
+        if (!provider.isVisibleInModelPicker()) return@mapNotNull null
         model to provider
     }
 

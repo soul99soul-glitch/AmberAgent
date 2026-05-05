@@ -12,6 +12,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,8 +79,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -94,6 +99,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
@@ -108,10 +114,11 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
@@ -143,6 +150,7 @@ import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
@@ -164,12 +172,12 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.utils.formatNumber
 import org.koin.compose.koinInject
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
-import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 
 enum class ExpandState {
@@ -420,82 +428,66 @@ fun ChatInput(
                         MediaFileInputRow(state = state)
                     }
 
+                    val selectedChatModelId = assistant.chatModelId ?: settings.chatModelId
+                    val chatModel = remember(settings.providers, selectedChatModelId) {
+                        settings.providers.findModelById(selectedChatModelId)
+                    }
                     TextInputRow(
                         state = state,
-                        onSendMessage = { sendMessage() }
+                        onSendMessage = { sendMessage() },
                     )
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Row(
+                        Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                .height(ComposerModelGroupHeight),
+                            contentAlignment = Alignment.BottomStart,
                         ) {
-                            // Model Picker
-                            ModelSelector(
-                                modelId = assistant.chatModelId ?: settings.chatModelId,
-                                providers = settings.providers,
-                                onSelect = {
-                                    onUpdateChatModel(it)
-                                    dismissExpand()
-                                },
-                                type = ModelType.CHAT,
-                                onlyIcon = true,
-                                modifier = Modifier,
-                            )
-
-                            // Search
-                            val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                            val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                            val chatModel = settings.getCurrentChatModel()
-                            SearchPickerButton(
-                                enableSearch = enableSearch,
-                                settings = settings,
-                                onToggleSearch = { enabled ->
-                                    onToggleSearch(enabled)
-                                    toaster.show(
-                                        message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                        duration = 1.seconds,
-                                        type = if (enabled) {
-                                            ToastType.Success
-                                        } else {
-                                            ToastType.Normal
-                                        }
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    horizontalAlignment = Alignment.Start,
+                                ) {
+                                    ContextUsageIndicator(
+                                        conversation = conversation,
+                                        model = chatModel,
+                                        modifier = Modifier.padding(start = 3.dp),
                                     )
-                                },
-                                onUpdateSearchService = onUpdateSearchService,
-                                model = chatModel,
-                            )
+                                    ModelSelector(
+                                        modelId = assistant.chatModelId ?: settings.chatModelId,
+                                        providers = settings.providers,
+                                        onSelect = {
+                                            onUpdateChatModel(it)
+                                            dismissExpand()
+                                        },
+                                        type = ModelType.CHAT,
+                                        compact = true,
+                                        modifier = Modifier,
+                                    )
+                                }
 
-                            // Reasoning
-                            val model = settings.getCurrentChatModel()
-                            if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                ReasoningButton(
-                                    reasoningLevel = assistant.reasoningLevel,
-                                    onUpdateReasoningLevel = {
-                                        onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                    },
-                                    onlyIcon = true,
-                                )
-                            }
-
-                            // MCP
-                            if (settings.mcpServers.isNotEmpty()) {
-                                McpPickerButton(
-                                    assistant = assistant,
-                                    servers = settings.mcpServers,
-                                    mcpManager = mcpManager,
-                                    onUpdateAssistant = {
-                                        onUpdateAssistant(it)
-                                    },
-                                )
+                                // MCP
+                                if (settings.mcpServers.isNotEmpty()) {
+                                    McpPickerButton(
+                                        assistant = assistant,
+                                        servers = settings.mcpServers,
+                                        mcpManager = mcpManager,
+                                        onUpdateAssistant = {
+                                            onUpdateAssistant(it)
+                                        },
+                                    )
+                                }
                             }
                         }
 
@@ -615,6 +607,86 @@ fun ChatInput(
             }
         }
     }
+}
+
+@Composable
+private fun ContextUsageIndicator(
+    conversation: Conversation,
+    model: Model?,
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    val usedTokens = remember(conversation.messageNodes) {
+        conversation.messageNodes.asReversed()
+            .map { it.currentMessage }
+            .firstOrNull { it.role == MessageRole.ASSISTANT }
+            ?.usage
+            ?.promptTokens
+            ?: estimateConversationTokens(conversation)
+    }
+    val contextWindow = remember(model?.modelId) {
+        model?.contextWindowTokens ?: model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
+    }
+    val ratio = if (contextWindow != null && contextWindow > 0) {
+        (usedTokens.toFloat() / contextWindow.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val ringColor = when {
+        ratio >= 0.7f -> workspace.red
+        ratio >= 0.5f -> workspace.amber
+        else -> workspace.muted.copy(alpha = 0.56f)
+    }
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Canvas(modifier = Modifier.size(10.dp)) {
+            val stroke = 1.6.dp.toPx()
+            val radius = (size.minDimension - stroke) / 2f
+            drawCircle(
+                color = workspace.faint.copy(alpha = 0.24f),
+                radius = radius,
+                style = Stroke(width = stroke),
+            )
+            drawArc(
+                color = ringColor,
+                startAngle = -90f,
+                sweepAngle = 360f * ratio,
+                useCenter = false,
+                topLeft = Offset(stroke / 2f, stroke / 2f),
+                size = Size(size.width - stroke, size.height - stroke),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Text(
+            text = "${usedTokens.formatNumber()}/${contextWindow?.formatNumber() ?: "--"} context",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            color = workspace.muted.copy(alpha = 0.72f),
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
+    }
+}
+
+private fun estimateConversationTokens(conversation: Conversation): Int {
+    val chars = conversation.currentMessages.sumOf { message ->
+        message.parts.sumOf { it.estimatedTokenChars() }
+    }
+    return (chars / 4).coerceAtLeast(0)
+}
+
+private fun UIMessagePart.estimatedTokenChars(): Int = when (this) {
+    is UIMessagePart.Text -> text.length
+    is UIMessagePart.Reasoning -> reasoning.length
+    is UIMessagePart.Document -> fileName.length
+    is UIMessagePart.Tool -> input.length + output.sumOf { it.estimatedTokenChars() }
+    is UIMessagePart.Image,
+    is UIMessagePart.Video,
+    is UIMessagePart.Audio -> 0
+    else -> 0
 }
 
 @Composable
@@ -1379,6 +1451,7 @@ private const val MAX_SLASH_COMMANDS = 6
 private const val MAX_SLASH_COMMAND_TITLE_CHARS = 32
 private val ComposerButtonSize = 44.dp
 private val ComposerButtonIconSize = 28.dp
+private val ComposerModelGroupHeight = 48.dp
 
 private fun String.firstHttpUrl(): String? =
     HTTP_URL_REGEX.find(this)?.value?.trimEnd('.', ',', ';', ')')
@@ -1548,15 +1621,18 @@ private fun TextInputRow(
                 focusedPlaceholderColor = workspace.faint,
                 unfocusedPlaceholderColor = workspace.faint,
             ),
-            trailingIcon = {
-                if (isFocused) {
+            trailingIcon = if (isFocused) {
+                {
                     IconButton(
                         onClick = {
                             isFullScreen = !isFullScreen
-                        }) {
+                        },
+                    ) {
                         Icon(HugeIcons.FullScreen, null)
                     }
                 }
+            } else {
+                null
             },
             leadingIcon = if (quickMessages.isNotEmpty()) {
                 {

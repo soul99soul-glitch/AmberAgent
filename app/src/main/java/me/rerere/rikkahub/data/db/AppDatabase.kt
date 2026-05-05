@@ -7,12 +7,16 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import me.rerere.ai.core.TokenUsage
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
+import me.rerere.rikkahub.data.db.dao.ConversationCompactDAO
+import me.rerere.rikkahub.data.db.dao.ConversationContextEventDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
+import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
+import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
@@ -29,9 +33,11 @@ import me.rerere.rikkahub.utils.JsonInstant
         GenMediaEntity::class,
         MessageNodeEntity::class,
         ManagedFileEntity::class,
-        FavoriteEntity::class
+        FavoriteEntity::class,
+        ConversationCompactEntity::class,
+        ConversationContextEventEntity::class,
     ],
-    version = 18,
+    version = 19,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -50,6 +56,10 @@ import me.rerere.rikkahub.utils.JsonInstant
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun conversationDao(): ConversationDAO
+
+    abstract fun conversationCompactDao(): ConversationCompactDAO
+
+    abstract fun conversationContextEventDao(): ConversationContextEventDAO
 
     abstract fun memoryDao(): MemoryDAO
 

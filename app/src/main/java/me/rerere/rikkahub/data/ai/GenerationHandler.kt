@@ -30,7 +30,6 @@ import me.rerere.ai.ui.MessageStreamAccumulator
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
-import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -42,8 +41,10 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
+import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
@@ -82,6 +83,7 @@ class GenerationHandler(
     private val memoryRepo: MemoryRepository,
     private val conversationRepo: ConversationRepository,
     private val aiLoggingManager: AILoggingManager,
+    private val conversationContextEngine: ConversationContextEngine,
 ) {
     fun generateText(
         settings: Settings,
@@ -97,6 +99,7 @@ class GenerationHandler(
         autoApproveTools: Boolean = false,
         autoApproveHighRiskTools: Boolean = false,
         autoApprovedToolNames: Set<String> = emptySet(),
+        conversation: Conversation? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -152,6 +155,7 @@ class GenerationHandler(
                     memories = memories ?: emptyList(),
                     stream = assistant.streamOutput,
                     processingStatus = processingStatus,
+                    conversation = conversation,
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -333,6 +337,7 @@ class GenerationHandler(
         memories: List<AssistantMemory>,
         stream: Boolean,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
+        conversation: Conversation? = null,
     ) {
         val coreMemories = if (settings.agentRuntime.enableCoreMemory) {
             memories.orEmpty()
@@ -350,6 +355,14 @@ class GenerationHandler(
             emptyList()
         }
         val sessionDefaults = settings.resolveSessionDefaults(assistant, model)
+        val preparedContext = conversationContextEngine.prepareContext(
+            conversation = conversation,
+            settings = settings,
+            model = model,
+            messages = messages,
+            tools = tools,
+            contextMessageSize = sessionDefaults.contextMessageSize,
+        )
         val internalMessages = buildList {
             val system = buildString {
                 append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
@@ -385,7 +398,7 @@ class GenerationHandler(
                 }
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
-            addAll(messages.limitContext(sessionDefaults.contextMessageSize))
+            addAll(preparedContext.messages)
         }.transforms(
             transformers = transformers,
             context = context,

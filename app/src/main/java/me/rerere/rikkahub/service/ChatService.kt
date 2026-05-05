@@ -13,9 +13,6 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,9 +69,12 @@ import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import me.rerere.rikkahub.data.context.ConversationContextEngine
+import me.rerere.rikkahub.data.datastore.toCompactPolicy
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.Settings
@@ -146,6 +146,7 @@ class ChatService(
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
     private val workspaceManager: WorkspaceManager,
+    private val contextEngine: ConversationContextEngine,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -568,6 +569,7 @@ class ChatService(
                 senderName = senderName,
                 settings = settings,
             )
+            val runTools = createRunTools(settings, conversationId)
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -598,7 +600,8 @@ class ChatService(
                     MIN_AGENT_TOOL_LOOP_STEPS,
                     MAX_AGENT_TOOL_LOOP_STEPS,
                 ),
-                tools = createRunTools(settings),
+                tools = runTools,
+                conversation = conversation,
             ).onCompletion { cause ->
                 cancelLiveUpdateNotification(conversationId)
 
@@ -857,82 +860,25 @@ class ChatService(
         keepRecentMessages: Int = 32
     ): Result<Unit> = runCatching {
         val settings = settingsStore.settingsFlow.first()
-        val model = settings.findModelById(settings.compressModelId)
-            ?: settings.getCurrentChatModel()
-            ?: throw IllegalStateException("No model available for compression")
-        val provider = model.findProvider(settings.providers)
-            ?: throw IllegalStateException("Provider not found")
-
-        val providerHandler = providerManager.getProviderByType(provider)
-
-        val maxMessagesPerChunk = 256
-        val allMessages = conversation.currentMessages
-
-        // Split messages into those to compress and those to keep
-        val messagesToCompress: List<UIMessage>
-        val messagesToKeep: List<UIMessage>
-
-        if (keepRecentMessages > 0 && allMessages.size > keepRecentMessages) {
-            messagesToCompress = allMessages.dropLast(keepRecentMessages)
-            messagesToKeep = allMessages.takeLast(keepRecentMessages)
-        } else if (keepRecentMessages > 0) {
-            // Not enough messages to compress while keeping recent ones
+        if (keepRecentMessages > 0 && conversation.currentMessages.size <= keepRecentMessages) {
             throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages))
-        } else {
-            messagesToCompress = allMessages
-            messagesToKeep = emptyList()
         }
-
-        fun splitMessages(messages: List<UIMessage>): List<List<UIMessage>> {
-            if (messages.size <= maxMessagesPerChunk) return listOf(messages)
-            val mid = messages.size / 2
-            val left = splitMessages(messages.subList(0, mid))
-            val right = splitMessages(messages.subList(mid, messages.size))
-            return left + right
-        }
-
-        suspend fun compressMessages(messages: List<UIMessage>): String {
-            val contentToCompress = messages.joinToString("\n\n") { it.summaryAsText() }
-            val prompt = settings.compressPrompt.applyPlaceholders(
-                "content" to contentToCompress,
-                "target_tokens" to targetTokens.toString(),
-                "additional_context" to if (additionalPrompt.isNotBlank()) {
-                    "Additional instructions from user: $additionalPrompt"
-                } else "",
-                "locale" to Locale.getDefault().displayName
-            )
-
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(UIMessage.user(prompt)),
-                params = TextGenerationParams(
-                    model = model,
-                ),
-            )
-
-            return result.choices[0].message?.toText()?.trim()
-                ?: throw IllegalStateException("Failed to generate compressed summary")
-        }
-
-        val compressedSummaries = coroutineScope {
-            splitMessages(messagesToCompress)
-                .map { chunk -> async { compressMessages(chunk) } }
-                .awaitAll()
-        }
-
-        // Create new conversation with compressed history as multiple user messages + kept messages
-        val newMessageNodes = buildList {
-            compressedSummaries.forEach { summary ->
-                add(UIMessage.user(summary).toMessageNode())
-            }
-            addAll(messagesToKeep.map { it.toMessageNode() })
-        }
-        val newConversation = conversation.copy(
-            messageNodes = newMessageNodes,
-            chatSuggestions = emptyList(),
+        val result = contextEngine.compactConversation(
+            conversation = conversation,
+            settings = settings,
+            policy = settings.agentRuntime.contextCompaction.toCompactPolicy().copy(
+                enabled = true,
+                keepRecentTurns = (keepRecentMessages / 2).coerceAtLeast(1),
+                maxSummaryTokens = targetTokens,
+            ),
+            model = settings.findModelById(settings.compressModelId) ?: settings.getCurrentChatModel(),
+            reason = "manual_compact_dialog",
+            additionalPrompt = additionalPrompt,
+            force = true,
         )
-
-        saveConversation(conversationId, newConversation)
+        if (result.status != "completed") {
+            throw IllegalStateException(result.error ?: result.status)
+        }
     }
 
     // ---- 通知 ----
@@ -1285,9 +1231,9 @@ class ChatService(
         updateConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
     }
 
-    internal fun createDebugRunTools(settings: Settings): List<Tool> = createRunTools(settings)
+    internal fun createDebugRunTools(settings: Settings): List<Tool> = createRunTools(settings, null)
 
-    private fun createRunTools(settings: Settings): List<Tool> {
+    private fun createRunTools(settings: Settings, conversationId: Uuid?): List<Tool> {
         val rawTools = buildList {
             if (settings.enableWebSearch) {
                 addAll(createSearchTools(settings))
@@ -1337,6 +1283,16 @@ class ChatService(
                 )
             }
             addAll(createMemoryTools(settings))
+            if (conversationId != null) {
+                addAll(
+                    ConversationContextTools(
+                        contextEngine = contextEngine,
+                        conversationProvider = { getConversationFlow(conversationId).value },
+                        settingsProvider = { settingsStore.settingsFlow.first() },
+                        modelProvider = { settingsStore.settingsFlow.first().getCurrentChatModel() },
+                    ).tools()
+                )
+            }
         }
         val registry = ToolRegistry.from(rawTools)
         return registry.tools() + localTools.createToolsListTool(registry)

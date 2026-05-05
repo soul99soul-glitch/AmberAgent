@@ -16,6 +16,7 @@ data class Model(
     val outputModalities: List<Modality> = listOf(Modality.TEXT),
     val abilities: List<ModelAbility> = emptyList(),
     val tools: Set<BuiltInTools> = emptySet(),
+    val contextWindowTokens: Int? = null,
     val providerOverwrite: ProviderSetting? = null,
 )
 
@@ -55,6 +56,5 @@ sealed class BuiltInTools {
     @SerialName("image_generation")
     data object ImageGeneration : BuiltInTools()
 }
-
 
 

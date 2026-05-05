@@ -196,6 +196,8 @@ fun WorkspaceIconButton(
     enabled: Boolean = true,
     size: Dp = 32.dp,
     iconSize: Dp = 15.dp,
+    showBorder: Boolean = true,
+    containerColor: Color? = null,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
     icon: ImageVector,
     contentDescription: String?,
@@ -214,9 +216,9 @@ fun WorkspaceIconButton(
             .clip(RoundedCornerShape(6.dp))
             .clickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(6.dp),
-        color = if (tone == WorkspaceTone.Accent) colors.blueContainer else colors.paper,
+        color = containerColor ?: if (tone == WorkspaceTone.Accent) colors.blueContainer else colors.paper,
         contentColor = contentColor,
-        border = workspaceBorder(alpha = if (enabled) 1f else 0.48f),
+        border = if (showBorder) workspaceBorder(alpha = if (enabled) 1f else 0.48f) else null,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(

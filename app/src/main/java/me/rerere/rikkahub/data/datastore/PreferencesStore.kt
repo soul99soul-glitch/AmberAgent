@@ -36,6 +36,7 @@ import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
+import me.rerere.rikkahub.data.context.CompactPolicy
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -562,6 +563,26 @@ data class AgentRuntimeSetting(
     val terminalOutputTailChars: Int = 256 * 1024,
     val terminalInstallTimeoutMs: Long = 15 * 60_000L,
     val feishuOfficeEnhancement: FeishuOfficeEnhancementSetting = FeishuOfficeEnhancementSetting(),
+    val contextCompaction: ContextCompactionSetting = ContextCompactionSetting(),
+)
+
+@Serializable
+data class ContextCompactionSetting(
+    val enabled: Boolean = true,
+    val notifyOnly: Boolean = false,
+    val precompactRatio: Float = 0.70f,
+    val forceRatio: Float = 0.85f,
+    val keepRecentTurns: Int = 12,
+    val maxSummaryTokens: Int = 2_000,
+)
+
+fun ContextCompactionSetting.toCompactPolicy() = CompactPolicy(
+    enabled = enabled,
+    notifyOnly = notifyOnly,
+    precompactRatio = precompactRatio,
+    forceRatio = forceRatio,
+    keepRecentTurns = keepRecentTurns,
+    maxSummaryTokens = maxSummaryTokens,
 )
 
 @Serializable

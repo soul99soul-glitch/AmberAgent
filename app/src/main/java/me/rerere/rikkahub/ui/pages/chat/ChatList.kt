@@ -7,6 +7,7 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowDownDouble
 import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
+import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedContent
@@ -45,6 +46,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -91,6 +93,7 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getAssistantById
@@ -157,9 +160,47 @@ private fun ToolApprovalState.compactRenderToken(): String = when (this) {
 }
 
 @Composable
+private fun ContextCompactMarker(modifier: Modifier = Modifier) {
+    val workspace = workspaceColors()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = workspace.hairline,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Package01,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = workspace.muted,
+            )
+            Text(
+                text = stringResource(R.string.chat_context_auto_compacted),
+                style = MaterialTheme.typography.labelLarge,
+                color = workspace.muted,
+            )
+        }
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = workspace.hairline,
+        )
+    }
+}
+
+@Composable
 fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    contextCompacts: List<ConversationCompact> = emptyList(),
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -202,6 +243,7 @@ fun ChatList(
             ChatListNormal(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                contextCompacts = contextCompacts,
                 state = state,
                 loading = loading,
                 processingStatus = processingStatus,
@@ -231,6 +273,7 @@ fun ChatList(
 private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    contextCompacts: List<ConversationCompact>,
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -346,6 +389,16 @@ private fun ChatListNormal(
                 key = { index, item -> item.id },
             ) { index, node ->
                 Column {
+                    val markers = remember(contextCompacts, index) {
+                        contextCompacts.filter { compact ->
+                            compact.status == "completed" && compact.sourceEndIndex == index - 1
+                        }
+                    }
+                    markers.forEach {
+                        ContextCompactMarker(
+                            modifier = Modifier.padding(bottom = TimelineItemSpacing)
+                        )
+                    }
                     ListSelectableItem(
                         key = node.id,
                         onSelectChange = {
@@ -632,6 +685,7 @@ private fun buildHighlightedText(
 private fun ChatListPreview(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    contextCompacts: List<ConversationCompact> = emptyList(),
     settings: Settings,
     hazeState: HazeState,
     animatedVisibilityScope: AnimatedVisibilityScope,

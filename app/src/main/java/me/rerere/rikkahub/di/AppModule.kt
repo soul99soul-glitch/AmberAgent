@@ -28,6 +28,8 @@ import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import me.rerere.rikkahub.data.context.ConversationContextEngine
+import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.EmojiData
@@ -78,6 +80,14 @@ val appModule = module {
 
     single {
         FeishuOfficeTools(get(), get())
+    }
+
+    single {
+        ConversationContextRepository(get(), get(), get())
+    }
+
+    single {
+        ConversationContextEngine(get(), get(), get(), get())
     }
 
     single {
@@ -176,6 +186,7 @@ val appModule = module {
             filesManager = get(),
             skillManager = get(),
             workspaceManager = get(),
+            contextEngine = get(),
         )
     }
 

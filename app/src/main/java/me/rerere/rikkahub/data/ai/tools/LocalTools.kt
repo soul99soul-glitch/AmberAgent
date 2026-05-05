@@ -622,7 +622,7 @@ class LocalTools(
                 properties = buildJsonObject {
                     put("category", buildJsonObject {
                         put("type", "string")
-                        put("description", "Optional category filter: workspace, cloud, terminal, web, webview, screen, system, memory, skill, mcp, utility.")
+                        put("description", "Optional category filter: workspace, cloud, terminal, web, webview, screen, system, memory, context, skill, mcp, utility.")
                     })
                     put("query", buildJsonObject {
                         put("type", "string")

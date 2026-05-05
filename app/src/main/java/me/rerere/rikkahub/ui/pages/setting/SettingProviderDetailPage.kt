@@ -249,6 +249,36 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     }
 }
 
+private fun parseContextWindowInput(input: String): Int? {
+    val compact = input.trim()
+        .replace(",", "")
+        .replace("_", "")
+        .replace(" ", "")
+    if (compact.isBlank()) return null
+
+    val multiplier = when {
+        compact.endsWith("k", ignoreCase = true) -> 1_000.0
+        compact.endsWith("m", ignoreCase = true) -> 1_000_000.0
+        else -> 1.0
+    }
+    val number = compact
+        .removeSuffix("K")
+        .removeSuffix("k")
+        .removeSuffix("M")
+        .removeSuffix("m")
+        .toDoubleOrNull()
+        ?: return null
+    return (number * multiplier)
+        .coerceIn(1.0, Int.MAX_VALUE.toDouble())
+        .toInt()
+}
+
+private fun Int.formatContextWindowInput(): String = when {
+    this % 1_000_000 == 0 -> "${this / 1_000_000}M"
+    this % 1_000 == 0 -> "${this / 1_000}K"
+    else -> toString()
+}
+
 @Composable
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
@@ -501,13 +531,15 @@ private fun ModelSettingsForm(
         val inputModality = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id)
         val outputModality = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id)
         val abilities = ModelRegistry.MODEL_ABILITIES.getData(id)
+        val contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(id)
         onModelChange(
             model.copy(
                 modelId = id,
                 displayName = id,
                 inputModalities = inputModality,
                 outputModalities = outputModality,
-                abilities = abilities
+                abilities = abilities,
+                contextWindowTokens = contextWindowTokens,
             )
         )
     }
@@ -590,6 +622,22 @@ private fun ModelSettingsForm(
                                 }
                             }
                         )
+
+                        if (model.type == ModelType.CHAT) {
+                            OutlinedTextField(
+                                value = model.contextWindowTokens?.formatContextWindowInput().orEmpty(),
+                                onValueChange = {
+                                    onModelChange(model.copy(contextWindowTokens = parseContextWindowInput(it)))
+                                },
+                                label = { Text(stringResource(R.string.setting_provider_page_model_context_window)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = {
+                                    Text(stringResource(R.string.setting_provider_page_model_context_window_placeholder))
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                                singleLine = true,
+                            )
+                        }
 
                         ModelTypeSelector(
                             selectedType = model.type,
@@ -688,18 +736,20 @@ private fun AddModelButton(
         ModelPicker(
             models = models,
             selectedModels = selectedModels,
-            onModelSelected = { model ->
-                val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId)
-                val outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId)
-                val abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
-                onAddModel(
-                    model.copy(
-                        inputModalities = inputModalities,
-                        outputModalities = outputModalities,
-                        abilities = abilities
+                onModelSelected = { model ->
+                    val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId)
+                    val outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId)
+                    val abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
+                    val contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(model.modelId)
+                    onAddModel(
+                        model.copy(
+                            inputModalities = inputModalities,
+                            outputModalities = outputModalities,
+                            abilities = abilities,
+                            contextWindowTokens = contextWindowTokens,
+                        )
                     )
-                )
-            },
+                },
             onModelDeselected = { model ->
                 onRemoveModel(model)
             },
@@ -712,7 +762,8 @@ private fun AddModelButton(
                             model.copy(
                                 inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId),
                                 outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId),
-                                abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
+                                abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId),
+                                contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(model.modelId),
                             )
                         }
                     )
@@ -941,6 +992,7 @@ private fun ModelPicker(
                                                 inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it.modelId),
                                                 outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it.modelId),
                                                 abilities = ModelRegistry.MODEL_ABILITIES.getData(it.modelId),
+                                                contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it.modelId),
                                             )
                                         }
                                         ModelModalityTag(
