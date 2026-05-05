@@ -4,18 +4,17 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +43,7 @@ import kotlin.uuid.Uuid
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Earth
@@ -52,7 +52,6 @@ import me.rerere.hugeicons.stroke.Message01
 import me.rerere.hugeicons.stroke.MessageMultiple01
 import me.rerere.hugeicons.stroke.Notebook01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.View
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
@@ -65,7 +64,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
@@ -80,13 +79,6 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val workspace = workspaceColors()
     var showGroupDefaults by remember { mutableStateOf(false) }
-    val rowColors = ListItemDefaults.colors(
-        containerColor = workspace.paper,
-        headlineColor = workspace.ink,
-        supportingColor = workspace.muted,
-        leadingIconColor = workspace.muted,
-        trailingIconColor = workspace.muted,
-    )
 
     Scaffold(
         topBar = {
@@ -115,76 +107,38 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item("chat") {
-                CardGroup(
+                ModelSection(
                     title = { Text(stringResource(R.string.setting_model_page_chat_section)) },
-                    colors = rowColors,
                 ) {
-                    item(
-                        leadingContent = {
-                            SettingModelLeadingIcon(HugeIcons.Message01, tone = WorkspaceTone.Accent)
-                        },
-                        headlineContent = {
-                            Text(stringResource(R.string.setting_model_page_chat_model))
-                        },
-                        supportingContent = {
-                            ModelPickerRow(
-                                description = stringResource(R.string.setting_model_page_chat_model_desc),
-                                modelId = settings.chatModelId,
-                                providers = settings.providers,
-                                onSelect = {
-                                    vm.updateSettings(settings.copy(chatModelId = it.id))
-                                },
-                            )
-                        },
+                    DefaultChatModelSetting(
+                        settings = settings,
+                        vm = vm,
                     )
                 }
             }
 
             item("assistantTasks") {
-                CardGroup(
+                ModelSection(
                     title = { Text(stringResource(R.string.setting_model_page_auxiliary_section)) },
-                    colors = rowColors,
                 ) {
-                    item {
-                        DefaultTitleModelSetting(settings = settings, vm = vm)
-                    }
-                    item {
-                        DefaultSuggestionModelSetting(settings = settings, vm = vm)
-                    }
-                    item {
-                        DefaultTranslationModelSetting(settings = settings, vm = vm)
-                    }
-                    item {
-                        DefaultOcrModelSetting(settings = settings, vm = vm)
-                    }
-                    item {
-                        DefaultCompressModelSetting(settings = settings, vm = vm)
-                    }
+                    DefaultTitleModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
+                    DefaultSuggestionModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
+                    DefaultTranslationModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
+                    DefaultOcrModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
+                    DefaultCompressModelSetting(settings = settings, vm = vm)
                 }
             }
 
             item("advanced") {
-                CardGroup(
+                ModelSection(
                     title = { Text(stringResource(R.string.setting_model_page_advanced_section)) },
-                    colors = rowColors,
                 ) {
-                    item(
+                    GroupDefaultsEntry(
                         onClick = { showGroupDefaults = true },
-                        leadingContent = {
-                            SettingModelLeadingIcon(HugeIcons.Settings03)
-                        },
-                        headlineContent = {
-                            Text(stringResource(R.string.setting_model_page_group_session_defaults))
-                        },
-                        supportingContent = {
-                            Text(stringResource(R.string.setting_model_page_group_session_defaults_desc))
-                        },
-                        trailingContent = {
-                            WorkspaceStatusPill(
-                                text = stringResource(R.string.setting_model_page_configure),
-                                tone = WorkspaceTone.Accent,
-                            )
-                        },
                     )
                 }
             }
@@ -196,6 +150,28 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
             settings = settings,
             vm = vm,
             onDismissRequest = { showGroupDefaults = false },
+        )
+    }
+}
+
+@Composable
+private fun DefaultChatModelSetting(
+    settings: Settings,
+    vm: SettingVM,
+) {
+    SettingModelRow(
+        title = stringResource(R.string.setting_model_page_chat_model),
+        description = stringResource(R.string.setting_model_page_chat_model_desc),
+        icon = HugeIcons.Message01,
+        tone = WorkspaceTone.Accent,
+    ) {
+        ModelPickerRow(
+            description = null,
+            modelId = settings.chatModelId,
+            providers = settings.providers,
+            onSelect = {
+                vm.updateSettings(settings.copy(chatModelId = it.id))
+            },
         )
     }
 }
@@ -377,7 +353,7 @@ private fun ModelTaskSetting(
     description: String,
     icon: ImageVector,
     modelId: Uuid?,
-    providers: List<me.rerere.ai.provider.ProviderSetting>,
+    providers: List<ProviderSetting>,
     allowClear: Boolean = false,
     onSelect: (Model) -> Unit,
     onOpenParams: () -> Unit,
@@ -413,7 +389,9 @@ private fun SettingModelRow(
     content: @Composable () -> Unit,
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
@@ -445,7 +423,7 @@ private fun SettingModelRow(
 private fun ModelPickerRow(
     description: String?,
     modelId: Uuid?,
-    providers: List<me.rerere.ai.provider.ProviderSetting>,
+    providers: List<ProviderSetting>,
     allowClear: Boolean = false,
     onSelect: (Model) -> Unit,
     trailingContent: (@Composable () -> Unit)? = null,
@@ -473,7 +451,7 @@ private fun ModelPickerRow(
                     onSelect = onSelect,
                     providers = providers,
                     allowClear = allowClear,
-                    modifier = Modifier.width(210.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             trailingContent?.invoke()
@@ -665,6 +643,84 @@ private fun ModelGroupSessionDefaultsSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ModelSection(
+    title: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val workspace = workspaceColors()
+    Column {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides workspace.muted,
+        ) {
+            androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleSmall) {
+                Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 8.dp)) {
+                    title()
+                }
+            }
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
+        ) {
+            Column(
+                modifier = Modifier.padding(vertical = 4.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModelSectionDivider() {
+    WorkspaceDivider(modifier = Modifier.padding(start = 56.dp))
+}
+
+@Composable
+private fun GroupDefaultsEntry(
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = workspaceColors().paper,
+        contentColor = workspaceColors().ink,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SettingModelLeadingIcon(HugeIcons.Settings03)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_model_page_group_session_defaults),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = stringResource(R.string.setting_model_page_group_session_defaults_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspaceColors().muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            WorkspaceStatusPill(
+                text = stringResource(R.string.setting_model_page_configure),
+                tone = WorkspaceTone.Accent,
+            )
         }
     }
 }
