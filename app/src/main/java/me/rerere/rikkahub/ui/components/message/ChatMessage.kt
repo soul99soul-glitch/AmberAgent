@@ -409,7 +409,6 @@ private fun MessagePartsBlock(
                                         ),
                                         onClickCitation = handleClickCitation,
                                         modifier = Modifier
-                                            .fillMaxWidth()
                                             .animateContentSize()
                                     )
                                 }

@@ -82,7 +82,7 @@ class MessageStreamAccumulator(
         }
 
         fun snapshot(): UIMessage = source.copy(
-            parts = parts.map { it.snapshot() },
+            parts = parts.map { it.snapshot() }.coalesceStreamParts(),
             annotations = annotations,
             usage = usage,
         )
@@ -238,4 +238,62 @@ private fun UIMessagePart.toMutablePart(): MutablePart {
         is UIMessagePart.Tool -> MutablePart.Tool(this)
         else -> MutablePart.Static(this)
     }
+}
+
+private fun List<UIMessagePart>.coalesceStreamParts(): List<UIMessagePart> {
+    val result = mutableListOf<UIMessagePart>()
+    var pendingText: UIMessagePart.Text? = null
+    var pendingExplicitEmptyReasoning: UIMessagePart.Reasoning? = null
+
+    fun flushText() {
+        pendingText?.let { result += it }
+        pendingText = null
+    }
+
+    fun flushExplicitEmptyReasoning() {
+        val marker = pendingExplicitEmptyReasoning ?: return
+        if (result.none { it is UIMessagePart.Reasoning && it.hasExplicitReasoningContentField() }) {
+            result += marker
+        }
+        pendingExplicitEmptyReasoning = null
+    }
+
+    for (part in this) {
+        when (part) {
+            is UIMessagePart.Text -> {
+                if (part.text.isEmpty()) continue
+                val previous = pendingText
+                pendingText = if (previous == null) {
+                    part
+                } else {
+                    previous.copy(
+                        text = previous.text + part.text,
+                        metadata = part.metadata ?: previous.metadata,
+                    )
+                }
+            }
+
+            is UIMessagePart.Reasoning -> {
+                if (part.reasoning.isBlank()) {
+                    if (part.hasExplicitReasoningContentField()) {
+                        pendingExplicitEmptyReasoning = pendingExplicitEmptyReasoning ?: part
+                    }
+                } else {
+                    flushText()
+                    pendingExplicitEmptyReasoning = null
+                    result += part
+                }
+            }
+
+            else -> {
+                flushText()
+                flushExplicitEmptyReasoning()
+                result += part
+            }
+        }
+    }
+
+    flushText()
+    flushExplicitEmptyReasoning()
+    return result
 }

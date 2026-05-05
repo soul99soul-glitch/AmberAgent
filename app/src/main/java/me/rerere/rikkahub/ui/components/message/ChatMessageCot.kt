@@ -31,6 +31,8 @@ sealed interface MessagePartBlock {
 fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
     val result = mutableListOf<MessagePartBlock>()
     var currentThinkingSteps = mutableListOf<ThinkingStep>()
+    var pendingText: UIMessagePart.Text? = null
+    var pendingTextIndex = -1
 
     fun flushThinkingSteps() {
         if (currentThinkingSteps.isNotEmpty()) {
@@ -39,24 +41,50 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
         }
     }
 
+    fun flushText() {
+        pendingText?.let {
+            result.add(MessagePartBlock.ContentBlock(it, pendingTextIndex))
+        }
+        pendingText = null
+        pendingTextIndex = -1
+    }
+
     this.fastForEachIndexed { index, part ->
         when (part) {
             is UIMessagePart.Reasoning -> {
                 if (part.reasoning.isNotBlank()) {
+                    flushText()
                     currentThinkingSteps.add(ThinkingStep.ReasoningStep(part))
                 }
             }
 
             is UIMessagePart.Tool -> {
+                flushText()
                 currentThinkingSteps.add(ThinkingStep.ToolStep(part))
             }
 
+            is UIMessagePart.Text -> {
+                flushThinkingSteps()
+                val previous = pendingText
+                pendingText = if (previous == null) {
+                    pendingTextIndex = index
+                    part
+                } else {
+                    previous.copy(
+                        text = previous.text + part.text,
+                        metadata = part.metadata ?: previous.metadata,
+                    )
+                }
+            }
+
             else -> {
+                flushText()
                 flushThinkingSteps()
                 result.add(MessagePartBlock.ContentBlock(part, index))
             }
         }
     }
+    flushText()
     flushThinkingSteps()
     return result
 }
