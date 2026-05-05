@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.sync.copyZipEntryToFile
 import me.rerere.rikkahub.data.sync.databaseTempFile
+import me.rerere.rikkahub.data.sync.encodeSettingsForBackup
 import me.rerere.rikkahub.data.sync.inspectBackupArchive
 import me.rerere.rikkahub.data.sync.replaceDatabaseFilesFromTemp
 import me.rerere.rikkahub.data.sync.requireSafeZipEntryName
@@ -152,7 +153,7 @@ class WebDavSync(
             addVirtualFileToZip(
                 zipOut = zipOut,
                 name = "settings.json",
-                content = json.encodeToString(settingsStore.settingsFlow.value)
+                content = json.encodeSettingsForBackup(settingsStore.settingsFlow.value)
             )
 
             // Backup database files

@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
+import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
@@ -609,7 +610,7 @@ class LocalTools(
         )
     }
 
-    fun createToolsListTool(toolsSnapshot: List<Tool>) = Tool(
+    fun createToolsListTool(registry: ToolRegistry) = Tool(
         name = "tools_list",
         description = "List AmberAgent tools currently available in this run, including category, approval policy, permission needs, and optional schema.",
         parameters = {
@@ -639,12 +640,14 @@ class LocalTools(
             val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val includeSchema = input.jsonObject["include_schema"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
             val includeDisabled = input.jsonObject["include_disabled"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-            val tools = toolsSnapshot
-                .filter { tool -> categoryFilter == null || tool.category() == categoryFilter }
-                .filter { tool ->
+            val toolDefinitions = registry.tools().associateBy { it.name }
+            val tools = registry.metadata
+                .filter { metadata -> categoryFilter == null || metadata.category == categoryFilter }
+                .filter { metadata ->
+                    val tool = toolDefinitions[metadata.name]
                     query.isBlank() ||
-                        tool.name.contains(query, ignoreCase = true) ||
-                        tool.description.contains(query, ignoreCase = true)
+                        metadata.name.contains(query, ignoreCase = true) ||
+                        tool?.description.orEmpty().contains(query, ignoreCase = true)
                 }
             val payload = buildJsonObject {
                 put("enabled_count", tools.size)
@@ -655,19 +658,22 @@ class LocalTools(
                 put(
                     "tools",
                     buildJsonArray {
-                        tools.forEach { tool ->
+                        tools.forEach { metadata ->
+                            val tool = toolDefinitions[metadata.name]
                             val capabilities = permissionBroker.capabilities.filter { capability ->
-                                tool.name in capability.toolNames
+                                metadata.name in capability.toolNames
                             }
                             add(
                                 buildJsonObject {
-                                    put("name", tool.name)
-                                    put("category", tool.category())
-                                    put("description", tool.description.take(240))
+                                    put("name", metadata.name)
+                                    put("category", metadata.category)
+                                    put("description", tool?.description.orEmpty().take(240))
                                     put("enabled", true)
-                                    put("needs_approval", tool.needsApproval)
-                                    put("allows_auto_approval", tool.allowsAutoApproval)
-                                    put("risk", capabilities.maxByOrNull { it.risk.ordinal }?.risk?.name ?: if (tool.needsApproval) "Sensitive" else "Normal")
+                                    put("mutates", metadata.mutates)
+                                    put("needs_approval", metadata.needsApproval)
+                                    put("allows_auto_approval", metadata.autoApprovable)
+                                    put("output_budget_chars", metadata.outputBudgetChars)
+                                    put("risk", capabilities.maxByOrNull { it.risk.ordinal }?.risk?.name ?: if (metadata.needsApproval) "Sensitive" else "Normal")
                                     put("required_permissions", buildJsonArray {
                                         capabilities.forEach { capability ->
                                             add(
@@ -679,7 +685,7 @@ class LocalTools(
                                             )
                                         }
                                     })
-                                    if (includeSchema) {
+                                    if (includeSchema && tool != null) {
                                         put("schema", tool.parameters()?.toString().orEmpty())
                                     }
                                 }
@@ -826,20 +832,4 @@ class LocalTools(
         return tools
     }
 
-    private fun Tool.category(): String = when {
-        name.startsWith("file_") || name.startsWith("archive_") ||
-            name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
-        name.startsWith("icloud_") -> "cloud"
-        name.startsWith("terminal_") -> "terminal"
-        name in setOf("search_web", "scrape_web", "http_request") -> "web"
-        name.startsWith("webview_") -> "webview"
-        name.startsWith("screen_") || name == "vlm_task" -> "screen"
-        name.startsWith("sms_") || name.startsWith("contacts_") || name.startsWith("calendar_") ||
-            name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
-            name in setOf("device_phone_state", "media_search", "location_current", "audio_record_once", "notification_list", "usage_stats_list", "battery_status", "network_status", "wifi_status", "device_info", "settings_open", "intent_open", "share_text", "share_file", "notification_post") -> "system"
-        name.startsWith("memory_") -> "memory"
-        name.startsWith("skill") || name == "use_skill" -> "skill"
-        name.startsWith("mcp_") || name.startsWith("mcp__") -> "mcp"
-        else -> "utility"
-    }
 }

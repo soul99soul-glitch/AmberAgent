@@ -51,7 +51,12 @@ class ScreenAutomationTools(
         execute = { input ->
             trackScreenTool("screen_click", "点击屏幕", input) {
                 val service = requireService()
-                val ok = service.tap(input.requiredFloat("x"), input.requiredFloat("y"))
+                val point = requireDisplayPoint(
+                    x = input.requiredFloat("x"),
+                    y = input.requiredFloat("y"),
+                    label = "screen_click"
+                )
+                val ok = service.tap(point.x, point.y)
                 result(ok)
             }
         }
@@ -74,9 +79,14 @@ class ScreenAutomationTools(
         execute = { input ->
             trackScreenTool("screen_long_click", "长按屏幕", input) {
                 val service = requireService()
-                val ok = service.longPress(
+                val point = requireDisplayPoint(
                     x = input.requiredFloat("x"),
                     y = input.requiredFloat("y"),
+                    label = "screen_long_click"
+                )
+                val ok = service.longPress(
+                    x = point.x,
+                    y = point.y,
                     durationMillis = input.long("duration_ms") ?: 600L
                 )
                 result(ok)
@@ -103,11 +113,21 @@ class ScreenAutomationTools(
         execute = { input ->
             trackScreenTool("screen_swipe", "滑动屏幕", input) {
                 val service = requireService()
+                val from = requireDisplayPoint(
+                    x = input.requiredFloat("from_x"),
+                    y = input.requiredFloat("from_y"),
+                    label = "screen_swipe.from"
+                )
+                val to = requireDisplayPoint(
+                    x = input.requiredFloat("to_x"),
+                    y = input.requiredFloat("to_y"),
+                    label = "screen_swipe.to"
+                )
                 val ok = service.swipe(
-                    fromX = input.requiredFloat("from_x"),
-                    fromY = input.requiredFloat("from_y"),
-                    toX = input.requiredFloat("to_x"),
-                    toY = input.requiredFloat("to_y"),
+                    fromX = from.x,
+                    fromY = from.y,
+                    toX = to.x,
+                    toY = to.y,
                     durationMillis = input.long("duration_ms") ?: 350L
                 )
                 result(ok)
@@ -423,6 +443,17 @@ class ScreenAutomationTools(
         AmberAccessibilityService.getActiveService()
             ?: error("AmberAgent Accessibility is not enabled. Open ${Settings.ACTION_ACCESSIBILITY_SETTINGS} and enable AmberAgent Accessibility.")
 
+    private fun requireDisplayPoint(x: Float, y: Float, label: String): ScreenPoint {
+        val metrics = context.resources.displayMetrics
+        return requirePointInDisplayBounds(
+            x = x,
+            y = y,
+            width = metrics.widthPixels,
+            height = metrics.heightPixels,
+            label = label
+        )
+    }
+
     private fun coordinateSchema(xName: String, yName: String) = InputSchema.Obj(
         properties = buildJsonObject {
             put(xName, numberProp("X coordinate."))
@@ -498,3 +529,24 @@ class ScreenAutomationTools(
 
 private fun JsonElement.requiredFloat(name: String): Float =
     jsonObject[name]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: error("$name is required")
+
+internal data class ScreenPoint(val x: Float, val y: Float)
+
+internal fun requirePointInDisplayBounds(
+    x: Float,
+    y: Float,
+    width: Int,
+    height: Int,
+    label: String,
+): ScreenPoint {
+    require(x.isFinite() && y.isFinite()) {
+        "$label point out of bounds: coordinates must be finite"
+    }
+    require(width > 0 && height > 0) {
+        "$label point out of bounds: invalid display bounds ${width}x$height"
+    }
+    require(x >= 0f && x < width && y >= 0f && y < height) {
+        "$label point out of bounds: ($x, $y) outside ${width}x$height"
+    }
+    return ScreenPoint(x, y)
+}

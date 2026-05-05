@@ -61,6 +61,7 @@ class WorkspaceTools(
         parameters = {
             obj(
                 "path" to stringProp("Workspace-relative file path to read."),
+                "max_chars" to integerProp("Maximum characters to return. Defaults to 65536; hard limit is 262144."),
                 required = listOf("path")
             )
         },
@@ -68,10 +69,7 @@ class WorkspaceTools(
             trackWorkspaceTool("file_read", "读取文件", input) {
                 val path = input.requiredString("path")
                 val content = workspaceManager.readText(path)
-                textJson {
-                    put("path", path)
-                    put("content", content)
-                }
+                listOf(UIMessagePart.Text(buildFileReadJson(path, content, input.int("max_chars")).toString()))
             }
         }
     )
@@ -259,4 +257,27 @@ class WorkspaceTools(
             }.toString()
             else -> toString()
         }
+}
+
+internal const val FILE_READ_DEFAULT_MAX_CHARS = 65_536
+internal const val FILE_READ_HARD_MAX_CHARS = 262_144
+
+internal fun normalizeFileReadMaxChars(requested: Int?): Int {
+    if (requested == null) return FILE_READ_DEFAULT_MAX_CHARS
+    require(requested > 0) { "max_chars must be greater than 0" }
+    return requested.coerceAtMost(FILE_READ_HARD_MAX_CHARS)
+}
+
+internal fun buildFileReadJson(
+    path: String,
+    content: String,
+    requestedMaxChars: Int?,
+) = buildJsonObject {
+    val maxChars = normalizeFileReadMaxChars(requestedMaxChars)
+    val truncated = content.length > maxChars
+    put("path", path)
+    put("content", if (truncated) content.take(maxChars) else content)
+    put("total_size_chars", content.length)
+    put("truncated", truncated)
+    put("max_chars", maxChars)
 }

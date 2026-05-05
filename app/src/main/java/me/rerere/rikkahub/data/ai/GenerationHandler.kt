@@ -37,6 +37,7 @@ import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
+import me.rerere.rikkahub.data.agent.toAgentToolFailurePayload
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -278,21 +279,11 @@ class GenerationHandler(
                             val result = toolDef.execute(args)
                             executedTools += tool.copy(output = result)
                         }.onFailure {
-                            it.printStackTrace()
+                            Log.e(TAG, "generateText: tool execution failed for ${tool.toolName}", it)
                             executedTools += tool.copy(
                                 output = listOf(
                                     UIMessagePart.Text(
-                                        json.encodeToString(
-                                            buildJsonObject {
-                                                put(
-                                                    "error",
-                                                    JsonPrimitive(buildString {
-                                                        append("[${it.javaClass.name}] ${it.message}")
-                                                        append("\n${it.stackTraceToString()}")
-                                                    })
-                                                )
-                                            }
-                                        )
+                                        json.encodeToString(it.toAgentToolFailurePayload())
                                     )
                                 )
                             )

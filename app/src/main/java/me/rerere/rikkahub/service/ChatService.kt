@@ -72,6 +72,7 @@ import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
@@ -1286,56 +1287,59 @@ class ChatService(
 
     internal fun createDebugRunTools(settings: Settings): List<Tool> = createRunTools(settings)
 
-    private fun createRunTools(settings: Settings): List<Tool> = buildList {
-        if (settings.enableWebSearch) {
-            addAll(createSearchTools(settings))
-        }
-        val assistant = settings.getCurrentAssistant()
-        addAll(localTools.getTools(assistant.localTools))
-        addAll(
-            createSkillTools(
-                enabledSkills = assistant.enabledSkills,
-                allSkills = skillManager.listSkills(),
-                skillManager = skillManager,
-                settingsStore = settingsStore,
-                workspaceManager = workspaceManager,
-            )
-        )
-        addAll(
-            createMcpManagementTools(
-                settingsStore = settingsStore,
-                mcpManager = mcpManager,
-                skillManager = skillManager,
-            )
-        )
-        mcpManager.getAllAvailableTools().forEach { tool ->
-            add(
-                Tool(
-                    name = "mcp__" + tool.name,
-                    description = tool.description ?: "",
-                    parameters = { tool.inputSchema },
-                    needsApproval = tool.needsApproval,
-                    execute = { input ->
-                        val toolCallId = activityStore.startTool(
-                            toolName = "mcp__${tool.name}",
-                            title = "调用 MCP 工具",
-                            inputPreview = input.toString(),
-                            runtime = "MCP",
-                        )
-                        try {
-                            val result = mcpManager.callTool(tool.name, input.jsonObject)
-                            activityStore.complete(toolCallId, result.toolOutputPreview())
-                            result
-                        } catch (error: Throwable) {
-                            activityStore.fail(toolCallId, error)
-                            throw error
-                        }
-                    },
+    private fun createRunTools(settings: Settings): List<Tool> {
+        val rawTools = buildList {
+            if (settings.enableWebSearch) {
+                addAll(createSearchTools(settings))
+            }
+            val assistant = settings.getCurrentAssistant()
+            addAll(localTools.getTools(assistant.localTools))
+            addAll(
+                createSkillTools(
+                    enabledSkills = assistant.enabledSkills,
+                    allSkills = skillManager.listSkills(),
+                    skillManager = skillManager,
+                    settingsStore = settingsStore,
+                    workspaceManager = workspaceManager,
                 )
             )
+            addAll(
+                createMcpManagementTools(
+                    settingsStore = settingsStore,
+                    mcpManager = mcpManager,
+                    skillManager = skillManager,
+                )
+            )
+            mcpManager.getAllAvailableTools().forEach { tool ->
+                add(
+                    Tool(
+                        name = "mcp__" + tool.name,
+                        description = tool.description ?: "",
+                        parameters = { tool.inputSchema },
+                        needsApproval = tool.needsApproval,
+                        execute = { input ->
+                            val toolCallId = activityStore.startTool(
+                                toolName = "mcp__${tool.name}",
+                                title = "调用 MCP 工具",
+                                inputPreview = input.toString(),
+                                runtime = "MCP",
+                            )
+                            try {
+                                val result = mcpManager.callTool(tool.name, input.jsonObject)
+                                activityStore.complete(toolCallId, result.toolOutputPreview())
+                                result
+                            } catch (error: Throwable) {
+                                activityStore.fail(toolCallId, error)
+                                throw error
+                            }
+                        },
+                    )
+                )
+            }
+            addAll(createMemoryTools(settings))
         }
-        addAll(createMemoryTools(settings))
-        add(localTools.createToolsListTool(this.toList()))
+        val registry = ToolRegistry.from(rawTools)
+        return registry.tools() + localTools.createToolsListTool(registry)
     }
 
     private fun createMemoryTools(settings: Settings): List<Tool> {

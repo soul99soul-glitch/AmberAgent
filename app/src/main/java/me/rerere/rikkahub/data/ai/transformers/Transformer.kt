@@ -2,8 +2,10 @@ package me.rerere.rikkahub.data.ai.transformers
 
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 
@@ -67,7 +69,13 @@ suspend fun List<UIMessage>.transforms(
 ): List<UIMessage> {
     val ctx = TransformerContext(context, model, assistant, settings, processingStatus)
     return transformers.fold(this) { acc, transformer ->
-        transformer.transform(ctx, acc)
+        transformer.transform(ctx, acc).also { output ->
+            validateTransformerInvariants(
+                before = acc,
+                after = output,
+                transformerName = transformer.javaClass.simpleName
+            )
+        }
     }
 }
 
@@ -81,7 +89,13 @@ suspend fun List<UIMessage>.visualTransforms(
     val ctx = TransformerContext(context, model, assistant, settings)
     return transformers.fold(this) { acc, transformer ->
         if (transformer is OutputMessageTransformer) {
-            transformer.visualTransform(ctx, acc)
+            transformer.visualTransform(ctx, acc).also { output ->
+                validateTransformerInvariants(
+                    before = acc,
+                    after = output,
+                    transformerName = transformer.javaClass.simpleName
+                )
+            }
         } else {
             acc
         }
@@ -98,9 +112,69 @@ suspend fun List<UIMessage>.onGenerationFinish(
     val ctx = TransformerContext(context, model, assistant, settings)
     return transformers.fold(this) { acc, transformer ->
         if (transformer is OutputMessageTransformer) {
-            transformer.onGenerationFinish(ctx, acc)
+            transformer.onGenerationFinish(ctx, acc).also { output ->
+                validateTransformerInvariants(
+                    before = acc,
+                    after = output,
+                    transformerName = transformer.javaClass.simpleName
+                )
+            }
         } else {
             acc
         }
     }
 }
+
+internal fun validateTransformerInvariants(
+    before: List<UIMessage>,
+    after: List<UIMessage>,
+    transformerName: String,
+) {
+    if (before.any { it.role == MessageRole.SYSTEM }) {
+        require(after.any { it.role == MessageRole.SYSTEM }) {
+            "$transformerName removed the system message"
+        }
+    }
+    val beforeTools = before.toolSignatures()
+    val afterTools = after.toolSignatures()
+    require(beforeTools == afterTools) {
+        "$transformerName modified tool call/result ordering"
+    }
+}
+
+private fun List<UIMessage>.toolSignatures(): List<ToolSignature> =
+    flatMap { message ->
+        message.parts.mapNotNull { part ->
+            when (part) {
+                is UIMessagePart.Tool -> ToolSignature(
+                    id = part.toolCallId,
+                    name = part.toolName,
+                    input = part.input,
+                    executed = part.isExecuted,
+                )
+
+                is UIMessagePart.ToolCall -> ToolSignature(
+                    id = part.toolCallId,
+                    name = part.toolName,
+                    input = part.arguments,
+                    executed = false,
+                )
+
+                is UIMessagePart.ToolResult -> ToolSignature(
+                    id = part.toolCallId,
+                    name = part.toolName,
+                    input = part.arguments.toString(),
+                    executed = true,
+                )
+
+                else -> null
+            }
+        }
+    }
+
+private data class ToolSignature(
+    val id: String,
+    val name: String,
+    val input: String,
+    val executed: Boolean,
+)

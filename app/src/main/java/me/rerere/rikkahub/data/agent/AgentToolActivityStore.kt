@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent
 
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,11 +80,12 @@ class AgentToolActivityStore {
     }
 
     fun fail(toolCallId: String, error: Throwable) {
+        Log.e(TAG, "Tool activity failed: $toolCallId", error)
         _sandboxActivity.update { current ->
             if (current?.toolCallId == toolCallId) {
                 current.copy(
                     status = ToolActivityStatus.FAILED,
-                    outputTail = error.stackTraceToString().takeLast(MAX_OUTPUT_TAIL_CHARS),
+                    outputTail = error.toAgentToolFailureJson().takeLast(MAX_OUTPUT_TAIL_CHARS),
                     endedAtEpochMillis = System.currentTimeMillis(),
                     canCancel = false,
                 )
@@ -124,6 +126,7 @@ class AgentToolActivityStore {
         }.takeLast(MAX_OUTPUT_TAIL_CHARS)
 
     companion object {
+        private const val TAG = "AgentToolActivityStore"
         private const val MAX_INPUT_PREVIEW_CHARS = 800
         private const val MAX_OUTPUT_TAIL_CHARS = 1_600
     }

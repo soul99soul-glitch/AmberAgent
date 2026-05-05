@@ -123,7 +123,7 @@ class S3Sync(
             addVirtualFileToZip(
                 zipOut = zipOut,
                 name = "settings.json",
-                content = json.encodeToString(settingsStore.settingsFlow.value)
+                content = json.encodeSettingsForBackup(settingsStore.settingsFlow.value)
             )
 
             // Backup database files
