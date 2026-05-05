@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
+import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.sync.s3.S3Client
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.utils.fileSizeToString
@@ -31,6 +32,7 @@ class S3Sync(
     private val json: Json,
     private val context: Context,
     private val httpClient: HttpClient,
+    private val appDatabase: AppDatabase,
 ) {
     private fun getS3Client(config: S3Config): S3Client {
         return S3Client(config, httpClient)
@@ -181,10 +183,36 @@ class S3Sync(
     private suspend fun restoreFromBackupFile(backupFile: File, config: S3Config) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
 
-        ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
-            var entry: ZipEntry?
-            while (zipIn.nextEntry.also { entry = it } != null) {
-                entry?.let { zipEntry ->
+        val inspection = inspectBackupArchive(backupFile)
+        if (config.items.contains(S3Config.BackupItem.DATABASE) &&
+            inspection.hasDatabasePayload &&
+            !inspection.hasMainDatabase
+        ) {
+            throw Exception("Backup archive contains database sidecar files but is missing rikka_hub.db")
+        }
+
+        val databaseRestoreDir = if (
+            config.items.contains(S3Config.BackupItem.DATABASE) &&
+            inspection.hasDatabasePayload
+        ) {
+            File(context.cacheDir, "s3_db_restore_${System.currentTimeMillis()}").apply {
+                deleteRecursively()
+                mkdirs()
+            }
+        } else {
+            null
+        }
+
+        try {
+            ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
+                var entry: ZipEntry?
+                while (zipIn.nextEntry.also { entry = it } != null) {
+                    val zipEntry = entry ?: continue
+                    requireSafeZipEntryName(zipEntry.name)
+                    if (zipEntry.isDirectory) {
+                        zipIn.closeEntry()
+                        continue
+                    }
                     Log.i(TAG, "restoreFromBackupFile: Processing entry ${zipEntry.name}")
 
                     when (zipEntry.name) {
@@ -203,34 +231,16 @@ class S3Sync(
                         }
 
                         "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
-                            if (config.items.contains(S3Config.BackupItem.DATABASE)) {
-                                val dbFile = when (zipEntry.name) {
-                                    "rikka_hub.db" -> context.getDatabasePath("rikka_hub")
-                                    "rikka_hub-wal" -> File(
-                                        context.getDatabasePath("rikka_hub").parentFile,
-                                        "rikka_hub-wal"
-                                    )
-
-                                    "rikka_hub-shm" -> File(
-                                        context.getDatabasePath("rikka_hub").parentFile,
-                                        "rikka_hub-shm"
-                                    )
-
-                                    else -> null
-                                }
-
-                                dbFile?.let { targetFile ->
+                            databaseRestoreDir?.let { tempDir ->
+                                databaseTempFile(tempDir, zipEntry.name)?.let { targetFile ->
                                     Log.i(
                                         TAG,
-                                        "restoreFromBackupFile: Restoring ${zipEntry.name} to ${targetFile.absolutePath}"
+                                        "restoreFromBackupFile: Staging ${zipEntry.name} to ${targetFile.absolutePath}"
                                     )
-                                    targetFile.parentFile?.mkdirs()
-                                    FileOutputStream(targetFile).use { outputStream ->
-                                        zipIn.copyTo(outputStream)
-                                    }
+                                    copyZipEntryToFile(zipIn, targetFile)
                                     Log.i(
                                         TAG,
-                                        "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
+                                        "restoreFromBackupFile: Staged ${zipEntry.name} (${targetFile.length()} bytes)"
                                     )
                                 }
                             }
@@ -248,16 +258,14 @@ class S3Sync(
                                         Log.i(TAG, "restoreFromBackupFile: Created upload directory")
                                     }
 
-                                    val targetFile = File(uploadFolder, fileName)
+                                    val targetFile = resolveArchiveChild(uploadFolder, fileName)
                                     Log.i(
                                         TAG,
                                         "restoreFromBackupFile: Restoring file ${zipEntry.name} to ${targetFile.absolutePath}"
                                     )
 
                                     try {
-                                        FileOutputStream(targetFile).use { outputStream ->
-                                            zipIn.copyTo(outputStream)
-                                        }
+                                        copyZipEntryToFile(zipIn, targetFile)
                                         Log.i(
                                             TAG,
                                             "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
@@ -280,12 +288,25 @@ class S3Sync(
                     zipIn.closeEntry()
                 }
             }
+
+            databaseRestoreDir?.let { tempDir ->
+                Log.i(TAG, "restoreFromBackupFile: Replacing database files after archive extraction")
+                replaceDatabaseFilesFromTemp(
+                    context = context,
+                    appDatabase = appDatabase,
+                    tempDir = tempDir,
+                )
+                Log.i(TAG, "restoreFromBackupFile: Database restored; app restart is required")
+            }
+        } finally {
+            databaseRestoreDir?.deleteRecursively()
         }
 
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
     }
 
     private fun addFileToZip(zipOut: ZipOutputStream, file: File, entryName: String) {
+        requireSafeZipEntryName(entryName)
         FileInputStream(file).use { fis ->
             val zipEntry = ZipEntry(entryName)
             zipOut.putNextEntry(zipEntry)
@@ -347,6 +368,7 @@ class S3Sync(
     }
 
     private fun addVirtualFileToZip(zipOut: ZipOutputStream, name: String, content: String) {
+        requireSafeZipEntryName(name)
         val zipEntry = ZipEntry(name)
         zipOut.putNextEntry(zipEntry)
         zipOut.write(content.toByteArray())
