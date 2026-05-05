@@ -140,18 +140,30 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     LaunchedEffect(files, text) {
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
-            val contentTypes = files.mapNotNull { file ->
+            val contentTypes = files.map { file ->
                 filesManager.getFileMimeType(file)
+            }
+            val fileNames = files.map { file ->
+                filesManager.getFileNameFromUri(file) ?: file.lastPathSegment ?: "file"
             }
             val parts = buildList {
                 localFiles.forEachIndexed { index, file ->
                     val type = contentTypes.getOrNull(index)
+                    val fileName = fileNames.getOrNull(index) ?: "file"
                     if (type?.startsWith("image/") == true) {
                         add(UIMessagePart.Image(url = file.toString()))
                     } else if (type?.startsWith("video/") == true) {
                         add(UIMessagePart.Video(url = file.toString()))
                     } else if (type?.startsWith("audio/") == true) {
                         add(UIMessagePart.Audio(url = file.toString()))
+                    } else {
+                        add(
+                            UIMessagePart.Document(
+                                url = file.toString(),
+                                fileName = fileName,
+                                mime = type ?: "application/octet-stream"
+                            )
+                        )
                     }
                 }
             }

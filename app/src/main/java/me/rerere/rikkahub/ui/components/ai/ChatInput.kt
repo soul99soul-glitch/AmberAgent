@@ -115,6 +115,7 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
@@ -130,6 +131,7 @@ import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.FullScreen
@@ -233,6 +235,7 @@ fun ChatInput(
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
     var showInjectionSheet by remember { mutableStateOf(false) }
     var showCompressDialog by remember { mutableStateOf(false) }
+    var showUsageSheet by remember { mutableStateOf(false) }
     fun dismissExpand() {
         expand = ExpandState.Collapsed
         showInjectionSheet = false
@@ -376,10 +379,17 @@ fun ChatInput(
 
     // Collapse when ime is visible
     val imeVisile = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisile, showInjectionSheet, showCompressDialog) {
-        if (imeVisile && !showInjectionSheet && !showCompressDialog) {
+    LaunchedEffect(imeVisile, showInjectionSheet, showCompressDialog, showUsageSheet) {
+        if (imeVisile && !showInjectionSheet && !showCompressDialog && !showUsageSheet) {
             dismissExpand()
         }
+    }
+
+    if (showUsageSheet) {
+        ComposerUsageSheet(
+            status = ComposerUsageStatus(),
+            onDismissRequest = { showUsageSheet = false },
+        )
     }
 
     Surface(
@@ -435,6 +445,7 @@ fun ChatInput(
                     TextInputRow(
                         state = state,
                         onSendMessage = { sendMessage() },
+                        onUsageClick = { showUsageSheet = true },
                     )
 
                     Row(
@@ -464,17 +475,28 @@ fun ChatInput(
                                         model = chatModel,
                                         modifier = Modifier.padding(start = 3.dp),
                                     )
-                                    ModelSelector(
-                                        modelId = assistant.chatModelId ?: settings.chatModelId,
-                                        providers = settings.providers,
-                                        onSelect = {
-                                            onUpdateChatModel(it)
-                                            dismissExpand()
-                                        },
-                                        type = ModelType.CHAT,
-                                        compact = true,
-                                        modifier = Modifier,
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.Bottom,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        ModelSelector(
+                                            modelId = assistant.chatModelId ?: settings.chatModelId,
+                                            providers = settings.providers,
+                                            onSelect = {
+                                                onUpdateChatModel(it)
+                                                dismissExpand()
+                                            },
+                                            type = ModelType.CHAT,
+                                            compact = true,
+                                            modifier = Modifier,
+                                        )
+                                        ReasoningLevelChip(
+                                            reasoningLevel = assistant.reasoningLevel,
+                                            onUpdateReasoningLevel = {
+                                                onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                            },
+                                        )
+                                    }
                                 }
 
                                 // MCP
@@ -662,7 +684,7 @@ private fun ContextUsageIndicator(
             )
         }
         Text(
-            text = "${usedTokens.formatNumber()}/${contextWindow?.formatNumber() ?: "--"} CONTEXT",
+            text = "Context ${usedTokens.formatNumber()} / ${contextWindow?.formatNumber() ?: "--"}",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             color = workspace.muted.copy(alpha = 0.72f),
             maxLines = 1,
@@ -687,6 +709,200 @@ private fun UIMessagePart.estimatedTokenChars(): Int = when (this) {
     is UIMessagePart.Video,
     is UIMessagePart.Audio -> 0
     else -> 0
+}
+
+private data class ComposerUsageStatus(
+    val fiveHourQuota: ComposerUsageMetric? = null,
+    val weeklyQuota: ComposerUsageMetric? = null,
+    val cacheHitRate: ComposerUsageMetric? = null,
+) {
+    val hasData: Boolean
+        get() = fiveHourQuota != null || weeklyQuota != null || cacheHitRate != null
+}
+
+private data class ComposerUsageMetric(
+    val percent: Int? = null,
+    val detail: String? = null,
+)
+
+@Composable
+private fun ReasoningLevelChip(
+    reasoningLevel: ReasoningLevel,
+    onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        ComposerStatusChip(
+            text = reasoningLevel.composerLabel(),
+            accent = reasoningLevel.isEnabled,
+            onClick = { expanded = true },
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.width(176.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                ReasoningLevel.entries.chunked(2).fastForEach { row ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        row.fastForEach { level ->
+                            ReasoningLevelMenuCell(
+                                level = level,
+                                selected = level == reasoningLevel,
+                                onClick = {
+                                    onUpdateReasoningLevel(level)
+                                    expanded = false
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (row.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReasoningLevelMenuCell(
+    level: ReasoningLevel,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(34.dp),
+        shape = RoundedCornerShape(7.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        color = if (selected) workspace.blueContainer else Color.Transparent,
+        contentColor = if (selected) workspace.blue else workspace.ink,
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = level.composerLabel(),
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComposerStatusChip(
+    text: String,
+    modifier: Modifier = Modifier,
+    accent: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(32.dp),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        color = if (accent) workspace.blueContainer else workspace.paper,
+        contentColor = if (accent) workspace.blue else workspace.ink,
+        border = BorderStroke(1.dp, if (accent) workspace.blue.copy(alpha = 0.18f) else workspace.hairline),
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComposerUsageSheet(
+    status: ComposerUsageStatus,
+    onDismissRequest: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (!status.hasData) {
+                Text(
+                    text = "No usage data",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = workspace.muted,
+                )
+            } else {
+                status.fiveHourQuota?.let { UsageMetricRow(label = "5h", metric = it) }
+                status.weeklyQuota?.let { UsageMetricRow(label = "weekly", metric = it) }
+                status.cacheHitRate?.let { UsageMetricRow(label = "cache", metric = it) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageMetricRow(
+    label: String,
+    metric: ComposerUsageMetric,
+) {
+    val workspace = workspaceColors()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = workspace.muted,
+        )
+        Text(
+            text = listOfNotNull(
+                metric.percent?.let { "$it%" },
+                metric.detail,
+            ).joinToString("  ").ifBlank { "--" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = workspace.ink,
+        )
+    }
+}
+
+private fun ReasoningLevel.composerLabel(): String = when (this) {
+    ReasoningLevel.OFF -> "off"
+    ReasoningLevel.AUTO -> "auto"
+    ReasoningLevel.LOW -> "low"
+    ReasoningLevel.MEDIUM -> "medium"
+    ReasoningLevel.HIGH -> "high"
+    ReasoningLevel.XHIGH -> "xhigh"
 }
 
 @Composable
@@ -1493,6 +1709,7 @@ private fun ActionIconButton(
 private fun TextInputRow(
     state: ChatInputState,
     onSendMessage: () -> Unit,
+    onUsageClick: () -> Unit,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
@@ -1533,6 +1750,12 @@ private fun TextInputRow(
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
         val slashQuery = state.textContent.text.toString().slashCommandQuery()
+        val showUsageCommand = slashQuery?.let { query ->
+            query.isNotBlank() && (
+                "usage".startsWith(query, ignoreCase = true) ||
+                "用量".startsWith(query, ignoreCase = true)
+                )
+        } == true
         val slashCommands = remember(quickMessages, slashQuery) {
             slashQuery?.let { query ->
                 quickMessages.filter { quickMessage ->
@@ -1581,7 +1804,12 @@ private fun TextInputRow(
         if (isFocused && slashQuery != null) {
             SlashCommandPanel(
                 quickMessages = slashCommands,
-                hasAnyQuickMessage = quickMessages.isNotEmpty(),
+                hasAnyCommand = quickMessages.isNotEmpty() || showUsageCommand,
+                showUsageCommand = showUsageCommand,
+                onUsageClick = {
+                    state.setMessageText("")
+                    onUsageClick()
+                },
                 onSelect = { quickMessage ->
                     state.setMessageText(quickMessage.content)
                 },
@@ -1668,7 +1896,9 @@ private fun TextInputRow(
 @Composable
 private fun SlashCommandPanel(
     quickMessages: List<QuickMessage>,
-    hasAnyQuickMessage: Boolean,
+    hasAnyCommand: Boolean,
+    showUsageCommand: Boolean,
+    onUsageClick: () -> Unit,
     onSelect: (QuickMessage) -> Unit,
 ) {
     val workspace = workspaceColors()
@@ -1682,15 +1912,24 @@ private fun SlashCommandPanel(
     ) {
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
             when {
-                !hasAnyQuickMessage -> SlashCommandEmptyRow(
+                !hasAnyCommand -> SlashCommandEmptyRow(
                     text = stringResource(R.string.chat_input_slash_command_empty)
                 )
 
-                quickMessages.isEmpty() -> SlashCommandEmptyRow(
+                quickMessages.isEmpty() && !showUsageCommand -> SlashCommandEmptyRow(
                     text = stringResource(R.string.chat_input_slash_command_no_match)
                 )
 
                 else -> {
+                    if (showUsageCommand) {
+                        SlashUsageCommandRow(onClick = onUsageClick)
+                        if (quickMessages.isNotEmpty()) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 58.dp),
+                                color = workspace.hairline,
+                            )
+                        }
+                    }
                     quickMessages.take(MAX_SLASH_COMMANDS).forEachIndexed { index, quickMessage ->
                         SlashCommandRow(
                             quickMessage = quickMessage,
@@ -1704,6 +1943,55 @@ private fun SlashCommandPanel(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlashUsageCommandRow(
+    onClick: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(30.dp),
+                shape = RoundedCornerShape(6.dp),
+                color = workspace.blueContainer,
+                contentColor = workspace.blue,
+                border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.14f)),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = HugeIcons.ChartColumn,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "/usage",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "5h / weekly / cache",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
