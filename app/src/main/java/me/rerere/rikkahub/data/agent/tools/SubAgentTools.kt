@@ -27,7 +27,7 @@ class SubAgentTools(
 
     private fun listTool() = Tool(
         name = "subagent_list",
-        description = "List built-in Sub Agents and dynamic Sub Agent rules available to this AmberAgent run.",
+        description = "List built-in subagents and dynamic subagent rules available to this AmberAgent run.",
         parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
         execute = {
             val payload = buildJsonObject {
@@ -44,7 +44,7 @@ class SubAgentTools(
 
     private fun startTool() = Tool(
         name = "subagent_start",
-        description = "Start a built-in or dynamic Sub Agent as an isolated task. Requires task.objective, output_format, tools_and_sources, and boundaries.",
+        description = "Start a built-in or dynamic subagent as an isolated task. Requires task.objective, output_format, tools_and_sources, and boundaries.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -73,11 +73,11 @@ class SubAgentTools(
 
     private fun readTool() = Tool(
         name = "subagent_read",
-        description = "Read Sub Agent run status and result summary by run_id.",
+        description = "Read subagent run status and result summary by run_id.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("run_id", stringProp("Sub Agent run id"))
+                    put("run_id", stringProp("Subagent run id"))
                 },
                 required = listOf("run_id")
             )
@@ -90,11 +90,11 @@ class SubAgentTools(
 
     private fun waitTool() = Tool(
         name = "subagent_wait",
-        description = "Wait for a Sub Agent run to complete, up to wait_timeout_ms.",
+        description = "Wait for a subagent run to complete, up to wait_timeout_ms.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("run_id", stringProp("Sub Agent run id"))
+                    put("run_id", stringProp("Subagent run id"))
                     put("wait_timeout_ms", buildJsonObject {
                         put("type", "integer")
                         put("description", "Maximum wait time, default 10000, capped at 60000")
@@ -112,11 +112,11 @@ class SubAgentTools(
 
     private fun cancelTool() = Tool(
         name = "subagent_cancel",
-        description = "Cancel a running Sub Agent task by run_id.",
+        description = "Cancel a running subagent task by run_id.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("run_id", stringProp("Sub Agent run id"))
+                    put("run_id", stringProp("Subagent run id"))
                 },
                 required = listOf("run_id")
             )

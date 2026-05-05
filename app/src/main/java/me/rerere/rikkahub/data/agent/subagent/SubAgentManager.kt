@@ -38,12 +38,12 @@ class SubAgentManager(
         val settings = settingsStore.settingsFlow.value
         val subAgentSetting = settings.agentRuntime.subAgent
         if (!subAgentSetting.enabled) {
-            return@withContext errorPayload("subagent_disabled", "Sub Agent experimental mode is disabled.")
+            return@withContext errorPayload("subagent_disabled", "Subagent experimental mode is disabled.")
         }
 
         val running = runs.values.count { it.snapshot.status.running }
         if (running >= subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)) {
-            return@withContext errorPayload("too_many_subagents", "Sub Agent concurrency limit reached.")
+            return@withContext errorPayload("too_many_subagents", "Subagent concurrency limit reached.")
         }
 
         val parentToolNames = parentTools.map { it.name }.toSet()
@@ -59,7 +59,7 @@ class SubAgentManager(
             if (runningDynamic >= DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS) {
                 return@withContext errorPayload(
                     "too_many_dynamic_subagents",
-                    "Dynamic Sub Agent per-turn limit reached."
+                    "Dynamic subagent per-turn limit reached."
                 )
             }
         }
