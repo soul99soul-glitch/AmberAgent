@@ -48,6 +48,8 @@ import me.rerere.rikkahub.data.agent.icloud.ICLOUD_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
+import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select
@@ -57,6 +59,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
+import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
 @Composable
@@ -86,6 +89,128 @@ fun SettingExperimentalPage() {
                         leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_officepro_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_officepro_desc)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingExperimentalSubAgent) },
+                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_desc)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingExperimentalSubAgentPage(
+    vm: SettingVM = koinViewModel(),
+) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val subAgent = settings.agentRuntime.subAgent
+    val concurrencyOptions = listOf(1, 2, 3)
+    val turnOptions = listOf(2, 4, 6, 8)
+    val timeoutOptions = listOf(60_000L, 180_000L, DEFAULT_SUB_AGENT_TIMEOUT_MS, 600_000L)
+    val budgetOptions = listOf(8_000, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS, 20_000, 40_000)
+
+    fun update(block: (me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting) -> me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting) {
+        vm.updateSettings(
+            settings.copy(
+                agentRuntime = settings.agentRuntime.copy(
+                    subAgent = block(subAgent)
+                )
+            )
+        )
+    }
+
+    ExperimentalSettingsScaffold(
+        title = stringResource(R.string.setting_subagent_title),
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = innerPadding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                CardGroup(
+                    title = { Text(stringResource(R.string.setting_subagent_section_runtime)) },
+                ) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_enabled)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_enabled_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = subAgent.enabled,
+                                onCheckedChange = { checked -> update { it.copy(enabled = checked) } },
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_dynamic)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_dynamic_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = subAgent.allowDynamicSubAgents,
+                                onCheckedChange = { checked -> update { it.copy(allowDynamicSubAgents = checked) } },
+                            )
+                        },
+                    )
+                }
+            }
+
+            item {
+                CardGroup(
+                    title = { Text(stringResource(R.string.setting_subagent_section_limits)) },
+                ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_max_concurrent)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_max_concurrent_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = concurrencyOptions,
+                                selectedOption = subAgent.maxConcurrentRuns.coerceIn(1, 3),
+                                onOptionSelected = { value -> update { it.copy(maxConcurrentRuns = value) } },
+                                optionToString = { it.toString() },
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_max_turns)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_max_turns_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = turnOptions,
+                                selectedOption = subAgent.maxTurns.coerceIn(2, 8),
+                                onOptionSelected = { value -> update { it.copy(maxTurns = value) } },
+                                optionToString = { it.toString() },
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_timeout)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_timeout_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = timeoutOptions,
+                                selectedOption = timeoutOptions.minBy { kotlin.math.abs(it - subAgent.timeoutMs) },
+                                onOptionSelected = { value -> update { it.copy(timeoutMs = value) } },
+                                optionToString = { "${it / 60_000} min" },
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_subagent_output_budget)) },
+                        supportingContent = { Text(stringResource(R.string.setting_subagent_output_budget_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = budgetOptions,
+                                selectedOption = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
+                                onOptionSelected = { value -> update { it.copy(outputBudgetChars = value) } },
+                                optionToString = { "${it / 1000}k" },
+                            )
+                        },
                     )
                 }
             }

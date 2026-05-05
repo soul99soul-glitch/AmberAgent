@@ -72,6 +72,7 @@ internal fun Tool.category(): String = when {
         name in setOf("device_phone_state", "media_search", "location_current", "audio_record_once", "notification_list", "usage_stats_list", "battery_status", "network_status", "wifi_status", "device_info", "settings_open", "intent_open", "share_text", "share_file", "notification_post") -> "system"
     name.startsWith("memory_") -> "memory"
     name.startsWith("conversation_") -> "context"
+    name.startsWith("subagent_") -> "subagent"
     name.startsWith("skill") || name == "use_skill" -> "skill"
     name.startsWith("mcp_") || name.startsWith("mcp__") -> "mcp"
     else -> "utility"
@@ -87,6 +88,7 @@ private fun Tool.mutatesState(): Boolean {
         name.contains("_stop") ||
         name.startsWith("memory_") && name != "memory_list" ||
         name == "conversation_compact" ||
+        name in setOf("subagent_start", "subagent_cancel") ||
         name.startsWith("skill_enable") ||
         name.startsWith("skill_disable")
 }

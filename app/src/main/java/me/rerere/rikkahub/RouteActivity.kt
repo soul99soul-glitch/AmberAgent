@@ -107,6 +107,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalICloudPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalOfficeProPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalPage
+import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalSubAgentPage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
@@ -466,6 +467,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingExperimentalOfficeProPage()
                             }
 
+                            entry<Screen.SettingExperimentalSubAgent> {
+                                SettingExperimentalSubAgentPage()
+                            }
+
                             entry<Screen.SettingSystemAccess> {
                                 SettingSystemAccessPage()
                             }
@@ -666,6 +671,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingExperimentalOfficePro : Screen
+
+    @Serializable
+    data object SettingExperimentalSubAgent : Screen
 
     @Serializable
     data object SettingSystemAccess : Screen

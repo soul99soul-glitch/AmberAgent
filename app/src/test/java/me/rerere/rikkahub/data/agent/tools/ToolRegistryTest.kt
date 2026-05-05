@@ -76,6 +76,24 @@ class ToolRegistryTest {
         assertTrue(registry.metadata.single { it.name == "conversation_compact" }.mutates)
     }
 
+    @Test
+    fun subAgentToolsUseSubAgentCategory() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool("subagent_list"),
+                stubTool("subagent_start"),
+                stubTool("subagent_read"),
+                stubTool("subagent_wait"),
+                stubTool("subagent_cancel"),
+            )
+        )
+
+        assertEquals(List(5) { "subagent" }, registry.metadata.map { it.category })
+        assertTrue(registry.metadata.single { it.name == "subagent_start" }.mutates)
+        assertTrue(registry.metadata.single { it.name == "subagent_cancel" }.mutates)
+        assertTrue(!registry.metadata.single { it.name == "subagent_read" }.mutates)
+    }
+
     private fun stubTool(
         name: String,
         needsApproval: Boolean = false,

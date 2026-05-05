@@ -15,6 +15,8 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
+import me.rerere.rikkahub.data.agent.subagent.GenerationSubAgentRunner
+import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
@@ -88,6 +90,14 @@ val appModule = module {
 
     single {
         ConversationContextEngine(get(), get(), get(), get())
+    }
+
+    single {
+        GenerationSubAgentRunner(get())
+    }
+
+    single {
+        SubAgentManager(get(), get(), get(), get(), get<GenerationSubAgentRunner>())
     }
 
     single {
@@ -187,6 +197,7 @@ val appModule = module {
             skillManager = get(),
             workspaceManager = get(),
             contextEngine = get(),
+            subAgentManager = get(),
         )
     }
 

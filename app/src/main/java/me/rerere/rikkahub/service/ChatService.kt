@@ -70,7 +70,9 @@ import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
+import me.rerere.rikkahub.data.agent.tools.SubAgentTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
+import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.context.ConversationContextEngine
@@ -147,6 +149,7 @@ class ChatService(
     private val skillManager: SkillManager,
     private val workspaceManager: WorkspaceManager,
     private val contextEngine: ConversationContextEngine,
+    private val subAgentManager: SubAgentManager,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -1294,7 +1297,18 @@ class ChatService(
                 )
             }
         }
-        val registry = ToolRegistry.from(rawTools)
+        val baseRegistry = ToolRegistry.from(rawTools)
+        val baseTools = baseRegistry.tools() + localTools.createToolsListTool(baseRegistry)
+        val finalRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
+            rawTools + SubAgentTools(
+                subAgentManager = subAgentManager,
+                parentConversationId = conversationId,
+                parentToolsProvider = { baseTools },
+            ).tools()
+        } else {
+            rawTools
+        }
+        val registry = ToolRegistry.from(finalRawTools)
         return registry.tools() + localTools.createToolsListTool(registry)
     }
 

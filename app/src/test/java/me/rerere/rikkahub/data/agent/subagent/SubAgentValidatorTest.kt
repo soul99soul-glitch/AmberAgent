@@ -1,0 +1,114 @@
+package me.rerere.rikkahub.data.agent.subagent
+
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SubAgentValidatorTest {
+    private val setting = SubAgentRuntimeSetting(
+        enabled = true,
+        maxTurns = 4,
+        timeoutMs = 60_000L,
+        outputBudgetChars = 12_000,
+    )
+
+    @Test
+    fun taskSpecRequiresFourElements() {
+        val input = buildJsonObject {
+            put("task", buildJsonObject {
+                put("objective", "Inspect one focused issue")
+                put("output_format", "Short findings")
+                put("tools_and_sources", "Use file_read only")
+            })
+        }
+
+        val error = runCatching { SubAgentValidator.parseTask(input) }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("boundaries"))
+    }
+
+    @Test
+    fun dynamicRoleRejectsGenericName() {
+        val input = inputWithCustomSubagent(name = "General Helper")
+
+        val error = runCatching {
+            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("too broad"))
+    }
+
+    @Test
+    fun dynamicRoleDefaultsToAvailableReadOnlyTools() {
+        val input = inputWithCustomSubagent()
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting,
+            availableToolNames = setOf("file_read", "file_search", "terminal_execute"),
+        )
+
+        assertEquals(setOf("file_read", "file_search"), result.definition.toolAllowlist)
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun dynamicRoleRejectsUnavailableExplicitTool() {
+        val input = inputWithCustomSubagent(
+            toolAllowlist = listOf("file_read", "terminal_execute"),
+        )
+
+        val error = runCatching {
+            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("unavailable tools"))
+    }
+
+    @Test
+    fun dynamicRoleRejectsOverBudgetConfig() {
+        val input = inputWithCustomSubagent(maxTurns = 9)
+
+        val error = runCatching {
+            SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("max_turns"))
+    }
+
+    private fun inputWithCustomSubagent(
+        name: String = "Focused Code Reviewer",
+        toolAllowlist: List<String>? = null,
+        maxTurns: Int? = null,
+    ) = buildJsonObject {
+        put("custom_subagent", buildJsonObject {
+            put("name", name)
+            put("description", "Use when a narrow read-only code review is needed for a specific file or behavior.")
+            put(
+                "system_prompt",
+                "You are a narrow reviewer. Boundaries: do not edit files, do not spawn agents, and do not use tools outside the allowlist. Report output as summary, findings, evidence, risks, and next steps."
+            )
+            toolAllowlist?.let { tools ->
+                put("tool_allowlist", buildJsonArray {
+                    tools.forEach { add(JsonPrimitive(it)) }
+                })
+            }
+            maxTurns?.let { put("max_turns", it) }
+        })
+        put("task", buildJsonObject {
+            put("objective", "Review one issue")
+            put("output_format", "Findings with evidence")
+            put("tools_and_sources", "Use the listed tools only")
+            put("boundaries", "Do not edit files")
+        })
+    }
+}
