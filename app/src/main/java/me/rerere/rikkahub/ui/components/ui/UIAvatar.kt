@@ -38,6 +38,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -84,7 +85,11 @@ fun UIAvatar(
     name: String,
     value: Avatar,
     modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
     loading: Boolean = false,
+    containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    editContainerColor: Color = MaterialTheme.colorScheme.tertiaryContainer,
+    editContentColor: Color = MaterialTheme.colorScheme.onTertiaryContainer,
     onUpdate: ((Avatar) -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
@@ -105,7 +110,7 @@ fun UIAvatar(
         }
     }
 
-    Box(modifier = modifier.size(32.dp)) {
+    Box(modifier = modifier.size(size)) {
         Surface(
             shape = rememberAvatarShape(loading),
             modifier = Modifier.fillMaxSize(),
@@ -114,7 +119,7 @@ fun UIAvatar(
                 if (onUpdate != null) showPickOption = true
             },
             tonalElevation = 4.dp,
-            color = MaterialTheme.colorScheme.secondaryContainer,
+            color = containerColor,
         ) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -149,7 +154,7 @@ fun UIAvatar(
                                 .ifBlank { stringResource(R.string.user_default_name) }
                                 .takeIf { it.isNotEmpty() }
                                 ?.firstOrNull()?.toString()?.uppercase() ?: "A",
-                            fontSize = 20.sp,
+                            fontSize = (size.value * 0.62f).sp,
                             lineHeight = 1.em
                         )
                     }
@@ -162,18 +167,18 @@ fun UIAvatar(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .size(14.dp)
+                    .size(size * 0.44f)
                     .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.tertiaryContainer),
+                    .background(editContainerColor),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = HugeIcons.Edit03,
                     contentDescription = "Edit",
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(size * 0.31f)
                         .padding(1.dp),
-                    tint = MaterialTheme.colorScheme.onTertiaryContainer
+                    tint = editContentColor
                 )
             }
         }

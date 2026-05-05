@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.svg.css
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -101,7 +102,13 @@ private fun AmberAgentIcon(
         color = color,
     ) {
         Image(
-            painter = painterResource(R.drawable.amberagent_pig_mark),
+            painter = painterResource(
+                if (BuildConfig.NOTION_LIKE) {
+                    R.drawable.notion_agent_mark
+                } else {
+                    R.drawable.amberagent_pig_mark
+                }
+            ),
             contentDescription = name,
             modifier = Modifier.padding(4.dp),
         )

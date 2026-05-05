@@ -1,31 +1,46 @@
 package me.rerere.rikkahub.ui.components.nav
 
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.ui.theme.CustomColors
 
 @Composable
 fun BackButton(modifier: Modifier = Modifier) {
     val navController = LocalNavController.current
-    FilledTonalIconButton(
-        onClick = {
-            navController.popBackStack()
-        },
-        modifier = modifier,
-        shapes = IconButtonDefaults.shapes(),
-        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = CustomColors.listItemColors.containerColor),
-    ) {
-        Icon(
-            imageVector = HugeIcons.ArrowLeft01,
-            contentDescription = stringResource(R.string.back)
-        )
+    val onBack = { navController.popBackStack() }
+    val contentDescription = stringResource(R.string.back)
+
+    if (BuildConfig.NOTION_LIKE) {
+        val workspace = workspaceColors()
+        IconButton(
+            onClick = onBack,
+            modifier = modifier,
+        ) {
+            Icon(
+                imageVector = HugeIcons.ArrowLeft01,
+                contentDescription = contentDescription,
+                tint = workspace.ink,
+            )
+        }
+        return
     }
+
+    WorkspaceIconButton(
+        onClick = onBack,
+        modifier = modifier,
+        size = 34.dp,
+        iconSize = 17.dp,
+        icon = HugeIcons.ArrowLeft01,
+        contentDescription = contentDescription,
+    )
 }

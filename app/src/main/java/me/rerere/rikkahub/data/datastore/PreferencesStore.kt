@@ -32,6 +32,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
@@ -560,6 +561,7 @@ data class AgentRuntimeSetting(
     val terminalMaxConcurrentJobs: Int = 1,
     val terminalOutputTailChars: Int = 256 * 1024,
     val terminalInstallTimeoutMs: Long = 15 * 60_000L,
+    val feishuOfficeEnhancement: FeishuOfficeEnhancementSetting = FeishuOfficeEnhancementSetting(),
 )
 
 @Serializable
@@ -593,6 +595,7 @@ You are AmberAgent, an agent-only Android assistant.
 - Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
 - If you are unsure which skills are installed or enabled, call skills_list before use_skill.
 - If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
+- If the user asks about 小米办公 Pro / 飞书办公 work context, call officepro_status first. Use officepro_read_screen or officepro_context_digest for read-first analysis, and only use officepro_open/search after the user approves opening or driving the office app.
 - For webpage tasks:
   - When the user asks to open, browse, view, inspect, or visually verify a webpage, call webview_open early so the live preview shows the page.
   - After webview_open, call webview_read when you need the current page title, readable text, or links from the opened preview.

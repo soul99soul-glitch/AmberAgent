@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import android.os.Build
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,19 +13,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,11 +33,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.LAUNCH_START_MODE_PREF
 import me.rerere.rikkahub.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
@@ -47,9 +51,11 @@ import me.rerere.rikkahub.migrateLaunchStartMode
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceString
@@ -67,6 +73,46 @@ private fun LaunchStartMode.launchStartModeLabel(): String = when (this) {
 }
 
 @Composable
+private fun <T> WorkspaceSegmentedChoice(
+    options: List<T>,
+    selected: T,
+    modifier: Modifier = Modifier,
+    onSelected: (T) -> Unit,
+    label: @Composable (T) -> Unit,
+) {
+    val workspace = workspaceColors()
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, workspace.hairline, RoundedCornerShape(6.dp))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEach { option ->
+            val isSelected = option == selected
+            Surface(
+                onClick = { onSelected(option) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(4.dp),
+                color = if (isSelected) workspace.row else Color.Transparent,
+                contentColor = if (isSelected) workspace.ink else workspace.muted,
+            ) {
+                CompositionLocalProvider(LocalContentColor provides LocalContentColor.current) {
+                    ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            label(option)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
@@ -78,6 +124,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val workspace = workspaceColors()
 
     val permissionState = rememberPermissionState(
         permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setOf(
@@ -88,7 +135,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = {
                     Text(stringResource(R.string.setting_display_page_title))
                 },
@@ -96,54 +143,78 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = workspace.paper,
+                    scrolledContainerColor = workspace.paper,
+                    titleContentColor = workspace.ink,
+                    navigationIconContentColor = workspace.muted,
+                    actionIconContentColor = workspace.blue,
+                )
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = workspace.canvas
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding + PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = contentPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             item {
                 Column(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.setting_page_theme_setting),
                         style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = workspace.faint,
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
                     )
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 20.dp,
-                                    topEnd = 20.dp,
-                                    bottomStart = 4.dp,
-                                    bottomEnd = 4.dp
+                    if (BuildConfig.NOTION_LIKE) {
+                        ListItem(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(
+                                    RoundedCornerShape(
+                                        topStart = 8.dp,
+                                        topEnd = 8.dp,
+                                        bottomStart = 2.dp,
+                                        bottomEnd = 2.dp
+                                    )
+                                ),
+                            headlineContent = { Text("Workspace White") },
+                            supportingContent = { Text("白色纸面 + 蓝色强调，不跟随系统动态色") },
+                            colors = CustomColors.listItemColors,
+                        )
+                    } else {
+                        ListItem(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(
+                                    RoundedCornerShape(
+                                        topStart = 8.dp,
+                                        topEnd = 8.dp,
+                                        bottomStart = 2.dp,
+                                        bottomEnd = 2.dp
+                                    )
+                                ),
+                            headlineContent = { Text(stringResource(R.string.setting_page_dynamic_color)) },
+                            supportingContent = { Text(stringResource(R.string.setting_page_dynamic_color_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = settings.dynamicColor,
+                                    onCheckedChange = { vm.updateSettings(settings.copy(dynamicColor = it)) },
                                 )
-                            ),
-                        headlineContent = { Text(stringResource(R.string.setting_page_dynamic_color)) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_dynamic_color_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.dynamicColor,
-                                onCheckedChange = { vm.updateSettings(settings.copy(dynamicColor = it)) },
-                            )
-                        },
-                        colors = CustomColors.listItemColors,
-                    )
-                    if (!settings.dynamicColor) {
+                            },
+                            colors = CustomColors.listItemColors,
+                        )
+                    }
+                    if (!settings.dynamicColor && !BuildConfig.NOTION_LIKE) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(RoundedCornerShape(2.dp))
                                 .background(MaterialTheme.colorScheme.surfaceBright)
                         ) {
                             PresetThemeButtonGroup(
@@ -160,8 +231,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 RoundedCornerShape(
                                     topStart = 4.dp,
                                     topEnd = 4.dp,
-                                    bottomStart = 20.dp,
-                                    bottomEnd = 20.dp
+                                    bottomStart = 8.dp,
+                                    bottomEnd = 8.dp
                                 )
                             ),
                         headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
@@ -191,7 +262,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     legacyCreateNewConversationOnStart = legacyCreateNewConversationOnStart,
                 )
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { Text(stringResource(R.string.setting_page_general_settings)) },
                 ) {
                     item(
@@ -202,29 +273,23 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(stringResource(R.string.setting_display_page_launch_start_mode_desc))
-                                SingleChoiceSegmentedButtonRow(
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    LaunchStartMode.entries.forEachIndexed { index, mode ->
-                                        SegmentedButton(
-                                            selected = launchStartMode == mode,
-                                            onClick = {
-                                                launchStartModeRaw = mode.name
-                                                legacyCreateNewConversationOnStart = mode == LaunchStartMode.NEW_CHAT
-                                            },
-                                            shape = SegmentedButtonDefaults.itemShape(
-                                                index = index,
-                                                count = LaunchStartMode.entries.size
-                                            ),
-                                            label = {
-                                                Text(
-                                                    text = mode.launchStartModeLabel(),
-                                                    maxLines = 1
-                                                )
-                                            }
+                                WorkspaceSegmentedChoice(
+                                    options = LaunchStartMode.entries,
+                                    selected = launchStartMode,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onSelected = { mode ->
+                                        launchStartModeRaw = mode.name
+                                        legacyCreateNewConversationOnStart = mode == LaunchStartMode.NEW_CHAT
+                                    },
+                                    label = { mode ->
+                                        Text(
+                                            text = mode.launchStartModeLabel(),
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth(),
                                         )
-                                    }
-                                }
+                                    },
+                                )
                             }
                         },
                     )
@@ -384,31 +449,28 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_chat_font_family_title)) },
                             supportingContent = {
-                                SingleChoiceSegmentedButtonRow(
+                                WorkspaceSegmentedChoice(
+                                    options = chatFontFamilyOptions,
+                                    selected = chatFontFamilyOptions.first { it.first == displaySetting.chatFontFamily },
                                     modifier = Modifier
                                         .padding(top = 4.dp)
-                                        .fillMaxWidth()
-                                ) {
-                                    chatFontFamilyOptions.forEachIndexed { index, (family, label) ->
-                                        SegmentedButton(
-                                            selected = displaySetting.chatFontFamily == family,
-                                            onClick = { updateDisplaySetting(displaySetting.copy(chatFontFamily = family)) },
-                                            shape = SegmentedButtonDefaults.itemShape(
-                                                index,
-                                                chatFontFamilyOptions.size
-                                            ),
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                fontFamily = when (family) {
-                                                    ChatFontFamily.DEFAULT -> FontFamily.Default
-                                                    ChatFontFamily.SERIF -> FontFamily.Serif
-                                                    ChatFontFamily.MONOSPACE -> FontFamily.Monospace
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
+                                        .fillMaxWidth(),
+                                    onSelected = { (family, _) ->
+                                        updateDisplaySetting(displaySetting.copy(chatFontFamily = family))
+                                    },
+                                    label = { (family, label) ->
+                                        Text(
+                                            text = label,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            fontFamily = when (family) {
+                                                ChatFontFamily.DEFAULT -> FontFamily.Default
+                                                ChatFontFamily.SERIF -> FontFamily.Serif
+                                                ChatFontFamily.MONOSPACE -> FontFamily.Monospace
+                                            }
+                                        )
+                                    },
+                                )
                             }
                         )
                         item(

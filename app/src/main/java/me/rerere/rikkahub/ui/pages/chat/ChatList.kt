@@ -21,6 +21,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -101,6 +102,7 @@ import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
 import kotlin.uuid.Uuid
@@ -108,6 +110,11 @@ import kotlin.uuid.Uuid
 private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
+private val TimelineHorizontalPadding = 16.dp
+private val TimelineTopPadding = 12.dp
+private val TimelineBottomSafetyPadding = 28.dp
+private val TimelineItemSpacing = 14.dp
+private val TimelineSelectionToolbarOffset = 56.dp
 
 private fun Conversation.latestRenderToken(): String {
     val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
@@ -250,6 +257,7 @@ private fun ChatListNormal(
     var isRecentScroll by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val workspace = workspaceColors()
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -289,7 +297,8 @@ private fun ChatListNormal(
 
     Box(
         modifier = Modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .background(workspace.canvas),
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             val latestRenderToken = conversation.latestRenderToken()
@@ -319,9 +328,14 @@ private fun ChatListNormal(
 
         LazyColumn(
             state = state,
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 96.dp + innerPadding.calculateBottomPadding()),
+            contentPadding = PaddingValues(
+                start = TimelineHorizontalPadding,
+                top = TimelineTopPadding,
+                end = TimelineHorizontalPadding,
+                bottom = TimelineBottomSafetyPadding + innerPadding.calculateBottomPadding(),
+            ),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(TimelineItemSpacing),
             modifier = Modifier
                 .fillMaxSize()
                 .hazeSource(state = hazeState)
@@ -386,22 +400,31 @@ private fun ChatListNormal(
 
             if (loading) {
                 item(LoadingIndicatorKey) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = workspace.paper,
+                        contentColor = workspace.muted,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 1.dp,
+                        border = BorderStroke(1.dp, workspace.hairline),
                     ) {
-                        PigLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text(
-                                text = processingStatus ?: "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            PigLoadingIndicator(
+                                modifier = Modifier.size(24.dp)
                             )
+                            AnimatedVisibility(
+                                visible = processingStatus != null,
+                            ) {
+                                Text(
+                                    text = processingStatus ?: "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = workspace.muted,
+                                )
+                            }
                         }
                     }
                 }
@@ -437,7 +460,7 @@ private fun ChatListNormal(
                 visible = selecting,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .offset(y = -(48).dp),
+                    .offset(y = -TimelineSelectionToolbarOffset),
                 enter = slideInVertically(
                     initialOffsetY = { it * 2 },
                 ),

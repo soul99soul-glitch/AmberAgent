@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,10 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -44,7 +42,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
@@ -77,6 +74,9 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.SandboxActivitySheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
@@ -803,81 +803,77 @@ private fun TopBar(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val workspace = workspaceColors()
     val titleState = useEditState<String> {
         onUpdateTitle(it)
     }
 
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f),
-            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            containerColor = workspace.paper.copy(alpha = 0.94f),
+            scrolledContainerColor = workspace.paper,
+            navigationIconContentColor = workspace.muted,
+            titleContentColor = workspace.ink,
+            actionIconContentColor = workspace.muted,
         ),
         navigationIcon = {
             if (!bigScreen) {
-                FilledTonalIconButton(
+                WorkspaceIconButton(
                     onClick = {
                         scope.launch { drawerState.open() }
                     },
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                ) {
-                    Icon(HugeIcons.Menu03, "Messages")
-                }
+                    icon = HugeIcons.Menu03,
+                    size = 42.dp,
+                    iconSize = 24.dp,
+                    contentDescription = "Messages",
+                )
             }
         },
         title = {
             val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
-            Surface(
-                onClick = {
-                    if (conversation.messageNodes.isNotEmpty()) {
-                        titleState.open(conversation.title)
-                    } else {
-                        toaster.show(editTitleWarning, type = ToastType.Warning)
-                    }
-                },
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = RoundedCornerShape(
-                    topStart = 22.dp,
-                    topEnd = 16.dp,
-                    bottomEnd = 22.dp,
-                    bottomStart = 16.dp,
-                ),
-            ) {
-                Text(
-                    text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
-                    maxLines = 1,
-                    style = MaterialTheme.typography.titleMedium,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .clickable {
+                        if (conversation.messageNodes.isNotEmpty()) {
+                            titleState.open(conversation.title)
+                        } else {
+                            toaster.show(editTitleWarning, type = ToastType.Warning)
+                        }
+                    },
+                maxLines = 1,
+                style = MaterialTheme.typography.titleLarge,
+                color = workspace.ink,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
         actions = {
-            FilledTonalIconButton(
-                onClick = {
-                    onClickMenu()
-                },
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
+            Row(
+                modifier = Modifier.padding(end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet, "Chat Options")
-            }
+                WorkspaceIconButton(
+                    onClick = {
+                        onClickMenu()
+                    },
+                    icon = if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet,
+                    contentDescription = "Chat Options",
+                    size = 42.dp,
+                    iconSize = 23.dp,
+                )
 
-            FilledIconButton(
-                onClick = {
-                    onNewChat()
-                },
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                WorkspaceIconButton(
+                    onClick = {
+                        onNewChat()
+                    },
+                    icon = HugeIcons.MessageAdd01,
+                    contentDescription = "New Message",
+                    tone = WorkspaceTone.Accent,
+                    size = 42.dp,
+                    iconSize = 23.dp,
                 )
-            ) {
-                Icon(HugeIcons.MessageAdd01, "New Message")
             }
         },
     )

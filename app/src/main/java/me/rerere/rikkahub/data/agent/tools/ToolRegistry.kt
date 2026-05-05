@@ -62,6 +62,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("file_") || name.startsWith("archive_") ||
         name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
     name.startsWith("icloud_") -> "cloud"
+    name.startsWith("officepro_") -> "office"
     name.startsWith("terminal_") -> "terminal"
     name in setOf("search_web", "scrape_web", "http_request") -> "web"
     name.startsWith("webview_") -> "webview"

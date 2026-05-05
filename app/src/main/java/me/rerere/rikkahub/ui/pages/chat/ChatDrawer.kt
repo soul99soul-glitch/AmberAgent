@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,16 +9,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
@@ -33,6 +34,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,12 +62,15 @@ import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
 import me.rerere.rikkahub.ui.components.ui.Greeting
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
+import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceBorder
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.utils.navigateToChatPage
-import me.rerere.rikkahub.utils.toDp
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -113,30 +119,40 @@ fun ChatDrawerContent(
 
     // Menu popup 状态
     var showMenuPopup by remember { mutableStateOf(false) }
+    val workspace = workspaceColors()
 
     ModalDrawerSheet(
-        modifier = Modifier.width(300.dp)
+        modifier = Modifier.width(326.dp),
+        drawerShape = RoundedCornerShape(0.dp),
+        drawerContainerColor = workspace.paper,
+        drawerContentColor = workspace.ink,
+        drawerTonalElevation = 0.dp,
     ) {
         Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .background(workspace.paper)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             BackupReminderCard(
                 settings = settings,
                 onClick = { navController.navigate(Screen.Backup) },
             )
 
-            // 用户头像和昵称自定义区域
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 2.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 UIAvatar(
                     name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
                     value = settings.displaySetting.userAvatar,
+                    size = 48.dp,
+                    containerColor = workspace.blueContainer,
+                    editContainerColor = workspace.paper,
+                    editContentColor = workspace.blue,
                     onUpdate = { newAvatar ->
                         vm.updateSettings(
                             settings.copy(
@@ -146,7 +162,6 @@ fun ChatDrawerContent(
                             )
                         )
                     },
-                    modifier = Modifier.size(50.dp),
                 )
 
                 Column(
@@ -155,11 +170,12 @@ fun ChatDrawerContent(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
                             text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
                             style = MaterialTheme.typography.titleMedium,
+                            color = workspace.ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable {
@@ -174,16 +190,19 @@ fun ChatDrawerContent(
                                 .onClick {
                                     nicknameEditState.open(settings.displaySetting.userNickname)
                                 }
-                                .size(LocalTextStyle.current.fontSize.toDp())
+                                .size(20.dp),
+                            tint = workspace.muted,
                         )
                     }
                     Greeting(
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = workspace.muted,
                     )
                 }
             }
 
             DrawerActions(navController = navController)
+            WorkspaceDivider(modifier = Modifier.padding(horizontal = 2.dp, vertical = 6.dp))
 
             ConversationList(
                 current = current,
@@ -215,11 +234,11 @@ fun ChatDrawerContent(
             )
 
             Row(
-                horizontalArrangement = Arrangement.SpaceAround,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
+                    .padding(horizontal = 2.dp, vertical = 6.dp)
             ) {
                 Box {
                     DrawerAction(
@@ -283,14 +302,15 @@ fun ChatDrawerContent(
                 Spacer(Modifier.weight(1f))
 
                 DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.Settings03, null)
-                    },
-                    label = { Text(stringResource(R.string.settings)) },
-                    onClick = {
-                        navController.navigate(Screen.Setting)
-                    },
-                )
+                        icon = {
+                            Icon(HugeIcons.Settings03, null)
+                        },
+                        label = { Text(stringResource(R.string.settings)) },
+                        onClick = {
+                            navController.navigate(Screen.Setting)
+                        },
+                        tone = WorkspaceTone.Accent,
+                    )
             }
         }
     }
@@ -338,65 +358,58 @@ fun ChatDrawerContent(
 
 @Composable
 private fun DrawerActions(navController: Navigator) {
-    Column {
-        // 搜索入口
-        Surface(
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        DrawerNavRow(
+            icon = HugeIcons.Search01,
+            label = stringResource(R.string.chat_page_search_chats),
             onClick = { navController.navigate(Screen.MessageSearch) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Search01,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = stringResource(R.string.chat_page_search_chats),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-
-        // 历史记录入口
-        Surface(
+            tone = WorkspaceTone.Accent,
+        )
+        DrawerNavRow(
+            icon = HugeIcons.TransactionHistory,
+            label = stringResource(R.string.chat_page_history),
             onClick = { navController.navigate(Screen.History) },
+        )
+    }
+}
+
+@Composable
+private fun DrawerNavRow(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tone: WorkspaceTone = WorkspaceTone.Neutral,
+) {
+    val workspace = workspaceColors()
+    val tint = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.muted
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        color = if (tone == WorkspaceTone.Accent) workspace.blueContainer else Color.Transparent,
+        contentColor = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                .height(48.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.TransactionHistory,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = stringResource(R.string.chat_page_history),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = tint,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -407,25 +420,22 @@ private fun DrawerAction(
     icon: @Composable () -> Unit,
     label: @Composable () -> Unit,
     onClick: () -> Unit,
+    tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shape = CircleShape,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+    val workspace = workspaceColors()
+    Tooltip(
+        tooltip = { label() }
     ) {
-        Tooltip(
-            tooltip = {
-                label()
-            }
+        Surface(
+            onClick = onClick,
+            modifier = modifier.size(44.dp),
+            color = if (tone == WorkspaceTone.Accent) workspace.blueContainer else workspace.paper,
+            shape = RoundedCornerShape(9.dp),
+            contentColor = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
+            border = workspaceBorder(),
         ) {
-            Box(
-                modifier = Modifier
-                    .padding(10.dp)
-                    .size(20.dp),
-            ) {
-                icon()
+            Box(contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.size(22.dp)) { icon() }
             }
         }
     }

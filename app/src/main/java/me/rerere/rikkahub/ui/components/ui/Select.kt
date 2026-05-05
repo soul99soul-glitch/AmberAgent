@@ -1,10 +1,13 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -39,6 +42,7 @@ fun <T> Select(
     trailing: @Composable () -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val workspace = workspaceColors()
 
     ExposedDropdownMenuBox(
         modifier = modifier,
@@ -46,29 +50,36 @@ fun <T> Select(
         onExpandedChange = { expanded = it }
     ) {
         Surface(
-            tonalElevation = 4.dp,
-            shape = RoundedCornerShape(50),
-            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            shape = RoundedCornerShape(6.dp),
+            color = workspace.blueContainer.copy(alpha = 0.72f),
+            contentColor = workspace.blue,
+            border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.12f)),
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .heightIn(min = 32.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(6.dp))
                     .clickable { expanded = true }
-                    .padding(vertical = 8.dp, horizontal = 16.dp),
+                    .padding(vertical = 6.dp, horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 leading()
                 Text(
                     text = optionToString(selectedOption),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1f)
                 )
                 trailing()
                 Icon(
                     imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                    contentDescription = "expand"
+                    contentDescription = "expand",
+                    modifier = Modifier.size(14.dp),
                 )
             }
         }

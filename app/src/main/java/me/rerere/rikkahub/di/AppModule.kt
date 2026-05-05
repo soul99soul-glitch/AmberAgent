@@ -14,6 +14,8 @@ import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
+import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
@@ -71,6 +73,14 @@ val appModule = module {
     }
 
     single {
+        FeishuOfficeEnhancementManager(get(), get(), get(), get())
+    }
+
+    single {
+        FeishuOfficeTools(get(), get(), get())
+    }
+
+    single {
         WorkspaceArtifactTools(get(), get(), get())
     }
 
@@ -115,7 +125,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

@@ -20,6 +20,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
@@ -27,6 +28,7 @@ import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
@@ -92,6 +94,8 @@ class LocalTools(
     private val permissionBroker: AgentPermissionBroker,
     private val webViewOperationStore: WebViewOperationStore,
     private val iCloudDriveTools: ICloudDriveTools,
+    private val feishuOfficeTools: FeishuOfficeTools,
+    private val settingsStore: SettingsStore,
 ) {
     val javascriptTool by lazy {
         Tool(
@@ -816,6 +820,11 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.SystemAccess)) {
             tools.addAll(systemAccessTools.getTools())
+        }
+        if (options.contains(LocalToolOption.SystemAccess) ||
+            settingsStore.settingsFlow.value.agentRuntime.feishuOfficeEnhancement.enabled
+        ) {
+            tools.addAll(feishuOfficeTools.getTools())
         }
         if (options.contains(LocalToolOption.WebView)) {
             tools.add(webViewTool)

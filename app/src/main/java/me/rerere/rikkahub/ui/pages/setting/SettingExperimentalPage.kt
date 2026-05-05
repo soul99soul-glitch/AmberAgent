@@ -5,19 +5,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,20 +29,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.icloud.ICLOUD_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
+import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -49,19 +60,26 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingExperimentalPage(
     iCloudDriveManager: ICloudDriveManager = koinInject(),
+    feishuOfficeManager: FeishuOfficeEnhancementManager = koinInject(),
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val iCloudState by iCloudDriveManager.state.collectAsStateWithLifecycle()
+    val officeState by feishuOfficeManager.state.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var showICloudLogin by remember { mutableStateOf(false) }
     var iCloudBusy by remember { mutableStateOf(false) }
     var iCloudVaultInput by remember(iCloudState.vaultPath) { mutableStateOf(iCloudState.vaultPath) }
+    var officeBusy by remember { mutableStateOf(false) }
+    var officePackageInput by remember(officeState.targetPackage) { mutableStateOf(officeState.targetPackage) }
+    var officeCandidates by remember { mutableStateOf("") }
     val iCloudSavedToast = stringResource(R.string.setting_icloud_saved)
+    val officeSavedToast = stringResource(R.string.setting_officepro_saved)
+    val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = { Text(stringResource(R.string.setting_experimental_page_title)) },
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
@@ -175,8 +193,136 @@ fun SettingExperimentalPage(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                if (showICloudLogin && iCloudState.enabled) {
-                                    ICloudLoginWebView()
+                            }
+                        },
+                    )
+                }
+            }
+            item {
+                CardGroup(
+                    title = { Text(stringResource(R.string.setting_officepro_section)) },
+                ) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_officepro_title)) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(stringResource(R.string.setting_officepro_desc))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.setting_officepro_enabled),
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Switch(
+                                        checked = officeState.enabled,
+                                        onCheckedChange = { feishuOfficeManager.setEnabled(it) },
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = officePackageInput,
+                                    onValueChange = { officePackageInput = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = officeState.enabled,
+                                    singleLine = true,
+                                    label = { Text(stringResource(R.string.setting_officepro_package)) },
+                                    supportingText = { Text(stringResource(R.string.setting_officepro_package_desc)) },
+                                )
+                                Select(
+                                    options = FeishuOfficeAnalysisTemplate.entries,
+                                    selectedOption = officeState.defaultTemplate,
+                                    onOptionSelected = { feishuOfficeManager.setDefaultTemplate(it) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    optionToString = { it.zhLabel },
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            feishuOfficeManager.setTargetPackage(officePackageInput)
+                                            toaster.show(officeSavedToast)
+                                        },
+                                        enabled = officeState.enabled,
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(stringResource(R.string.setting_officepro_save_package), maxLines = 1)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            officeBusy = true
+                                            scope.launch {
+                                                val candidates = feishuOfficeManager.detectPackages()
+                                                val selected = feishuOfficeManager.chooseAndSaveBestPackage(candidates)
+                                                officeCandidates = candidates.joinToString("\n") {
+                                                    "${it.label} · ${it.packageName}"
+                                                }
+                                                if (selected == null) {
+                                                    toaster.show(officeDetectNoneToast)
+                                                } else {
+                                                    officePackageInput = selected.packageName
+                                                    toaster.show(officeSavedToast)
+                                                }
+                                                feishuOfficeManager.refresh()
+                                                officeBusy = false
+                                            }
+                                        },
+                                        enabled = officeState.enabled && !officeBusy,
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(stringResource(R.string.setting_officepro_detect), maxLines = 1)
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick = { feishuOfficeManager.openTargetApp() },
+                                        enabled = officeState.enabled && officeState.launchable,
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(stringResource(R.string.setting_officepro_open), maxLines = 1)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { feishuOfficeManager.refresh() },
+                                        enabled = officeState.enabled,
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(stringResource(R.string.setting_officepro_refresh), maxLines = 1)
+                                    }
+                                }
+                                Text(
+                                    text = stringResource(
+                                        R.string.setting_officepro_status,
+                                        officeState.capability.wireName,
+                                        officeState.targetPackage,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = listOf(
+                                        stringResource(R.string.setting_officepro_permission_installed, officeState.installed),
+                                        stringResource(R.string.setting_officepro_permission_accessibility, officeState.accessibilityReady),
+                                        stringResource(R.string.setting_officepro_permission_notification, officeState.notificationReady),
+                                        stringResource(R.string.setting_officepro_permission_usage, officeState.usageReady),
+                                    ).joinToString("\n"),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                officeState.lastError?.takeIf { it.isNotBlank() }?.let { error ->
+                                    Text(
+                                        text = error,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                officeCandidates.takeIf { it.isNotBlank() }?.let { candidates ->
+                                    Text(
+                                        text = stringResource(R.string.setting_officepro_candidates, candidates),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         },
@@ -185,10 +331,17 @@ fun SettingExperimentalPage(
             }
         }
     }
+    if (showICloudLogin && iCloudState.enabled) {
+        ICloudLoginDialog(
+            onDismiss = { showICloudLogin = false },
+        )
+    }
 }
 
 @Composable
-private fun ICloudLoginWebView() {
+private fun ICloudLoginDialog(
+    onDismiss: () -> Unit,
+) {
     val state = rememberWebViewState(
         url = ICLOUD_LOGIN_URL,
         settings = {
@@ -198,16 +351,53 @@ private fun ICloudLoginWebView() {
             userAgentString = ICLOUD_WEBVIEW_USER_AGENT
         },
     )
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(420.dp)
-            .clip(MaterialTheme.shapes.medium),
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        WebView(
-            state = state,
-            modifier = Modifier.fillMaxSize(),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.9f),
+                shape = MaterialTheme.shapes.extraLarge,
+                tonalElevation = 6.dp,
+                shadowElevation = 12.dp,
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, top = 12.dp, end = 12.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_icloud_login),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = HugeIcons.Cancel01,
+                                contentDescription = stringResource(R.string.update_card_close),
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                    WebView(
+                        state = state,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                }
+            }
+        }
     }
 }
 

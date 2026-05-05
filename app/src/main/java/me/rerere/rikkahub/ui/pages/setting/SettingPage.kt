@@ -1,11 +1,14 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
@@ -14,13 +17,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -58,6 +63,9 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select
+import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.rememberColorMode
@@ -73,6 +81,14 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     val filesManager: FilesManager = koinInject()
+    val workspace = workspaceColors()
+    val settingListColors = ListItemDefaults.colors(
+        containerColor = workspace.paper,
+        headlineColor = workspace.ink,
+        supportingColor = workspace.muted,
+        leadingIconColor = workspace.muted,
+        trailingIconColor = workspace.muted,
+    )
 
     if (settings.launchCount > 100 && (settings.launchCount - settings.sponsorAlertDismissedAt) >= 50) {
         AlertDialog(
@@ -102,7 +118,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = {
                     Text(text = stringResource(R.string.settings))
                 },
@@ -111,7 +127,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 },
                 scrollBehavior = scrollBehavior,
                 actions = {
-                    if(settings.developerMode) {
+                    if (settings.developerMode) {
                         IconButton(
                             onClick = {
                                 navController.navigate(Screen.Developer)
@@ -121,16 +137,22 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         }
                     }
                 },
-                colors = CustomColors.topBarColors
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = workspace.paper,
+                    scrolledContainerColor = workspace.paper,
+                    titleContentColor = workspace.ink,
+                    navigationIconContentColor = workspace.muted,
+                    actionIconContentColor = workspace.muted,
+                )
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = workspace.canvas
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             if (settings.isNotConfigured()) {
                 item {
@@ -146,11 +168,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
                 }
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { Text(stringResource(R.string.setting_page_general_settings)) },
+                    colors = settingListColors,
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Sun01, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Sun01) },
                         trailingContent = {
                             Select(
                                 options = ColorMode.entries,
@@ -178,97 +201,91 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingDisplay) },
-                        leadingContent = { Icon(HugeIcons.Settings03, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Settings03) },
                         supportingContent = { Text(stringResource(R.string.setting_page_display_setting_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingModels) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.AiMagic) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                     )
                 }
             }
 
             item("agentRuntimeSettings") {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { Text(stringResource(R.string.setting_page_agent_runtime)) },
+                    colors = settingListColors,
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentMemory) },
-                        leadingContent = { Icon(HugeIcons.Brain02, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Brain02) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_memory_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExtensions) },
-                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Package) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_extensions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExecution) },
-                        leadingContent = { Icon(HugeIcons.LookTop, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.LookTop) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_execution_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_execution)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentPermissions) },
-                        leadingContent = { Icon(HugeIcons.Alert01, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Alert01) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_permissions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_permissions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSandbox) },
-                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Code) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_sandbox_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_sandbox)) },
                     )
-                }
-            }
-
-            item("experimentalFeatures") {
-                CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_experimental_features)) },
-                ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimental) },
-                        leadingContent = { Icon(HugeIcons.Rocket01, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Rocket01) },
                         supportingContent = { Text(stringResource(R.string.setting_page_experimental_features_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_icloud_title)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_experimental_features)) },
                     )
                 }
             }
 
             item("modelServices") {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { Text(stringResource(R.string.setting_page_model_and_services)) },
+                    colors = settingListColors,
                 ) {
                     item(
-                        onClick = { navController.navigate(Screen.SettingModels) },
-                        leadingContent = { Icon(HugeIcons.AiMagic, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
-                    )
-                    item(
                         onClick = { navController.navigate(Screen.SettingProvider) },
-                        leadingContent = { Icon(HugeIcons.Brain02, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Brain02) },
                         supportingContent = { Text(stringResource(R.string.setting_page_providers_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
-                        leadingContent = { Icon(HugeIcons.GlobalSearch, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.GlobalSearch) },
                         supportingContent = { Text(stringResource(R.string.setting_page_search_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingTTS) },
-                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Megaphone01) },
                         supportingContent = { Text(stringResource(R.string.setting_page_tts_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingWeb) },
-                        leadingContent = { Icon(HugeIcons.ServerStack01, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.ServerStack01) },
                         supportingContent = { Text(stringResource(R.string.setting_page_web_server_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_web_server)) },
                     )
@@ -280,18 +297,19 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     value = filesManager.countChatFiles()
                 }
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { Text(stringResource(R.string.setting_page_data_settings)) },
+                    colors = settingListColors,
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
-                        leadingContent = { Icon(HugeIcons.Database02, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.Database02) },
                         supportingContent = { Text(stringResource(R.string.setting_page_data_backup_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_data_backup)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },
-                        leadingContent = { Icon(HugeIcons.ImageUpload, null) },
+                        leadingContent = { SettingLeadingIcon(HugeIcons.ImageUpload) },
                         supportingContent = {
                             if (storageState.first == -1) {
                                 Text(stringResource(R.string.calculating))
@@ -314,17 +332,33 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 }
 
 @Composable
+private fun SettingLeadingIcon(
+    icon: ImageVector,
+    tone: WorkspaceTone = WorkspaceTone.Neutral,
+) {
+    WorkspaceLeadingIcon(
+        icon = icon,
+        size = 30.dp,
+        iconSize = 15.dp,
+        tone = tone,
+    )
+}
+
+@Composable
 private fun ProviderConfigWarningCard(navController: Navigator) {
+    val workspace = workspaceColors()
     Card(
-        modifier = Modifier.padding(8.dp),
+        modifier = Modifier.padding(2.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
+            containerColor = workspace.amberContainer
+        ),
+        border = BorderStroke(1.dp, workspace.amber.copy(alpha = 0.18f)),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
+                .padding(12.dp),
             horizontalAlignment = Alignment.End
         ) {
             ListItem(
@@ -335,10 +369,12 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
                     Text(stringResource(R.string.setting_page_config_api_desc))
                 },
                 leadingContent = {
-                    Icon(HugeIcons.Alert01, null)
+                    SettingLeadingIcon(HugeIcons.Alert01, tone = WorkspaceTone.Warning)
                 },
                 colors = ListItemDefaults.colors(
-                    containerColor = Color.Transparent
+                    containerColor = Color.Transparent,
+                    headlineColor = workspace.ink,
+                    supportingColor = workspace.muted,
                 )
             )
 

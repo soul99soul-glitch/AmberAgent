@@ -9,6 +9,7 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import me.rerere.rikkahub.BuildConfig
 
 data class ExtendColors(
     val red1: Color,
@@ -174,6 +175,15 @@ object CustomColors {
 
     val topBarColors: TopAppBarColors
         @Composable get() {
+            if (BuildConfig.NOTION_LIKE) {
+                return TopAppBarDefaults.topAppBarColors(
+                    containerColor = colorScheme.background,
+                    scrolledContainerColor = colorScheme.surface,
+                    titleContentColor = colorScheme.onSurface,
+                    navigationIconContentColor = colorScheme.onSurfaceVariant,
+                    actionIconContentColor = colorScheme.primary,
+                )
+            }
             return if (!LocalDarkMode.current) TopAppBarDefaults.topAppBarColors(
                 containerColor = colorScheme.surfaceContainer,
                 scrolledContainerColor = colorScheme.surfaceContainer
@@ -181,11 +191,19 @@ object CustomColors {
         }
 
     val cardColors: CardColors
-        @Composable get() = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer)
+        @Composable get() = CardDefaults.cardColors(
+            containerColor = if (BuildConfig.NOTION_LIKE) colorScheme.surface else colorScheme.surfaceContainer
+        )
 
     val cardColorsOnSurfaceContainer: CardColors
         @Composable get() = CardDefaults.cardColors(containerColor = colorScheme.surfaceBright)
 
     val listItemColors: ListItemColors
-        @Composable get() = ListItemDefaults.colors(containerColor = colorScheme.surfaceBright)
+        @Composable get() = ListItemDefaults.colors(
+            containerColor = if (BuildConfig.NOTION_LIKE) colorScheme.surface else colorScheme.surfaceBright,
+            headlineColor = colorScheme.onSurface,
+            supportingColor = colorScheme.onSurfaceVariant,
+            leadingIconColor = colorScheme.onSurfaceVariant,
+            trailingIconColor = colorScheme.onSurfaceVariant,
+        )
 }

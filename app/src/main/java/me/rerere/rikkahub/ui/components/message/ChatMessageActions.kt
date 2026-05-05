@@ -1,8 +1,5 @@
 package me.rerere.rikkahub.ui.components.message
 
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -11,11 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
@@ -30,7 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -57,6 +53,7 @@ import me.rerere.hugeicons.stroke.WebDesign01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.utils.copyMessageToClipboard
@@ -87,33 +84,25 @@ fun ColumnScope.ChatMessageActionButtons(
     }
 
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
+        MessageActionIconButton(
             imageVector = HugeIcons.Copy01,
             contentDescription = stringResource(R.string.copy),
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable { context.copyMessageToClipboard(message) }
-                .padding(8.dp)
-                .size(16.dp)
+            onClick = { context.copyMessageToClipboard(message) },
         )
 
-        Icon(
+        MessageActionIconButton(
             imageVector = HugeIcons.Refresh03,
             contentDescription = stringResource(R.string.regenerate),
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable {
-                    if (message.role == MessageRole.USER) {
-                        showRegenerateConfirm = true
-                    } else {
-                        onRegenerate()
-                    }
+            onClick = {
+                if (message.role == MessageRole.USER) {
+                    showRegenerateConfirm = true
+                } else {
+                    onRegenerate()
                 }
-                .padding(8.dp)
-                .size(16.dp)
+            },
         )
 
         if (message.role == MessageRole.ASSISTANT) {
@@ -121,68 +110,42 @@ fun ColumnScope.ChatMessageActionButtons(
             val settings = LocalSettings.current
             val isSpeaking by tts.isSpeaking.collectAsState()
             val isAvailable by tts.isAvailable.collectAsState()
-            Icon(
+            MessageActionIconButton(
                 imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
                 contentDescription = stringResource(R.string.tts),
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(
-                        enabled = isAvailable,
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = LocalIndication.current,
-                        onClick = {
-                            if (!isSpeaking) {
-                                val text = message.toText()
-                                val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
-                                    text.extractQuotedContentAsText() ?: text
-                                } else {
-                                    text
-                                }
-                                tts.speak(textToSpeak)
-                            } else {
-                                tts.stop()
-                            }
+                enabled = isAvailable,
+                onClick = {
+                    if (!isSpeaking) {
+                        val text = message.toText()
+                        val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
+                            text.extractQuotedContentAsText() ?: text
+                        } else {
+                            text
                         }
-                    )
-                    .padding(8.dp)
-                    .size(16.dp),
-                tint = if (isAvailable) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.38f)
+                        tts.speak(textToSpeak)
+                    } else {
+                        tts.stop()
+                    }
+                },
             )
 
-            // Translation button
             if (onTranslate != null) {
-                Icon(
+                MessageActionIconButton(
                     imageVector = HugeIcons.Translate,
                     contentDescription = stringResource(R.string.translate),
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = LocalIndication.current,
-                            onClick = {
-                                showTranslateDialog = true
-                            }
-                        )
-                        .padding(8.dp)
-                        .size(16.dp)
+                    onClick = {
+                        showTranslateDialog = true
+                    },
                 )
             }
         }
 
-        Icon(
+        MessageActionIconButton(
             imageVector = HugeIcons.MoreVertical,
             contentDescription = stringResource(R.string.more_options),
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = LocalIndication.current,
-                    onClick = {
-                        onOpenActionSheet()
-                    }
-                )
-                .padding(8.dp)
-                .size(16.dp)
+            onClick = {
+                onOpenActionSheet()
+            },
         )
 
         ChatMessageBranchSelector(
@@ -220,6 +183,22 @@ fun ColumnScope.ChatMessageActionButtons(
         },
         onDismiss = { showRegenerateConfirm = false },
         text = { Text(stringResource(R.string.regenerate_confirm_message)) }
+    )
+}
+
+@Composable
+private fun MessageActionIconButton(
+    imageVector: ImageVector,
+    contentDescription: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    WorkspaceIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(34.dp),
+        icon = imageVector,
+        contentDescription = contentDescription,
     )
 }
 

@@ -7,15 +7,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -84,6 +88,7 @@ import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.Favicon
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -271,6 +276,7 @@ private fun MessagePartsBlock(
 ) {
     val context = LocalContext.current
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+    val workspace = workspaceColors()
 
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
@@ -352,44 +358,52 @@ private fun MessagePartsBlock(
                         SelectionContainer {
                             if (role == MessageRole.USER) {
                                 Surface(
-                                    modifier = Modifier.animateContentSize(),
-                                    shape = RoundedCornerShape(
-                                        topStart = 22.dp,
-                                        topEnd = 8.dp,
-                                        bottomEnd = 22.dp,
-                                        bottomStart = 22.dp,
-                                    ),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    tonalElevation = 2.dp,
+                                    modifier = Modifier
+                                        .widthIn(max = 560.dp)
+                                        .animateContentSize(),
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = workspace.note,
+                                    contentColor = workspace.ink,
+                                    tonalElevation = 0.dp,
+                                    shadowElevation = 0.dp,
+                                    border = BorderStroke(1.dp, workspace.hairline),
                                     onClick = { onUserMessageClick?.invoke() },
                                 ) {
-                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
-                                        MarkdownBlock(
-                                            content = part.text.replaceRegexes(
-                                                assistant = assistant,
-                                                scope = AssistantAffectScope.USER,
-                                                visual = true,
-                                            ),
-                                            onClickCitation = handleClickCitation
+                                    Row(
+                                        modifier = Modifier.height(IntrinsicSize.Min),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .width(3.dp)
+                                                .background(workspace.blue)
                                         )
+                                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                                            MarkdownBlock(
+                                                content = part.text.replaceRegexes(
+                                                    assistant = assistant,
+                                                    scope = AssistantAffectScope.USER,
+                                                    visual = true,
+                                                ),
+                                                onClickCitation = handleClickCitation
+                                            )
+                                        }
                                     }
                                 }
                             } else {
                                 if (settings.displaySetting.showAssistantBubble) {
                                     Surface(
-                                        modifier = Modifier.animateContentSize(),
-                                        shape = RoundedCornerShape(
-                                            topStart = 8.dp,
-                                            topEnd = 22.dp,
-                                            bottomEnd = 22.dp,
-                                            bottomStart = 22.dp,
-                                        ),
-                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                        contentColor = MaterialTheme.colorScheme.onSurface,
-                                        tonalElevation = 2.dp,
+                                        modifier = Modifier
+                                            .widthIn(max = 640.dp)
+                                            .animateContentSize(),
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = workspace.paper,
+                                        contentColor = workspace.ink,
+                                        tonalElevation = 0.dp,
+                                        shadowElevation = 0.dp,
+                                        border = BorderStroke(1.dp, workspace.hairline),
                                     ) {
-                                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                                        Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
                                             MarkdownBlock(
                                                 content = part.text.replaceRegexes(
                                                     assistant = assistant,

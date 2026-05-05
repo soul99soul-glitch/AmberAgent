@@ -55,14 +55,14 @@ internal class MyWebChromeClient(
 
 internal class MyWebViewClient(
     private val state: WebViewState,
-    private val onPageStarted: (WebView?, String?) -> Unit,
-    private val onPageFinished: (WebView?, String?) -> Unit,
+    private val onPageStartedCallback: (WebView?, String?) -> Unit,
+    private val onPageFinishedCallback: (WebView?, String?) -> Unit,
 ) : WebViewClient() {
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
         state.isLoading = true
         state.currentUrl = url // Update current URL
-        onPageStarted(view, url)
+        onPageStartedCallback(view, url)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
@@ -72,7 +72,7 @@ internal class MyWebViewClient(
         state.pageTitle = view?.title // Update title
         state.canGoBack = view?.canGoBack() == true
         state.canGoForward = view?.canGoForward() == true
-        onPageFinished(view, url)
+        onPageFinishedCallback(view, url)
     }
 }
 
@@ -99,8 +99,8 @@ fun WebView(
     val webViewClient = remember(state) {
         MyWebViewClient(
             state = state,
-            onPageStarted = { view, url -> currentOnPageStarted.value(view, url) },
-            onPageFinished = { view, url -> currentOnPageFinished.value(view, url) },
+            onPageStartedCallback = { view, url -> currentOnPageStarted.value(view, url) },
+            onPageFinishedCallback = { view, url -> currentOnPageFinished.value(view, url) },
         )
     }
 

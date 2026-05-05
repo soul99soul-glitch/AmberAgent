@@ -7,17 +7,20 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +50,7 @@ import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.extractThinkingTitle
@@ -127,6 +131,7 @@ private fun ReasoningContent(
     scrollState: ScrollState,
     fadeHeight: Float,
 ) {
+    val workspace = workspaceColors()
     val isPreview = expandState == ReasoningCardState.Preview
     Column(
         modifier = Modifier
@@ -163,15 +168,24 @@ private fun ReasoningContent(
             }
     ) {
         SelectionContainer {
-            MarkdownBlock(
-                content = reasoning.reasoning.replaceRegexes(
-                    assistant = assistant,
-                    scope = AssistantAffectScope.ASSISTANT,
-                    visual = true,
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxSize(),
-            )
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = workspace.row,
+                contentColor = workspace.muted,
+                border = BorderStroke(1.dp, workspace.hairline),
+            ) {
+                MarkdownBlock(
+                    content = reasoning.reasoning.replaceRegexes(
+                        assistant = assistant,
+                        scope = AssistantAffectScope.ASSISTANT,
+                        visual = true,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+            }
         }
     }
 }
@@ -187,6 +201,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val (state, loading) = rememberReasoningState(reasoning)
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
+    val workspace = workspaceColors()
 
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
@@ -196,7 +211,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 imageVector = HugeIcons.Idea01,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.secondary,
+                tint = workspace.muted,
             )
         },
         label = {
@@ -209,7 +224,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat()
                     ),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = workspace.muted,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -219,7 +234,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 Text(
                     text = state.duration.toString(DurationUnit.SECONDS, 1),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = workspace.faint,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -241,6 +256,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
 
 @Composable
 private fun ReasoningTitle(title: String) {
+    val workspace = workspaceColors()
     AnimatedContent(
         targetState = title,
         transitionSpec = {
@@ -252,7 +268,7 @@ private fun ReasoningTitle(title: String) {
         Text(
             text = it,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.secondary,
+            color = workspace.muted,
             modifier = Modifier
                 .padding(horizontal = 4.dp)
                 .shimmer(true),

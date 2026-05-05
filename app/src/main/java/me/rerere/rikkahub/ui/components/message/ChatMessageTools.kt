@@ -28,10 +28,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -106,6 +106,11 @@ import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
+import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.JsonInstantPretty
@@ -274,51 +279,6 @@ private fun toolStatusFromMessagePart(
     else -> AgentToolStatus.SUCCEEDED
 }
 
-private data class AgentToolColors(
-    val container: Color,
-    val content: Color,
-    val statusContainer: Color,
-    val statusContent: Color,
-)
-
-@Composable
-private fun agentToolColors(status: AgentToolStatus): AgentToolColors = when (status) {
-    AgentToolStatus.RUNNING -> AgentToolColors(
-        container = MaterialTheme.colorScheme.primaryContainer,
-        content = MaterialTheme.colorScheme.onPrimaryContainer,
-        statusContainer = MaterialTheme.colorScheme.primary,
-        statusContent = MaterialTheme.colorScheme.onPrimary,
-    )
-
-    AgentToolStatus.WAITING_FOR_PERMISSION -> AgentToolColors(
-        container = MaterialTheme.colorScheme.tertiaryContainer,
-        content = MaterialTheme.colorScheme.onTertiaryContainer,
-        statusContainer = MaterialTheme.colorScheme.tertiary,
-        statusContent = MaterialTheme.colorScheme.onTertiary,
-    )
-
-    AgentToolStatus.SUCCEEDED -> AgentToolColors(
-        container = MaterialTheme.colorScheme.secondaryContainer,
-        content = MaterialTheme.colorScheme.onSecondaryContainer,
-        statusContainer = MaterialTheme.colorScheme.surface,
-        statusContent = MaterialTheme.colorScheme.secondary,
-    )
-
-    AgentToolStatus.FAILED -> AgentToolColors(
-        container = MaterialTheme.colorScheme.errorContainer,
-        content = MaterialTheme.colorScheme.onErrorContainer,
-        statusContainer = MaterialTheme.colorScheme.error,
-        statusContent = MaterialTheme.colorScheme.onError,
-    )
-
-    AgentToolStatus.CANCELLED -> AgentToolColors(
-        container = MaterialTheme.colorScheme.surfaceVariant,
-        content = MaterialTheme.colorScheme.onSurfaceVariant,
-        statusContainer = MaterialTheme.colorScheme.surface,
-        statusContent = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
 @Composable
 private fun toolStatusLabel(status: AgentToolStatus): String = when (status) {
     AgentToolStatus.RUNNING -> "执行中"
@@ -326,6 +286,14 @@ private fun toolStatusLabel(status: AgentToolStatus): String = when (status) {
     AgentToolStatus.SUCCEEDED -> "成功"
     AgentToolStatus.FAILED -> "失败"
     AgentToolStatus.CANCELLED -> "已取消"
+}
+
+private fun toolStatusTone(status: AgentToolStatus): WorkspaceTone = when (status) {
+    AgentToolStatus.RUNNING -> WorkspaceTone.Accent
+    AgentToolStatus.WAITING_FOR_PERMISSION -> WorkspaceTone.Warning
+    AgentToolStatus.SUCCEEDED -> WorkspaceTone.Success
+    AgentToolStatus.FAILED -> WorkspaceTone.Danger
+    AgentToolStatus.CANCELLED -> WorkspaceTone.Neutral
 }
 
 @Composable
@@ -344,20 +312,11 @@ private fun ToolStatusPill(
     status: AgentToolStatus,
     modifier: Modifier = Modifier,
 ) {
-    val colors = agentToolColors(status)
-    Surface(
+    WorkspaceStatusPill(
+        text = toolStatusLabel(status),
         modifier = modifier,
-        shape = CircleShape,
-        color = colors.statusContainer,
-        contentColor = colors.statusContent,
-    ) {
-        Text(
-            text = toolStatusLabel(status),
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-        )
-    }
+        tone = toolStatusTone(status),
+    )
 }
 
 @Composable
@@ -372,13 +331,14 @@ private fun AgentToolCallCapsule(
     approvalActions: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val colors = agentToolColors(status)
-    val shape = RoundedCornerShape(24.dp)
+    val workspace = workspaceColors()
+    val tone = toolStatusTone(status)
+    val shape = RoundedCornerShape(10.dp)
     val kindDescription = toolKindLabel(kind, toolName)
     Surface(
         modifier = modifier
             .wrapContentWidth(align = Alignment.Start)
-            .widthIn(max = 420.dp)
+            .widthIn(max = 460.dp)
             .clip(shape)
             .then(
                 if (onClick != null) {
@@ -389,49 +349,59 @@ private fun AgentToolCallCapsule(
             )
             .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
         shape = shape,
-        color = colors.container,
-        contentColor = colors.content,
-        border = BorderStroke(1.dp, colors.content.copy(alpha = 0.08f)),
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Surface(
-                modifier = Modifier.size(26.dp),
-                shape = CircleShape,
-                color = colors.content.copy(alpha = 0.10f),
-                contentColor = colors.content,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    if (loading && status == AgentToolStatus.RUNNING) {
-                        DotLoading(size = 8.dp)
-                    } else {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = kindDescription,
-                            modifier = Modifier.size(15.dp),
-                        )
-                    }
+                WorkspaceLeadingIcon(
+                    icon = icon,
+                    size = 28.dp,
+                    iconSize = 15.dp,
+                    tone = tone,
+                )
+
+                Column(modifier = Modifier.weight(1f, fill = false)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
+                    )
+                    Text(
+                        text = "$kindDescription · ${toolName.compactToolPreview(28)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                if (approvalActions != null) {
+                    approvalActions()
+                } else {
+                    ToolStatusPill(status = status)
                 }
             }
-
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = colors.content,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
-            )
-
-            if (approvalActions != null) {
-                approvalActions()
-            } else {
-                ToolStatusPill(status = status)
+            if (loading && status == AgentToolStatus.RUNNING) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(CircleShape),
+                    color = workspace.blue,
+                    trackColor = workspace.hairline,
+                )
             }
         }
     }
@@ -542,6 +512,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     val title = toolDisplayTitle(tool.toolName, arguments, memoryAction)
     val status = toolStatusFromMessagePart(tool = tool, loading = loading, content = content)
+    val workspace = workspaceColors()
 
     val hasExtraContent = isDenied || images.isNotEmpty()
 
@@ -567,26 +538,24 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         ToolStatusPill(status = status)
-                        FilledTonalIconButton(
+                        WorkspaceIconButton(
                             onClick = { showDenyDialog = true },
                             modifier = Modifier.size(24.dp),
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Cancel01,
-                                contentDescription = stringResource(R.string.chat_message_tool_deny),
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                        FilledTonalIconButton(
+                            size = 24.dp,
+                            iconSize = 12.dp,
+                            tone = WorkspaceTone.Danger,
+                            icon = HugeIcons.Cancel01,
+                            contentDescription = stringResource(R.string.chat_message_tool_deny),
+                        )
+                        WorkspaceIconButton(
                             onClick = { onToolApproval(tool.toolCallId, true, "") },
                             modifier = Modifier.size(24.dp),
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Tick01,
-                                contentDescription = stringResource(R.string.chat_message_tool_approve),
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
+                            size = 24.dp,
+                            iconSize = 12.dp,
+                            tone = WorkspaceTone.Success,
+                            icon = HugeIcons.Tick01,
+                            contentDescription = stringResource(R.string.chat_message_tool_approve),
+                        )
                     }
                 }
             } else {
@@ -599,9 +568,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 32.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                shape = RoundedCornerShape(8.dp),
+                color = workspace.row,
+                contentColor = workspace.muted,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -614,7 +584,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = memoryContent,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = workspace.muted,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -626,7 +596,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = answer,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = workspace.muted,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -645,7 +615,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 Text(
                                     text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                    color = workspace.faint,
                                 )
                             }
                         }
@@ -655,7 +625,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         Text(
                             text = url,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            color = workspace.faint,
                         )
                     }
                     if (tool.toolName == ToolNames.TTS) {
@@ -668,21 +638,19 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = text,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = workspace.muted,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
                             )
-                            FilledTonalIconButton(
+                            WorkspaceIconButton(
                                 onClick = { scope.launch { eventBus.emit(AppEvent.Speak(text)) } },
                                 modifier = Modifier.size(28.dp),
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Refresh01,
-                                    contentDescription = "Replay",
-                                    modifier = Modifier.size(14.dp),
-                                )
-                            }
+                                size = 28.dp,
+                                iconSize = 14.dp,
+                                icon = HugeIcons.Refresh01,
+                                contentDescription = "Replay",
+                            )
                         }
                     }
                     if (images.isNotEmpty()) {
@@ -707,7 +675,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             text = stringResource(R.string.chat_message_tool_denied) +
                                 if (reason.isNotBlank()) ": $reason" else "",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = workspace.red,
                         )
                     }
                 }

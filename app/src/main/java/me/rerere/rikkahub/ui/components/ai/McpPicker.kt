@@ -17,7 +17,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -132,7 +132,7 @@ fun McpPickerButton(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.padding(vertical = 4.dp)
                     ) {
-                        LinearWavyProgressIndicator()
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         Text(
                             text = stringResource(id = R.string.mcp_picker_syncing),
                             style = MaterialTheme.typography.bodyLarge

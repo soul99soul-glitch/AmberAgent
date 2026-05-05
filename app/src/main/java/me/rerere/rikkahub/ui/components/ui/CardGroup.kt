@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.LocalContentColor
@@ -33,9 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.rikkahub.ui.theme.CustomColors
 
-private val CardGroupCorner = 20.dp
-private val CardGroupItemSpacing = 2.dp
-private val CardGroupInnerCorner = 4.dp
+private val CardGroupCorner = 12.dp
+private val CardGroupItemSpacing = 1.dp
+private val CardGroupInnerCorner = 2.dp
 
 data class CardGroupItem(
     val onClick: (() -> Unit)?,
@@ -81,6 +80,7 @@ private fun CardGroupListItem(
     item: CardGroupItem,
     count: Int,
     index: Int,
+    defaultColors: ListItemColors?,
 ) {
     val isFirst = index == 0
     val isLast = index == count - 1
@@ -88,14 +88,8 @@ private fun CardGroupListItem(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val topCorner by animateDpAsState(
-        targetValue = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner,
-        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-    )
-    val bottomCorner by animateDpAsState(
-        targetValue = if (isPressed || count == 1 || isLast) CardGroupCorner else CardGroupInnerCorner,
-        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-    )
+    val topCorner = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner
+    val bottomCorner = if (isPressed || count == 1 || isLast) CardGroupCorner else CardGroupInnerCorner
 
     ListItem(
         headlineContent = item.headlineContent,
@@ -122,7 +116,7 @@ private fun CardGroupListItem(
         supportingContent = item.supportingContent,
         leadingContent = item.leadingContent,
         trailingContent = item.trailingContent,
-        colors = item.colors ?: CustomColors.listItemColors,
+        colors = item.colors ?: defaultColors ?: CustomColors.listItemColors,
     )
 }
 
@@ -130,6 +124,7 @@ private fun CardGroupListItem(
 fun CardGroup(
     modifier: Modifier = Modifier,
     title: (@Composable () -> Unit)? = null,
+    colors: ListItemColors? = null,
     content: @Composable CardGroupScope.() -> Unit,
 ) {
     val scope = CardGroupScope()
@@ -137,9 +132,9 @@ fun CardGroup(
 
     Column(modifier = modifier) {
         if (title != null) {
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.primary) {
-                ProvideTextStyle(MaterialTheme.typography.titleSmallEmphasized) {
-                    Box(modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                ProvideTextStyle(MaterialTheme.typography.titleSmall) {
+                    Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 8.dp)) {
                         title()
                     }
                 }
@@ -147,7 +142,7 @@ fun CardGroup(
         }
         val count = scope.items.size
         scope.items.fastForEachIndexed { index, item ->
-            CardGroupListItem(item = item, count = count, index = index)
+            CardGroupListItem(item = item, count = count, index = index, defaultColors = colors)
             if (index != count - 1) {
                 Spacer(modifier = Modifier.height(CardGroupItemSpacing))
             }
@@ -160,7 +155,7 @@ fun CardGroup(
 private fun CardGroupPreview() {
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = {
                     Text("Card Group")
                 },

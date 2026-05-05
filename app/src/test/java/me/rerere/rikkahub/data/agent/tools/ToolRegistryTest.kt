@@ -46,6 +46,13 @@ class ToolRegistryTest {
         assertEquals(FILE_READ_HARD_MAX_CHARS + 2_048, metadata.outputBudgetChars)
     }
 
+    @Test
+    fun officeProToolsUseOfficeCategory() {
+        val registry = ToolRegistry.from(listOf(stubTool("officepro_status")))
+
+        assertEquals("office", registry.metadata.single().category)
+    }
+
     private fun stubTool(
         name: String,
         execute: suspend (kotlinx.serialization.json.JsonElement) -> List<UIMessagePart> = {

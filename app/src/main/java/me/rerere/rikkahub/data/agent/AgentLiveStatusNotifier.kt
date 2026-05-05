@@ -356,8 +356,8 @@ class AgentLiveStatusNotifier(
         private const val LIVE_NOTIFICATION_OFFSET = 10_000
         private const val STOP_ACTION_REQUEST_OFFSET = 20_000
         private const val MIN_UPDATE_INTERVAL_MS = 1_000L
-        private const val MAX_TOOL_TITLE_CHARS = 36
-        private const val MAX_COMMAND_CHARS = 44
+        private const val MAX_TOOL_TITLE_CHARS = 32
+        private const val MAX_COMMAND_CHARS = 36
         private const val MAX_INSTALL_TARGETS = 3
         private val URL_REGEX = Regex("https?://[^\\s\"'}]+")
         private val WHITESPACE_REGEX = Regex("\\s+")

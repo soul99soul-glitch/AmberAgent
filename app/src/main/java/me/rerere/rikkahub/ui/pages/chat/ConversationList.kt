@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,9 +33,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,7 +55,7 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.ui.theme.extendColors
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 import java.time.ZoneId
@@ -107,24 +106,11 @@ fun ColumnScope.ConversationList(
     LazyColumn(
         state = listState,
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (conversations.itemCount == 0) {
             item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    Text(
-                        text = stringResource(id = R.string.chat_page_no_conversations),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
+                EmptyConversationList()
             }
         }
 
@@ -178,18 +164,18 @@ private fun DateHeaderItem(
     label: String,
     modifier: Modifier = Modifier
 ) {
+    val workspace = workspaceColors()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+            fontWeight = FontWeight.Medium,
+            color = workspace.faint
         )
     }
 }
@@ -198,25 +184,25 @@ private fun DateHeaderItem(
 private fun PinnedHeader(
     modifier: Modifier = Modifier
 ) {
+    val workspace = workspaceColors()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = HugeIcons.Pin,
             contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.primary
+            modifier = Modifier.size(18.dp),
+            tint = workspace.faint
         )
-        Spacer(Modifier.size(8.dp))
+        Spacer(Modifier.size(10.dp))
         Text(
             text = stringResource(R.string.pinned_chats),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+            color = workspace.faint
         )
     }
 }
@@ -233,8 +219,9 @@ private fun ConversationItem(
     onClick: (Conversation) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val workspace = workspaceColors()
     val backgroundColor = if (selected) {
-        MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp)
+        workspace.blueContainer
     } else {
         Color.Transparent
     }
@@ -243,7 +230,7 @@ private fun ConversationItem(
     }
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(50f))
+            .clip(RoundedCornerShape(8.dp))
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = LocalIndication.current,
@@ -257,11 +244,14 @@ private fun ConversationItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .heightIn(min = 46.dp)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = conversation.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (selected) workspace.blue else workspace.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -272,8 +262,8 @@ private fun ConversationItem(
                 Icon(
                     imageVector = HugeIcons.Pin,
                     contentDescription = "Pinned",
-                    modifier = Modifier.size(12.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    modifier = Modifier.size(15.dp),
+                    tint = workspace.faint
                 )
             }
             AnimatedVisibility(loading) {
@@ -332,6 +322,21 @@ private fun ConversationItem(
 }
 
 @Composable
+private fun EmptyConversationList(
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    Text(
+        text = stringResource(id = R.string.chat_page_no_conversations),
+        style = MaterialTheme.typography.bodyLarge,
+        color = workspace.faint,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 22.dp)
+    )
+}
+
+@Composable
 private fun ConversationRunningIndicator(
     modifier: Modifier = Modifier,
 ) {
@@ -354,11 +359,12 @@ private fun ConversationRunningIndicator(
         ),
         label = "conversation-running-alpha",
     )
-    val runningColor = MaterialTheme.colorScheme.primary
+    val workspace = workspaceColors()
+    val runningColor = workspace.blue
 
     Box(
         modifier = modifier
-            .size(18.dp)
+            .size(22.dp)
             .semantics {
                 contentDescription = "Running"
             },
@@ -366,7 +372,7 @@ private fun ConversationRunningIndicator(
     ) {
         Box(
             modifier = Modifier
-                .size(14.dp)
+                .size(16.dp)
                 .scale(pulseScale)
                 .border(
                     width = 1.5.dp,
@@ -377,8 +383,8 @@ private fun ConversationRunningIndicator(
         Box(
             modifier = Modifier
                 .clip(CircleShape)
-                .background(MaterialTheme.extendColors.green6)
-                .size(5.dp),
+                .background(workspace.green)
+                .size(6.dp),
         )
     }
 }

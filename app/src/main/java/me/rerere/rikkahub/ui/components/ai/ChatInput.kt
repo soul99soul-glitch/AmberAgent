@@ -133,6 +133,7 @@ import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.hugeicons.stroke.Zap
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
@@ -151,6 +152,8 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.ui.components.ui.ExtensionSelector
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -159,6 +162,7 @@ import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import org.koin.compose.koinInject
 import org.json.JSONArray
@@ -198,13 +202,10 @@ fun ChatInput(
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
-    val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val composerShape = RoundedCornerShape(
-        topStart = 32.dp,
-        topEnd = 32.dp,
-        bottomStart = 28.dp,
-        bottomEnd = 14.dp,
-    )
+    val workspace = workspaceColors()
+    val hazeTintColor = workspace.paper
+    val composerShape = RoundedCornerShape(8.dp)
+    val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -399,21 +400,21 @@ fun ChatInput(
                     .fillMaxWidth()
                     .clip(composerShape)
                     .then(
-                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                        if (useComposerBlur) Modifier.hazeEffect(
                             state = hazeState,
                             style = HazeMaterials.ultraThin(containerColor = hazeTintColor)
                         )
                         else Modifier
                     ),
                 shape = composerShape,
-                tonalElevation = 3.dp,
-                shadowElevation = 2.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-                color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                border = BorderStroke(1.dp, workspace.hairline),
+                color = if (useComposerBlur) Color.Transparent else hazeTintColor,
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
@@ -501,18 +502,21 @@ fun ChatInput(
                         ActionIconButton(
                             onClick = {
                                 expandToggle(ExpandState.Files)
-                            }) {
+                            },
+                            accent = expand == ExpandState.Files,
+                        ) {
                             Icon(
                                 imageVector = if (expand == ExpandState.Files) HugeIcons.Cancel01 else HugeIcons.Add01,
-                                contentDescription = stringResource(R.string.more_options)
+                                contentDescription = stringResource(R.string.more_options),
+                                modifier = Modifier.size(ComposerButtonIconSize),
                             )
                         }
 
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
+                                .size(ComposerButtonSize)
+                                .clip(RoundedCornerShape(8.dp))
                                 .combinedClickable(
                                     enabled = loading || !state.isEmpty(),
                                     onClick = {
@@ -525,32 +529,35 @@ fun ChatInput(
                                 )
                         ) {
                             val containerColor = when {
-                                loading -> MaterialTheme.colorScheme.tertiaryContainer
-                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                else -> MaterialTheme.colorScheme.primary
+                                loading -> workspace.amberContainer
+                                state.isEmpty() -> workspace.row
+                                else -> workspace.blue
                             }
                             val contentColor = when {
-                                loading -> MaterialTheme.colorScheme.onTertiaryContainer
-                                state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                else -> MaterialTheme.colorScheme.onPrimary
+                                loading -> workspace.amber
+                                state.isEmpty() -> workspace.faint
+                                else -> Color.White
                             }
                             Surface(
                                 modifier = Modifier.fillMaxSize(),
-                                shape = CircleShape,
+                                shape = RoundedCornerShape(8.dp),
                                 color = containerColor,
+                                border = BorderStroke(1.dp, if (state.isEmpty()) workspace.hairline else Color.Transparent),
                                 content = {})
                             if (loading) {
                                 KeepScreenOn()
                                 Icon(
                                     imageVector = HugeIcons.Cancel01,
                                     contentDescription = stringResource(R.string.stop),
-                                    tint = contentColor
+                                    tint = contentColor,
+                                    modifier = Modifier.size(ComposerButtonIconSize),
                                 )
                             } else {
                                 Icon(
                                     imageVector = HugeIcons.ArrowUp02,
                                     contentDescription = stringResource(R.string.send),
-                                    tint = contentColor
+                                    tint = contentColor,
+                                    modifier = Modifier.size(ComposerButtonIconSize),
                                 )
                             }
                         }
@@ -573,17 +580,18 @@ fun ChatInput(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .then(
-                                if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
+                                if (useComposerBlur) Modifier.hazeEffect(
                                     state = hazeState,
                                     style = HazeMaterials.ultraThin()
                                 )
                                 else Modifier
-                            ),
-                        shape = RoundedCornerShape(20.dp),
+                        ),
+                        shape = RoundedCornerShape(8.dp),
                         tonalElevation = 0.dp,
-                        color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
+                        border = BorderStroke(1.dp, workspace.hairline),
+                        color = if (useComposerBlur) Color.Transparent else hazeTintColor,
                     ) {
                         FilesPicker(
                             conversation = conversation,
@@ -652,15 +660,16 @@ private fun AgentOperationPreviewPeek(
     modifier: Modifier = Modifier,
 ) {
     val previewUrl = activity.operationPreviewUrl()
+    val workspace = workspaceColors()
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(10.dp))
             .clickable { onOpen() },
-        shape = RoundedCornerShape(16.dp),
-        color = if (previewUrl != null) MaterialTheme.colorScheme.surface else Color(0xFF05070B),
-        contentColor = Color(0xFFEAF2FF),
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        shape = RoundedCornerShape(10.dp),
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         if (previewUrl != null) {
             WebOperationPreviewThumbnail(
@@ -674,14 +683,14 @@ private fun AgentOperationPreviewPeek(
             ) {
                 Text(
                     text = activity.operationPreviewKind(),
-                    color = Color(0xFFFF5B93),
+                    color = workspace.amber,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = activity.operationPreviewText(),
-                    color = Color(0xFF92E6A7),
+                    color = workspace.muted,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
@@ -776,16 +785,17 @@ private fun SandboxStepPeek(
     onNext: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val workspace = workspaceColors()
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(15.dp))
+            .clip(RoundedCornerShape(10.dp))
             .clickable { onOpen() },
-        shape = RoundedCornerShape(15.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.96f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shadowElevation = 3.dp,
-        tonalElevation = 1.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        shape = RoundedCornerShape(10.dp),
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        shadowElevation = 1.dp,
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -825,7 +835,7 @@ private fun SandboxStepPeek(
                 Text(
                     text = activity.stepProgressText(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = workspace.muted,
                     maxLines = 1,
                 )
                 SandboxStepArrow(
@@ -1367,6 +1377,8 @@ private fun SandboxActivityUiState.terminalTranscript(): String = buildString {
 private val HTTP_URL_REGEX = Regex("https?://[^\\s\"'<>),]+")
 private const val MAX_SLASH_COMMANDS = 6
 private const val MAX_SLASH_COMMAND_TITLE_CHARS = 32
+private val ComposerButtonSize = 44.dp
+private val ComposerButtonIconSize = 28.dp
 
 private fun String.firstHttpUrl(): String? =
     HTTP_URL_REGEX.find(this)?.value?.trimEnd('.', ',', ';', ')')
@@ -1382,15 +1394,19 @@ private fun String.compactForSandbox(maxLength: Int): String {
 @Composable
 private fun ActionIconButton(
     onClick: () -> Unit,
+    accent: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    val workspace = workspaceColors()
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(44.dp),
-        shape = CircleShape,
+        modifier = Modifier.size(ComposerButtonSize),
+        shape = RoundedCornerShape(8.dp),
         tonalElevation = 0.dp,
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shadowElevation = 0.dp,
+        color = if (accent) workspace.blueContainer else workspace.paper,
+        contentColor = if (accent) workspace.blue else workspace.ink,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Box(
             modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center
@@ -1408,6 +1424,7 @@ private fun TextInputRow(
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
     val assistant = settings.getCurrentAssistant()
+    val workspace = workspaceColors()
     val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
         settings.getQuickMessagesOfAssistant(assistant)
     }
@@ -1418,8 +1435,10 @@ private fun TextInputRow(
     ) {
         if (state.isEditing()) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(6.dp),
+                color = workspace.blueContainer,
+                contentColor = workspace.blue,
+                border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.16f)),
             ) {
                 Row(
                     modifier = Modifier
@@ -1503,9 +1522,12 @@ private fun TextInputRow(
                 .onFocusChanged {
                     isFocused = it.isFocused
                 },
-            shape = MaterialTheme.shapes.largeIncreased,
+            shape = RoundedCornerShape(8.dp),
             placeholder = {
-                Text(stringResource(R.string.chat_input_placeholder))
+                Text(
+                    text = stringResource(R.string.chat_input_placeholder),
+                    color = workspace.faint,
+                )
             },
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
             keyboardOptions = KeyboardOptions(
@@ -1519,8 +1541,12 @@ private fun TextInputRow(
             colors = TextFieldDefaults.colors().copy(
                 unfocusedIndicatorColor = Color.Transparent,
                 focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.74f),
+                focusedContainerColor = workspace.paper,
+                unfocusedContainerColor = workspace.paper,
+                focusedTextColor = workspace.ink,
+                unfocusedTextColor = workspace.ink,
+                focusedPlaceholderColor = workspace.faint,
+                unfocusedPlaceholderColor = workspace.faint,
             ),
             trailingIcon = {
                 if (isFocused) {
@@ -1536,7 +1562,24 @@ private fun TextInputRow(
                 {
                     QuickMessageButton(quickMessages = quickMessages, state = state)
                 }
-            } else null,
+            } else {
+                {
+                    Surface(
+                        modifier = Modifier.size(24.dp),
+                        shape = RoundedCornerShape(5.dp),
+                        color = workspace.blueContainer,
+                        contentColor = workspace.blue,
+                        border = BorderStroke(1.dp, workspace.hairline),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "/",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
+            },
         )
         if (isFullScreen) {
             FullScreenEditor(state = state) {
@@ -1552,12 +1595,14 @@ private fun SlashCommandPanel(
     hasAnyQuickMessage: Boolean,
     onSelect: (QuickMessage) -> Unit,
 ) {
+    val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        tonalElevation = 2.dp,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(10.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 1.dp,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
             when {
@@ -1578,7 +1623,7 @@ private fun SlashCommandPanel(
                         if (index < quickMessages.take(MAX_SLASH_COMMANDS).lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = 58.dp),
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                color = workspace.hairline,
                             )
                         }
                     }
@@ -1593,6 +1638,7 @@ private fun SlashCommandRow(
     quickMessage: QuickMessage,
     onClick: () -> Unit,
 ) {
+    val workspace = workspaceColors()
     Surface(
         onClick = onClick,
         color = Color.Transparent,
@@ -1604,10 +1650,11 @@ private fun SlashCommandRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Surface(
-                modifier = Modifier.size(38.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(30.dp),
+                shape = RoundedCornerShape(6.dp),
+                color = workspace.row,
+                contentColor = workspace.muted,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -1627,7 +1674,7 @@ private fun SlashCommandRow(
                 Text(
                     text = quickMessage.content,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = workspace.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1814,12 +1861,14 @@ private fun AttachmentChip(
     leading: @Composable () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val workspace = workspaceColors()
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        border = BorderStroke(1.dp, workspace.hairline)
     ) {
         Row(
             modifier = Modifier
@@ -1846,7 +1895,7 @@ private fun AttachmentChip(
                 Icon(
                     imageVector = HugeIcons.Cancel01,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = workspace.muted,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -1858,10 +1907,13 @@ private fun AttachmentChip(
 private fun AttachmentLeadingIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
 ) {
+    val workspace = workspaceColors()
     Surface(
-        modifier = Modifier.size(34.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.size(32.dp),
+        shape = RoundedCornerShape(6.dp),
+        color = workspace.row,
+        contentColor = workspace.muted,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -1870,7 +1922,7 @@ private fun AttachmentLeadingIcon(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = workspace.muted
             )
         }
     }

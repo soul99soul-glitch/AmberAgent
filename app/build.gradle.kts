@@ -82,11 +82,21 @@ android {
             )
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
+            buildConfigField("Boolean", "NOTION_LIKE", "false")
         }
         debug {
             applicationIdSuffix = ".debug"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
+            buildConfigField("Boolean", "NOTION_LIKE", "false")
+        }
+        create("notion") {
+            initWith(getByName("debug"))
+            matchingFallbacks.add("debug")
+            applicationIdSuffix = ".notion"
+            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
+            buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
+            buildConfigField("Boolean", "NOTION_LIKE", "true")
         }
         create("baseline") {
             initWith(getByName("release"))
@@ -97,6 +107,7 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             isProfileable = true
+            buildConfigField("Boolean", "NOTION_LIKE", "false")
         }
     }
     compileOptions {

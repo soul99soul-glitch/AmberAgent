@@ -43,29 +43,29 @@ fun Switch(
     size: SwitchSize = SwitchSize.Medium,
     enabled: Boolean = true,
     trackColor: Color = MaterialTheme.colorScheme.primary,
-    trackColorUnchecked: Color = MaterialTheme.colorScheme.surfaceVariant,
-    thumbColor: Color = MaterialTheme.colorScheme.onPrimary,
+    trackColorUnchecked: Color = MaterialTheme.colorScheme.surfaceContainer,
+    thumbColor: Color = MaterialTheme.colorScheme.surface,
     thumbColorUnchecked: Color = MaterialTheme.colorScheme.outline
 ) {
     val dimensions = when (size) {
         SwitchSize.Small -> SwitchDimensions(
-            trackWidth = 36.dp,
+            trackWidth = 34.dp,
+            trackHeight = 18.dp,
+            thumbSize = 14.dp,
+            thumbPadding = 2.dp
+        )
+
+        SwitchSize.Medium -> SwitchDimensions(
+            trackWidth = 38.dp,
             trackHeight = 20.dp,
             thumbSize = 16.dp,
             thumbPadding = 2.dp
         )
 
-        SwitchSize.Medium -> SwitchDimensions(
-            trackWidth = 44.dp,
-            trackHeight = 24.dp,
-            thumbSize = 20.dp,
-            thumbPadding = 2.dp
-        )
-
         SwitchSize.Large -> SwitchDimensions(
-            trackWidth = 52.dp,
-            trackHeight = 28.dp,
-            thumbSize = 24.dp,
+            trackWidth = 42.dp,
+            trackHeight = 22.dp,
+            thumbSize = 18.dp,
             thumbPadding = 2.dp
         )
     }
@@ -112,7 +112,7 @@ fun Switch(
                 .offset(x = thumbOffset)
                 .size(dimensions.thumbSize)
                 .shadow(
-                    elevation = if (enabled) 2.dp else 0.dp,
+                    elevation = if (enabled && checked) 1.dp else 0.dp,
                     shape = CircleShape
                 )
                 .clip(CircleShape)

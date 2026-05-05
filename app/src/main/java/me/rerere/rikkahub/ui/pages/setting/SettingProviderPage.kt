@@ -24,10 +24,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,7 +33,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -82,10 +80,11 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyStaggeredGridState
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
+import androidx.compose.foundation.lazy.items as lazyItems
 
 @Composable
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
@@ -94,27 +93,36 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var searchQuery by remember { mutableStateOf("") }
-    val lazyListState = rememberLazyStaggeredGridState()
-    val reorderableState = rememberReorderableLazyStaggeredGridState(lazyListState) { from, to ->
-        val newProviders = settings.providers.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        vm.updateSettings(settings.copy(providers = newProviders))
+    val lazyListState = rememberLazyListState()
+    val visibleProviders = remember(settings.providers) {
+        settings.providers.filterNot { it.isAmberAgentBuiltInProvider() }
     }
-
-    val filteredProviders = remember(settings.providers, searchQuery) {
+    val filteredProviders = remember(visibleProviders, searchQuery) {
         if (searchQuery.isBlank()) {
-            settings.providers
+            visibleProviders
         } else {
-            settings.providers.filter { provider ->
+            visibleProviders.filter { provider ->
                 provider.name.contains(searchQuery, ignoreCase = true)
             }
         }
     }
+    val isFiltering = searchQuery.isNotBlank()
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        if (isFiltering) return@rememberReorderableLazyListState
+        val fromProvider = filteredProviders.getOrNull(from.index) ?: return@rememberReorderableLazyListState
+        val toProvider = filteredProviders.getOrNull(to.index) ?: return@rememberReorderableLazyListState
+        val newProviders = settings.providers.toMutableList().apply {
+            val fromIndex = indexOfFirst { it.id == fromProvider.id }
+            val toIndex = indexOfFirst { it.id == toProvider.id }
+            if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
+            add(toIndex, removeAt(fromIndex))
+        }
+        vm.updateSettings(settings.copy(providers = newProviders))
+    }
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = {
                     Text(text = stringResource(R.string.setting_provider_page_title))
                 },
@@ -188,18 +196,16 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             )
 
 
-            LazyVerticalStaggeredGrid(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .imePadding(),
                 contentPadding = PaddingValues(16.dp),
-                verticalItemSpacing = 8.dp,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 state = lazyListState,
-                columns = StaggeredGridCells.Fixed(2)
             ) {
-                items(filteredProviders, key = { it.id }) { provider ->
+                lazyItems(filteredProviders, key = { it.id }) { provider ->
                     ReorderableItem(
                         state = reorderableState,
                         key = provider.id
@@ -213,15 +219,17 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                 val haptic = LocalHapticFeedback.current
                                 IconButton(
                                     onClick = {},
-                                    modifier = Modifier
-                                        .longPressDraggableHandle(
+                                    enabled = !isFiltering,
+                                    modifier = Modifier.then(
+                                        if (!isFiltering) Modifier.longPressDraggableHandle(
                                             onDragStarted = {
                                                 haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                             },
                                             onDragStopped = {
                                                 haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
                                             }
-                                        )
+                                        ) else Modifier
+                                    )
                                 ) {
                                     Icon(
                                         imageVector = HugeIcons.DragDropHorizontal,
@@ -516,29 +524,25 @@ private fun ProviderItem(
             onClick()
         }
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AutoAIIcon(
-                    name = provider.name,
-                    modifier = Modifier.size(36.dp)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                dragHandle()
-            }
+            AutoAIIcon(
+                name = provider.name,
+                modifier = Modifier.size(40.dp)
+            )
             Column(
-                modifier = Modifier,
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
                     text = provider.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 2,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 ProvideTextStyle(MaterialTheme.typography.labelSmall) {
@@ -568,6 +572,13 @@ private fun ProviderItem(
                     }
                 }
             }
+            dragHandle()
         }
     }
+}
+
+private val AmberAgentBuiltInProviderId = Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce")
+
+private fun ProviderSetting.isAmberAgentBuiltInProvider(): Boolean {
+    return builtIn && id == AmberAgentBuiltInProviderId
 }
