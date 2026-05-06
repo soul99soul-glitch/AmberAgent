@@ -69,6 +69,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -146,6 +147,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewLink
+import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -611,10 +613,19 @@ private fun ContextUsageIndicator(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    val usedTokens = remember(conversation.messageNodes) {
+    val latestNode = conversation.messageNodes.lastOrNull()
+    val latestMessage = latestNode?.currentMessage
+    val latestUsagePromptTokens = latestMessage?.usage?.promptTokens
+    val usedTokens = remember(
+        conversation.id,
+        conversation.messageNodes.size,
+        latestNode?.id,
+        latestUsagePromptTokens,
+    ) {
         conversation.messageNodes.asReversed()
+            .asSequence()
             .map { it.currentMessage }
-            .firstOrNull { it.role == MessageRole.ASSISTANT }
+            .firstOrNull { it.role == MessageRole.ASSISTANT && (it.usage?.promptTokens ?: 0) > 0 }
             ?.usage
             ?.promptTokens
             ?: estimateConversationTokens(conversation)
@@ -1162,7 +1173,6 @@ private fun WebOperationPreviewThumbnail(
     url: String,
     onOpen: () -> Unit,
 ) {
-    val context = LocalContext.current
     val webViewOperationStore: WebViewOperationStore = koinInject()
     val webState by webViewOperationStore.state.collectAsState()
     val isCurrentPreview = webState.requestedUrl == url || webState.url == url
@@ -1170,11 +1180,14 @@ private fun WebOperationPreviewThumbnail(
         .takeIf { isCurrentPreview && it.isNotBlank() }
         ?.let(::File)
         ?.takeIf { it.exists() && it.length() > 0L }
+    val showFrozenThumbnail = thumbnailFile != null &&
+        webState.status in setOf(WebViewLoadStatus.READY, WebViewLoadStatus.STALLED, WebViewLoadStatus.FAILED)
     LaunchedEffect(url, isCurrentPreview) {
         if (!isCurrentPreview) {
             webViewOperationStore.open(url)
         }
     }
+    val loadId = webState.loadId.takeIf { isCurrentPreview }
     val state = rememberWebViewState(
         url = url,
         settings = {
@@ -1183,15 +1196,32 @@ private fun WebOperationPreviewThumbnail(
             textZoom = 85
         },
     )
+    LaunchedEffect(loadId, url) {
+        if (!loadId.isNullOrBlank()) {
+            state.loadUrl(url)
+        }
+    }
+    DisposableEffect(loadId) {
+        if (!loadId.isNullOrBlank()) {
+            webViewOperationStore.markRendererActive(loadId, true)
+        }
+        onDispose {
+            if (!loadId.isNullOrBlank()) {
+                webViewOperationStore.markRendererActive(loadId, false)
+            }
+        }
+    }
+    val workspace = workspaceColors()
+    val frozenThumbnail = thumbnailFile.takeIf { showFrozenThumbnail }
     Box(modifier = Modifier.fillMaxSize()) {
-        if (thumbnailFile != null) {
+        if (frozenThumbnail != null) {
             AsyncImage(
-                model = thumbnailFile,
+                model = frozenThumbnail,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
-        } else {
+        } else if (!loadId.isNullOrBlank()) {
             WebView(
                 state = state,
                 modifier = Modifier
@@ -1205,30 +1235,70 @@ private fun WebOperationPreviewThumbnail(
                     webView.isFocusable = false
                     webView.isFocusableInTouchMode = false
                     webView.setOnTouchListener { _, _ -> true }
+                    webViewOperationStore.markRendererActive(loadId, true)
                 },
                 onUpdated = { webView ->
                     webView.setOnTouchListener { _, _ -> true }
                 },
                 onProgressChanged = { webView, progress ->
-                    webViewOperationStore.updateLoading(webView?.url ?: url, progress)
+                    webViewOperationStore.updateLoading(loadId, webView?.url ?: url, progress)
+                    if (progress >= 35) {
+                        webView?.let { extractReadablePage(it, webViewOperationStore, loadId) }
+                    }
                 },
                 onPageStarted = { webView, pageUrl ->
-                    webViewOperationStore.updateLoading(pageUrl ?: webView?.url ?: url, 1)
+                    webViewOperationStore.updateLoading(loadId, pageUrl ?: webView?.url ?: url, 1)
+                    webView?.let { scheduleReadableExtracts(it, webViewOperationStore, loadId) }
                 },
                 onPageFinished = { webView, pageUrl ->
                     val resolvedUrl = pageUrl ?: webView?.url ?: url
-                    webViewOperationStore.updateLoading(resolvedUrl, 100)
+                    webViewOperationStore.markPageFinished(loadId, resolvedUrl)
                     webView?.let {
-                        extractReadablePage(it, webViewOperationStore)
-                        captureWebViewThumbnail(it, webViewOperationStore, context)
+                        extractReadablePage(it, webViewOperationStore, loadId, force = true)
+                        captureWebViewThumbnail(it, webViewOperationStore, context = it.context, loadId = loadId)
                     }
                 },
+                onReceivedError = { webView, pageUrl, error ->
+                    webViewOperationStore.markFailed(loadId, pageUrl ?: webView?.url ?: url, error.orEmpty())
+                },
             )
+        } else {
+            WebOperationPreviewPlaceholder(url = url, workspace = workspace)
         }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clickable { onOpen() },
+        )
+    }
+}
+
+@Composable
+private fun WebOperationPreviewPlaceholder(
+    url: String,
+    workspace: me.rerere.rikkahub.ui.components.ui.WorkspaceColors,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(workspace.paper),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "网页预览",
+            style = MaterialTheme.typography.labelMedium,
+            color = workspace.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = url,
+            style = MaterialTheme.typography.labelSmall,
+            color = workspace.muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
 }
@@ -1553,7 +1623,23 @@ private fun OperationWebPreview(
             webViewOperationStore.open(url)
         }
     }
+    val loadId = webState.loadId.takeIf { isCurrentPreview }
     val state = rememberWebViewState(url = url)
+    LaunchedEffect(loadId, url) {
+        if (!loadId.isNullOrBlank()) {
+            state.loadUrl(url)
+        }
+    }
+    DisposableEffect(loadId) {
+        if (!loadId.isNullOrBlank()) {
+            webViewOperationStore.markRendererActive(loadId, true)
+        }
+        onDispose {
+            if (!loadId.isNullOrBlank()) {
+                webViewOperationStore.markRendererActive(loadId, false)
+            }
+        }
+    }
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
@@ -1565,17 +1651,32 @@ private fun OperationWebPreview(
             state = state,
             modifier = Modifier.fillMaxSize(),
             onProgressChanged = { webView, progress ->
-                webViewOperationStore.updateLoading(webView?.url ?: url, progress)
+                loadId?.let {
+                    webViewOperationStore.updateLoading(it, webView?.url ?: url, progress)
+                    if (progress >= 35) {
+                        webView?.let { view -> extractReadablePage(view, webViewOperationStore, it) }
+                    }
+                }
             },
             onPageStarted = { webView, pageUrl ->
-                webViewOperationStore.updateLoading(pageUrl ?: webView?.url ?: url, 1)
+                loadId?.let {
+                    webViewOperationStore.updateLoading(it, pageUrl ?: webView?.url ?: url, 1)
+                    webView?.let { view -> scheduleReadableExtracts(view, webViewOperationStore, it) }
+                }
             },
             onPageFinished = { webView, pageUrl ->
                 val resolvedUrl = pageUrl ?: webView?.url ?: url
-                webViewOperationStore.updateLoading(resolvedUrl, 100)
-                webView?.let {
-                    extractReadablePage(it, webViewOperationStore)
-                    captureWebViewThumbnail(it, webViewOperationStore, context)
+                loadId?.let {
+                    webViewOperationStore.markPageFinished(it, resolvedUrl)
+                    webView?.let { view ->
+                        extractReadablePage(view, webViewOperationStore, it, force = true)
+                        captureWebViewThumbnail(view, webViewOperationStore, context, it)
+                    }
+                }
+            },
+            onReceivedError = { webView, pageUrl, error ->
+                loadId?.let {
+                    webViewOperationStore.markFailed(it, pageUrl ?: webView?.url ?: url, error.orEmpty())
                 }
             },
         )
@@ -1585,7 +1686,10 @@ private fun OperationWebPreview(
 private fun extractReadablePage(
     webView: AndroidWebView,
     store: WebViewOperationStore,
+    loadId: String,
+    force: Boolean = false,
 ) {
+    if (!force && !store.shouldExtractReadablePage(loadId, webView.url)) return
     val script = """
         (function() {
           const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 40).map((a) => {
@@ -1625,6 +1729,7 @@ private fun extractReadablePage(
                     }
                 }
                 store.updateReadablePage(
+                    loadId = loadId,
                     url = payload.optString("url").ifBlank { webView.url },
                     title = payload.optString("title"),
                     readableText = payload.optString("text"),
@@ -1637,11 +1742,22 @@ private fun extractReadablePage(
     }
 }
 
+private fun scheduleReadableExtracts(
+    webView: AndroidWebView,
+    store: WebViewOperationStore,
+    loadId: String,
+) {
+    webView.postDelayed({ extractReadablePage(webView, store, loadId) }, 1_500L)
+    webView.postDelayed({ extractReadablePage(webView, store, loadId) }, 3_000L)
+}
+
 private fun captureWebViewThumbnail(
     webView: AndroidWebView,
     store: WebViewOperationStore,
     context: android.content.Context,
+    loadId: String,
 ) {
+    if (!store.shouldCaptureThumbnail(loadId, webView.url)) return
     webView.postDelayed({
         runCatching {
             val width = webView.width
@@ -1667,7 +1783,7 @@ private fun captureWebViewThumbnail(
                 cropped.compress(Bitmap.CompressFormat.PNG, 92, stream)
             }
             cropped.recycle()
-            store.updateThumbnail(webView.url, output.absolutePath)
+            store.updateThumbnail(loadId, webView.url, output.absolutePath)
         }.onFailure {
             Log.w("ChatInput", "Failed to capture WebView thumbnail", it)
         }
@@ -1741,7 +1857,7 @@ private fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = w
 
 private fun SandboxActivityUiState.operationPreviewKind(): String = when {
     toolName == "search_web" -> "web search"
-    toolName == "scrape_web" || toolName == "webview_open" || toolName == "webview_read" -> "webview"
+    toolName == "scrape_web" || toolName == "webview_open" || toolName == "webview_wait_for_load" || toolName == "webview_read" -> "webview"
     toolName.startsWith("icloud_") -> "icloud"
     toolName.startsWith("screen_") || toolName == "vlm_task" -> "screen"
     toolName.startsWith("file_") -> "workspace"
@@ -1777,7 +1893,7 @@ private fun SandboxActivityUiState.operationPreviewText(): String {
 }
 
 private fun SandboxActivityUiState.operationPreviewUrl(): String? {
-    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_open" && toolName != "webview_read") {
+    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_open" && toolName != "webview_wait_for_load" && toolName != "webview_read") {
         return null
     }
 

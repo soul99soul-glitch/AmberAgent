@@ -4,7 +4,6 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -142,7 +141,6 @@ fun Mermaid(
             state = webViewState,
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .animateContentSize()
                 .height(height),
             onUpdated = {
                 it.evaluateJavascript("calculateAndSendHeight();", null)

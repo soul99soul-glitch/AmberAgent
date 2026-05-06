@@ -202,7 +202,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         navController = navController,
                         current = conversation,
                         vm = vm,
-                        settings = setting
+                        settings = setting,
+                        drawerState = drawerState,
                     )
                 }
             ) {
@@ -235,7 +236,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         navController = navController,
                         current = conversation,
                         vm = vm,
-                        settings = setting
+                        settings = setting,
+                        drawerState = drawerState,
                     )
                 }
             ) {
@@ -298,9 +300,12 @@ private fun ChatPageContent(
             processingStatus = processingStatus,
         )
     }
+    val scopedLiveSandboxActivity = liveSandboxActivity?.takeIf { live ->
+        loadingJob != null || messageSandboxActivities.any { it.toolCallId == live.toolCallId }
+    }
     val rawSandboxTimeline = mergeSandboxTimeline(
         messageActivities = messageSandboxActivities,
-        liveActivity = liveSandboxActivity?.withStepProgress(conversation),
+        liveActivity = scopedLiveSandboxActivity?.withStepProgress(conversation),
     )
     val sandboxTimeline = when (setting.agentRuntime.operationPreviewMode) {
         AgentOperationPreviewMode.ALWAYS -> rawSandboxTimeline
@@ -548,6 +553,10 @@ private fun ChatPageContent(
     }
 }
 
+private const val MAX_SANDBOX_TIMELINE_ITEMS = 24
+private const val MAX_SANDBOX_OUTPUT_TAIL_CHARS = 1_600
+private const val MAX_SANDBOX_JSON_PARSE_CHARS = 80_000
+
 private fun mergeSandboxTimeline(
     messageActivities: List<SandboxActivityUiState>,
     liveActivity: SandboxActivityUiState?,
@@ -573,7 +582,7 @@ private fun Conversation.deriveSandboxActivities(
     loading: Boolean,
     processingStatus: String?,
 ): List<SandboxActivityUiState> {
-    val sandboxTools = sandboxActivityTools()
+    val sandboxTools = sandboxActivityTools().takeLast(MAX_SANDBOX_TIMELINE_ITEMS)
     if (sandboxTools.isEmpty()) {
         return processingStatus?.takeIf { loading && it.isNotBlank() }?.let {
             listOf(
@@ -614,7 +623,7 @@ private fun Conversation.deriveSandboxActivities(
 }
 
 private fun SandboxActivityUiState.withStepProgress(conversation: Conversation): SandboxActivityUiState {
-    val sandboxTools = conversation.sandboxActivityTools()
+    val sandboxTools = conversation.sandboxActivityTools().takeLast(MAX_SANDBOX_TIMELINE_ITEMS)
     val matchedIndex = sandboxTools.indexOfFirst { it.toolCallId == toolCallId }
     val inferredStep = if (matchedIndex >= 0) matchedIndex + 1 else sandboxTools.size + 1
     return copy(
@@ -629,8 +638,9 @@ private fun Conversation.sandboxActivityTools(): List<UIMessagePart.Tool> =
             .filter { it.isSandboxActivityTool() }
     }
 
-private fun Conversation.currentRunMessages() =
-    currentMessages.drop((currentMessages.indexOfLast { it.role == MessageRole.USER } + 1).coerceAtLeast(0))
+private fun Conversation.currentRunMessages() = currentMessages.let { messages ->
+    messages.drop((messages.indexOfLast { it.role == MessageRole.USER } + 1).coerceAtLeast(0))
+}
 
 private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
     toolName.startsWith("mcp__") ||
@@ -638,6 +648,7 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
             "search_web",
             "scrape_web",
             "webview_open",
+            "webview_wait_for_load",
             "webview_read",
             "icloud_status",
             "icloud_list",
@@ -682,6 +693,7 @@ private fun UIMessagePart.Tool.sandboxTitle(): String {
         "search_web" -> "网页搜索 ${input.getFirstStringContent("query", "q", "keyword", "keywords").orEmpty().compactSandboxText(20)}"
         "scrape_web" -> "打开网页 ${input.getFirstStringContent("url", "link", "uri").orEmpty().compactSandboxText(24)}"
         "webview_open" -> "打开网页 ${input.getStringContent("url").orEmpty().compactSandboxText(24)}"
+        "webview_wait_for_load" -> "等待网页加载"
         "webview_read" -> "读取网页内容"
         "icloud_status" -> "检查 iCloud 挂载"
         "icloud_list" -> "列出 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(18)}"
@@ -723,6 +735,7 @@ private fun UIMessagePart.Tool.inputPreview(): String {
         "search_web" -> input.getFirstStringContent("query", "q", "keyword", "keywords")
         "scrape_web" -> input.getFirstStringContent("url", "link", "uri")
         "webview_open" -> input.getStringContent("url")
+        "webview_wait_for_load" -> input.getStringContent("target_url")
         "webview_read" -> input.getStringContent("url")
         "icloud_list", "icloud_read", "icloud_write" -> input.getStringContent("path")
         "icloud_search" -> input.getStringContent("query")
@@ -741,6 +754,7 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName == "search_web" -> "web-search"
     toolName == "scrape_web" -> "webview"
     toolName == "webview_open" -> "webview"
+    toolName == "webview_wait_for_load" -> "webview"
     toolName == "webview_read" -> "webview"
     toolName.startsWith("icloud_") -> "icloud-web-mount"
     toolName == "terminal_execute" ||
@@ -765,26 +779,41 @@ private fun UIMessagePart.Tool.hasFailure(): Boolean {
     val error = outputJson.getStringContent("error")
     return !error.isNullOrBlank() ||
         (exitCode != null && exitCode != 0) ||
-        outputText().contains("Exception", ignoreCase = true)
+        outputText(MAX_SANDBOX_OUTPUT_TAIL_CHARS).contains("Exception", ignoreCase = true)
 }
 
 private fun UIMessagePart.Tool.outputTail(outputJson: JsonObject): String {
     val output = outputJson.getStringContent("output")
         ?: outputJson.getStringContent("error")
-        ?: outputText()
-    return output.trim().takeLast(1_600)
+        ?: outputText(MAX_SANDBOX_OUTPUT_TAIL_CHARS)
+    return output.trim().takeLast(MAX_SANDBOX_OUTPUT_TAIL_CHARS)
 }
 
 private fun UIMessagePart.Tool.outputJson(): JsonObject {
-    val output = outputText()
+    val output = outputText(MAX_SANDBOX_JSON_PARSE_CHARS + 1)
     if (output.isBlank()) return JsonObject(emptyMap())
+    if (output.length > MAX_SANDBOX_JSON_PARSE_CHARS) return JsonObject(emptyMap())
     return runCatching {
         JsonInstant.parseToJsonElement(output) as? JsonObject
     }.getOrNull() ?: JsonObject(emptyMap())
 }
 
-private fun UIMessagePart.Tool.outputText(): String =
-    output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+private fun UIMessagePart.Tool.outputText(maxChars: Int = Int.MAX_VALUE): String {
+    val textParts = output.filterIsInstance<UIMessagePart.Text>()
+    if (maxChars == Int.MAX_VALUE) {
+        return textParts.joinToString("\n") { it.text }
+    }
+    var remaining = maxChars
+    val chunks = ArrayDeque<String>()
+    for (part in textParts.asReversed()) {
+        if (remaining <= 0) break
+        val text = part.text
+        val chunk = if (text.length > remaining) text.takeLast(remaining) else text
+        chunks.addFirst(chunk)
+        remaining -= chunk.length
+    }
+    return chunks.joinToString("\n")
+}
 
 private fun JsonElement?.getStringContent(key: String): String? =
     (this as? JsonObject)?.get(key)?.jsonPrimitiveOrNull?.contentOrNull

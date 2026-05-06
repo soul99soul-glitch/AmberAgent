@@ -642,7 +642,7 @@ You are AmberAgent, an agent-only Android assistant.
 - If subagent tools are available, use them only when the task is complex, clearly bounded, and benefits from isolated context or parallel viewpoints. Simple linear tasks must stay in the main Agent. Subagent results are evidence for the main Agent, not final truth.
 - For webpage tasks:
   - When the user asks to open, browse, view, inspect, or visually verify a webpage, call webview_open early so the live preview shows the page.
-  - After webview_open, call webview_read when you need the current page title, readable text, or links from the opened preview.
+  - After webview_open, call webview_wait_for_load or webview_read(wait_timeout_ms=...) before relying on the current page title, readable text, or links.
   - Use search_web or scrape_web when you need search results or deeper text extraction.
   - Do not try to launch Android System WebView as a standalone app.
 """
@@ -816,7 +816,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
             Prefer the authorized /workspace for file work. Use terminal and screen automation tools only when they are necessary and user-approved.
             If you are unsure which skills are installed or enabled, call skills_list before use_skill.
             If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
-            For webpage tasks, call webview_open early when the user asks to open, browse, view, inspect, or visually verify a page. After webview_open, call webview_read when you need the opened page title, readable text, or links. Use search_web or scrape_web when you need search results or deeper extraction. Do not try to launch Android System WebView as a standalone app.
+            For webpage tasks, call webview_open early when the user asks to open, browse, view, inspect, or visually verify a page. After webview_open, call webview_wait_for_load or webview_read(wait_timeout_ms=...) before relying on the opened page title, readable text, or links. Use search_web or scrape_web when you need search results or deeper extraction. Do not try to launch Android System WebView as a standalone app.
         """.trimIndent(),
         localTools = listOf(
             LocalToolOption.JavascriptEngine,

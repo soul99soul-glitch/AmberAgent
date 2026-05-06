@@ -168,6 +168,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
     ToolNames.SEARCH_WEB -> HugeIcons.Search01
     ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
     "webview_open" -> HugeIcons.GlobalSearch
+    "webview_wait_for_load" -> HugeIcons.GlobalSearch
     "webview_read" -> HugeIcons.GlobalSearch
     in setOf("icloud_status", "icloud_list", "icloud_read", "icloud_write", "icloud_search") -> HugeIcons.Database02
     ToolNames.GET_TIME_INFO -> HugeIcons.Time02
@@ -239,7 +240,11 @@ private fun getToolKind(toolName: String) = when {
         "vlm_task"
     ) -> AgentToolKind.SCREEN
 
-    toolName == ToolNames.SEARCH_WEB || toolName == ToolNames.SCRAPE_WEB || toolName == "webview_open" || toolName == "webview_read" -> AgentToolKind.WEB
+    toolName == ToolNames.SEARCH_WEB ||
+        toolName == ToolNames.SCRAPE_WEB ||
+        toolName == "webview_open" ||
+        toolName == "webview_wait_for_load" ||
+        toolName == "webview_read" -> AgentToolKind.WEB
     toolName.startsWith("icloud_") -> AgentToolKind.FILE
     toolName == ToolNames.MEMORY -> AgentToolKind.MEMORY
     toolName.startsWith("mcp__") -> AgentToolKind.MCP
@@ -427,6 +432,7 @@ private fun toolDisplayTitle(
 
     ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
     "webview_open" -> "打开网页 ${arguments.getStringContent("url")?.compactToolPreview(28).orEmpty()}"
+    "webview_wait_for_load" -> "等待网页加载"
     "webview_read" -> "读取当前网页"
     "icloud_status" -> "检查 iCloud 挂载"
     "icloud_list" -> "列出 iCloud ${arguments.getStringContent("path")?.compactToolPreview(18).orEmpty()}"

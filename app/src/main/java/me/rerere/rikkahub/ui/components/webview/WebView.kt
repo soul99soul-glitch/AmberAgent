@@ -6,6 +6,8 @@ import android.util.Log
 import android.view.ViewGroup.LayoutParams
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -57,6 +59,7 @@ internal class MyWebViewClient(
     private val state: WebViewState,
     private val onPageStartedCallback: (WebView?, String?) -> Unit,
     private val onPageFinishedCallback: (WebView?, String?) -> Unit,
+    private val onReceivedErrorCallback: (WebView?, String?, String?) -> Unit,
 ) : WebViewClient() {
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
@@ -74,6 +77,22 @@ internal class MyWebViewClient(
         state.canGoForward = view?.canGoForward() == true
         onPageFinishedCallback(view, url)
     }
+
+    override fun onReceivedError(
+        view: WebView?,
+        request: WebResourceRequest?,
+        error: WebResourceError?,
+    ) {
+        super.onReceivedError(view, request, error)
+        if (request?.isForMainFrame == true) {
+            state.isLoading = false
+            onReceivedErrorCallback(
+                view,
+                request.url?.toString(),
+                error?.description?.toString(),
+            )
+        }
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
@@ -86,11 +105,13 @@ fun WebView(
     onProgressChanged: (WebView?, Int) -> Unit = { _, _ -> },
     onPageStarted: (WebView?, String?) -> Unit = { _, _ -> },
     onPageFinished: (WebView?, String?) -> Unit = { _, _ -> },
+    onReceivedError: (WebView?, String?, String?) -> Unit = { _, _, _ -> },
 ) {
     // Remember the clients based on the state
     val currentOnProgressChanged = rememberUpdatedState(onProgressChanged)
     val currentOnPageStarted = rememberUpdatedState(onPageStarted)
     val currentOnPageFinished = rememberUpdatedState(onPageFinished)
+    val currentOnReceivedError = rememberUpdatedState(onReceivedError)
     val webChromeClient = remember(state) {
         MyWebChromeClient(state) { view, progress ->
             currentOnProgressChanged.value(view, progress)
@@ -101,6 +122,7 @@ fun WebView(
             state = state,
             onPageStartedCallback = { view, url -> currentOnPageStarted.value(view, url) },
             onPageFinishedCallback = { view, url -> currentOnPageFinished.value(view, url) },
+            onReceivedErrorCallback = { view, url, error -> currentOnReceivedError.value(view, url, error) },
         )
     }
 
@@ -160,24 +182,25 @@ fun WebView(
                         // Also check if the webView's url is null or blank, which might happen initially
                         val currentWebViewUrl = webView.url
                         if (url.isNotEmpty() && (currentWebViewUrl.isNullOrBlank() || url != currentWebViewUrl || state.forceReload)) {
+                            state.lastLoadedDataKey = null
                             webView.loadUrl(content.url, content.additionalHttpHeaders)
                             state.forceReload = false // Reset force reload flag
                         }
                     }
 
                     is WebContent.Data -> {
-                        // Check if the data needs to be reloaded (e.g., if different from last loaded data)
-                        // For simplicity, we might just reload it every time the update block runs with Data content.
-                        // A more complex check could involve comparing `content.data` with a previously stored value.
-                        webView.loadDataWithBaseURL(
-                            content.baseUrl,
-                            content.data,
-                            content.mimeType,
-                            content.encoding,
-                            content.historyUrl
-                        )
-                        // Assuming data loading is fast, but let's reflect the state more accurately
-                        // state.isLoading = false // This might be too soon, let WebViewClient handle it
+                        val dataKey = content.stableLoadKey()
+                        if (dataKey != state.lastLoadedDataKey || state.forceReload) {
+                            webView.loadDataWithBaseURL(
+                                content.baseUrl,
+                                content.data,
+                                content.mimeType,
+                                content.encoding,
+                                content.historyUrl
+                            )
+                            state.lastLoadedDataKey = dataKey
+                            state.forceReload = false
+                        }
                     }
 
                     WebContent.NavigatorOnly -> {
@@ -226,6 +249,7 @@ class WebViewState(
     // --- Content State ---
     var content: WebContent by mutableStateOf(initialContent)
     internal var forceReload: Boolean by mutableStateOf(false) // Internal state to force URL reload if needed
+    internal var lastLoadedDataKey: String? = null
 
     // --- Loading State ---
     var isLoading: Boolean by mutableStateOf(false)
@@ -317,6 +341,21 @@ class WebViewState(
         }
     }
 }
+
+private fun WebContent.Data.stableLoadKey(): String =
+    buildString {
+        append(baseUrl.orEmpty())
+        append('\u0000')
+        append(encoding)
+        append('\u0000')
+        append(mimeType.orEmpty())
+        append('\u0000')
+        append(historyUrl.orEmpty())
+        append('\u0000')
+        append(data.length)
+        append(':')
+        append(data.hashCode())
+    }
 
 @Composable
 fun rememberWebViewState(

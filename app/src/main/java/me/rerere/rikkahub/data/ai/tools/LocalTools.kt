@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.tools
 import android.content.Context
 import com.whl.quickjs.wrapper.QuickJSContext
 import com.whl.quickjs.wrapper.QuickJSObject
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -32,6 +33,8 @@ import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
+import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
@@ -263,7 +266,7 @@ class LocalTools(
             description = """
                 Open a URL in AmberAgent's live operation preview WebView.
                 Prefer this early when the user asks to open, browse, view, inspect, or visually verify a webpage, or when search results should be shown in the live preview.
-                After opening, call webview_read when you need the current page title, readable text, or links.
+                After opening, call webview_wait_for_load or webview_read(wait_timeout_ms=...) when you need the current page title, readable text, or links.
                 Use search_web or scrape_web when you need search results or deeper page extraction.
                 Do not try to open the Android System WebView package as an app; the preview WebView is embedded inside AmberAgent.
             """.trimIndent().replace("\n", " "),
@@ -289,15 +292,16 @@ class LocalTools(
                 require(url.startsWith("http://") || url.startsWith("https://")) {
                     "Only http and https URLs can be opened in WebView"
                 }
-                webViewOperationStore.open(url)
+                val loadId = webViewOperationStore.open(url)
                 val payload = buildJsonObject {
                     put("url", url)
+                    put("load_id", loadId)
                     put("runtime", "webview")
                     put("status", "opened")
                     params["reason"]?.jsonPrimitive?.contentOrNull?.takeIf { reason -> reason.isNotBlank() }?.let { reason ->
                         put("reason", reason)
                     }
-                    put("note", "Tap the operation preview to expand the WebView panel.")
+                    put("note", "The live preview is loading. Use webview_wait_for_load or webview_read with wait_timeout_ms before relying on page text.")
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
             }
@@ -310,7 +314,7 @@ class LocalTools(
             description = """
                 Read the currently opened AmberAgent WebView page.
                 Use after webview_open when you need the page title, readable visible text, current URL, or page links.
-                If the page is still loading, the tool returns status=loading instead of pretending content is available.
+                By default this waits briefly for ready or partial content, then returns status=ready/interactive/loading/stalled/failed/no_page.
             """.trimIndent().replace("\n", " "),
             parameters = {
                 InputSchema.Obj(
@@ -323,52 +327,112 @@ class LocalTools(
                             put("type", "integer")
                             put("description", "Maximum links to return. Defaults to 20.")
                         })
+                        put("wait_timeout_ms", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Wait up to this many milliseconds for ready or partial content. Defaults to 6000. Use 0 for immediate read.")
+                        })
+                        put("accept_partial", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "Whether interactive or stalled pages with partial content are acceptable. Defaults to true.")
+                        })
                     }
                 )
             },
             execute = { input ->
-                val state = webViewOperationStore.state.value
-                if (!state.hasPage) {
-                    val payload = buildJsonObject {
-                        put("status", "no_page")
-                        put("error", "No WebView page is open. Call webview_open first.")
+                val maxChars = input.jsonObject["max_chars"]?.jsonPrimitive?.contentOrNull
+                    ?.toIntOrNull()
+                    ?.coerceIn(500, 40_000)
+                    ?: 8_000
+                val maxLinks = input.jsonObject["max_links"]?.jsonPrimitive?.contentOrNull
+                    ?.toIntOrNull()
+                    ?.coerceIn(0, 40)
+                    ?: 20
+                val waitTimeoutMs = input.jsonObject["wait_timeout_ms"]?.jsonPrimitive?.contentOrNull
+                    ?.toLongOrNull()
+                    ?.coerceIn(0L, 30_000L)
+                    ?: 6_000L
+                val acceptPartial = input.jsonObject["accept_partial"]?.jsonPrimitive?.contentOrNull
+                    ?.toBooleanStrictOrNull()
+                    ?: true
+                val state = awaitWebViewState(
+                    timeoutMs = waitTimeoutMs,
+                    minTextChars = 80,
+                    acceptPartial = acceptPartial,
+                    targetUrl = null,
+                )
+                listOf(
+                    UIMessagePart.Text(
+                        state.toWebViewPayload(
+                            maxChars = maxChars,
+                            maxLinks = maxLinks,
+                            acceptPartial = acceptPartial,
+                        ).toString()
+                    )
+                )
+            }
+        )
+    }
+
+    val webViewWaitForLoadTool by lazy {
+        Tool(
+            name = "webview_wait_for_load",
+            description = """
+                Wait for the currently opened AmberAgent WebView page to become ready or partially readable.
+                Use this right after webview_open before reading JS-heavy pages, search result pages, or pages that need visual rendering.
+            """.trimIndent().replace("\n", " "),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("timeout_ms", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Maximum wait time in milliseconds. Defaults to 10000.")
+                        })
+                        put("min_text_chars", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Minimum readable text characters before considering the page useful. Defaults to 80.")
+                        })
+                        put("accept_partial", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "Whether interactive or stalled pages with partial content are acceptable. Defaults to true.")
+                        })
+                        put("target_url", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Optional URL that must match the currently loading page.")
+                        })
                     }
-                    listOf(UIMessagePart.Text(payload.toString()))
-                } else {
-                    val maxChars = input.jsonObject["max_chars"]?.jsonPrimitive?.contentOrNull
-                        ?.toIntOrNull()
-                        ?.coerceIn(500, 40_000)
-                        ?: 8_000
-                    val maxLinks = input.jsonObject["max_links"]?.jsonPrimitive?.contentOrNull
-                        ?.toIntOrNull()
-                        ?.coerceIn(0, 40)
-                        ?: 20
-                    val payload = buildJsonObject {
-                        put("status", if (state.isLoading) "loading" else "ready")
-                        put("url", state.url)
-                        put("title", state.title)
-                        put("loading_progress", state.loadingProgress)
-                        put("text", state.readableText.take(maxChars))
-                        put(
-                            "links",
-                            kotlinx.serialization.json.buildJsonArray {
-                                state.links.take(maxLinks).forEach { link ->
-                                    add(
-                                        buildJsonObject {
-                                            put("title", link.title)
-                                            put("url", link.url)
-                                        }
-                                    )
-                                }
-                            }
-                        )
-                        if (state.thumbnailPath.isNotBlank()) {
-                            put("thumbnail_path", state.thumbnailPath)
-                        }
-                        put("updated_at_ms", state.updatedAtEpochMillis)
-                    }
-                    listOf(UIMessagePart.Text(payload.toString()))
-                }
+                )
+            },
+            execute = { input ->
+                val timeoutMs = input.jsonObject["timeout_ms"]?.jsonPrimitive?.contentOrNull
+                    ?.toLongOrNull()
+                    ?.coerceIn(500L, 60_000L)
+                    ?: 10_000L
+                val minTextChars = input.jsonObject["min_text_chars"]?.jsonPrimitive?.contentOrNull
+                    ?.toIntOrNull()
+                    ?.coerceIn(0, 40_000)
+                    ?: 80
+                val acceptPartial = input.jsonObject["accept_partial"]?.jsonPrimitive?.contentOrNull
+                    ?.toBooleanStrictOrNull()
+                    ?: true
+                val targetUrl = input.jsonObject["target_url"]?.jsonPrimitive?.contentOrNull
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                val state = awaitWebViewState(
+                    timeoutMs = timeoutMs,
+                    minTextChars = minTextChars,
+                    acceptPartial = acceptPartial,
+                    targetUrl = targetUrl,
+                )
+                listOf(
+                    UIMessagePart.Text(
+                        state.toWebViewPayload(
+                            maxChars = 2_000,
+                            maxLinks = 10,
+                            acceptPartial = acceptPartial,
+                            targetUrl = targetUrl,
+                        ).toString()
+                    )
+                )
             }
         )
     }
@@ -393,7 +457,7 @@ class LocalTools(
                 )
             },
             execute = { input ->
-                val state = webViewOperationStore.state.value
+                val state = webViewOperationStore.refreshStalled()
                 val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull ?: error("query is required")
                 val caseSensitive = input.jsonObject["case_sensitive"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
                 val text = state.readableText
@@ -418,8 +482,9 @@ class LocalTools(
                     }
                 }
                 val payload = buildJsonObject {
-                    put("status", if (state.isLoading) "loading" else if (state.hasPage) "ready" else "no_page")
-                    put("url", state.url)
+                    put("status", if (state.hasPage) state.statusValue else "no_page")
+                    put("load_id", state.loadId)
+                    put("url", state.displayUrl)
                     put("title", state.title)
                     put("query", query)
                     put("matches", matches)
@@ -448,7 +513,7 @@ class LocalTools(
                 )
             },
             execute = { input ->
-                val state = webViewOperationStore.state.value
+                val state = webViewOperationStore.refreshStalled()
                 val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
                 val limit = input.jsonObject["limit"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.coerceIn(1, 80) ?: 40
                 val links = state.links.filter { link ->
@@ -457,8 +522,9 @@ class LocalTools(
                         link.url.contains(query, ignoreCase = true)
                 }
                 val payload = buildJsonObject {
-                    put("status", if (state.isLoading) "loading" else if (state.hasPage) "ready" else "no_page")
-                    put("url", state.url)
+                    put("status", if (state.hasPage) state.statusValue else "no_page")
+                    put("load_id", state.loadId)
+                    put("url", state.displayUrl)
                     put(
                         "links",
                         buildJsonArray {
@@ -507,15 +573,121 @@ class LocalTools(
                 require(url.startsWith("http://") || url.startsWith("https://")) {
                     "Only http and https URLs can be opened in WebView"
                 }
-                webViewOperationStore.open(url)
+                val loadId = webViewOperationStore.open(url)
                 val payload = buildJsonObject {
                     put("status", "opened")
                     put("url", url)
+                    put("load_id", loadId)
                     put("runtime", "webview")
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
             }
         )
+    }
+
+    private suspend fun awaitWebViewState(
+        timeoutMs: Long,
+        minTextChars: Int,
+        acceptPartial: Boolean,
+        targetUrl: String?,
+    ): WebViewOperationState {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var state = webViewOperationStore.refreshStalled()
+        if (!state.hasPage || timeoutMs <= 0L) return state
+        while (true) {
+            state = webViewOperationStore.refreshStalled()
+            if (state.isUsefulWebViewState(minTextChars, acceptPartial, targetUrl)) {
+                return state
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                return state
+            }
+            delay(250L)
+        }
+    }
+
+    private fun WebViewOperationState.isUsefulWebViewState(
+        minTextChars: Int,
+        acceptPartial: Boolean,
+        targetUrl: String?,
+    ): Boolean {
+        if (!hasPage) return true
+        if (!matchesTargetUrl(targetUrl)) return false
+        if (status == WebViewLoadStatus.FAILED) return true
+        val enoughText = readableText.length >= minTextChars
+        val hasUsefulContent = enoughText || (minTextChars == 0 && hasReadableContent)
+        return when (status) {
+            WebViewLoadStatus.READY -> true
+            WebViewLoadStatus.INTERACTIVE -> acceptPartial && hasUsefulContent
+            WebViewLoadStatus.STALLED -> acceptPartial && hasReadableContent
+            else -> false
+        }
+    }
+
+    private fun WebViewOperationState.matchesTargetUrl(targetUrl: String?): Boolean {
+        if (targetUrl.isNullOrBlank()) return true
+        val target = targetUrl.trim()
+        return requestedUrl == target ||
+            committedUrl == target ||
+            url == target ||
+            displayUrl == target ||
+            displayUrl.startsWith(target) ||
+            target.startsWith(displayUrl) && displayUrl.isNotBlank()
+    }
+
+    private fun WebViewOperationState.toWebViewPayload(
+        maxChars: Int,
+        maxLinks: Int,
+        acceptPartial: Boolean,
+        targetUrl: String? = null,
+    ) = buildJsonObject {
+        val statusString = if (hasPage) statusValue else "no_page"
+        val visibleText = readableText.take(maxChars)
+        put("status", statusString)
+        put("ready", status == WebViewLoadStatus.READY)
+        put("partial", acceptPartial && status in setOf(WebViewLoadStatus.INTERACTIVE, WebViewLoadStatus.STALLED) && hasReadableContent)
+        put("stalled", status == WebViewLoadStatus.STALLED)
+        put("failed", status == WebViewLoadStatus.FAILED)
+        put("load_id", loadId)
+        put("requested_url", requestedUrl)
+        put("url", displayUrl)
+        put("committed_url", committedUrl)
+        put("title", title)
+        put("loading_progress", loadingProgress)
+        put("text", visibleText)
+        put("text_chars", readableText.length)
+        put("truncated", readableText.length > visibleText.length)
+        put(
+            "links",
+            buildJsonArray {
+                links.take(maxLinks).forEach { link ->
+                    add(
+                        buildJsonObject {
+                            put("title", link.title)
+                            put("url", link.url)
+                        }
+                    )
+                }
+            }
+        )
+        put("total_links", links.size)
+        if (thumbnailPath.isNotBlank()) {
+            put("thumbnail_path", thumbnailPath)
+        }
+        if (lastError.isNotBlank()) {
+            put("error", lastError)
+        }
+        if (targetUrl != null) {
+            put("target_url", targetUrl)
+            put("target_matched", matchesTargetUrl(targetUrl))
+        }
+        if (!hasPage) {
+            put("error", "No WebView page is open. Call webview_open first.")
+        }
+        put("opened_at_ms", openedAtEpochMillis)
+        put("last_progress_at_ms", lastProgressAtEpochMillis)
+        put("last_extract_at_ms", lastExtractAtEpochMillis)
+        put("updated_at_ms", updatedAtEpochMillis)
     }
 
     val ttsTool by lazy {
@@ -897,6 +1069,7 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.WebView)) {
             tools.add(webViewTool)
+            tools.add(webViewWaitForLoadTool)
             tools.add(webViewReadTool)
             tools.add(webViewFindTextTool)
             tools.add(webViewLinksTool)

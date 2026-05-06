@@ -623,7 +623,7 @@ class ChatService(
                     },
                     updateAt = Instant.now()
                 )
-                updateConversation(conversationId, updatedConversation)
+                updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
                 cleanupRunResourcesIfDone(conversationId, updatedConversation)
 
                 // Show notification if app is not in foreground
@@ -639,7 +639,7 @@ class ChatService(
                     is GenerationChunk.Messages -> {
                         val updatedConversation = getConversationFlow(conversationId).value
                             .updateCurrentMessages(chunk.messages)
-                        updateConversation(conversationId, updatedConversation)
+                        updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
 
                         updateAgentLiveStatus(
                             conversationId = conversationId,
@@ -948,10 +948,16 @@ class ChatService(
 
     // ---- 对话状态更新 ----
 
-    private fun updateConversation(conversationId: Uuid, conversation: Conversation) {
+    private fun updateConversation(
+        conversationId: Uuid,
+        conversation: Conversation,
+        checkDeletedFiles: Boolean = true,
+    ) {
         if (conversation.id != conversationId) return
         val session = getOrCreateSession(conversationId)
-        checkFilesDelete(conversation, session.state.value)
+        if (checkDeletedFiles) {
+            checkFilesDelete(conversation, session.state.value)
+        }
         session.state.value = conversation
     }
 
