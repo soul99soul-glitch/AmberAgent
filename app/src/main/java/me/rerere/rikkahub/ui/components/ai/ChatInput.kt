@@ -57,6 +57,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
@@ -67,6 +68,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -467,7 +469,7 @@ fun ChatInput(
                                     )
                                     Row(
                                         verticalAlignment = Alignment.Bottom,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
                                         ModelSelector(
                                             modelId = assistant.chatModelId ?: settings.chatModelId,
@@ -776,25 +778,27 @@ private fun ReasoningLevelMenuCell(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    Surface(
-        onClick = onClick,
-        modifier = modifier.height(30.dp),
-        shape = RoundedCornerShape(6.dp),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        color = if (selected) workspace.blueContainer else Color.Transparent,
-        contentColor = if (selected) workspace.blue else workspace.ink,
-    ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 8.dp),
-            contentAlignment = Alignment.Center,
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.height(30.dp),
+            shape = RoundedCornerShape(6.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            color = if (selected) workspace.blueContainer else Color.Transparent,
+            contentColor = if (selected) workspace.blue else workspace.ink,
         ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Box(
+                modifier = Modifier.padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -807,26 +811,28 @@ private fun ComposerStatusChip(
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
-    Surface(
-        onClick = onClick,
-        modifier = modifier.height(32.dp),
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        color = if (accent) workspace.blueContainer else workspace.paper,
-        contentColor = if (accent) workspace.blue else workspace.ink,
-        border = BorderStroke(1.dp, if (accent) workspace.blue.copy(alpha = 0.18f) else workspace.hairline),
-    ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.height(32.dp),
+            shape = RoundedCornerShape(8.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            color = if (accent) workspace.blueContainer else workspace.paper,
+            contentColor = if (accent) workspace.blue else workspace.ink,
+            border = BorderStroke(1.dp, if (accent) workspace.blue.copy(alpha = 0.18f) else workspace.hairline),
         ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Box(
+                modifier = Modifier.padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

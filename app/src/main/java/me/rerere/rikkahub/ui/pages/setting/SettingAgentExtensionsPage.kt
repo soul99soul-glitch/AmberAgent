@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
@@ -104,8 +105,8 @@ fun SettingCronTasksPage(
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val tasks by produceState<List<AgentCronTask>>(initialValue = emptyList(), cronManager) {
-        value = withContext(Dispatchers.IO) { cronManager.listTasks() }
-        cronManager.tasksFlow.collect { value = it }
+        value = cronManager.listTasksSnapshot()
+        cronManager.tasksFlow.collect { value = it.ifEmpty { cronManager.listTasksSnapshot() } }
     }
     val scope = rememberCoroutineScope()
 
@@ -135,30 +136,36 @@ fun SettingCronTasksPage(
                         headlineContent = { Text(stringResource(R.string.setting_cron_tasks_scope_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_cron_tasks_scope_desc)) },
                     )
-                    if (tasks.isEmpty()) {
+                }
+            }
+            if (tasks.isEmpty()) {
+                item {
+                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
                         item(
                             leadingContent = { Icon(HugeIcons.Clock02, null) },
                             headlineContent = { Text(stringResource(R.string.setting_cron_tasks_empty_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_cron_tasks_empty_desc)) },
                         )
-                    } else {
-                        tasks.forEach { task ->
-                            item(
-                                leadingContent = { Icon(HugeIcons.Clock02, null) },
-                                headlineContent = { Text(task.title) },
-                                supportingContent = { CronTaskSummary(task) },
-                                trailingContent = {
-                                    Switch(
-                                        checked = task.enabled,
-                                        onCheckedChange = { checked ->
-                                            scope.launch {
-                                                cronManager.updateTask(task.id, enabled = checked)
-                                            }
-                                        },
-                                    )
-                                },
-                            )
-                        }
+                    }
+                }
+            } else {
+                items(tasks, key = { it.id }) { task ->
+                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                        item(
+                            leadingContent = { Icon(HugeIcons.Clock02, null) },
+                            headlineContent = { Text(task.title) },
+                            supportingContent = { CronTaskSummary(task) },
+                            trailingContent = {
+                                Switch(
+                                    checked = task.enabled,
+                                    onCheckedChange = { checked ->
+                                        scope.launch {
+                                            cronManager.updateTask(task.id, enabled = checked)
+                                        }
+                                    },
+                                )
+                            },
+                        )
                     }
                 }
             }

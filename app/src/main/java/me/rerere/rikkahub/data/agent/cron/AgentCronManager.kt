@@ -15,6 +15,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 import kotlin.uuid.Uuid
@@ -28,10 +35,21 @@ class AgentCronManager(
     private val workManager = WorkManager.getInstance(context)
 
     val tasksFlow: Flow<List<AgentCronTask>> = context.agentCronDataStore.data
-        .map { preferences -> decode(preferences[TASKS_KEY]) }
+        .map { preferences ->
+            decode(preferences[TASKS_KEY]).ifEmpty { decodeFromBackingFile() }
+        }
         .distinctUntilChanged()
 
     suspend fun listTasks(): List<AgentCronTask> = tasksFlow.first()
+
+    suspend fun listTasksSnapshot(): List<AgentCronTask> = withContext(Dispatchers.IO) {
+        val fileTasks = decodeFromBackingFile()
+        if (fileTasks.isNotEmpty()) {
+            fileTasks
+        } else {
+            tasksFlow.first()
+        }
+    }
 
     suspend fun createTask(
         title: String,
@@ -173,7 +191,7 @@ class AgentCronManager(
 
     private suspend fun replaceTasks(transform: (List<AgentCronTask>) -> List<AgentCronTask>) {
         context.agentCronDataStore.edit { preferences ->
-            val current = decode(preferences[TASKS_KEY])
+            val current = decode(preferences[TASKS_KEY]).ifEmpty { decodeFromBackingFile() }
             val next = transform(current).sortedBy { it.nextRunAtMs ?: Long.MAX_VALUE }
             preferences[TASKS_KEY] = json.encodeToString(AgentCronTaskStore.serializer(), AgentCronTaskStore(next))
         }
@@ -197,7 +215,72 @@ class AgentCronManager(
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching {
             json.decodeFromString(AgentCronTaskStore.serializer(), raw).tasks
+        }.recoverCatching {
+            decodeLenient(raw)
         }.getOrDefault(emptyList())
+    }
+
+    private fun decodeLenient(raw: String): List<AgentCronTask> {
+        val root = json.parseToJsonElement(raw).jsonObject
+        val tasks = root["tasks"]?.jsonArray.orEmpty()
+        return tasks.mapNotNull { element ->
+            val obj = element.jsonObject
+            AgentCronTask(
+                id = obj.string("id") ?: return@mapNotNull null,
+                title = obj.string("title") ?: "",
+                prompt = obj.string("prompt") ?: "",
+                cronExpression = obj.string("cronExpression") ?: return@mapNotNull null,
+                timezoneId = obj.string("timezoneId") ?: ZoneId.systemDefault().id,
+                conversationId = obj.string("conversationId") ?: Uuid.random().toString(),
+                enabled = obj["enabled"]?.jsonPrimitive?.booleanOrNull ?: false,
+                createdAtMs = obj["createdAtMs"]?.jsonPrimitive?.longOrNull ?: 0L,
+                updatedAtMs = obj["updatedAtMs"]?.jsonPrimitive?.longOrNull ?: 0L,
+                nextRunAtMs = obj["nextRunAtMs"]?.jsonPrimitive?.longOrNull,
+                lastRunAtMs = obj["lastRunAtMs"]?.jsonPrimitive?.longOrNull,
+                lastStatus = obj.string("lastStatus")?.let { rawStatus ->
+                    AgentCronTaskStatus.entries.firstOrNull { it.name.equals(rawStatus, ignoreCase = true) }
+                } ?: AgentCronTaskStatus.Idle,
+                lastError = obj.string("lastError"),
+                runCount = obj["runCount"]?.jsonPrimitive?.intOrNull ?: 0,
+            )
+        }
+    }
+
+    private fun kotlinx.serialization.json.JsonObject.string(key: String): String? {
+        return this[key]?.jsonPrimitive?.contentOrNull
+    }
+
+    private fun decodeFromBackingFile(): List<AgentCronTask> {
+        val file = context.filesDir.resolve("datastore/agent_cron_tasks.preferences_pb")
+        if (!file.exists()) return emptyList()
+        val text = runCatching { file.readBytes().toString(Charsets.UTF_8) }.getOrNull() ?: return emptyList()
+        val start = text.indexOf("{\"tasks\":[")
+        if (start < 0) return emptyList()
+        val jsonText = extractJsonObject(text, start) ?: return emptyList()
+        return runCatching { decodeLenient(jsonText) }.getOrDefault(emptyList())
+    }
+
+    private fun extractJsonObject(text: String, start: Int): String? {
+        var depth = 0
+        var inString = false
+        var escaping = false
+        for (index in start until text.length) {
+            val char = text[index]
+            if (escaping) {
+                escaping = false
+                continue
+            }
+            when {
+                char == '\\' && inString -> escaping = true
+                char == '"' -> inString = !inString
+                !inString && char == '{' -> depth++
+                !inString && char == '}' -> {
+                    depth--
+                    if (depth == 0) return text.substring(start, index + 1)
+                }
+            }
+        }
+        return null
     }
 
     private fun resolveZone(timezoneId: String?): ZoneId =

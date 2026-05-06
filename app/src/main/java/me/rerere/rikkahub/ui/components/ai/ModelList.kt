@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -30,6 +31,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -40,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -118,28 +121,31 @@ fun ModelSelector(
     if (!onlyIcon) {
         if (compact) {
             val workspace = workspaceColors()
-            Surface(
-                modifier = modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { popup = true },
-                shape = RoundedCornerShape(6.dp),
-                color = workspace.paper,
-                contentColor = workspace.ink,
-                border = BorderStroke(1.dp, workspace.hairline),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .heightIn(min = 32.dp)
-                        .widthIn(max = 156.dp)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            val chipShape = RoundedCornerShape(8.dp)
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                Surface(
+                    onClick = { popup = true },
+                    modifier = modifier
+                        .height(32.dp)
+                        .widthIn(max = 156.dp),
+                    shape = chipShape,
+                    color = workspace.paper,
+                    contentColor = workspace.ink,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
-                    Text(
-                        text = model?.compactDisplayName() ?: stringResource(R.string.model_list_select_model),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = model?.compactDisplayName() ?: stringResource(R.string.model_list_select_model),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                        )
+                    }
                 }
             }
         } else {

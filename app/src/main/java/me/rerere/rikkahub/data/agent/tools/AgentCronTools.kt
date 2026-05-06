@@ -27,7 +27,7 @@ class AgentCronTools(
             textJson {
                 put("status", "ok")
                 put("tasks", buildJsonArray {
-                    manager.listTasks().forEach { task -> add(task.toJson()) }
+                    manager.listTasksSnapshot().forEach { task -> add(task.toJson()) }
                 })
             }
         }
