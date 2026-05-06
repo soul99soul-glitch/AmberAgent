@@ -306,6 +306,31 @@ class ToolRegistryTest {
         assertTrue(!registry.metadata.single { it.name == "external_file_write" }.autoApprovable)
     }
 
+    @Test
+    fun mcpCallToolUsesMcpCategoryAndAutoApprovableApproval() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool("mcp_list"),
+                stubTool("mcp_call_tool", needsApproval = true),
+            )
+        )
+
+        val listMetadata = registry.metadata.single { it.name == "mcp_list" }
+        val callMetadata = registry.metadata.single { it.name == "mcp_call_tool" }
+        val policy = registry.evaluateInvocation("mcp_call_tool")!!
+
+        assertEquals("mcp", listMetadata.category)
+        assertTrue(!listMetadata.needsApproval)
+        assertEquals("mcp", callMetadata.category)
+        assertTrue(callMetadata.mutates)
+        assertTrue(callMetadata.needsApproval)
+        assertTrue(callMetadata.autoApprovable)
+        assertEquals(ToolRisk.Sensitive, callMetadata.risk)
+        assertTrue(policy.needsApproval)
+        assertTrue(policy.mutates)
+        assertTrue(!policy.concurrencySafe)
+    }
+
     private fun stubTool(
         name: String,
         needsApproval: Boolean = false,

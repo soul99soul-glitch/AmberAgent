@@ -153,6 +153,14 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             autoApprovable = true
             concurrencySafe = true
         }
+
+        "mcp_call_tool" -> {
+            mutates = true
+            risk = ToolRisk.Sensitive
+            needsApproval = true
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
     }
 
     val category = category()
@@ -216,6 +224,7 @@ private fun Tool.mutatesState(): Boolean {
         name.contains("_install") ||
         name.contains("_stop") ||
         name == "pdf_render_page" ||
+        name == "mcp_call_tool" ||
         name == "officepro_make_report" ||
         name == "officepro_project_update" ||
         name == "model_council_make_report" ||
@@ -231,6 +240,7 @@ private fun Tool.mutatesState(): Boolean {
 private fun Tool.risk(): ToolRisk = when {
     name == "http_request" -> ToolRisk.High
     name == "memory_tool" -> ToolRisk.High
+    name == "mcp_call_tool" -> ToolRisk.Sensitive
     name in setOf("session_read", "session_expand") -> ToolRisk.Sensitive
     name == "pdf_render_page" -> ToolRisk.High
     name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> ToolRisk.Sensitive

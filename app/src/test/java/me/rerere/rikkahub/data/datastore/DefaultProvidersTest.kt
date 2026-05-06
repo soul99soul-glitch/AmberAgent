@@ -26,4 +26,13 @@ class DefaultProvidersTest {
             },
         )
     }
+
+    @Test
+    fun `default tts providers do not include AiHubMix`() {
+        val settings = Settings()
+
+        assertFalse(settings.ttsProviders.any { it.name == "AiHubMix" })
+        assertTrue(settings.ttsProviders.any { it.id == DEFAULT_SYSTEM_TTS_ID })
+        assertTrue(settings.ttsProviders.any { it.id == settings.selectedTTSProviderId })
+    }
 }

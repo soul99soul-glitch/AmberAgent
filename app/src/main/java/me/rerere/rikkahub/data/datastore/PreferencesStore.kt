@@ -276,7 +276,10 @@ class SettingsStore(
                     assistants.add(defaultAssistant.copy())
                 }
             }
-            val ttsProviders = it.ttsProviders.ifEmpty { DEFAULT_TTS_PROVIDERS }.toMutableList()
+            val ttsProviders = it.ttsProviders
+                .filterNot { provider -> provider.id in REMOVED_DEFAULT_TTS_PROVIDER_IDS }
+                .ifEmpty { DEFAULT_TTS_PROVIDERS }
+                .toMutableList()
             DEFAULT_TTS_PROVIDERS.forEach { defaultTTSProvider ->
                 if (ttsProviders.none { provider -> provider.id == defaultTTSProvider.id }) {
                     ttsProviders.add(defaultTTSProvider.copyProvider())
@@ -285,7 +288,12 @@ class SettingsStore(
             it.copy(
                 providers = providers,
                 assistants = assistants.withAmberAgentAssistantBranding(),
-                ttsProviders = ttsProviders
+                ttsProviders = ttsProviders,
+                selectedTTSProviderId = if (ttsProviders.any { provider -> provider.id == it.selectedTTSProviderId }) {
+                    it.selectedTTSProviderId
+                } else {
+                    DEFAULT_SYSTEM_TTS_ID
+                },
             )
         }
         .map { settings ->
@@ -662,7 +670,7 @@ You are AmberAgent, an agent-only Android assistant.
 - Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
 - If you are unsure which skills are installed or enabled, call skills_list before use_skill.
 - If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
-- If the user asks about 小米办公 Pro / 飞书办公 work context, call officepro_status or officepro_dashboard first. Use officepro_daily_radar for today's work radar, officepro_project_briefing for Q 代/MiClaw/Lhasa-style project context, officepro_document_warroom for document review drafts, officepro_open_items_radar / officepro_meeting_closure for follow-up closure, and officepro_project_context/report/list/update for local project knowledge packs. Use officepro_create_task_draft, officepro_create_base_record_draft, and officepro_reply_draft only to produce drafts; never send, comment, create tasks, or write Base records without a separate approval and a real Feishu MCP/Skill write tool. Use officepro_capture_context or officepro_context_digest for lower-level read-first analysis, and officepro_make_report when the user wants a workspace Markdown draft. If Feishu MCP tools are available, call mcp_list/tools_list and prefer MCP for cloud document, calendar, task, meeting, or IM source material. Only use officepro_open/search after the user approves opening or driving the office app.
+- If the user asks about 小米办公 Pro / 飞书办公 work context, call officepro_status or officepro_dashboard first. Use officepro_daily_radar for today's work radar, officepro_project_briefing for Q 代/MiClaw/Lhasa-style project context, officepro_document_warroom for document review drafts, officepro_open_items_radar / officepro_meeting_closure for follow-up closure, and officepro_project_context/report/list/update for local project knowledge packs. Use officepro_create_task_draft, officepro_create_base_record_draft, and officepro_reply_draft only to produce drafts; never send, comment, create tasks, or write Base records without a separate approval and a real Feishu MCP/Skill write tool. Use officepro_capture_context or officepro_context_digest for lower-level read-first analysis, and officepro_make_report when the user wants a workspace Markdown draft. If Feishu MCP tools are available, call mcp_list(include_tools=true) or tools_list(category="mcp"); use mcp_call_tool for a specific cloud document, calendar, task, meeting, IM, Base, or wiki operation. Only use officepro_open/search after the user approves opening or driving the office app.
 - If the user asks to recall, compare, or summarize other sessions, use session_list/session_search first. Read full historical content only with session_read/session_expand after approval or a valid session grant. For many sessions, start multiple history-focused subagents such as session-archivist/topic-miner with separate source_session_ids shards, then synthesize their source-backed summaries.
 - If subagent tools are available, use them only when the task is complex, clearly bounded, and benefits from isolated context or parallel viewpoints. Simple linear tasks must stay in the main Agent. Subagent results are evidence for the main Agent, not final truth.
 - For webpage tasks:
@@ -912,18 +920,14 @@ private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS = listOf(
 private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator")
 
 val DEFAULT_SYSTEM_TTS_ID = Uuid.parse("026a01a2-c3a0-4fd5-8075-80e03bdef200")
+private val REMOVED_DEFAULT_TTS_PROVIDER_IDS = setOf(
+    Uuid.parse("e36b22ef-ca82-40ab-9e70-60cad861911c"), // AiHubMix TTS
+)
 private val DEFAULT_TTS_PROVIDERS = listOf(
     TTSProviderSetting.SystemTTS(
         id = DEFAULT_SYSTEM_TTS_ID,
         name = "",
     ),
-    TTSProviderSetting.OpenAI(
-        id = Uuid.parse("e36b22ef-ca82-40ab-9e70-60cad861911c"),
-        name = "AiHubMix",
-        baseUrl = "https://aihubmix.com/v1",
-        model = "gpt-4o-mini-tts",
-        voice = "alloy",
-    )
 )
 
 internal val DEFAULT_ASSISTANTS_IDS = DEFAULT_ASSISTANTS.map { it.id }

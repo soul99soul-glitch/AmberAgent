@@ -158,6 +158,51 @@ class McpManager(
         }
     }
 
+    suspend fun callConfiguredTool(
+        serverId: String?,
+        serverName: String?,
+        toolName: String,
+        args: JsonObject,
+    ): List<UIMessagePart> = withContext(Dispatchers.IO) {
+        require(toolName.isNotBlank()) { "tool_name is required" }
+        val settings = settingsStore.settingsFlow.value
+        val server = settings.mcpServers.firstOrNull { config ->
+            config.commonOptions.enable &&
+                (serverId.isNullOrBlank() || config.id.toString() == serverId) &&
+                (serverName.isNullOrBlank() || config.commonOptions.name == serverName) &&
+                config.commonOptions.tools.any { it.name == toolName }
+        } ?: error("MCP tool not found in enabled servers: $toolName")
+        val tool = server.commonOptions.tools.firstOrNull { it.name == toolName }
+            ?: error("MCP tool not found on ${server.commonOptions.name}: $toolName")
+        require(tool.enable) { "MCP tool is disabled: ${server.commonOptions.name}/$toolName" }
+
+        var client = getClient(server)
+        if (client == null) {
+            addClient(server)
+            client = getClient(server)
+        }
+        val liveClient = client ?: error("MCP client is not connected: ${server.commonOptions.name}")
+        val liveConfig = clients.keys.firstOrNull { it.id == server.id } ?: server
+        if (liveClient.transport == null) liveClient.connect(getTransport(liveConfig))
+        Log.i(TAG, "callConfiguredTool: ${server.commonOptions.name}/$toolName / $args")
+        val result = liveClient.callTool(
+            request = CallToolRequest(
+                params = CallToolRequestParams(
+                    name = tool.name,
+                    arguments = args,
+                ),
+            ),
+            options = RequestOptions(timeout = 120.seconds),
+        )
+        result.content.map {
+            when (it) {
+                is TextContent -> UIMessagePart.Text(it.text)
+                is ImageContent -> convertImageContentToFilePart(it)
+                else -> UIMessagePart.Text(JsonInstant.encodeToString(it))
+            }
+        }
+    }
+
     private suspend fun convertImageContentToFilePart(image: ImageContent): UIMessagePart.Image {
         val bytes = Base64.decode(image.data)
         val ext = android.webkit.MimeTypeMap.getSingleton()
