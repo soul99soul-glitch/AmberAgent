@@ -14,14 +14,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.McpServer
@@ -101,7 +103,10 @@ fun SettingCronTasksPage(
     cronManager: AgentCronManager = koinInject(),
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val tasks by cronManager.tasksFlow.collectAsStateWithLifecycle(emptyList())
+    val tasks by produceState<List<AgentCronTask>>(initialValue = emptyList(), cronManager) {
+        value = withContext(Dispatchers.IO) { cronManager.listTasks() }
+        cronManager.tasksFlow.collect { value = it }
+    }
     val scope = rememberCoroutineScope()
 
     Scaffold(
