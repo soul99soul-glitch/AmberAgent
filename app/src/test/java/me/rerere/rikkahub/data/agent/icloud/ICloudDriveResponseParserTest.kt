@@ -35,6 +35,33 @@ class ICloudDriveResponseParserTest {
     }
 
     @Test
+    fun parsesChinaSessionEndpointsFromValidateResponse() {
+        val raw = JsonInstant.parseToJsonElement(
+            """
+            {
+              "dsInfo": {"dsid": "cn-123"},
+              "webservices": {
+                "drivews": {"url": "https://drivews.icloud.com.cn/ws/"},
+                "docws": {"url": "https://docws.icloud.com.cn/docws/"}
+              }
+            }
+            """.trimIndent(),
+        ).jsonObject
+
+        val session = ICloudDriveResponseParser.parseSession(
+            clientId = "client-cn",
+            cookies = ICloudDriveCookieBundle("X-APPLE-WEBAUTH-TOKEN=ok"),
+            raw = raw,
+            endpoint = ICloudDriveWebEndpoints.CHINA,
+        )
+
+        assertEquals("cn-123", session.dsid)
+        assertEquals("https://drivews.icloud.com.cn/ws", session.drivewsUrl)
+        assertEquals("https://docws.icloud.com.cn/docws", session.docwsUrl)
+        assertEquals(ICloudDriveWebEndpoints.CHINA, session.endpoint)
+    }
+
+    @Test
     fun parsesNodeNameWithExtension() {
         val node = ICloudDriveResponseParser.parseNode(
             buildJsonObject {

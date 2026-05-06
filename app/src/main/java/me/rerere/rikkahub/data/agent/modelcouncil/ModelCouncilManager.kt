@@ -150,13 +150,35 @@ class ModelCouncilManager(
     }
 
     suspend fun wait(runId: String, waitTimeoutMs: Long): JsonObject = withContext(Dispatchers.IO) {
-        val deadline = System.currentTimeMillis() + waitTimeoutMs.coerceIn(0, 60_000L)
+        val setting = settingsStore.settingsFlow.value.agentRuntime.modelCouncil
+        val maxWaitMs = (setting.totalTimeoutMs + 30_000L)
+            .coerceAtLeast(60_000L)
+            .coerceAtMost(15 * 60_000L)
+        val effectiveWaitMs = if (waitTimeoutMs > 0L) {
+            waitTimeoutMs.coerceAtMost(maxWaitMs)
+        } else {
+            DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS.coerceAtMost(maxWaitMs)
+        }
+        val deadline = System.currentTimeMillis() + effectiveWaitMs
         while (System.currentTimeMillis() < deadline) {
             val current = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
             if (!current.status.running) return@withContext runToPayload(current)
             delay(250)
         }
-        read(runId)
+        val current = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
+        if (!current.status.running) {
+            runToPayload(current)
+        } else {
+            buildJsonObject {
+                runToPayload(current).forEach { (key, value) -> put(key, value) }
+                put("wait_status", "still_running")
+                put("wait_timeout_ms", effectiveWaitMs)
+                put(
+                    "message",
+                    "Model Council is still running. This is not a failure; call model_council_read or model_council_wait again to see new seat outputs.",
+                )
+            }
+        }
     }
 
     suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.IO) {
@@ -182,6 +204,8 @@ class ModelCouncilManager(
             put("seat_timeout_ms", setting.seatTimeoutMs)
             put("total_timeout_ms", setting.totalTimeoutMs)
             put("output_budget_chars", setting.outputBudgetChars)
+            put("show_seat_outputs", setting.showSeatOutputs)
+            put("recommended_wait_timeout_ms", DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS)
             put("synthesis_model_id", (setting.synthesisModelId ?: settings.chatModelId).toString())
             put("running", runs.values.count { it.snapshot.status.running })
             putJsonArray("default_seats") {
@@ -328,11 +352,11 @@ class ModelCouncilManager(
                             error = error.message ?: error::class.java.simpleName,
                         )
                     },
-                )
+                ).also { turn ->
+                    appendTurn(runtimeRun, turn)
+                }
             }
-        }.awaitAll().also { turns ->
-            appendTurns(runtimeRun, turns)
-        }
+        }.awaitAll()
     }
 
     private suspend fun synthesize(
@@ -372,15 +396,25 @@ class ModelCouncilManager(
         )
     }
 
-    private fun appendTurns(runtimeRun: RuntimeRun, turns: List<ModelCouncilTurn>) {
-        val current = runtimeRun.snapshot
-        if (!current.status.running) return
-        val next = current.copy(
-            turns = current.turns + turns,
-            updatedAtMs = Instant.now().toEpochMilli(),
-        )
-        runtimeRun.snapshot = next
-        appendEvent(runtimeRun, "turns", runToPayload(next))
+    private fun appendTurn(runtimeRun: RuntimeRun, turn: ModelCouncilTurn) {
+        synchronized(runtimeRun) {
+            val current = runtimeRun.snapshot
+            if (!current.status.running) return
+            val next = current.copy(
+                turns = current.turns + turn,
+                updatedAtMs = Instant.now().toEpochMilli(),
+            )
+            runtimeRun.snapshot = next
+            appScope.launch(Dispatchers.IO) {
+                agentTaskStore.update(
+                    taskId = next.runId,
+                    status = AgentTaskStatus.RUNNING,
+                    summary = "${turn.seatName}: ${(turn.content.ifBlank { turn.error }).take(700)}",
+                    cancelCapability = true,
+                )
+            }
+            appendEvent(runtimeRun, "turn", runToPayload(next))
+        }
     }
 
     private fun finish(runId: String, status: ModelCouncilRunStatus, result: ModelCouncilResult) {
@@ -429,6 +463,7 @@ class ModelCouncilManager(
     }
 
     private fun runToPayload(run: ModelCouncilRun): JsonObject = buildJsonObject {
+        val exposeSeatOutputs = settingsStore.settingsFlow.value.agentRuntime.modelCouncil.showSeatOutputs
         put("status", run.status.name.lowercase())
         put("run_id", run.runId)
         put("mode", run.mode.name.lowercase())
@@ -436,7 +471,8 @@ class ModelCouncilManager(
         put("started_at_ms", run.startedAtMs)
         put("updated_at_ms", run.updatedAtMs)
         put("seats", encoded(run.seats))
-        put("turns", encoded(run.turns))
+        put("seat_outputs_visible", exposeSeatOutputs)
+        put("turns", encoded(run.turns.map { it.visible(exposeSeatOutputs) }))
         run.result?.let { put("result", encoded(it)) }
     }
 
@@ -490,6 +526,14 @@ class ModelCouncilManager(
     private class RuntimeRun(
         @Volatile var snapshot: ModelCouncilRun,
         @Volatile var job: Job? = null,
+    )
+}
+
+private fun ModelCouncilTurn.visible(exposeContent: Boolean): ModelCouncilTurn {
+    if (exposeContent) return this
+    return copy(
+        content = content.take(700),
+        error = error.take(700),
     )
 }
 

@@ -1176,6 +1176,7 @@
   <string name="setting_icloud_vault_path_desc">Use an iCloud Drive path such as Obsidian or Documents/Obsidian. Leave blank only for root probing.</string>
   <string name="setting_icloud_save_path">Save Path</string>
   <string name="setting_icloud_login">Login WebView</string>
+  <string name="setting_icloud_login_china">China Login</string>
   <string name="setting_icloud_probe">Probe Read</string>
   <string name="setting_icloud_write_probe">Probe Write</string>
   <string name="setting_icloud_status">Status: %1$s · Capability: %2$s</string>
@@ -1274,6 +1275,8 @@
   <string name="setting_model_council_desc">Compare or debate one question across multiple configured chat models without tool access.</string>
   <string name="setting_model_council_runtime_section">Runtime</string>
   <string name="setting_model_council_runtime_note">Council seats are pure-text model calls. They do not inherit tools, memories, or the full chat transcript.</string>
+  <string name="setting_model_council_show_seat_outputs">Show seat outputs</string>
+  <string name="setting_model_council_show_seat_outputs_desc">Expose each model\'s final text in read/wait results, like a group chat transcript.</string>
   <string name="setting_model_council_synthesis_model">Synthesis model</string>
   <string name="setting_model_council_seats_section">Default seats</string>
   <string name="setting_model_council_no_models">Add at least two chat models in Providers before enabling a default council.</string>

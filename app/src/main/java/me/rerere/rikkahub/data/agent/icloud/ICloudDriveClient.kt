@@ -38,19 +38,31 @@ class ICloudDriveClient(
         cookies: ICloudDriveCookieBundle,
     ): ICloudDriveSession {
         require(!cookies.isEmpty && cookies.value("X-APPLE-WEBAUTH-TOKEN") != null) {
-            "iCloud Web login cookie is missing. Open iCloud login first and finish 2FA."
+            "iCloud Web login cookie is missing. Open iCloud or China iCloud login first and finish 2FA."
         }
-        val raw = postJson(
-            url = "$ICLOUD_SETUP_ENDPOINT/validate",
-            cookies = cookies,
-            body = JsonNull,
-        ).jsonObject
-        return ICloudDriveResponseParser.parseSession(clientId, cookies, raw)
+        var lastError: Throwable? = null
+        ICloudDriveWebEndpoints.preferredFor(cookies).forEach { endpoint ->
+            runCatching {
+                val raw = postJson(
+                    url = "${endpoint.setupEndpoint}/validate",
+                    cookies = cookies,
+                    body = JsonNull,
+                    endpoint = endpoint,
+                ).jsonObject
+                return ICloudDriveResponseParser.parseSession(clientId, cookies, raw, endpoint)
+            }.onFailure { error ->
+                lastError = error
+            }
+        }
+        throw IllegalStateException(
+            "iCloud session validation failed for global and China endpoints: ${lastError?.message ?: "unknown error"}",
+            lastError,
+        )
     }
 
     suspend fun requestDriveAccess(session: ICloudDriveSession) {
         val state = postJson(
-            url = "$ICLOUD_SETUP_ENDPOINT/requestWebAccessState",
+            url = "${session.endpoint.setupEndpoint}/requestWebAccessState",
             session = session,
             body = JsonNull,
         ).jsonObject
@@ -59,7 +71,7 @@ class ICloudDriveClient(
 
         if (state.boolean("isDeviceConsentedForPCS") == false) {
             postJson(
-                url = "$ICLOUD_SETUP_ENDPOINT/enableDeviceConsentForPCS",
+                url = "${session.endpoint.setupEndpoint}/enableDeviceConsentForPCS",
                 session = session,
                 body = JsonNull,
             )
@@ -67,7 +79,7 @@ class ICloudDriveClient(
         }
 
         val pcs = postJson(
-            url = "$ICLOUD_SETUP_ENDPOINT/requestPCS",
+            url = "${session.endpoint.setupEndpoint}/requestPCS",
             session = session,
             body = buildJsonObject {
                 put("appName", "iclouddrive")
@@ -226,6 +238,7 @@ class ICloudDriveClient(
                 put("size", contentBytes.size)
             },
             contentType = ContentType.Text.Plain,
+            endpoint = session.endpoint,
         ).jsonArray.first().jsonObject
         val documentId = uploadInfo.string("document_id") ?: error("iCloud upload did not return document_id")
         val uploadUrl = uploadInfo.string("url") ?: error("iCloud upload did not return content URL")
@@ -302,14 +315,14 @@ class ICloudDriveClient(
     ): JsonObject =
         parseJson(
             httpClient.get(url) {
-                addICloudHeaders(session.cookies)
+                addICloudHeaders(session.cookies, session.endpoint)
                 (session.params + extraParams).forEach { (key, value) -> parameter(key, value) }
             },
         ).jsonObject
 
     private suspend fun getText(url: String, session: ICloudDriveSession): String {
         val response = httpClient.get(url) {
-            addICloudHeaders(session.cookies)
+            addICloudHeaders(session.cookies, session.endpoint)
             session.params.forEach { (key, value) -> parameter(key, value) }
         }
         val body = response.bodyAsText()
@@ -323,15 +336,16 @@ class ICloudDriveClient(
         body: JsonElement,
         contentType: ContentType = ContentType.Application.Json,
     ): JsonElement =
-        postJson(url, session.cookies, session.params, body, contentType)
+        postJson(url, session.cookies, session.params, body, contentType, session.endpoint)
 
     private suspend fun postJson(
         url: String,
         cookies: ICloudDriveCookieBundle,
         body: JsonElement,
         contentType: ContentType = ContentType.Application.Json,
+        endpoint: ICloudDriveWebEndpoint = ICloudDriveWebEndpoints.GLOBAL,
     ): JsonElement =
-        postJson(url, cookies, emptyMap(), body, contentType)
+        postJson(url, cookies, emptyMap(), body, contentType, endpoint)
 
     private suspend fun postJson(
         url: String,
@@ -339,9 +353,10 @@ class ICloudDriveClient(
         params: Map<String, String>,
         body: JsonElement,
         contentType: ContentType,
+        endpoint: ICloudDriveWebEndpoint,
     ): JsonElement {
         val response = httpClient.post(url) {
-            addICloudHeaders(cookies)
+            addICloudHeaders(cookies, endpoint)
             params.forEach { (key, value) -> parameter(key, value) }
             contentType(contentType)
             setBody(json.encodeToString(JsonElement.serializer(), body))
@@ -356,7 +371,7 @@ class ICloudDriveClient(
         content: ByteArray,
     ): JsonObject {
         val response = httpClient.post(url) {
-            addICloudHeaders(session.cookies)
+            addICloudHeaders(session.cookies, session.endpoint)
             setBody(
                 MultiPartFormDataContent(
                     formData {
@@ -381,12 +396,15 @@ class ICloudDriveClient(
         return json.parseToJsonElement(body)
     }
 
-    private fun io.ktor.client.request.HttpRequestBuilder.addICloudHeaders(cookies: ICloudDriveCookieBundle) {
+    private fun io.ktor.client.request.HttpRequestBuilder.addICloudHeaders(
+        cookies: ICloudDriveCookieBundle,
+        endpoint: ICloudDriveWebEndpoint = ICloudDriveWebEndpoints.GLOBAL,
+    ) {
         headers {
             append(HttpHeaders.Accept, "application/json, text/javascript, */*; q=0.01")
             append(HttpHeaders.UserAgent, SAFARI_USER_AGENT)
-            append(HttpHeaders.Origin, "https://www.icloud.com")
-            append("Referer", "https://www.icloud.com/")
+            append(HttpHeaders.Origin, endpoint.origin)
+            append("Referer", endpoint.referer)
             if (!cookies.isEmpty) append(HttpHeaders.Cookie, cookies.header)
         }
     }
@@ -411,6 +429,7 @@ internal object ICloudDriveResponseParser {
         clientId: String,
         cookies: ICloudDriveCookieBundle,
         raw: JsonObject,
+        endpoint: ICloudDriveWebEndpoint = ICloudDriveWebEndpoints.GLOBAL,
     ): ICloudDriveSession {
         val dsid = raw.jsonObjectOrNull("dsInfo")?.string("dsid")
             ?: error("iCloud session is not authenticated: missing dsInfo.dsid")
@@ -426,6 +445,7 @@ internal object ICloudDriveResponseParser {
             drivewsUrl = drivewsUrl.trimEnd('/'),
             docwsUrl = docwsUrl.trimEnd('/'),
             cookies = cookies,
+            endpoint = endpoint,
         )
     }
 

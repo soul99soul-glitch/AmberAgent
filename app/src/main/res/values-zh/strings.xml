@@ -757,6 +757,7 @@
   <string name="setting_icloud_vault_path_desc">填写 iCloud Drive 内路径，例如 Obsidian 或 Documents/Obsidian。留空仅用于根目录探测。</string>
   <string name="setting_icloud_save_path">保存路径</string>
   <string name="setting_icloud_login">登录 WebView</string>
+  <string name="setting_icloud_login_china">中国区登录</string>
   <string name="setting_icloud_probe">探测读取</string>
   <string name="setting_icloud_write_probe">探测写入</string>
   <string name="setting_icloud_status">状态：%1$s · 能力：%2$s</string>
@@ -855,6 +856,8 @@
   <string name="setting_model_council_desc">让多个已配置聊天模型并行评审或有限轮辩论，同步比较分歧和证据。</string>
   <string name="setting_model_council_runtime_section">运行</string>
   <string name="setting_model_council_runtime_note">Council 席位只做纯文本生成，不继承工具、记忆或完整聊天记录。</string>
+  <string name="setting_model_council_show_seat_outputs">显示席位输出</string>
+  <string name="setting_model_council_show_seat_outputs_desc">在 read/wait 结果里展示每个模型最终文本，像群聊记录一样查看。</string>
   <string name="setting_model_council_synthesis_model">综合模型</string>
   <string name="setting_model_council_seats_section">默认席位</string>
   <string name="setting_model_council_no_models">请先在提供商里添加至少两个聊天模型，再配置默认 Council。</string>

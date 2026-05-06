@@ -28,6 +28,7 @@ data class ICloudDriveState(
 
 data class ICloudDriveCookieBundle(
     val header: String,
+    val sourceUrls: List<String> = emptyList(),
 ) {
     val isEmpty: Boolean get() = header.isBlank()
 
@@ -44,6 +45,7 @@ data class ICloudDriveSession(
     val drivewsUrl: String,
     val docwsUrl: String,
     val cookies: ICloudDriveCookieBundle,
+    val endpoint: ICloudDriveWebEndpoint = ICloudDriveWebEndpoints.GLOBAL,
 ) {
     val params: Map<String, String>
         get() = mapOf(
@@ -80,7 +82,61 @@ data class ICloudDriveResolvedPath(
     val iCloudPath: String,
 )
 
-const val ICLOUD_LOGIN_URL = "https://www.icloud.com/iclouddrive"
+data class ICloudDriveWebEndpoint(
+    val id: String,
+    val displayName: String,
+    val loginUrl: String,
+    val setupEndpoint: String,
+    val origin: String,
+    val cookieUrls: List<String>,
+) {
+    val referer: String get() = "$origin/"
+}
+
+object ICloudDriveWebEndpoints {
+    val GLOBAL = ICloudDriveWebEndpoint(
+        id = "global",
+        displayName = "iCloud",
+        loginUrl = "https://www.icloud.com/iclouddrive",
+        setupEndpoint = "https://setup.icloud.com/setup/ws/1",
+        origin = "https://www.icloud.com",
+        cookieUrls = listOf(
+            "https://www.icloud.com",
+            "https://setup.icloud.com",
+            "https://www.icloud.com/iclouddrive",
+        ),
+    )
+
+    val CHINA = ICloudDriveWebEndpoint(
+        id = "china",
+        displayName = "iCloud China",
+        loginUrl = "https://www.icloud.com.cn/iclouddrive",
+        setupEndpoint = "https://setup.icloud.com.cn/setup/ws/1",
+        origin = "https://www.icloud.com.cn",
+        cookieUrls = listOf(
+            "https://www.icloud.com.cn",
+            "https://setup.icloud.com.cn",
+            "https://www.icloud.com.cn/iclouddrive",
+            "https://www.icloud.cn",
+            "https://setup.icloud.cn",
+            "https://www.icloud.cn/iclouddrive",
+        ),
+    )
+
+    val ALL = listOf(GLOBAL, CHINA)
+
+    fun preferredFor(cookies: ICloudDriveCookieBundle): List<ICloudDriveWebEndpoint> {
+        val sourceSet = cookies.sourceUrls.toSet()
+        val sourceMatched = ALL.sortedByDescending { endpoint ->
+            if (endpoint.cookieUrls.any { it in sourceSet }) 1 else 0
+        }
+        return sourceMatched.ifEmpty { ALL }
+    }
+}
+
+const val ICLOUD_GLOBAL_LOGIN_URL = "https://www.icloud.com/iclouddrive"
+const val ICLOUD_CHINA_LOGIN_URL = "https://www.icloud.com.cn/iclouddrive"
+const val ICLOUD_LOGIN_URL = ICLOUD_GLOBAL_LOGIN_URL
 const val ICLOUD_SETUP_ENDPOINT = "https://setup.icloud.com/setup/ws/1"
 const val ICLOUD_ROOT_DRIVEWS_ID = "FOLDER::com.apple.CloudDocs::root"
 const val ICLOUD_CLIENT_BUILD_NUMBER = "2534Project66"

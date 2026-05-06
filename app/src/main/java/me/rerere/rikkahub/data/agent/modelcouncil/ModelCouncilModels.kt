@@ -10,6 +10,7 @@ const val DEFAULT_MODEL_COUNCIL_MAX_ROUNDS = 3
 const val DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS = 180_000L
 const val DEFAULT_MODEL_COUNCIL_TOTAL_TIMEOUT_MS = 8 * 60_000L
 const val DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS = 12_000
+const val DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS = 180_000L
 
 @Serializable
 data class ModelCouncilRuntimeSetting(
@@ -22,6 +23,7 @@ data class ModelCouncilRuntimeSetting(
     val seatTimeoutMs: Long = DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS,
     val totalTimeoutMs: Long = DEFAULT_MODEL_COUNCIL_TOTAL_TIMEOUT_MS,
     val outputBudgetChars: Int = DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS,
+    val showSeatOutputs: Boolean = false,
 )
 
 @Serializable

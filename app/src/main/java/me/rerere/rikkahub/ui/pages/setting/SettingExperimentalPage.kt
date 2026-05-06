@@ -61,7 +61,8 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.icloud.ICLOUD_LOGIN_URL
+import me.rerere.rikkahub.data.agent.icloud.ICLOUD_CHINA_LOGIN_URL
+import me.rerere.rikkahub.data.agent.icloud.ICLOUD_GLOBAL_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS
@@ -342,6 +343,31 @@ fun SettingExperimentalModelCouncilPage(
                         style = MaterialTheme.typography.bodySmall,
                         color = workspaceColors().muted,
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.setting_model_council_show_seat_outputs),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = workspaceColors().ink,
+                            )
+                            Text(
+                                text = stringResource(R.string.setting_model_council_show_seat_outputs_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = workspaceColors().muted,
+                            )
+                        }
+                        Switch(
+                            checked = council.showSeatOutputs,
+                            onCheckedChange = { checked -> update { it.copy(showSeatOutputs = checked) } },
+                        )
+                    }
                     Text(
                         text = stringResource(R.string.setting_model_council_synthesis_model),
                         style = MaterialTheme.typography.labelMedium,
@@ -543,6 +569,7 @@ fun SettingExperimentalICloudPage(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var showICloudLogin by remember { mutableStateOf(false) }
+    var iCloudLoginUrl by remember { mutableStateOf(ICLOUD_GLOBAL_LOGIN_URL) }
     var iCloudBusy by remember { mutableStateOf(false) }
     var iCloudVaultInput by remember(iCloudState.vaultPath) { mutableStateOf(iCloudState.vaultPath) }
     val iCloudSavedToast = stringResource(R.string.setting_icloud_saved)
@@ -603,7 +630,18 @@ fun SettingExperimentalICloudPage(
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_icloud_login),
                             enabled = iCloudState.enabled,
-                            onClick = { showICloudLogin = !showICloudLogin },
+                            onClick = {
+                                iCloudLoginUrl = ICLOUD_GLOBAL_LOGIN_URL
+                                showICloudLogin = true
+                            },
+                        )
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_icloud_login_china),
+                            enabled = iCloudState.enabled,
+                            onClick = {
+                                iCloudLoginUrl = ICLOUD_CHINA_LOGIN_URL
+                                showICloudLogin = true
+                            },
                         )
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_icloud_probe),
@@ -649,6 +687,7 @@ fun SettingExperimentalICloudPage(
     }
     if (showICloudLogin && iCloudState.enabled) {
         ICloudLoginDialog(
+            url = iCloudLoginUrl,
             onDismiss = {
                 showICloudLogin = false
                 iCloudBusy = true
@@ -1668,10 +1707,11 @@ private fun ExperimentalSettingsScaffold(
 
 @Composable
 private fun ICloudLoginDialog(
+    url: String,
     onDismiss: () -> Unit,
 ) {
     val state = rememberWebViewState(
-        url = ICLOUD_LOGIN_URL,
+        url = url,
         settings = {
             domStorageEnabled = true
             builtInZoomControls = true

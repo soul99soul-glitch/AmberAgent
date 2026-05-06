@@ -12,6 +12,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
@@ -107,18 +108,18 @@ class ModelCouncilTools(
 
     private fun waitTool() = Tool(
         name = "model_council_wait",
-        description = "Wait for a Model Council run to finish, up to wait_timeout_ms.",
+        description = "Wait for a Model Council run to finish. If it returns status=running and wait_status=still_running, the run is still healthy; call model_council_read or wait again instead of treating it as a failure.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("run_id", stringProp("Model Council run id."))
-                    put("wait_timeout_ms", integerProp("Maximum wait time. Default 10000, capped at 60000."))
+                    put("wait_timeout_ms", integerProp("Maximum wait time. Default 180000; capped by the Model Council total timeout."))
                 },
                 required = listOf("run_id"),
             )
         },
         execute = { input ->
-            val waitMs = input.int("wait_timeout_ms")?.toLong() ?: 10_000L
+            val waitMs = input.int("wait_timeout_ms")?.toLong() ?: DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS
             listOf(UIMessagePart.Text(manager.wait(input.requiredString("run_id"), waitMs).toString()))
         },
     )

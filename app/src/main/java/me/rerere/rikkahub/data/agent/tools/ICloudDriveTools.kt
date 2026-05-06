@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveEntry
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveSearchResult
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveState
+import me.rerere.rikkahub.data.agent.icloud.ICloudDriveWebEndpoints
 
 class ICloudDriveTools(
     private val manager: ICloudDriveManager,
@@ -35,8 +36,9 @@ class ICloudDriveTools(
             val state = manager.state.value
             textJson {
                 putState(state)
-                put("login_url", "https://www.icloud.com/iclouddrive")
-                put("note", "This is an experimental Android-only iCloud Web Mount. It uses the WebView iCloud.com session and never stores the Apple ID password.")
+                put("login_url", ICloudDriveWebEndpoints.GLOBAL.loginUrl)
+                put("china_login_url", ICloudDriveWebEndpoints.CHINA.loginUrl)
+                put("note", "This experimental Android-only iCloud Web Mount supports global iCloud and China iCloud WebView sessions. It never stores the Apple ID password.")
             }
         },
     )
