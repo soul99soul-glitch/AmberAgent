@@ -15,6 +15,7 @@ object SubAgentValidator {
     val defaultDynamicReadOnlyTools = setOf(
         "tools_list", "file_list", "file_read", "file_search",
         "conversation_search", "conversation_expand",
+        "session_search",
         "officepro_status", "officepro_dashboard",
         "search_web", "scrape_web",
         "apps_list", "apps_installed_list", "permissions_status", "skills_list", "mcp_list",
@@ -28,6 +29,13 @@ object SubAgentValidator {
             toolsAndSources = task.string("tools_and_sources"),
             boundaries = task.string("boundaries"),
             context = task.stringOrBlank("context"),
+            sessionGrantId = task.stringOrBlank("session_grant_id"),
+            sourceSessionIds = task["source_session_ids"]?.jsonArray
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf(String::isNotBlank) }
+                .orEmpty(),
+            historyQuery = task.stringOrBlank("history_query"),
+            shardIndex = task["shard_index"]?.jsonPrimitive?.intOrNull ?: 0,
+            shardCount = task["shard_count"]?.jsonPrimitive?.intOrNull ?: 1,
         )
         validateTask(spec)
         return spec

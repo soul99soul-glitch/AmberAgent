@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.ai.tools.LocalTools
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
+import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
@@ -105,11 +106,15 @@ val appModule = module {
     }
 
     single {
+        SessionAccessGrantStore()
+    }
+
+    single {
         GenerationSubAgentRunner(get())
     }
 
     single {
-        SubAgentManager(get(), get(), get(), get(), get<GenerationSubAgentRunner>(), get())
+        SubAgentManager(get(), get(), get(), get(), get<GenerationSubAgentRunner>(), get(), get())
     }
 
     single {
@@ -240,6 +245,7 @@ val appModule = module {
             subAgentManager = get(),
             modelCouncilManager = get(),
             agentTaskScheduler = get(),
+            sessionAccessGrantStore = get(),
         )
     }
 

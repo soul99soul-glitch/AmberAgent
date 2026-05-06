@@ -851,6 +851,7 @@ class LocalTools(
                                     put("description", tool?.description.orEmpty().take(240))
                                     put("enabled", true)
                                     put("mutates", metadata.mutates)
+                                    put("sensitive_read", metadata.sensitiveRead)
                                     put("needs_approval", metadata.needsApproval)
                                     put("allows_auto_approval", metadata.autoApprovable)
                                     put("output_budget_chars", metadata.outputBudgetChars)

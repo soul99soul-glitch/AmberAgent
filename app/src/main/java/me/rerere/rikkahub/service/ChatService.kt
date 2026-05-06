@@ -69,10 +69,12 @@ import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
+import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.AgentTaskTools
 import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
+import me.rerere.rikkahub.data.agent.tools.ConversationHistoryTools
 import me.rerere.rikkahub.data.agent.tools.ModelCouncilTools
 import me.rerere.rikkahub.data.agent.tools.SubAgentTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
@@ -156,6 +158,7 @@ class ChatService(
     private val subAgentManager: SubAgentManager,
     private val modelCouncilManager: ModelCouncilManager,
     private val agentTaskScheduler: AgentTaskScheduler,
+    private val sessionAccessGrantStore: SessionAccessGrantStore,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -1311,6 +1314,13 @@ class ChatService(
                         conversationProvider = { getConversationFlow(conversationId).value },
                         settingsProvider = { settingsStore.settingsFlow.first() },
                         modelProvider = { settingsStore.settingsFlow.first().getCurrentChatModel() },
+                    ).tools()
+                )
+                addAll(
+                    ConversationHistoryTools(
+                        conversationRepo = conversationRepo,
+                        currentConversationProvider = { getConversationFlow(conversationId).value },
+                        grantStore = sessionAccessGrantStore,
                     ).tools()
                 )
             }

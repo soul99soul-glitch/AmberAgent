@@ -98,6 +98,24 @@ class GenerationSubAgentRunner(
         Context from parent:
         ${task.context.ifBlank { "(none)" }}
 
+        ${historyGrantPrompt(task)}
+
         Return only the useful result for the supervisor. Do not ask the user follow-up questions.
     """.trimIndent()
+
+    private fun historyGrantPrompt(task: SubAgentTaskSpec): String {
+        if (task.sessionGrantId.isBlank() && task.sourceSessionIds.isEmpty() && task.historyQuery.isBlank()) {
+            return ""
+        }
+        return """
+            Historical session scope:
+            - session_grant_id: ${task.sessionGrantId.ifBlank { "(none)" }}
+            - source_session_ids: ${task.sourceSessionIds.joinToString(", ").ifBlank { "(none)" }}
+            - history_query: ${task.historyQuery.ifBlank { "(none)" }}
+            - shard: ${task.shardIndex + 1}/${task.shardCount.coerceAtLeast(1)}
+
+            When using session_read or session_expand, include the session_grant_id in the tool input.
+            Keep source_message_ids in your evidence whenever the tool returns them.
+        """.trimIndent()
+    }
 }

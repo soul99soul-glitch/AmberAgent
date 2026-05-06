@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
 import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
@@ -33,6 +34,7 @@ class SubAgentManager(
     private val json: Json,
     private val runner: SubAgentRunner,
     private val agentTaskStore: AgentTaskStore,
+    private val sessionAccessGrantStore: SessionAccessGrantStore,
 ) {
     private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
     private val runs = ConcurrentHashMap<String, RuntimeRun>()
@@ -90,9 +92,32 @@ class SubAgentManager(
                 "No allowed tools are currently available for subagent ${definition.id}."
             )
         }
+        val historyGrant = if (effectiveDefinition.isHistoryReader() && task.sourceSessionIds.isNotEmpty()) {
+            sessionAccessGrantStore.create(
+                sessionIds = task.sourceSessionIds,
+                maxChars = effectiveDefinition.outputBudgetChars * 4,
+                purpose = task.objective,
+                sourceConversationId = parentConversationId.toString(),
+            )
+        } else {
+            task.sessionGrantId.takeIf { it.isNotBlank() }?.let { sessionAccessGrantStore.get(it) }
+        }
+        val effectiveTask = if (historyGrant != null && task.sessionGrantId.isBlank()) {
+            task.copy(sessionGrantId = historyGrant.grantId)
+        } else {
+            task
+        }
+
         val allowedTools = parentTools
             .filterNot { it.name.startsWith("subagent_") }
             .filter { it.name in effectiveDefinition.toolAllowlist }
+            .map { tool ->
+                if (tool.name in HISTORY_FULL_READ_TOOLS && historyGrant != null) {
+                    tool.copy(needsApproval = false, allowsAutoApproval = true)
+                } else {
+                    tool
+                }
+            }
 
         val now = Instant.now().toEpochMilli()
         val runId = Uuid.random().toString()
@@ -101,7 +126,7 @@ class SubAgentManager(
             runId = runId,
             parentConversationId = parentConversationId,
             definition = effectiveDefinition,
-            task = task,
+            task = effectiveTask,
             status = SubAgentRunStatus.RUNNING,
             transcriptPath = transcript.absolutePath,
             startedAtMs = now,
@@ -117,7 +142,7 @@ class SubAgentManager(
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
             val result = runCatching {
                 withTimeout(definition.timeoutMs) {
-                    runner.run(settings, effectiveDefinition, task, allowedTools)
+                    runner.run(settings, effectiveDefinition, effectiveTask, allowedTools)
                 }
             }.fold(
                 onSuccess = { it },
@@ -237,6 +262,7 @@ class SubAgentManager(
         put("updated_at_ms", run.updatedAtMs)
         put("definition", json.encodeToString(run.definition))
         put("task", json.encodeToString(run.task))
+        run.task.sessionGrantId.takeIf { it.isNotBlank() }?.let { put("session_grant_id", it) }
         run.result?.let { put("result", json.encodeToString(it)) }
     }
 
@@ -286,4 +312,12 @@ class SubAgentManager(
         @Volatile var snapshot: SubAgentRun,
         @Volatile var job: Job? = null,
     )
+
+    private fun SubAgentDefinition.isHistoryReader(): Boolean =
+        id in setOf("session-archivist", "history-synthesizer", "topic-miner") ||
+            toolAllowlist.any { it in HISTORY_FULL_READ_TOOLS }
+
+    private companion object {
+        val HISTORY_FULL_READ_TOOLS = setOf("session_read", "session_expand")
+    }
 }

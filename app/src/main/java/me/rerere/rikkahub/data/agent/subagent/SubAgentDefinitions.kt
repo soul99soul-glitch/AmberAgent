@@ -14,8 +14,50 @@ object SubAgentDefinitions {
             toolAllowlist = setOf(
                 "tools_list", "search_web", "scrape_web",
                 "file_list", "file_read", "file_search",
-                "conversation_search", "conversation_expand",
+                "conversation_search", "conversation_expand", "session_search",
                 "mcp_list", "skills_list",
+            ),
+        ),
+        SubAgentDefinition(
+            id = "session-archivist",
+            name = "Session Archivist",
+            description = "Use for reading one or a small shard of authorized historical sessions and extracting questions, decisions, open items, and evidence.",
+            systemPrompt = basePrompt(
+                role = "historical session archivist subagent",
+                strengths = "bounded transcript reading, source-backed session summaries, open-item extraction",
+                extra = "Only read sessions inside the provided SessionAccessGrant. Do not infer across missing sessions. Every finding should keep source_message_ids when available."
+            ),
+            toolAllowlist = setOf(
+                "tools_list", "session_search", "session_read", "session_expand",
+                "conversation_search", "conversation_expand",
+            ),
+        ),
+        SubAgentDefinition(
+            id = "history-synthesizer",
+            name = "History Synthesizer",
+            description = "Use for merging multiple session-archivist outputs into deduplicated themes, timelines, and source-backed conclusions.",
+            systemPrompt = basePrompt(
+                role = "history synthesis subagent",
+                strengths = "deduplication, cross-session synthesis, timeline and table construction",
+                extra = "Prefer synthesis from provided worker summaries. Use session_expand only for source verification inside the provided grant. Mark partial or missing shards clearly."
+            ),
+            toolAllowlist = setOf(
+                "tools_list", "session_search", "session_read", "session_expand",
+                "conversation_search", "conversation_expand",
+            ),
+        ),
+        SubAgentDefinition(
+            id = "topic-miner",
+            name = "Topic Miner",
+            description = "Use for mining a specific topic across authorized historical sessions and returning compact source-backed excerpts.",
+            systemPrompt = basePrompt(
+                role = "topic mining subagent",
+                strengths = "keyword/topic extraction, excerpt selection, source id tracking",
+                extra = "Stay within the topic and grant. Return relevant snippets with session_id and source_message_ids; do not broaden the search without supervisor instructions."
+            ),
+            toolAllowlist = setOf(
+                "tools_list", "session_search", "session_read", "session_expand",
+                "conversation_search", "conversation_expand",
             ),
         ),
         SubAgentDefinition(

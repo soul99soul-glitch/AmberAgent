@@ -235,11 +235,20 @@ class ToolRegistryTest {
                 stubTool("conversation_search"),
                 stubTool("conversation_expand"),
                 stubTool("conversation_compact"),
+                stubTool("session_list"),
+                stubTool("session_search"),
+                stubTool("session_read", needsApproval = true),
+                stubTool("session_expand", needsApproval = true),
             )
         )
 
-        assertEquals(listOf("context", "context", "context", "context"), registry.metadata.map { it.category })
+        assertEquals(List(8) { "context" }, registry.metadata.map { it.category })
         assertTrue(registry.metadata.single { it.name == "conversation_compact" }.mutates)
+        assertTrue(!registry.metadata.single { it.name == "session_search" }.needsApproval)
+        assertTrue(registry.metadata.single { it.name == "session_read" }.needsApproval)
+        assertTrue(registry.metadata.single { it.name == "session_read" }.autoApprovable)
+        assertTrue(registry.metadata.single { it.name == "session_read" }.sensitiveRead)
+        assertEquals(ToolRisk.Sensitive, registry.metadata.single { it.name == "session_expand" }.risk)
     }
 
     @Test

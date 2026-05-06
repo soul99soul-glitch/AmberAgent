@@ -41,6 +41,16 @@ data class SubAgentTaskSpec(
     val toolsAndSources: String,
     val boundaries: String,
     val context: String = "",
+    @SerialName("session_grant_id")
+    val sessionGrantId: String = "",
+    @SerialName("source_session_ids")
+    val sourceSessionIds: List<String> = emptyList(),
+    @SerialName("history_query")
+    val historyQuery: String = "",
+    @SerialName("shard_index")
+    val shardIndex: Int = 0,
+    @SerialName("shard_count")
+    val shardCount: Int = 1,
 )
 
 @Serializable

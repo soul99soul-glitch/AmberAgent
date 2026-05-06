@@ -14,6 +14,7 @@ data class ToolMetadata(
     val name: String,
     val category: String,
     val mutates: Boolean,
+    val sensitiveRead: Boolean,
     val needsApproval: Boolean,
     val autoApprovable: Boolean,
     val outputBudgetChars: Int,
@@ -83,6 +84,7 @@ class ToolRegistry private constructor(
                 name = name,
                 category = category(),
                 mutates = mutates,
+                sensitiveRead = sensitiveRead(),
                 needsApproval = effectiveNeedsApproval,
                 autoApprovable = effectiveAutoApproval,
                 outputBudgetChars = outputBudgetChars(),
@@ -194,7 +196,7 @@ internal fun Tool.category(): String = when {
         name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
         name in setOf("device_phone_state", "media_search", "location_current", "audio_record_once", "notification_list", "usage_stats_list", "battery_status", "network_status", "wifi_status", "device_info", "settings_open", "intent_open", "share_text", "share_file", "notification_post") -> "system"
     name.startsWith("memory_") -> "memory"
-    name.startsWith("conversation_") -> "context"
+    name.startsWith("conversation_") || name.startsWith("session_") -> "context"
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
     name == "tool_policy_explain" -> "utility"
@@ -229,6 +231,7 @@ private fun Tool.mutatesState(): Boolean {
 private fun Tool.risk(): ToolRisk = when {
     name == "http_request" -> ToolRisk.High
     name == "memory_tool" -> ToolRisk.High
+    name in setOf("session_read", "session_expand") -> ToolRisk.Sensitive
     name == "pdf_render_page" -> ToolRisk.High
     name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> ToolRisk.Sensitive
     name == "officepro_read_screen" ||
@@ -257,6 +260,15 @@ private fun Tool.concurrencySafe(): Boolean = when {
     name.startsWith("subagent_") || name.startsWith("model_council_") -> false
     else -> !mutatesState()
 }
+
+private fun Tool.sensitiveRead(): Boolean =
+    name in setOf("session_read", "session_expand") ||
+        name.startsWith("screen_") ||
+        name in setOf(
+            "officepro_read_screen",
+            "officepro_capture_context",
+            "officepro_context_digest",
+        )
 
 private fun Tool.foregroundPackageRequirement(): String? = when (name) {
     "officepro_read_screen",

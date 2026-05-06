@@ -55,6 +55,8 @@ class SubAgentValidatorTest {
             availableToolNames = setOf(
                 "file_read",
                 "file_search",
+                "session_search",
+                "session_read",
                 "terminal_execute",
                 "http_request",
                 "officepro_capture_context",
@@ -62,8 +64,36 @@ class SubAgentValidatorTest {
             ),
         )
 
-        assertEquals(setOf("file_read", "file_search"), result.definition.toolAllowlist)
+        assertEquals(setOf("file_read", "file_search", "session_search"), result.definition.toolAllowlist)
         assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun taskSpecParsesHistoryShardFields() {
+        val input = buildJsonObject {
+            put("task", buildJsonObject {
+                put("objective", "Summarize historical sessions")
+                put("output_format", "Summary with source ids")
+                put("tools_and_sources", "Use session_read with the grant")
+                put("boundaries", "Only read granted sessions")
+                put("session_grant_id", "grant-1")
+                put("history_query", "飞书增强模式")
+                put("shard_index", 1)
+                put("shard_count", 3)
+                put("source_session_ids", buildJsonArray {
+                    add("session-a")
+                    add("session-b")
+                })
+            })
+        }
+
+        val task = SubAgentValidator.parseTask(input)
+
+        assertEquals("grant-1", task.sessionGrantId)
+        assertEquals(listOf("session-a", "session-b"), task.sourceSessionIds)
+        assertEquals("飞书增强模式", task.historyQuery)
+        assertEquals(1, task.shardIndex)
+        assertEquals(3, task.shardCount)
     }
 
     @Test
