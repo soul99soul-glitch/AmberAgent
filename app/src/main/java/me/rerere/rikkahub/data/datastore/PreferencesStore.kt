@@ -565,6 +565,21 @@ data class AgentRuntimeSetting(
     val subAgent: SubAgentRuntimeSetting = SubAgentRuntimeSetting(),
     val modelCouncil: ModelCouncilRuntimeSetting = ModelCouncilRuntimeSetting(),
     val externalFileAccess: ExternalFileAccessSetting = ExternalFileAccessSetting(),
+    val harnessDebug: HarnessDebugSetting = HarnessDebugSetting(),
+    val speculativeToolExecution: SpeculativeToolExecutionSetting = SpeculativeToolExecutionSetting(),
+)
+
+@Serializable
+data class HarnessDebugSetting(
+    val showPermissionReasons: Boolean = false,
+    val showParallelBatches: Boolean = false,
+    val showCapabilitySnapshotSummary: Boolean = false,
+)
+
+@Serializable
+data class SpeculativeToolExecutionSetting(
+    val enabled: Boolean = false,
+    val maxConcurrentTools: Int = 4,
 )
 
 @Serializable

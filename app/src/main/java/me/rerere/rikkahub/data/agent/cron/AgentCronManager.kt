@@ -22,6 +22,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
+import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import me.rerere.rikkahub.data.agent.task.toQueueState
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 import kotlin.uuid.Uuid
@@ -31,6 +35,7 @@ private val Context.agentCronDataStore by preferencesDataStore(name = "agent_cro
 class AgentCronManager(
     private val context: Context,
     private val json: Json,
+    private val agentTaskStore: AgentTaskStore,
 ) {
     private val workManager = WorkManager.getInstance(context)
 
@@ -82,6 +87,7 @@ class AgentCronManager(
         )
         replaceTasks { tasks -> tasks + task }
         schedule(task)
+        agentTaskStore.register(task.toAgentTaskSnapshot())
         task
     }
 
@@ -123,6 +129,7 @@ class AgentCronManager(
         }
         val task = requireNotNull(updated) { "Cron task not found: $id" }
         schedule(task)
+        agentTaskStore.upsert(task.toAgentTaskSnapshot())
         task
     }
 
@@ -133,6 +140,7 @@ class AgentCronManager(
             tasks.filterNot { it.id == id }
         }
         workManager.cancelUniqueWork(workName(id))
+        if (removed) agentTaskStore.remove(id)
         removed
     }
 
@@ -156,6 +164,7 @@ class AgentCronManager(
             }
         }
         prepared?.let { schedule(it) }
+        prepared?.let { agentTaskStore.upsert(it.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED)) }
         prepared
     }
 
@@ -173,6 +182,7 @@ class AgentCronManager(
                 }
             }
         }
+        agentTaskStore.update(id, status = AgentTaskStatus.FAILED, error = message.take(500))
     }
 
     suspend fun rescheduleAll() = withContext(Dispatchers.IO) {
@@ -288,6 +298,27 @@ class AgentCronManager(
             .getOrDefault(ZoneId.systemDefault())
 
     private fun workName(id: String) = "amberagent_cron_$id"
+
+    private fun AgentCronTask.toAgentTaskSnapshot(status: AgentTaskStatus? = null) = AgentTaskSnapshot(
+        taskId = id,
+        type = "cron",
+        title = title,
+        sourceConversationId = conversationId,
+        status = status ?: when {
+            !enabled -> AgentTaskStatus.CANCELLED
+            lastStatus == AgentCronTaskStatus.Failed -> AgentTaskStatus.FAILED
+            lastStatus == AgentCronTaskStatus.Queued -> AgentTaskStatus.QUEUED
+            else -> AgentTaskStatus.QUEUED
+        },
+        createdAtMs = createdAtMs,
+        updatedAtMs = updatedAtMs,
+        sourceToolName = "cron_task_create",
+        cancelCapability = false,
+        summary = "cron=$cronExpression; timezone=$timezoneId; next_run_at_ms=${nextRunAtMs ?: "none"}",
+        error = lastError,
+    ).let { snapshot ->
+        snapshot.copy(queueState = snapshot.status.toQueueState(snapshot.type))
+    }
 
     companion object {
         private val TASKS_KEY = stringPreferencesKey("tasks_json")

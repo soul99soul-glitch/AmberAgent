@@ -5,6 +5,7 @@ import com.whl.quickjs.wrapper.QuickJSContext
 import com.whl.quickjs.wrapper.QuickJSObject
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -626,7 +627,7 @@ class LocalTools(
                 properties = buildJsonObject {
                     put("category", buildJsonObject {
                         put("type", "string")
-                        put("description", "Optional category filter: workspace, external_file, cloud, office, terminal, web, webview, screen, system, memory, context, cron, subagent, model_council, skill, mcp, utility.")
+                        put("description", "Optional category filter: workspace, external_file, cloud, office, terminal, web, webview, screen, system, memory, context, cron, task, subagent, model_council, skill, mcp, utility.")
                     })
                     put("query", buildJsonObject {
                         put("type", "string")
@@ -681,6 +682,17 @@ class LocalTools(
                                     put("needs_approval", metadata.needsApproval)
                                     put("allows_auto_approval", metadata.autoApprovable)
                                     put("output_budget_chars", metadata.outputBudgetChars)
+                                    put("dynamic_policy_supported", true)
+                                    val invocationPolicy = registry.evaluateInvocation(metadata.name)
+                                    put("concurrency_safe", invocationPolicy?.concurrencySafe ?: true)
+                                    invocationPolicy?.parallelGroup?.let { put("parallel_group", it) }
+                                    invocationPolicy?.requiresForegroundAppPackage?.let {
+                                        put("requires_foreground_app_package", it)
+                                    }
+                                    put("speculative_eligible", invocationPolicy?.speculativeEligible ?: false)
+                                    invocationPolicy?.speculativeBlockReason?.let {
+                                        put("speculative_block_reason", it)
+                                    }
                                     put("risk", capabilities.maxByOrNull { it.risk.ordinal }?.risk?.name ?: metadata.risk.name)
                                     put("required_permissions", buildJsonArray {
                                         capabilities.forEach { capability ->
@@ -701,6 +713,54 @@ class LocalTools(
                         }
                     }
                 )
+            }
+            listOf(UIMessagePart.Text(payload.toString()))
+        }
+    )
+
+    fun createToolPolicyExplainTool(registry: ToolRegistry) = Tool(
+        name = "tool_policy_explain",
+        description = "Explain how AmberAgent would evaluate one tool invocation without executing it.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("tool_name", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Tool name to evaluate.")
+                    })
+                    put("input", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional JSON string input for dynamic policy evaluation.")
+                    })
+                },
+                required = listOf("tool_name")
+            )
+        },
+        execute = { input ->
+            val toolName = input.jsonObject["tool_name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val rawInput = input.jsonObject["input"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val toolInput = runCatching {
+                Json.parseToJsonElement(rawInput.ifBlank { "{}" })
+            }.getOrNull()
+            val policy = registry.evaluateInvocation(toolName, toolInput)
+            val payload = buildJsonObject {
+                put("status", if (policy == null) "not_found" else "ok")
+                put("tool_name", toolName)
+                policy?.let {
+                    put("category", it.category)
+                    put("risk", it.risk.name.lowercase())
+                    put("mutates", it.mutates)
+                    put("needs_approval", it.needsApproval)
+                    put("allows_auto_approval", it.autoApprovable)
+                    put("concurrency_safe", it.concurrencySafe)
+                    it.parallelGroup?.let { group -> put("parallel_group", group) }
+                    it.requiresForegroundAppPackage?.let { pkg -> put("requires_foreground_app_package", pkg) }
+                    put("speculative_eligible", it.speculativeEligible)
+                    it.speculativeBlockReason?.let { reason -> put("speculative_block_reason", reason) }
+                    put("output_budget_chars", it.outputBudgetChars)
+                    put("hard_blocked", it.hardBlocked)
+                    it.reason?.let { reason -> put("reason", reason) }
+                }
             }
             listOf(UIMessagePart.Text(payload.toString()))
         }

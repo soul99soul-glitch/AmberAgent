@@ -25,6 +25,8 @@ import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
+import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
@@ -35,6 +37,7 @@ import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import me.rerere.rikkahub.data.context.AgentCapabilitySnapshotBuilder
 import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -86,7 +89,7 @@ val appModule = module {
     }
 
     single {
-        FeishuOfficeTools(get(), get())
+        FeishuOfficeTools(get(), get(), get())
     }
 
     single {
@@ -94,7 +97,11 @@ val appModule = module {
     }
 
     single {
-        ConversationContextEngine(get(), get(), get(), get())
+        AgentCapabilitySnapshotBuilder(get())
+    }
+
+    single {
+        ConversationContextEngine(get(), get(), get(), get(), get())
     }
 
     single {
@@ -102,7 +109,7 @@ val appModule = module {
     }
 
     single {
-        SubAgentManager(get(), get(), get(), get(), get<GenerationSubAgentRunner>())
+        SubAgentManager(get(), get(), get(), get(), get<GenerationSubAgentRunner>(), get())
     }
 
     single {
@@ -110,7 +117,7 @@ val appModule = module {
     }
 
     single {
-        ModelCouncilManager(get(), get(), get(), get(), get<ProviderModelCouncilTextRunner>())
+        ModelCouncilManager(get(), get(), get(), get(), get<ProviderModelCouncilTextRunner>(), get())
     }
 
     single {
@@ -126,6 +133,14 @@ val appModule = module {
     }
 
     single {
+        AgentTaskStore(get(), get())
+    }
+
+    single {
+        AgentTaskScheduler(get())
+    }
+
+    single {
         WebViewOperationStore()
     }
 
@@ -138,7 +153,7 @@ val appModule = module {
     }
 
     single {
-        TerminalRuntime(get(), get(), get(), get(), get(), get())
+        TerminalRuntime(get(), get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -162,7 +177,7 @@ val appModule = module {
     }
 
     single {
-        AgentCronManager(get(), get())
+        AgentCronManager(get(), get(), get())
     }
 
     single {
@@ -224,6 +239,7 @@ val appModule = module {
             contextEngine = get(),
             subAgentManager = get(),
             modelCouncilManager = get(),
+            agentTaskScheduler = get(),
         )
     }
 

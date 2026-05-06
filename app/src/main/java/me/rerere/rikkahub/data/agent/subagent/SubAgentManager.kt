@@ -14,6 +14,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
+import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
+import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
+import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import me.rerere.rikkahub.data.agent.task.toQueueState
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import java.io.File
 import java.time.Instant
@@ -26,6 +32,7 @@ class SubAgentManager(
     private val settingsStore: SettingsStore,
     private val json: Json,
     private val runner: SubAgentRunner,
+    private val agentTaskStore: AgentTaskStore,
 ) {
     private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
     private val runs = ConcurrentHashMap<String, RuntimeRun>()
@@ -101,6 +108,10 @@ class SubAgentManager(
         )
         val runtimeRun = RuntimeRun(run)
         runs[runId] = runtimeRun
+        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
+            cancel(runId)
+            true
+        })
         appendEvent(runtimeRun, "started", runToPayload(run))
 
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
@@ -180,6 +191,15 @@ class SubAgentManager(
             updatedAtMs = Instant.now().toEpochMilli(),
         )
         runtimeRun.snapshot = next
+        appScope.launch(Dispatchers.IO) {
+            agentTaskStore.update(
+                taskId = runId,
+                status = status.toAgentTaskStatus(),
+                summary = result.summary.ifBlank { result.findings.joinToString("; ").take(1_000) },
+                error = result.error.takeIf { it.isNotBlank() },
+                cancelCapability = false,
+            )
+        }
         appendEvent(runtimeRun, "finished", runToPayload(next))
     }
 
@@ -224,6 +244,42 @@ class SubAgentManager(
         put("status", "failed")
         put("error", message)
         put("code", code)
+    }
+
+    private fun SubAgentRun.toAgentTaskSnapshot() = AgentTaskSnapshot(
+        taskId = runId,
+        type = "subagent",
+        title = definition.name,
+        sourceConversationId = parentConversationId.toString(),
+        status = status.toAgentTaskStatus(),
+        queueState = status.toAgentTaskStatus().toQueueState("subagent"),
+        outputPath = transcriptPath,
+        outputRef = AgentTaskOutputRef(
+            type = "transcript",
+            path = transcriptPath,
+            exists = File(transcriptPath).exists(),
+        ),
+        retryPolicy = AgentTaskRetryPolicy(
+            retryable = status == SubAgentRunStatus.FAILED,
+            requiresApproval = false,
+            maxRetries = 1,
+            reason = "Sub Agent retry starts a new isolated run from the original task spec.",
+        ),
+        sourceToolName = "subagent_start",
+        createdAtMs = startedAtMs,
+        updatedAtMs = updatedAtMs,
+        cancelCapability = status.running,
+        summary = task.objective.take(1_000),
+    )
+
+    private fun SubAgentRunStatus.toAgentTaskStatus(): AgentTaskStatus = when (this) {
+        SubAgentRunStatus.RUNNING,
+        SubAgentRunStatus.APPROVAL_REQUIRED -> AgentTaskStatus.RUNNING
+        SubAgentRunStatus.COMPLETED -> AgentTaskStatus.COMPLETED
+        SubAgentRunStatus.FAILED -> AgentTaskStatus.FAILED
+        SubAgentRunStatus.CANCELLED -> AgentTaskStatus.CANCELLED
+        SubAgentRunStatus.TIMED_OUT -> AgentTaskStatus.TIMED_OUT
+        SubAgentRunStatus.INTERRUPTED -> AgentTaskStatus.INTERRUPTED
     }
 
     private class RuntimeRun(

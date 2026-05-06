@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -13,9 +14,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -39,7 +37,9 @@ import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
-import me.rerere.rikkahub.data.agent.toAgentToolFailurePayload
+import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
+import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
+import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -56,7 +56,6 @@ import java.util.Locale
 import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
-private const val ASK_USER_TOOL_NAME = "ask_user"
 private const val STREAM_UI_FLUSH_INTERVAL_MS = 50L
 
 internal fun shouldPauseForToolApproval(
@@ -66,23 +65,13 @@ internal fun shouldPauseForToolApproval(
     autoApproveHighRiskTools: Boolean = false,
     autoApprovedToolNames: Set<String> = emptySet(),
 ): Boolean {
-    if (toolDef?.needsApproval != true) return false
-    if (tool.approvalState !is ToolApprovalState.Auto) return false
-    if (tool.toolName == "http_request" && tool.isSafeHttpRequest()) return false
-    if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME) return false
-    val canAutoApprove = toolDef.allowsAutoApproval || autoApproveHighRiskTools
-    return !(autoApproveTools && tool.toolName != ASK_USER_TOOL_NAME && canAutoApprove)
-}
-
-private fun UIMessagePart.Tool.isSafeHttpRequest(): Boolean {
-    val method = runCatching {
-        inputAsJson()
-            .jsonObject["method"]
-            ?.jsonPrimitive
-            ?.contentOrNull
-            ?.uppercase(Locale.ROOT)
-    }.getOrNull() ?: "GET"
-    return method in setOf("GET", "HEAD")
+    return PermissionDecisionResolver().shouldPauseForApproval(
+        toolDef = toolDef,
+        tool = tool,
+        autoApproveTools = autoApproveTools,
+        autoApproveHighRiskTools = autoApproveHighRiskTools,
+        autoApprovedToolNames = autoApprovedToolNames,
+    )
 }
 
 @Serializable
@@ -100,6 +89,7 @@ class GenerationHandler(
     private val conversationRepo: ConversationRepository,
     private val aiLoggingManager: AILoggingManager,
     private val conversationContextEngine: ConversationContextEngine,
+    private val toolDispatcher: AgentToolDispatcher,
 ) {
     fun generateText(
         settings: Settings,
@@ -117,6 +107,7 @@ class GenerationHandler(
         autoApprovedToolNames: Set<String> = emptySet(),
         conversation: Conversation? = null,
     ): Flow<GenerationChunk> = flow {
+        coroutineScope {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
@@ -128,6 +119,15 @@ class GenerationHandler(
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
                 addAll(tools)
+            }
+            val speculativeRunner = if (settings.agentRuntime.speculativeToolExecution.enabled && assistant.streamOutput) {
+                SpeculativeToolRunner(
+                    scope = this,
+                    dispatcher = toolDispatcher,
+                    maxConcurrentTools = settings.agentRuntime.speculativeToolExecution.maxConcurrentTools,
+                )
+            } else {
+                null
             }
 
             // Check if we have tool calls ready to continue after user interaction.
@@ -172,6 +172,7 @@ class GenerationHandler(
                     stream = assistant.streamOutput,
                     processingStatus = processingStatus,
                     conversation = conversation,
+                    speculativeRunner = speculativeRunner,
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -203,17 +204,24 @@ class GenerationHandler(
                 var hasPendingApproval = false
                 val updatedTools = tools.map { tool ->
                     val toolDef = toolsInternal.find { it.name == tool.toolName }
+                    val decision = toolDispatcher.resolveDecision(
+                        toolDef = toolDef,
+                        tool = tool,
+                        autoApproveTools = autoApproveTools,
+                        autoApproveHighRiskTools = autoApproveHighRiskTools,
+                        autoApprovedToolNames = autoApprovedToolNames,
+                    )
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
-                        shouldPauseForToolApproval(
-                            toolDef = toolDef,
-                            tool = tool,
-                            autoApproveTools = autoApproveTools,
-                            autoApproveHighRiskTools = autoApproveHighRiskTools,
-                            autoApprovedToolNames = autoApprovedToolNames,
-                        ) -> {
+                        decision.action == me.rerere.rikkahub.data.agent.runtime.PermissionDecisionAction.ASK -> {
                             hasPendingApproval = true
-                            tool.copy(approvalState = ToolApprovalState.Pending)
+                            tool.copy(
+                                approvalState = ToolApprovalState.Pending,
+                                metadata = kotlinx.serialization.json.buildJsonObject {
+                                    tool.metadata?.forEach { (key, value) -> put(key, value) }
+                                    put("permission_trace", decision.trace.toJson())
+                                },
+                            )
                         }
                         // State is Pending -> keep waiting
                         tool.approvalState is ToolApprovalState.Pending -> {
@@ -253,64 +261,14 @@ class GenerationHandler(
             }
 
             // Handle tools (execute approved tools, handle denied tools)
-            val executedTools = arrayListOf<UIMessagePart.Tool>()
-            toolsToProcess.forEach { tool ->
-                when (tool.approvalState) {
-                    is ToolApprovalState.Denied -> {
-                        // Tool was denied by user
-                        val reason = (tool.approvalState as ToolApprovalState.Denied).reason
-                        executedTools += tool.copy(
-                            output = listOf(
-                                UIMessagePart.Text(
-                                    json.encodeToString(
-                                        buildJsonObject {
-                                            put(
-                                                "error",
-                                                JsonPrimitive("Tool execution denied by user. Reason: ${reason.ifBlank { "No reason provided" }}")
-                                            )
-                                        }
-                                    )
-                                )
-                            )
-                        )
-                    }
-
-                    is ToolApprovalState.Answered -> {
-                        // Tool was answered by user (e.g., ask_user tool)
-                        val answer = (tool.approvalState as ToolApprovalState.Answered).answer
-                        executedTools += tool.copy(
-                            output = listOf(
-                                UIMessagePart.Text(answer)
-                            )
-                        )
-                    }
-
-                    is ToolApprovalState.Pending -> {
-                        // Should not reach here, but just in case
-                    }
-
-                    else -> {
-                        // Auto or Approved - execute the tool
-                        runCatching {
-                            val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
-                                ?: error("Tool ${tool.toolName} not found")
-                            val args = json.parseToJsonElement(tool.input.ifBlank { "{}" })
-                            Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
-                            val result = toolDef.execute(args)
-                            executedTools += tool.copy(output = result)
-                        }.onFailure {
-                            Log.e(TAG, "generateText: tool execution failed for ${tool.toolName}", it)
-                            executedTools += tool.copy(
-                                output = listOf(
-                                    UIMessagePart.Text(
-                                        json.encodeToString(it.toAgentToolFailurePayload())
-                                    )
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+            val executedTools = toolDispatcher.executeBatch(
+                tools = toolsToProcess,
+                toolDefinitions = toolsInternal.associateBy { it.name },
+                autoApproveTools = autoApproveTools,
+                autoApproveHighRiskTools = autoApproveHighRiskTools,
+                autoApprovedToolNames = autoApprovedToolNames,
+                prefetchedTools = speculativeRunner?.reusableResults(toolsToProcess).orEmpty(),
+            )
 
             if (executedTools.isEmpty()) {
                 // No results to add (all tools were pending)
@@ -338,6 +296,7 @@ class GenerationHandler(
             )
         }
 
+        }
     }.flowOn(Dispatchers.IO)
 
     private suspend fun generateInternal(
@@ -354,6 +313,7 @@ class GenerationHandler(
         stream: Boolean,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversation: Conversation? = null,
+        speculativeRunner: SpeculativeToolRunner? = null,
     ) {
         val coreMemories = if (settings.agentRuntime.enableCoreMemory) {
             memories.orEmpty()
@@ -462,11 +422,13 @@ class GenerationHandler(
                 val now = System.currentTimeMillis()
                 if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
                     messages = accumulator.snapshot()
+                    speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
                     onUpdateMessages(messages)
                     lastFlushAt = now
                 }
             }
             messages = accumulator.snapshot()
+            speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
             onUpdateMessages(messages)
         } else {
             aiLoggingManager.addLog(

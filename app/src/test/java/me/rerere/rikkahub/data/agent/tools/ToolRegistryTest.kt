@@ -75,6 +75,48 @@ class ToolRegistryTest {
     }
 
     @Test
+    fun dynamicPolicyDistinguishesHttpMethods() {
+        val registry = ToolRegistry.from(listOf(stubTool("http_request")))
+
+        val getPolicy = registry.evaluateInvocation(
+            "http_request",
+            Json.parseToJsonElement("""{"method":"GET","url":"https://example.com"}""")
+        )!!
+        val postPolicy = registry.evaluateInvocation(
+            "http_request",
+            Json.parseToJsonElement("""{"method":"POST","url":"https://example.com"}""")
+        )!!
+
+        assertTrue(!getPolicy.needsApproval)
+        assertTrue(!getPolicy.mutates)
+        assertEquals(ToolRisk.Normal, getPolicy.risk)
+        assertTrue(postPolicy.needsApproval)
+        assertTrue(postPolicy.mutates)
+        assertEquals(ToolRisk.High, postPolicy.risk)
+    }
+
+    @Test
+    fun dynamicPolicyDistinguishesMemoryOperations() {
+        val registry = ToolRegistry.from(listOf(stubTool("memory_tool")))
+
+        val readPolicy = registry.evaluateInvocation(
+            "memory_tool",
+            Json.parseToJsonElement("""{"operation":"search","query":"Q代"}""")
+        )!!
+        val writePolicy = registry.evaluateInvocation(
+            "memory_tool",
+            Json.parseToJsonElement("""{"operation":"delete","id":"memory-1"}""")
+        )!!
+
+        assertTrue(!readPolicy.needsApproval)
+        assertTrue(!readPolicy.mutates)
+        assertEquals(ToolRisk.Normal, readPolicy.risk)
+        assertTrue(writePolicy.needsApproval)
+        assertTrue(writePolicy.mutates)
+        assertEquals(ToolRisk.High, writePolicy.risk)
+    }
+
+    @Test
     fun cronTaskToolsUseCronCategoryAndApprovalForMutations() {
         val registry = ToolRegistry.from(
             listOf(
@@ -93,6 +135,52 @@ class ToolRegistryTest {
             assertTrue(metadata.needsApproval)
             assertTrue(metadata.autoApprovable)
         }
+    }
+
+    @Test
+    fun agentTaskToolsUseTaskCategory() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool("agent_task_list"),
+                stubTool("agent_task_read"),
+                stubTool("agent_task_cancel", needsApproval = true),
+                stubTool("agent_task_retry", needsApproval = true),
+                stubTool("agent_task_cleanup", needsApproval = true),
+                stubTool("agent_runtime_status"),
+                stubTool("tool_policy_explain"),
+            )
+        )
+
+        assertEquals("task", registry.metadata.single { it.name == "agent_runtime_status" }.category)
+        assertEquals("utility", registry.metadata.single { it.name == "tool_policy_explain" }.category)
+        assertTrue(!registry.metadata.single { it.name == "agent_task_list" }.mutates)
+        assertTrue(registry.metadata.single { it.name == "agent_task_cancel" }.mutates)
+        assertTrue(registry.metadata.single { it.name == "agent_task_retry" }.mutates)
+        assertTrue(registry.metadata.single { it.name == "agent_task_cleanup" }.needsApproval)
+        assertTrue(registry.evaluateInvocation("agent_task_cancel")!!.concurrencySafe)
+        assertTrue(registry.evaluateInvocation("agent_runtime_status")!!.concurrencySafe)
+        assertTrue(!registry.evaluateInvocation("agent_task_retry")!!.speculativeEligible)
+    }
+
+    @Test
+    fun policyIncludesParallelAndForegroundHints() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool("file_read"),
+                stubTool("officepro_read_screen"),
+            )
+        )
+
+        val fileRead = registry.evaluateInvocation("file_read")!!
+        val officeRead = registry.evaluateInvocation("officepro_read_screen")!!
+
+        assertEquals("workspace", fileRead.parallelGroup)
+        assertTrue(fileRead.requiresForegroundAppPackage == null)
+        assertTrue(fileRead.speculativeEligible)
+        assertEquals("configured_officepro_target", officeRead.requiresForegroundAppPackage)
+        assertTrue(officeRead.parallelGroup == null)
+        assertTrue(!officeRead.speculativeEligible)
+        assertEquals("risk_not_normal", officeRead.speculativeBlockReason)
     }
 
     @Test

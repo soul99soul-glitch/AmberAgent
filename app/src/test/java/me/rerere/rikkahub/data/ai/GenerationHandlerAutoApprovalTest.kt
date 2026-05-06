@@ -110,6 +110,39 @@ class GenerationHandlerAutoApprovalTest {
         }
     }
 
+    @Test
+    fun memoryToolReadOperationsDoNotPause() {
+        assertFalse(
+            shouldPauseForToolApproval(
+                toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
+                tool = toolCall("memory_tool", """{"operation":"search","query":"Q代"}"""),
+                autoApproveTools = false,
+            )
+        )
+    }
+
+    @Test
+    fun memoryToolWriteOperationsPause() {
+        assertTrue(
+            shouldPauseForToolApproval(
+                toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
+                tool = toolCall("memory_tool", """{"operation":"delete","id":"memory-1"}"""),
+                autoApproveTools = true,
+            )
+        )
+    }
+
+    @Test
+    fun cronCreateCanUseGlobalAutoApproval() {
+        assertFalse(
+            shouldPauseForToolApproval(
+                toolDef = approvalTool("cron_task_create"),
+                tool = toolCall("cron_task_create", """{"prompt":"daily brief","cron_expression":"30 8 * * *"}"""),
+                autoApproveTools = true,
+            )
+        )
+    }
+
     private fun approvalTool(name: String, allowsAutoApproval: Boolean = true) = Tool(
         name = name,
         description = "",

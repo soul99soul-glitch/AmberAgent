@@ -14,6 +14,11 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
+import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
+import me.rerere.rikkahub.data.agent.task.AgentTaskQueueState
+import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import me.rerere.rikkahub.data.agent.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementPlanner
@@ -30,6 +35,7 @@ import me.rerere.rikkahub.data.agent.office.FeishuWorkReport
 class FeishuOfficeTools(
     private val manager: FeishuOfficeEnhancementManager,
     private val activityStore: AgentToolActivityStore,
+    private val agentTaskStore: AgentTaskStore,
 ) {
     fun getTools(): List<Tool> = listOf(
         statusTool,
@@ -826,12 +832,38 @@ class FeishuOfficeTools(
             inputPreview = input.safePreview().toString(),
             runtime = "小米办公 Pro / Android Accessibility",
         )
+        agentTaskStore.register(
+            AgentTaskSnapshot(
+                taskId = toolCallId,
+                type = "officepro",
+                title = title,
+                queueState = AgentTaskQueueState.ACTIVE,
+                status = AgentTaskStatus.RUNNING,
+                sourceToolName = toolName,
+                createdAtMs = System.currentTimeMillis(),
+                cancelCapability = false,
+                summary = input.safePreview().toString(),
+            )
+        )
         return try {
             val result = block()
             activityStore.complete(toolCallId, result.previewText())
+            agentTaskStore.update(
+                taskId = toolCallId,
+                status = AgentTaskStatus.COMPLETED,
+                summary = result.previewText().take(4_000),
+                outputRef = result.firstPathOrNull()?.let {
+                    AgentTaskOutputRef(type = "report", path = it, exists = java.io.File(it).exists())
+                },
+            )
             result
         } catch (error: Throwable) {
             activityStore.fail(toolCallId, error)
+            agentTaskStore.update(
+                taskId = toolCallId,
+                status = AgentTaskStatus.FAILED,
+                error = error.message ?: error::class.java.simpleName,
+            )
             throw error
         }
     }
@@ -1065,4 +1097,11 @@ class FeishuOfficeTools(
 
     private fun List<UIMessagePart>.previewText(): String =
         filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.take(2_000)
+
+    private fun List<UIMessagePart>.firstPathOrNull(): String? =
+        filterIsInstance<UIMessagePart.Text>()
+            .asSequence()
+            .flatMap { it.text.lineSequence() }
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("/workspace/") || it.startsWith("/data/") }
 }

@@ -1,9 +1,14 @@
 package me.rerere.rikkahub.data.agent.tools
 
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import java.util.Locale
 
 data class ToolMetadata(
     val name: String,
@@ -13,6 +18,23 @@ data class ToolMetadata(
     val autoApprovable: Boolean,
     val outputBudgetChars: Int,
     val risk: ToolRisk,
+)
+
+data class ToolInvocationPolicy(
+    val name: String,
+    val category: String,
+    val mutates: Boolean,
+    val needsApproval: Boolean,
+    val autoApprovable: Boolean,
+    val concurrencySafe: Boolean,
+    val outputBudgetChars: Int,
+    val risk: ToolRisk,
+    val parallelGroup: String? = null,
+    val requiresForegroundAppPackage: String? = null,
+    val speculativeEligible: Boolean = false,
+    val speculativeBlockReason: String? = null,
+    val hardBlocked: Boolean = false,
+    val reason: String? = null,
 )
 
 class ToolRegistry private constructor(
@@ -32,6 +54,9 @@ class ToolRegistry private constructor(
 
     fun metadataFor(name: String): ToolMetadata? =
         metadata.firstOrNull { it.name == name }
+
+    fun evaluateInvocation(toolName: String, input: JsonElement? = null): ToolInvocationPolicy? =
+        entries.firstOrNull { it.tool.name == toolName }?.tool?.invocationPolicy(input)
 
     companion object {
         fun from(tools: List<Tool>): ToolRegistry {
@@ -78,6 +103,83 @@ enum class ToolRisk {
     High,
 }
 
+fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
+    val input = runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(inputText.ifBlank { "{}" })
+    }.getOrNull()
+    return invocationPolicy(input)
+}
+
+fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
+    val baseMutates = mutatesState()
+    val baseRisk = risk()
+    var mutates = baseMutates
+    var risk = baseRisk
+    var needsApproval = needsApproval || baseMutates || baseRisk == ToolRisk.High
+    var autoApprovable = allowsAutoApproval && baseRisk != ToolRisk.High
+    var concurrencySafe = concurrencySafe()
+
+    when (name) {
+        "http_request" -> {
+            val method = input.stringValue("method")?.uppercase(Locale.ROOT) ?: "GET"
+            val safe = method in setOf("GET", "HEAD")
+            mutates = !safe
+            risk = if (safe) ToolRisk.Normal else ToolRisk.High
+            needsApproval = !safe
+            autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
+            concurrencySafe = safe
+        }
+
+        "memory_tool" -> {
+            val op = input.stringValue("action")
+                ?: input.stringValue("operation")
+                ?: input.stringValue("op")
+                ?: input.stringValue("type")
+                ?: "read"
+            val readOnly = op.lowercase(Locale.ROOT) in setOf("read", "get", "list", "search", "status", "query")
+            mutates = !readOnly
+            risk = if (readOnly) ToolRisk.Normal else ToolRisk.High
+            needsApproval = !readOnly
+            autoApprovable = readOnly || (allowsAutoApproval && risk != ToolRisk.High)
+            concurrencySafe = readOnly
+        }
+
+        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain" -> {
+            mutates = false
+            risk = ToolRisk.Normal
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = true
+        }
+    }
+
+    val category = category()
+    val foregroundRequirement = foregroundPackageRequirement()
+    val speculativeBlockReason = speculativeBlockReason(
+        category = category,
+        mutates = mutates,
+        needsApproval = needsApproval,
+        concurrencySafe = concurrencySafe,
+        risk = risk,
+        parallelGroup = if (concurrencySafe && !mutates && risk == ToolRisk.Normal) category else null,
+        requiresForegroundAppPackage = foregroundRequirement,
+    )
+    return ToolInvocationPolicy(
+        name = name,
+        category = category,
+        mutates = mutates,
+        needsApproval = needsApproval,
+        autoApprovable = autoApprovable,
+        concurrencySafe = concurrencySafe,
+        outputBudgetChars = outputBudgetChars(),
+        risk = risk,
+        parallelGroup = if (concurrencySafe && !mutates && risk == ToolRisk.Normal) category else null,
+        requiresForegroundAppPackage = foregroundRequirement,
+        speculativeEligible = speculativeBlockReason == null,
+        speculativeBlockReason = speculativeBlockReason,
+    )
+}
+
 internal fun Tool.category(): String = when {
     name.startsWith("external_file_") -> "external_file"
     name.startsWith("file_") || name.startsWith("archive_") ||
@@ -94,6 +196,8 @@ internal fun Tool.category(): String = when {
     name.startsWith("memory_") -> "memory"
     name.startsWith("conversation_") -> "context"
     name.startsWith("cron_task_") -> "cron"
+    name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
+    name == "tool_policy_explain" -> "utility"
     name.startsWith("subagent_") -> "subagent"
     name.startsWith("model_council_") -> "model_council"
     name.startsWith("skill") || name == "use_skill" -> "skill"
@@ -114,9 +218,10 @@ private fun Tool.mutatesState(): Boolean {
         name == "officepro_project_update" ||
         name == "model_council_make_report" ||
         name in setOf("cron_task_create", "cron_task_update", "cron_task_delete") ||
+        name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") ||
         name.startsWith("memory_") && name != "memory_list" ||
-        name == "conversation_compact" ||
-        name in setOf("subagent_start", "subagent_cancel") ||
+    name == "conversation_compact" ||
+    name in setOf("subagent_start", "subagent_cancel") ||
         name.startsWith("skill_enable") ||
         name.startsWith("skill_disable")
 }
@@ -125,6 +230,7 @@ private fun Tool.risk(): ToolRisk = when {
     name == "http_request" -> ToolRisk.High
     name == "memory_tool" -> ToolRisk.High
     name == "pdf_render_page" -> ToolRisk.High
+    name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> ToolRisk.Sensitive
     name == "officepro_read_screen" ||
         name == "officepro_capture_context" ||
         name == "officepro_context_digest" ||
@@ -144,10 +250,54 @@ private fun Tool.risk(): ToolRisk = when {
     else -> ToolRisk.Normal
 }
 
+private fun Tool.concurrencySafe(): Boolean = when {
+    name in setOf("terminal_install_packages", "terminal_job_stop", "terminal_execute", "terminal_job_start") -> false
+    name.startsWith("cron_task_") && name != "cron_task_list" -> false
+    name.startsWith("agent_task_") || name in setOf("agent_runtime_status", "tool_policy_explain") -> true
+    name.startsWith("subagent_") || name.startsWith("model_council_") -> false
+    else -> !mutatesState()
+}
+
+private fun Tool.foregroundPackageRequirement(): String? = when (name) {
+    "officepro_read_screen",
+    "officepro_capture_context",
+    "officepro_context_digest",
+    "officepro_daily_radar",
+    "officepro_project_briefing",
+    "officepro_document_warroom",
+    "officepro_open_items_radar",
+    "officepro_meeting_closure" -> "configured_officepro_target"
+    else -> null
+}
+
+private fun Tool.speculativeBlockReason(
+    category: String,
+    mutates: Boolean,
+    needsApproval: Boolean,
+    concurrencySafe: Boolean,
+    risk: ToolRisk,
+    parallelGroup: String?,
+    requiresForegroundAppPackage: String?,
+): String? = when {
+    risk != ToolRisk.Normal -> "risk_not_normal"
+    mutates -> "mutates_state"
+    needsApproval -> "needs_approval"
+    !concurrencySafe -> "not_concurrency_safe"
+    parallelGroup == null -> "no_parallel_group"
+    requiresForegroundAppPackage != null -> "requires_foreground_app"
+    category in setOf("terminal", "screen", "office", "external_file", "subagent", "model_council") -> "category_blocked"
+    category == "cron" && name != "cron_task_list" -> "cron_mutation_blocked"
+    category == "memory" && mutates -> "memory_write_blocked"
+    else -> null
+}
+
 private fun Tool.outputBudgetChars(): Int = when (name) {
     "file_read" -> FILE_READ_HARD_MAX_CHARS + 2_048
     else -> DEFAULT_TOOL_OUTPUT_BUDGET_CHARS
 }
+
+private fun JsonElement?.stringValue(name: String): String? =
+    runCatching { this?.jsonObject?.get(name)?.jsonPrimitive?.contentOrNull }.getOrNull()
 
 private fun List<UIMessagePart>.enforceOutputBudget(maxChars: Int): List<UIMessagePart> {
     var remaining = maxChars

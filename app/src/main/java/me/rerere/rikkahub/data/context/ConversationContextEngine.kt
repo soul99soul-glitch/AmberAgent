@@ -35,6 +35,7 @@ class ConversationContextEngine(
     private val json: Json,
     private val contextRepository: ConversationContextRepository,
     private val appScope: AppScope,
+    private val capabilitySnapshotBuilder: AgentCapabilitySnapshotBuilder,
 ) {
     private val compactMutex = Mutex()
 
@@ -87,17 +88,23 @@ class ConversationContextEngine(
         }
 
         val latestCompacts = contextRepository.getCompacts(conversation.id)
-        val preparedMessages = ConversationContextPlanner.prepareMessages(
+        val compactedMessages = ConversationContextPlanner.prepareMessages(
             messages = messages,
             activeCompacts = latestCompacts,
             policy = policy,
             contextMessageSize = contextMessageSize,
         )
+        val hasCompletedCompact = latestCompacts.any { it.status == "completed" }
+        val preparedMessages = if (hasCompletedCompact) {
+            compactedMessages + capabilitySnapshotBuilder.build(tools)
+        } else {
+            compactedMessages
+        }
         val estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
         return PreparedContext(
             messages = preparedMessages,
             tokenEstimate = estimate,
-            compressionApplied = latestCompacts.any { it.status == "completed" },
+            compressionApplied = hasCompletedCompact,
             summaryIds = latestCompacts.filter { it.status == "completed" }.map { it.id },
         )
     }

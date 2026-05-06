@@ -24,6 +24,12 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
+import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
+import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
+import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import me.rerere.rikkahub.data.agent.task.toQueueState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -81,6 +87,7 @@ class ModelCouncilManager(
     private val settingsStore: SettingsStore,
     private val json: Json,
     private val runner: ModelCouncilTextRunner,
+    private val agentTaskStore: AgentTaskStore,
 ) {
     private val runDir = File(context.filesDir, "amberagent/model-council/runs").also { it.mkdirs() }
     private val runs = java.util.concurrent.ConcurrentHashMap<String, RuntimeRun>()
@@ -113,6 +120,10 @@ class ModelCouncilManager(
         )
         val runtimeRun = RuntimeRun(run)
         runs[runId] = runtimeRun
+        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
+            cancel(runId)
+            true
+        })
         appendEvent(runtimeRun, "started", runToPayload(run))
 
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
@@ -382,6 +393,15 @@ class ModelCouncilManager(
             updatedAtMs = Instant.now().toEpochMilli(),
         )
         runtimeRun.snapshot = next
+        appScope.launch(Dispatchers.IO) {
+            agentTaskStore.update(
+                taskId = runId,
+                status = status.toAgentTaskStatus(),
+                summary = result.finalRecommendation.ifBlank { result.error }.take(4_000),
+                error = result.error.takeIf { it.isNotBlank() },
+                cancelCapability = false,
+            )
+        }
         appendEvent(runtimeRun, "finished", runToPayload(next))
     }
 
@@ -428,6 +448,41 @@ class ModelCouncilManager(
 
     private fun failResult(message: String): Pair<ModelCouncilRunStatus, ModelCouncilResult> =
         ModelCouncilRunStatus.FAILED to ModelCouncilResult(error = message, finalRecommendation = message)
+
+    private fun ModelCouncilRun.toAgentTaskSnapshot() = AgentTaskSnapshot(
+        taskId = runId,
+        type = "model_council",
+        title = "${mode.name.lowercase()} · ${task.objective.take(48)}",
+        status = status.toAgentTaskStatus(),
+        queueState = status.toAgentTaskStatus().toQueueState("model_council"),
+        outputPath = transcriptPath,
+        outputRef = AgentTaskOutputRef(
+            type = "transcript",
+            path = transcriptPath,
+            exists = File(transcriptPath).exists(),
+        ),
+        retryPolicy = AgentTaskRetryPolicy(
+            retryable = status == ModelCouncilRunStatus.FAILED,
+            requiresApproval = false,
+            maxRetries = 1,
+            reason = "Model Council retry starts a new run from the original council task.",
+        ),
+        sourceToolName = "model_council_start",
+        createdAtMs = startedAtMs,
+        updatedAtMs = updatedAtMs,
+        cancelCapability = status.running,
+        summary = task.objective.take(1_000),
+    )
+
+    private fun ModelCouncilRunStatus.toAgentTaskStatus(): AgentTaskStatus = when (this) {
+        ModelCouncilRunStatus.RUNNING -> AgentTaskStatus.RUNNING
+        ModelCouncilRunStatus.COMPLETED,
+        ModelCouncilRunStatus.PARTIAL_FAILED -> AgentTaskStatus.COMPLETED
+        ModelCouncilRunStatus.FAILED -> AgentTaskStatus.FAILED
+        ModelCouncilRunStatus.CANCELLED -> AgentTaskStatus.CANCELLED
+        ModelCouncilRunStatus.TIMED_OUT -> AgentTaskStatus.TIMED_OUT
+        ModelCouncilRunStatus.INTERRUPTED -> AgentTaskStatus.INTERRUPTED
+    }
 
     private inline fun <reified T> encoded(value: T): JsonElement =
         json.parseToJsonElement(json.encodeToString(value))

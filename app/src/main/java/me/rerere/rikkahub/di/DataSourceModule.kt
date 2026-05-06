@@ -32,6 +32,8 @@ import me.rerere.rikkahub.data.db.migrations.Migration_14_15
 import me.rerere.rikkahub.data.db.migrations.Migration_15_16
 import me.rerere.rikkahub.data.db.migrations.Migration_18_19
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
+import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.search.SearchService
 import me.rerere.rikkahub.data.sync.S3Sync
@@ -153,6 +155,10 @@ val dataSourceModule = module {
 
     single { McpManager(settingsStore = get(), appScope = get(), filesManager = get()) }
 
+    single { PermissionDecisionResolver() }
+
+    single { AgentToolDispatcher(json = get(), permissionDecisionResolver = get()) }
+
     single {
         GenerationHandler(
             context = get(),
@@ -162,6 +168,7 @@ val dataSourceModule = module {
             conversationRepo = get(),
             aiLoggingManager = get(),
             conversationContextEngine = get(),
+            toolDispatcher = get(),
         )
     }
 

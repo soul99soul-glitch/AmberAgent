@@ -15,6 +15,13 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
+import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
+import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
+import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
+import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import me.rerere.rikkahub.data.agent.task.running
+import me.rerere.rikkahub.data.agent.task.toQueueState
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import java.io.BufferedWriter
@@ -36,6 +43,7 @@ class TerminalRuntime(
     private val alpineRuntimeInstaller: AlpineRuntimeInstaller,
     private val activityStore: AgentToolActivityStore,
     private val settingsStore: SettingsStore,
+    private val agentTaskStore: AgentTaskStore,
 ) {
     private val jobs = ConcurrentHashMap<String, TerminalJob>()
     private val sessions = ConcurrentHashMap<String, TerminalSession>()
@@ -131,6 +139,10 @@ class TerminalRuntime(
             outputCallback = outputCallback,
         )
         jobs[job.id] = job
+        agentTaskStore.register(job.toAgentTaskSnapshot(AgentTaskStatus.QUEUED), cancel = {
+            stopJob(job.id)
+            true
+        })
         activityStore.start(job.toActivityState())
 
         when (selectedRuntime) {
@@ -384,6 +396,9 @@ class TerminalRuntime(
             outputCallback = null,
         )
         jobs[job.id] = job
+        appScope.launch(Dispatchers.IO) {
+            agentTaskStore.register(job.toAgentTaskSnapshot(AgentTaskStatus.FAILED))
+        }
         appendJobOutput(job, "$error\n")
         finishJob(job, TerminalJobStatus.FAILED, null, error)
         return job.snapshot()
@@ -425,6 +440,7 @@ class TerminalRuntime(
     ) {
         try {
             job.status.set(TerminalJobStatus.RUNNING)
+            agentTaskStore.update(job.id, status = AgentTaskStatus.RUNNING)
             val syncIn = if (job.syncWorkspace) {
                 appendJobOutput(job, "Preparing /workspace mirror...\n")
                 workspaceManager.refreshMirrorFromWorkspace()
@@ -511,6 +527,9 @@ class TerminalRuntime(
 
         runCatching {
             job.status.set(TerminalJobStatus.RUNNING)
+            appScope.launch(Dispatchers.IO) {
+                agentTaskStore.update(job.id, status = AgentTaskStatus.RUNNING)
+            }
             val resultIntent = Intent(context, TermuxCommandResultReceiver::class.java).apply {
                 action = ACTION_TERMUX_RESULT
                 putExtra(EXTRA_JOB_ID, job.id)
@@ -579,6 +598,16 @@ class TerminalRuntime(
         job.updatedAtMs = System.currentTimeMillis()
         if (job.isInstall) installRunning.set(false)
         if (!job.completionNotified.compareAndSet(false, true)) return
+        appScope.launch(Dispatchers.IO) {
+            agentTaskStore.update(
+                taskId = job.id,
+                status = status.toAgentTaskStatus(),
+                summary = job.output.snapshot().take(4_000),
+                error = error,
+                outputOffset = job.log.file.length(),
+                cancelCapability = false,
+            )
+        }
         when (status) {
             TerminalJobStatus.COMPLETED -> activityStore.complete(job.id, exitCode ?: 0, job.output.snapshot())
             TerminalJobStatus.CANCELLED -> activityStore.cancel(job.id, job.output.snapshot())
@@ -599,6 +628,43 @@ class TerminalRuntime(
                 runCatching { activityStore.appendOutput(job.id, line) }
                 runCatching { job.outputCallback?.invoke(line) }
             }
+    }
+
+    private fun TerminalJob.toAgentTaskSnapshot(status: AgentTaskStatus) = AgentTaskSnapshot(
+        taskId = id,
+        type = "terminal",
+        title = title,
+        queueState = status.toQueueState("terminal"),
+        status = status,
+        outputPath = log.file.absolutePath,
+        outputOffset = log.file.length(),
+        outputRef = AgentTaskOutputRef(
+            type = "terminal_log",
+            path = log.file.absolutePath,
+            tailOffset = log.file.length(),
+            exists = log.file.exists(),
+        ),
+        retryPolicy = AgentTaskRetryPolicy(
+            retryable = status in setOf(AgentTaskStatus.FAILED, AgentTaskStatus.TIMED_OUT, AgentTaskStatus.INTERRUPTED),
+            requiresApproval = true,
+            maxRetries = 1,
+            reason = "Terminal commands can be retried by launching a fresh process; interrupted processes are not reattached.",
+        ),
+        runtime = runtime.name.lowercase(),
+        sourceToolName = toolName,
+        createdAtMs = startedAtMs,
+        updatedAtMs = updatedAtMs,
+        cancelCapability = status.running,
+        summary = command.take(500),
+    )
+
+    private fun TerminalJobStatus.toAgentTaskStatus(): AgentTaskStatus = when (this) {
+        TerminalJobStatus.QUEUED -> AgentTaskStatus.QUEUED
+        TerminalJobStatus.RUNNING -> AgentTaskStatus.RUNNING
+        TerminalJobStatus.COMPLETED -> AgentTaskStatus.COMPLETED
+        TerminalJobStatus.FAILED -> AgentTaskStatus.FAILED
+        TerminalJobStatus.CANCELLED -> AgentTaskStatus.CANCELLED
+        TerminalJobStatus.TIMED_OUT -> AgentTaskStatus.TIMED_OUT
     }
 
     private fun terminateProcess(job: TerminalJob, process: Process) {

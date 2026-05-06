@@ -105,6 +105,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingAgentExecutionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentPermissionsPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentRuntimeTasksPage
 import me.rerere.rikkahub.ui.pages.setting.SettingCronTasksPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
@@ -441,6 +442,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingCronTasksPage()
                             }
 
+                            entry<Screen.SettingAgentRuntimeTasks> {
+                                SettingAgentRuntimeTasksPage()
+                            }
+
                             entry<Screen.SettingAgentExecution> {
                                 SettingAgentExecutionPage()
                             }
@@ -692,6 +697,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingCronTasks : Screen
+
+    @Serializable
+    data object SettingAgentRuntimeTasks : Screen
 
     @Serializable
     data object SettingAgentExecution : Screen

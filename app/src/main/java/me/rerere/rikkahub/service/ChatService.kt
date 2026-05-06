@@ -69,7 +69,9 @@ import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
+import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.tools.AgentTaskTools
 import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
 import me.rerere.rikkahub.data.agent.tools.ModelCouncilTools
 import me.rerere.rikkahub.data.agent.tools.SubAgentTools
@@ -153,6 +155,7 @@ class ChatService(
     private val contextEngine: ConversationContextEngine,
     private val subAgentManager: SubAgentManager,
     private val modelCouncilManager: ModelCouncilManager,
+    private val agentTaskScheduler: AgentTaskScheduler,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -1305,9 +1308,12 @@ class ChatService(
                     ).tools()
                 )
             }
+            addAll(AgentTaskTools(agentTaskScheduler).tools())
         }
         val baseRegistry = ToolRegistry.from(rawTools)
-        val baseTools = baseRegistry.tools() + localTools.createToolsListTool(baseRegistry)
+        val baseTools = baseRegistry.tools() +
+            localTools.createToolsListTool(baseRegistry) +
+            localTools.createToolPolicyExplainTool(baseRegistry)
         val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
             rawTools + SubAgentTools(
                 subAgentManager = subAgentManager,
@@ -1326,7 +1332,9 @@ class ChatService(
             subAgentRawTools
         }
         val registry = ToolRegistry.from(finalRawTools)
-        return registry.tools() + localTools.createToolsListTool(registry)
+        return registry.tools() +
+            localTools.createToolsListTool(registry) +
+            localTools.createToolPolicyExplainTool(registry)
     }
 
     private fun createMemoryTools(settings: Settings): List<Tool> {
