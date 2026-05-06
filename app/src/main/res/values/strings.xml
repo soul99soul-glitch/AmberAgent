@@ -811,6 +811,11 @@
   <string name="setting_page_search_add_provider">Add Provider</string>
   <string name="setting_page_search_common_options">Common Options</string>
   <string name="setting_page_search_delete_provider">Delete Provider</string>
+  <string name="setting_page_search_agent_search">Agent Web Search</string>
+  <string name="setting_page_search_agent_search_desc">Allow chats to use search_web and scrape_web with enabled services.</string>
+  <string name="setting_page_search_enabled_services_count">%1$d/%2$d services enabled for multi-source Agent search.</string>
+  <string name="setting_page_search_use_for_agent">Use for Agent search</string>
+  <string name="setting_page_search_use_for_agent_desc">Enabled services are searched together by priority.</string>
   <string name="setting_page_search_result_size">Result Size</string>
   <string name="setting_page_search_service">Search Service</string>
   <string name="setting_page_search_service_desc">Set up search service</string>

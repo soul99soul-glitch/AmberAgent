@@ -24,8 +24,8 @@ android {
         applicationId = "me.rerere.amberagent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 182
-        versionName = "1.0.3"
+        versionCode = 185
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

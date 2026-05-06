@@ -92,9 +92,11 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 actions = {
                     IconButton(
                         onClick = {
+                            val newService = SearchServiceOptions.BingLocalOptions()
                             vm.updateSettings(
                                 settings.copy(
-                                    searchServices = listOf(SearchServiceOptions.BingLocalOptions()) + settings.searchServices
+                                    searchServices = listOf(newService) + settings.searchServices,
+                                    searchEnabledServiceIds = listOf(newService.id) + settings.searchEnabledServiceIds,
                                 )
                             )
                             scope.launch {
@@ -116,8 +118,8 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
         containerColor = CustomColors.topBarColors.containerColor
     ) {
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-            // providers_header 已移除，搜索服务从索引 0 开始
-            val offset = 0
+            // The first item is the global Agent search switch; service cards start after it.
+            val offset = 1
             val fromIndex = from.index - offset
             val toIndex = to.index - offset
 
@@ -142,6 +144,17 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             state = lazyListState
         ) {
+            item("agent_search_enable") {
+                AgentSearchEnableCard(
+                    enabled = settings.enableWebSearch,
+                    enabledCount = settings.searchServices.count { it.id in settings.searchEnabledServiceIds },
+                    serviceCount = settings.searchServices.size,
+                    onCheckedChange = { enabled ->
+                        vm.updateSettings(settings.copy(enableWebSearch = enabled))
+                    },
+                )
+            }
+
             // 搜索提供商列表
             items(settings.searchServices, key = { it.id }) { service ->
                 val index = settings.searchServices.indexOf(service)
@@ -151,12 +164,28 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 ) { isDragging ->
                     SearchProviderCard(
                         service = service,
+                        enabled = service.id in settings.searchEnabledServiceIds,
+                        onEnabledChange = { enabled ->
+                            val enabledIds = if (enabled) {
+                                (settings.searchEnabledServiceIds + service.id).distinct()
+                            } else {
+                                settings.searchEnabledServiceIds.filterNot { it == service.id }
+                            }
+                            vm.updateSettings(settings.copy(searchEnabledServiceIds = enabledIds))
+                        },
                         onUpdateService = { updatedService ->
                             val newServices = settings.searchServices.toMutableList()
+                            val wasEnabled = service.id in settings.searchEnabledServiceIds
                             newServices[index] = updatedService
+                            val enabledIds = if (wasEnabled) {
+                                settings.searchEnabledServiceIds.filterNot { it == service.id } + updatedService.id
+                            } else {
+                                settings.searchEnabledServiceIds
+                            }
                             vm.updateSettings(
                                 settings.copy(
-                                    searchServices = newServices
+                                    searchServices = newServices,
+                                    searchEnabledServiceIds = enabledIds.distinct(),
                                 )
                             )
                         },
@@ -166,7 +195,10 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                                 newServices.removeAt(index)
                                 vm.updateSettings(
                                     settings.copy(
-                                        searchServices = newServices
+                                        searchServices = newServices,
+                                        searchEnabledServiceIds = settings.searchEnabledServiceIds.filterNot {
+                                            it == service.id
+                                        },
                                     )
                                 )
                             }
@@ -212,8 +244,60 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
 
 
 @Composable
+private fun AgentSearchEnableCard(
+    enabled: Boolean,
+    enabledCount: Int,
+    serviceCount: Int,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_page_search_agent_search),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = stringResource(R.string.setting_page_search_agent_search_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.setting_page_search_enabled_services_count,
+                        enabledCount,
+                        serviceCount,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onCheckedChange,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SearchProviderCard(
     service: SearchServiceOptions,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
     onUpdateService: (SearchServiceOptions) -> Unit,
     onDeleteService: () -> Unit,
     canDelete: Boolean,
@@ -276,6 +360,33 @@ private fun SearchProviderCard(
             }
 
             SearchAbilityTagLine(options = options, modifier = Modifier.padding(horizontal = 8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.setting_page_search_use_for_agent),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(R.string.setting_page_search_use_for_agent_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                )
+            }
 
             AnimatedVisibility(expand) {
                 Column(

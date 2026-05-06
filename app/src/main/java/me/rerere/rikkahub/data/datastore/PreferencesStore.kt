@@ -114,6 +114,7 @@ class SettingsStore(
         val SEARCH_SERVICES = stringPreferencesKey("search_services")
         val SEARCH_COMMON = stringPreferencesKey("search_common")
         val SEARCH_SELECTED = intPreferencesKey("search_selected")
+        val SEARCH_ENABLED_SERVICE_IDS = stringPreferencesKey("search_enabled_service_ids")
 
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
@@ -161,6 +162,17 @@ class SettingsStore(
                 throw exception
             }
         }.map { preferences ->
+            val searchServices = preferences[SEARCH_SERVICES]?.let {
+                JsonInstant.decodeFromString<List<SearchServiceOptions>>(it)
+            } ?: listOf(SearchServiceOptions.DEFAULT)
+            val selectedSearchIndex = preferences[SEARCH_SELECTED]?.let { selected ->
+                if (searchServices.isEmpty()) 0 else selected.coerceIn(0, searchServices.lastIndex)
+            } ?: 0
+            val enabledSearchServiceIds = preferences[SEARCH_ENABLED_SERVICE_IDS]?.let {
+                JsonInstant.decodeFromString<List<Uuid>>(it)
+            }?.filter { id ->
+                searchServices.any { service -> service.id == id }
+            } ?: searchServices.getOrNull(selectedSearchIndex)?.let { listOf(it.id) }.orEmpty()
             Settings(
                 enableWebSearch = preferences[ENABLE_WEB_SEARCH] == true,
                 favoriteModels = preferences[FAVORITE_MODELS]?.let {
@@ -201,13 +213,12 @@ class SettingsStore(
                 themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
                 developerMode = preferences[DEVELOPER_MODE] == true,
                 displaySetting = JsonInstant.decodeFromString(preferences[DISPLAY_SETTING] ?: "{}"),
-                searchServices = preferences[SEARCH_SERVICES]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: listOf(SearchServiceOptions.DEFAULT),
+                searchServices = searchServices,
                 searchCommonOptions = preferences[SEARCH_COMMON]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: SearchCommonOptions(),
-                searchServiceSelected = preferences[SEARCH_SELECTED] ?: 0,
+                searchServiceSelected = selectedSearchIndex,
+                searchEnabledServiceIds = enabledSearchServiceIds,
                 mcpServers = preferences[MCP_SERVERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -323,6 +334,9 @@ class SettingsStore(
                 favoriteModels = settings.favoriteModels.filter { uuid ->
                     settings.providers.flatMap { it.models }.any { it.id == uuid }
                 },
+                searchEnabledServiceIds = settings.searchEnabledServiceIds.filter { id ->
+                    settings.searchServices.any { service -> service.id == id }
+                },
                 modeInjections = settings.modeInjections.distinctBy { it.id },
                 lorebooks = settings.lorebooks.distinctBy { it.id },
                 quickMessages = settings.quickMessages.distinctBy { it.id },
@@ -373,7 +387,16 @@ class SettingsStore(
 
             preferences[SEARCH_SERVICES] = JsonInstant.encodeToString(settings.searchServices)
             preferences[SEARCH_COMMON] = JsonInstant.encodeToString(settings.searchCommonOptions)
-            preferences[SEARCH_SELECTED] = settings.searchServiceSelected.coerceIn(0, settings.searchServices.size - 1)
+            preferences[SEARCH_SELECTED] = if (settings.searchServices.isEmpty()) {
+                0
+            } else {
+                settings.searchServiceSelected.coerceIn(0, settings.searchServices.lastIndex)
+            }
+            preferences[SEARCH_ENABLED_SERVICE_IDS] = JsonInstant.encodeToString(
+                settings.searchEnabledServiceIds.filter { id ->
+                    settings.searchServices.any { service -> service.id == id }
+                }
+            )
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
@@ -504,6 +527,7 @@ data class Settings(
     val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
+    val searchEnabledServiceIds: List<Uuid> = searchServices.take(1).map { it.id },
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
