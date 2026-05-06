@@ -15,8 +15,8 @@ object SubAgentValidator {
     val defaultDynamicReadOnlyTools = setOf(
         "tools_list", "file_list", "file_read", "file_search",
         "conversation_search", "conversation_expand",
-        "officepro_status", "officepro_dashboard", "officepro_capture_context", "officepro_context_digest",
-        "search_web", "scrape_web", "http_request",
+        "officepro_status", "officepro_dashboard",
+        "search_web", "scrape_web",
         "apps_list", "apps_installed_list", "permissions_status", "skills_list", "mcp_list",
     )
 

@@ -358,7 +358,6 @@ private fun ChatPageContent(
                     loading = loadingJob != null,
                     settings = setting,
                     conversation = conversation,
-                    mcpManager = vm.mcpManager,
                     hazeState = hazeState,
                     onCancelClick = {
                         vm.stopGeneration()
@@ -443,9 +442,6 @@ private fun ChatPageContent(
                                 searchServiceSelected = index
                             )
                         )
-                    },
-                    onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
-                        vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
                     },
                 )
             },

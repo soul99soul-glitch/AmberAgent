@@ -38,6 +38,7 @@ private val ExtendDarkColors = darkExtendColors()
 val LocalExtendColors = compositionLocalOf { ExtendLightColors }
 
 val LocalDarkMode = compositionLocalOf { false }
+val LocalAmoledDarkMode = compositionLocalOf { false }
 
 private val AMOLED_DARK_BACKGROUND = Color(0xFF000000)
 private val NotionShapes = Shapes(
@@ -100,37 +101,37 @@ private val NotionLightScheme = lightColorScheme(
 )
 
 private val NotionDarkScheme = darkColorScheme(
-    primary = Color(0xFFEDECE9),
-    onPrimary = Color(0xFF191918),
-    primaryContainer = Color(0xFF333230),
-    onPrimaryContainer = Color(0xFFEDECE9),
-    secondary = Color(0xFFC9C6C0),
-    onSecondary = Color(0xFF191918),
-    secondaryContainer = Color(0xFF2B2A28),
-    onSecondaryContainer = Color(0xFFEDECE9),
-    tertiary = Color(0xFFE0A34D),
-    onTertiary = Color(0xFF211600),
-    tertiaryContainer = Color(0xFF3A2A12),
+    primary = Color(0xFF4EA6FF),
+    onPrimary = Color(0xFF071B2E),
+    primaryContainer = Color(0xFF10263A),
+    onPrimaryContainer = Color(0xFFD8EAFF),
+    secondary = Color(0xFFB7BBC3),
+    onSecondary = Color(0xFF181A1D),
+    secondaryContainer = Color(0xFF24272B),
+    onSecondaryContainer = Color(0xFFE4E6EA),
+    tertiary = Color(0xFFE5B567),
+    onTertiary = Color(0xFF251805),
+    tertiaryContainer = Color(0xFF352715),
     onTertiaryContainer = Color(0xFFFFE0A3),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF4D1816),
+    error = Color(0xFFFF8F86),
+    onError = Color(0xFF3F0605),
+    errorContainer = Color(0xFF3A1715),
     onErrorContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF191918),
-    onBackground = Color(0xFFEDECE9),
-    surface = Color(0xFF20201E),
-    onSurface = Color(0xFFEDECE9),
-    surfaceVariant = Color(0xFF3E3C38),
-    onSurfaceVariant = Color(0xFFC9C6C0),
-    outline = Color(0xFF55524D),
-    outlineVariant = Color(0xFF3A3834),
-    surfaceContainerLowest = Color(0xFF171716),
-    surfaceContainerLow = Color(0xFF20201E),
-    surfaceContainer = Color(0xFF252523),
-    surfaceContainerHigh = Color(0xFF2E2D2A),
-    surfaceContainerHighest = Color(0xFF383633),
-    surfaceBright = Color(0xFF252523),
-    surfaceDim = Color(0xFF171716),
+    background = Color(0xFF111315),
+    onBackground = Color(0xFFEDEFF2),
+    surface = Color(0xFF181A1D),
+    onSurface = Color(0xFFEDEFF2),
+    surfaceVariant = Color(0xFF2A2D32),
+    onSurfaceVariant = Color(0xFFA7ABB2),
+    outline = Color(0xFF3E424A),
+    outlineVariant = Color(0xFF2A2D32),
+    surfaceContainerLowest = Color(0xFF0D0F11),
+    surfaceContainerLow = Color(0xFF16181B),
+    surfaceContainer = Color(0xFF1C1F23),
+    surfaceContainerHigh = Color(0xFF23262B),
+    surfaceContainerHighest = Color(0xFF2C3036),
+    surfaceBright = Color(0xFF202328),
+    surfaceDim = Color(0xFF0D0F11),
 )
 
 @Serializable
@@ -167,7 +168,18 @@ fun RikkahubTheme(
         if (darkTheme && amoledDarkMode) {
             colorScheme.copy(
                 background = AMOLED_DARK_BACKGROUND,
-                surface = AMOLED_DARK_BACKGROUND,
+                surface = Color(0xFF050505),
+                surfaceVariant = Color(0xFF101010),
+                surfaceContainerLowest = AMOLED_DARK_BACKGROUND,
+                surfaceContainerLow = Color(0xFF050505),
+                surfaceContainer = Color(0xFF080808),
+                surfaceContainerHigh = Color(0xFF0D0D0D),
+                surfaceContainerHighest = Color(0xFF141414),
+                surfaceBright = Color(0xFF0D0D0D),
+                surfaceDim = AMOLED_DARK_BACKGROUND,
+                secondaryContainer = Color(0xFF101010),
+                outline = Color(0xFF34383F),
+                outlineVariant = Color(0xFF20242A),
             )
         } else {
             colorScheme
@@ -189,6 +201,7 @@ fun RikkahubTheme(
 
     CompositionLocalProvider(
         LocalDarkMode provides darkTheme,
+        LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null
     ) {

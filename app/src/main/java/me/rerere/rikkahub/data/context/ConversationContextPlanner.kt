@@ -25,12 +25,13 @@ object ConversationContextPlanner {
         activeCompacts: List<ConversationCompact>,
         policy: CompactPolicy,
         modelContextWindowTokens: Int?,
+        extraTokenEstimate: Int = 0,
     ): CompactPlan {
         if (!policy.enabled || nodes.isEmpty()) {
             return skipped("disabled", nodes, modelContextWindowTokens)
         }
         val messages = nodes.map { it.currentMessage }
-        val estimatedTokens = estimateTokens(messages)
+        val estimatedTokens = estimateTokens(messages) + extraTokenEstimate.coerceAtLeast(0)
         val contextWindow = estimateContextWindow(modelContextWindowTokens)
         val ratio = estimatedTokens.toFloat() / contextWindow.toFloat()
         if (ratio < policy.precompactRatio) {
@@ -85,7 +86,12 @@ object ConversationContextPlanner {
         if (!policy.enabled || activeCompacts.isEmpty()) {
             return messages.limitContext(contextMessageSize)
         }
-        val completedCompacts = activeCompacts.filter { it.status == "completed" }
+        val existingMessageIds = messages.map { it.id.toString() }.toSet()
+        val completedCompacts = activeCompacts.filter { compact ->
+            compact.status == "completed" &&
+                compact.sourceMessageIds.isNotEmpty() &&
+                compact.sourceMessageIds.all { it in existingMessageIds }
+        }
         if (completedCompacts.isEmpty()) return messages.limitContext(contextMessageSize)
 
         val compactSummaryMessages = completedCompacts.map { compact ->

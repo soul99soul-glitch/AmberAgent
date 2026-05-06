@@ -323,14 +323,12 @@ private fun SettingProviderConfigPage(
 
             Spacer(Modifier.weight(1f))
 
-            if (!internalProvider.builtIn) {
-                IconButton(
-                    onClick = {
-                        showDeleteDialog = true
-                    },
-                ) {
-                    Icon(HugeIcons.Delete01, null)
-                }
+            IconButton(
+                onClick = {
+                    showDeleteDialog = true
+                },
+            ) {
+                Icon(HugeIcons.Delete01, null)
             }
 
             IconButton(

@@ -12,7 +12,7 @@ object SubAgentDefinitions {
                 extra = "Do not write files or drive apps. Prefer source-backed findings and say when evidence is missing."
             ),
             toolAllowlist = setOf(
-                "tools_list", "search_web", "scrape_web", "http_request",
+                "tools_list", "search_web", "scrape_web",
                 "file_list", "file_read", "file_search",
                 "conversation_search", "conversation_expand",
                 "mcp_list", "skills_list",

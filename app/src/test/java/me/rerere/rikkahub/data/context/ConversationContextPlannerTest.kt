@@ -69,4 +69,48 @@ class ConversationContextPlannerTest {
         assertTrue(prepared.first().toText().contains("summary-1"))
         assertEquals(messages.drop(4).map { it.id }, prepared.drop(1).map { it.id })
     }
+
+    @Test
+    fun prepareMessagesSkipsSummaryWhenSourceMessageIsMissing() {
+        val messages = List(8) { UIMessage.user("message $it") }
+        val compact = ConversationCompact(
+            id = "stale-summary",
+            conversationId = "conversation",
+            summary = "{\"facts\":[\"old fact\"]}",
+            level = 1,
+            sourceStartIndex = 0,
+            sourceEndIndex = 3,
+            sourceMessageIds = messages.take(3).map { it.id.toString() } + "missing-message-id",
+            tokenEstimate = 100,
+            createdAt = 1,
+            updatedAt = 1,
+            status = "completed",
+        )
+
+        val prepared = ConversationContextPlanner.prepareMessages(
+            messages = messages,
+            activeCompacts = listOf(compact),
+            policy = CompactPolicy(keepRecentTurns = 2),
+            contextMessageSize = 0,
+        )
+
+        assertEquals(messages.map { it.id }, prepared.map { it.id })
+        assertFalse(prepared.any { it.toText().contains("stale-summary") })
+    }
+
+    @Test
+    fun extraTokenEstimateContributesToCompactionPressure() {
+        val nodes = List(4) { MessageNode.of(UIMessage.user("short $it")) }
+
+        val plan = ConversationContextPlanner.planCompaction(
+            nodes = nodes,
+            activeCompacts = emptyList(),
+            policy = CompactPolicy(precompactRatio = 0.50f, forceRatio = 0.80f, keepRecentTurns = 1),
+            modelContextWindowTokens = 1_000,
+            extraTokenEstimate = 850,
+        )
+
+        assertTrue(plan.shouldCompact)
+        assertEquals("force_threshold", plan.reason)
+    }
 }

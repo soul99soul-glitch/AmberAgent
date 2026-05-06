@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AmberAgent Codex M3 Restrained UI Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --source: #4a6f66;
+      --primary: #365f57;
+      --on-primary: #ffffff;
+      --primary-container: #bcece0;
+      --on-primary-container: #04201b;
+      --secondary: #51645f;
+      --secondary-container: #d4e7df;
+      --on-secondary-container: #0e1f1b;
+      --tertiary: #446276;
+      --tertiary-container: #c8e6ff;
+      --on-tertiary-container: #001f2f;
+      --error: #ba1a1a;
+      --error-container: #ffdad6;
+      --surface: #fbfcf8;
+      --surface-dim: #daddd7;
+      --surface-bright: #fbfcf8;
+      --surface-container-lowest: #ffffff;
+      --surface-container-low: #f4f6f1;
+      --surface-container: #eef1eb;
+      --surface-container-high: #e8ebe5;
+      --surface-container-highest: #e2e5df;
+      --on-surface: #181c1a;
+      --on-surface-variant: #414946;
+      --outline: #717976;
+      --outline-variant: #c0c9c5;
+      --scrim: rgba(0, 0, 0, 0.55);
+      --blue: #1e6a93;
+      --blue-container: #c8e6ff;
+      --green: #2d6b44;
+      --green-container: #b9f0c7;
+      --amber: #775900;
+      --amber-container: #ffe08a;
+      --radius-xs: 8px;
+      --radius-sm: 12px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-xl: 28px;
+      --radius-xxl: 32px;
+      --elevation-1: 0 1px 2px rgba(35, 46, 42, 0.10), 0 1px 3px rgba(35, 46, 42, 0.08);
+      --elevation-2: 0 2px 6px rgba(35, 46, 42, 0.12), 0 8px 20px rgba(35, 46, 42, 0.08);
+      --elevation-3: 0 6px 20px rgba(35, 46, 42, 0.14), 0 18px 42px rgba(35, 46, 42, 0.10);
+      --font: Roboto, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Mono", "JetBrains Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 8% 2%, rgba(188, 236, 224, 0.55), transparent 32%),
+        radial-gradient(circle at 94% 4%, rgba(200, 230, 255, 0.42), transparent 28%),
+        linear-gradient(180deg, #f5f7f3 0%, #e8eee9 100%);
+      color: var(--on-surface);
+      font-family: var(--font);
+      letter-spacing: 0;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    .page {
+      width: min(1460px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    .brief {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 12px 0 8px;
+      color: #17211e;
+      font-size: clamp(28px, 3.4vw, 48px);
+      line-height: 1.06;
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
+
+    .brief p {
+      max-width: 760px;
+      margin: 0;
+      color: var(--on-surface-variant);
+      font-size: 15px;
+      line-height: 1.65;
+      text-wrap: pretty;
+    }
+
+    .principles {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid rgba(113, 121, 118, 0.18);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.58);
+      box-shadow: var(--elevation-1);
+      backdrop-filter: blur(18px);
+    }
+
+    .principle {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: start;
+      min-height: 34px;
+      color: var(--on-surface-variant);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .principle .mark {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .scene-tabs {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+      width: fit-content;
+      margin: 0 auto 18px;
+      padding: 6px;
+      border: 1px solid rgba(113, 121, 118, 0.18);
+      border-radius: 999px;
+      background: rgba(251, 252, 248, 0.84);
+      box-shadow: var(--elevation-2);
+      backdrop-filter: blur(20px);
+    }
+
+    .scene-tab {
+      height: 40px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--on-surface-variant);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+    }
+
+    .scene-tab.active {
+      background: var(--primary);
+      color: var(--on-primary);
+      box-shadow: var(--elevation-1);
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .lane {
+      display: grid;
+      gap: 12px;
+      justify-items: center;
+    }
+
+    .lane-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: min(100%, 440px);
+      padding: 0 6px;
+    }
+
+    .lane-title h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .lane-title span {
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .phone {
+      width: min(100%, 440px);
+      border-radius: 42px;
+      padding: 12px;
+      background: #111513;
+      box-shadow: 0 34px 80px rgba(18, 27, 24, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    }
+
+    .screen {
+      position: relative;
+      overflow: hidden;
+      height: 860px;
+      border-radius: 32px;
+      background: var(--surface);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+    }
+
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 32px;
+      padding: 0 20px;
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(24, 28, 26, 0.78);
+    }
+
+    .status-icons {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.65;
+    }
+
+    .battery {
+      width: 20px;
+      height: 10px;
+      border: 1.5px solid currentColor;
+      border-radius: 3px;
+      position: relative;
+    }
+
+    .battery::before {
+      content: "";
+      position: absolute;
+      right: -4px;
+      top: 2px;
+      width: 2px;
+      height: 4px;
+      border-radius: 0 2px 2px 0;
+      background: currentColor;
+    }
+
+    .battery::after {
+      content: "";
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 12px;
+      height: 4px;
+      border-radius: 1.5px;
+      background: currentColor;
+    }
+
+    .scene {
+      display: none;
+      height: calc(100% - 32px);
+    }
+
+    .scene.active {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 64px;
+      padding: 8px 14px 10px;
+      background: rgba(238, 241, 235, 0.94);
+      border-bottom: 1px solid rgba(113, 121, 118, 0.12);
+    }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      flex: 0 0 40px;
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .plain-icon {
+      background: transparent;
+      color: var(--on-surface-variant);
+    }
+
+    .topbar-title {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .topbar-title strong {
+      display: block;
+      overflow: hidden;
+      color: var(--on-surface);
+      font-size: 17px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .topbar-title small {
+      display: block;
+      margin-top: 3px;
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .now .topbar-title strong {
+      display: inline-block;
+      max-width: 210px;
+      padding: 9px 14px;
+      border-radius: 22px 16px 22px 16px;
+      background: var(--surface-container-high);
+    }
+
+    .timeline {
+      overflow: hidden;
+      padding: 16px 16px 132px;
+      background:
+        linear-gradient(180deg, rgba(251, 252, 248, 0) 0%, var(--surface) 82%),
+        repeating-linear-gradient(0deg, transparent 0, transparent 31px, rgba(113, 121, 118, 0.06) 32px);
+    }
+
+    .now .timeline {
+      padding-bottom: 124px;
+      background: var(--surface);
+    }
+
+    .message-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin: 0 0 14px;
+    }
+
+    .message-row.user {
+      justify-content: flex-end;
+    }
+
+    .avatar {
+      display: grid;
+      place-items: center;
+      flex: 0 0 30px;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--tertiary-container);
+      color: var(--on-tertiary-container);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .bubble {
+      max-width: 76%;
+      padding: 11px 13px;
+      border-radius: 8px 22px 22px 22px;
+      background: transparent;
+      color: var(--on-surface);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .bubble.user {
+      border-radius: 22px 8px 22px 22px;
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      box-shadow: var(--elevation-1);
+    }
+
+    .now .bubble.assistant {
+      padding: 0;
+    }
+
+    .after .bubble.assistant {
+      max-width: 82%;
+      padding: 13px 14px;
+      border: 1px solid rgba(113, 121, 118, 0.14);
+      border-radius: 8px 24px 24px 24px;
+      background: var(--surface-container-lowest);
+      box-shadow: var(--elevation-1);
+    }
+
+    .bubble p {
+      margin: 0 0 8px;
+    }
+
+    .bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .message-meta {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 7px;
+      color: var(--on-surface-variant);
+      font-size: 11px;
+    }
+
+    .cot-block {
+      margin: 0 0 10px 39px;
+      max-width: 82%;
+    }
+
+    .cot-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr);
+      gap: 9px;
+      align-items: start;
+      margin-bottom: 8px;
+    }
+
+    .cot-step::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      top: 27px;
+      width: 2px;
+      height: calc(100% - 14px);
+      background: var(--outline-variant);
+    }
+
+    .cot-step:last-child::before {
+      display: none;
+    }
+
+    .cot-node {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .cot-content {
+      min-width: 0;
+      padding: 9px 11px;
+      border: 1px solid rgba(113, 121, 118, 0.16);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .cot-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--secondary);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .cot-summary {
+      margin-top: 4px;
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .tool-card {
+      display: grid;
+      gap: 8px;
+      max-width: 330px;
+      margin: 0 0 12px 39px;
+      padding: 10px;
+      border: 1px solid rgba(113, 121, 118, 0.18);
+      border-radius: var(--radius-lg);
+      background: var(--surface-container-lowest);
+      box-shadow: var(--elevation-1);
+    }
+
+    .tool-capsule {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 7px 9px;
+      border-radius: 999px;
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+    }
+
+    .tool-capsule .tool-icon {
+      display: grid;
+      place-items: center;
+      flex: 0 0 26px;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      background: rgba(14, 31, 27, 0.10);
+      font-size: 12px;
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+
+    .tool-title {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      font-size: 13px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-pill {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(14, 31, 27, 0.10);
+      color: var(--on-secondary-container);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .tool-preview {
+      padding: 9px 11px;
+      border-radius: var(--radius-md);
+      background: var(--surface-container);
+      color: var(--on-surface-variant);
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .linear-progress {
+      overflow: hidden;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(54, 95, 87, 0.16);
+    }
+
+    .linear-progress span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--primary);
+      animation: progress 2200ms ease-in-out infinite;
+    }
+
+    @keyframes progress {
+      0% { width: 22%; transform: translateX(-30%); }
+      50% { width: 64%; transform: translateX(18%); }
+      100% { width: 28%; transform: translateX(250%); }
+    }
+
+    .composer {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      padding: 10px;
+      border: 1px solid rgba(113, 121, 118, 0.24);
+      border-radius: 32px 32px 28px 16px;
+      background: rgba(244, 246, 241, 0.94);
+      box-shadow: var(--elevation-3);
+      backdrop-filter: blur(18px);
+    }
+
+    .now .composer {
+      border-radius: 32px 32px 28px 14px;
+    }
+
+    .input-field {
+      min-height: 72px;
+      padding: 12px 14px;
+      border-radius: var(--radius-lg);
+      background: var(--surface-container-high);
+      color: var(--on-surface-variant);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .chips-row {
+      display: flex;
+      gap: 7px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      height: 32px;
+      padding: 0 11px;
+      border: 1px solid rgba(113, 121, 118, 0.24);
+      border-radius: 999px;
+      background: var(--surface-container-lowest);
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .chip.selected {
+      border-color: transparent;
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+    }
+
+    .composer-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .composer-actions .chip-rail {
+      display: flex;
+      gap: 6px;
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .send-button {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: var(--on-primary);
+      font-size: 19px;
+      font-weight: 900;
+      box-shadow: var(--elevation-1);
+    }
+
+    .summary-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+
+    .summary-card {
+      padding: 10px;
+      border-radius: var(--radius-lg);
+      background: var(--surface-container-lowest);
+      box-shadow: var(--elevation-1);
+    }
+
+    .summary-card strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .summary-card span {
+      color: var(--on-surface-variant);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .notification-area {
+      padding: 14px;
+      background:
+        linear-gradient(180deg, rgba(251, 252, 248, 0.98) 0%, rgba(232, 235, 229, 0.98) 100%);
+    }
+
+    .notification-card {
+      margin-bottom: 12px;
+      padding: 13px;
+      border-radius: var(--radius-lg);
+      background: var(--surface-container-lowest);
+      box-shadow: var(--elevation-2);
+    }
+
+    .notification-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 9px;
+    }
+
+    .app-icon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 11px;
+      background: var(--primary);
+      color: var(--on-primary);
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .notification-title {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .notification-title strong {
+      display: block;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .notification-title small {
+      color: var(--on-surface-variant);
+      font-size: 11px;
+    }
+
+    .live-chip {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--amber-container);
+      color: var(--amber);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .notification-body {
+      color: var(--on-surface-variant);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .cloud {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border-radius: 30px;
+      background: #111513;
+      color: #f0f5f1;
+      box-shadow: var(--elevation-3);
+    }
+
+    .cloud-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .cloud strong {
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .cloud small {
+      color: rgba(240, 245, 241, 0.66);
+      font-size: 12px;
+    }
+
+    .cloud-pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(188, 236, 224, 0.18);
+      color: #bcece0;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .settings-list {
+      overflow: hidden;
+      padding: 14px 14px 96px;
+      background: var(--surface);
+    }
+
+    .settings-hero {
+      padding: 16px;
+      border-radius: 28px;
+      background: linear-gradient(135deg, var(--primary-container), var(--blue-container));
+      color: var(--on-primary-container);
+      box-shadow: var(--elevation-1);
+    }
+
+    .settings-hero h3 {
+      margin: 0 0 5px;
+      font-size: 20px;
+      line-height: 1.15;
+    }
+
+    .settings-hero p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      color: rgba(4, 32, 27, 0.76);
+    }
+
+    .section-title {
+      margin: 18px 4px 8px;
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .list-group {
+      overflow: hidden;
+      border-radius: var(--radius-lg);
+      background: var(--surface-container-lowest);
+      box-shadow: var(--elevation-1);
+    }
+
+    .list-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 68px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(113, 121, 118, 0.11);
+    }
+
+    .list-item:last-child {
+      border-bottom: 0;
+    }
+
+    .leading-box {
+      display: grid;
+      place-items: center;
+      flex: 0 0 40px;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-sm);
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+      font-size: 13px;
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+
+    .list-text {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .list-text strong {
+      display: block;
+      overflow: hidden;
+      font-size: 15px;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .list-text small {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .switch {
+      position: relative;
+      flex: 0 0 52px;
+      width: 52px;
+      height: 32px;
+      border-radius: 999px;
+      background: var(--primary);
+    }
+
+    .switch::after {
+      content: "";
+      position: absolute;
+      right: 4px;
+      top: 4px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--on-primary);
+      box-shadow: var(--elevation-1);
+    }
+
+    .old-card {
+      margin-bottom: 12px;
+      padding: 12px;
+      border-radius: 16px;
+      background: var(--surface-container-low);
+      box-shadow: var(--elevation-1);
+    }
+
+    .old-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 4px;
+      border-bottom: 1px solid rgba(113, 121, 118, 0.12);
+    }
+
+    .old-row:last-child {
+      border-bottom: 0;
+    }
+
+    .old-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: var(--surface-container-highest);
+    }
+
+    .old-text {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .old-text strong,
+    .old-text small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .old-text strong {
+      font-size: 14px;
+    }
+
+    .old-text small {
+      color: var(--on-surface-variant);
+      font-size: 12px;
+    }
+
+    .fab-nav {
+      position: absolute;
+      left: 88px;
+      right: 88px;
+      bottom: 16px;
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      height: 44px;
+      padding: 6px;
+      border-radius: 999px;
+      background: rgba(238, 241, 235, 0.86);
+      box-shadow: var(--elevation-2);
+      backdrop-filter: blur(16px);
+    }
+
+    .fab-nav span {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+
+    .fab-nav .active {
+      background: var(--primary);
+      color: var(--on-primary);
+    }
+
+    .notes {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .note {
+      padding: 14px;
+      border: 1px solid rgba(113, 121, 118, 0.16);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.58);
+      box-shadow: var(--elevation-1);
+    }
+
+    .note strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+    }
+
+    .note span {
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1020px) {
+      .brief,
+      .comparison,
+      .notes {
+        grid-template-columns: 1fr;
+      }
+
+      .scene-tabs {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      .scene-tab {
+        white-space: nowrap;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .page {
+        width: min(100vw - 18px, 440px);
+        padding-top: 16px;
+      }
+
+      .phone {
+        padding: 8px;
+        border-radius: 34px;
+      }
+
+      .screen {
+        height: 800px;
+        border-radius: 28px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 1ms !important;
+        transition-duration: 1ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="brief" aria-label="Prototype direction">
+      <div>
+        <span class="eyebrow">Codex route: M3 standard + restrained</span>
+        <h1>AmberAgent UI visual exploration for serious agent work logs</h1>
+        <p>
+          这份原型不是 Claude 的激进 Expressive 线，而是 Codex 的克制路线：保留 Material You 的动态色、容器层级、Chip、ListItem、TopAppBar 和标准进度反馈，把聊天流重塑成更可读的 Agent 工作日志。
+        </p>
+      </div>
+      <div class="principles" aria-label="Design principles">
+        <div class="principle"><span class="mark">1</span><span>不用异形 shape morph；只用 small / medium / large / extra-large 这类稳定圆角刻度。</span></div>
+        <div class="principle"><span class="mark">2</span><span>工具调用以状态胶囊 + 轻量输出卡呈现，强调“正在做什么”和“是否需要用户决策”。</span></div>
+        <div class="principle"><span class="mark">3</span><span>设置首页先建立信息层级，再整理 ListItem 和 Switch，不进入二级页大改。</span></div>
+      </div>
+    </section>
+
+    <nav class="scene-tabs" aria-label="Scene selector">
+      <button class="scene-tab active" data-scene-button="chat">聊天时间线</button>
+      <button class="scene-tab" data-scene-button="live">Live Status</button>
+      <button class="scene-tab" data-scene-button="settings">设置首页</button>
+    </nav>
+
+    <section class="comparison" aria-label="Now versus redesigned comparison">
+      <div class="lane">
+        <div class="lane-title">
+          <h2>现在</h2>
+          <span>功能完整，但层级偏散</span>
+        </div>
+        <div class="phone now">
+          <div class="screen">
+            <div class="statusbar">
+              <span>09:41</span>
+              <span class="status-icons"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="battery"></span></span>
+            </div>
+
+            <section class="scene active" data-scene="chat">
+              <div class="topbar">
+                <button class="icon-button">=</button>
+                <div class="topbar-title"><strong>新聊天</strong></div>
+                <button class="icon-button plain-icon">+</button>
+              </div>
+              <div class="timeline">
+                <div class="message-row user">
+                  <div class="bubble user">帮我整理一个长 markdown 列表，并运行必要工具。</div>
+                </div>
+                <div class="message-row">
+                  <div class="avatar">A</div>
+                  <div class="bubble assistant">
+                    <p>我会先检查上下文，然后运行终端命令确认项目状态。</p>
+                    <p>下面是初步结论和待执行步骤...</p>
+                  </div>
+                </div>
+                <div class="tool-card" style="margin-left:0; max-width:100%;">
+                  <div class="tool-capsule">
+                    <span class="tool-icon">$</span>
+                    <span class="tool-title">terminal_execute git status --short</span>
+                    <span class="status-pill">运行中</span>
+                  </div>
+                </div>
+                <div class="message-row">
+                  <div class="avatar">A</div>
+                  <div class="bubble assistant">
+                    <p>- 第一项：读取 handoff</p>
+                    <p>- 第二项：检查 UI 文件</p>
+                    <p>- 第三项：准备重构计划</p>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="input-field">输入消息...</div>
+                <div class="composer-actions">
+                  <div class="chip-rail">
+                    <span class="chip">模型</span>
+                    <span class="chip">搜索</span>
+                    <span class="chip">推理</span>
+                  </div>
+                  <span class="send-button">↑</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="scene" data-scene="live">
+              <div class="topbar">
+                <button class="icon-button">&lt;</button>
+                <div class="topbar-title"><strong>通知预览</strong><small>Live Status + Fluid Cloud</small></div>
+              </div>
+              <div class="notification-area">
+                <div class="notification-card">
+                  <div class="notification-head">
+                    <div class="app-icon">A</div>
+                    <div class="notification-title">
+                      <strong>AmberAgent 正在执行工具</strong>
+                      <small>AmberAgent · Android Shell · 3/7</small>
+                    </div>
+                    <span class="live-chip">工具</span>
+                  </div>
+                  <div class="notification-body">
+                    正在运行 terminal_execute: adb shell am start -n me.rerere.rikkahub/.MainActivity --ei...
+                  </div>
+                </div>
+                <div class="notification-card">
+                  <div class="notification-head">
+                    <div class="app-icon">A</div>
+                    <div class="notification-title">
+                      <strong>等待权限</strong>
+                      <small>用户需要确认工具调用</small>
+                    </div>
+                    <span class="live-chip">等待</span>
+                  </div>
+                  <div class="notification-body">
+                    文案能说明状态，但 chip 和正文长度在小窗里容易抢占空间。
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="scene" data-scene="settings">
+              <div class="topbar">
+                <button class="icon-button">&lt;</button>
+                <div class="topbar-title"><strong>设置</strong></div>
+              </div>
+              <div class="settings-list">
+                <div class="old-card">
+                  <div class="old-row"><div class="old-icon"></div><div class="old-text"><strong>颜色模式</strong><small>跟随系统</small></div></div>
+                  <div class="old-row"><div class="old-icon"></div><div class="old-text"><strong>显示设置</strong><small>字体、Markdown、头像...</small></div></div>
+                </div>
+                <div class="old-card">
+                  <div class="old-row"><div class="old-icon"></div><div class="old-text"><strong>Agent 记忆</strong><small>管理记忆和规则</small></div></div>
+                  <div class="old-row"><div class="old-icon"></div><div class="old-text"><strong>Agent 扩展</strong><small>MCP 与工具配置</small></div></div>
+                  <div class="old-row"><div class="old-icon"></div><div class="old-text"><strong>Agent 执行</strong><small>权限、运行时、终端...</small></div></div>
+                </div>
+                <div class="old-card">
+                  <div class="old-row"><div class="old-icon"></div><div class="old-text"><strong>模型与服务</strong><small>模型、Provider、搜索、TTS...</small></div></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-title">
+          <h2>Codex 重构后</h2>
+          <span>M3 克制路线，Agent 工作日志</span>
+        </div>
+        <div class="phone after">
+          <div class="screen">
+            <div class="statusbar">
+              <span>09:41</span>
+              <span class="status-icons"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="battery"></span></span>
+            </div>
+
+            <section class="scene active" data-scene="chat">
+              <div class="topbar">
+                <button class="icon-button">=</button>
+                <div class="topbar-title">
+                  <strong>AmberAgent UI audit</strong>
+                  <small>GPT-5.5 · 工作日志视图</small>
+                </div>
+                <button class="icon-button plain-icon">+</button>
+              </div>
+              <div class="timeline">
+                <div class="summary-strip">
+                  <div class="summary-card"><strong>6</strong><span>已读 UI 文件</span></div>
+                  <div class="summary-card"><strong>2</strong><span>需要回归测试</span></div>
+                </div>
+                <div class="message-row user">
+                  <div class="bubble user">只做 UI 重构实验，别碰 Provider 和工具语义。</div>
+                </div>
+                <div class="cot-block">
+                  <div class="cot-step">
+                    <div class="cot-node">1</div>
+                    <div class="cot-content">
+                      <div class="cot-title"><span>理解约束</span><span>4.8s</span></div>
+                      <div class="cot-summary">确认 timeline、composer、Live Status、设置首页的可触碰边界。</div>
+                    </div>
+                  </div>
+                  <div class="cot-step">
+                    <div class="cot-node">2</div>
+                    <div class="cot-content">
+                      <div class="cot-title"><span>读取结构</span><span>进行中</span></div>
+                      <div class="cot-summary">ChatList 负责 LazyColumn 和底部边界，ChatMessage 负责 Markdown Surface。</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="tool-card">
+                  <div class="tool-capsule">
+                    <span class="tool-icon">$</span>
+                    <span class="tool-title">compileDebugKotlin</span>
+                    <span class="status-pill">运行中</span>
+                  </div>
+                  <div class="linear-progress"><span></span></div>
+                  <div class="tool-preview">:app:compileDebugKotlin<br>MessageStreamAccumulatorTest<br>ChatMessageCotTest</div>
+                </div>
+                <div class="message-row">
+                  <div class="avatar">A</div>
+                  <div class="bubble assistant">
+                    <p>结论：先统一消息 Surface 和工作日志节奏，再整理 composer 边界。</p>
+                    <p>保持 MarkdownBlock 内部不动，避免重新引入流式文本切块问题。</p>
+                    <div class="message-meta"><span>可回滚</span><span>·</span><span>只触碰 UI 层</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="chips-row">
+                  <span class="chip selected">image.png</span>
+                  <span class="chip">handoff.md</span>
+                </div>
+                <div class="input-field">给出 Phase 1 计划...</div>
+                <div class="composer-actions">
+                  <div class="chip-rail">
+                    <span class="chip selected">模型</span>
+                    <span class="chip">搜索关</span>
+                    <span class="chip">MCP 3</span>
+                  </div>
+                  <span class="icon-button">+</span>
+                  <span class="send-button">↑</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="scene" data-scene="live">
+              <div class="topbar">
+                <button class="icon-button">&lt;</button>
+                <div class="topbar-title"><strong>Live Status</strong><small>短 chip + 可扫读正文</small></div>
+              </div>
+              <div class="notification-area">
+                <div class="cloud">
+                  <div class="cloud-top">
+                    <div>
+                      <strong>AmberAgent 正在工作</strong>
+                      <small>Android Shell · 3/7 · 可停止</small>
+                    </div>
+                    <span class="cloud-pill">工具中</span>
+                  </div>
+                  <div class="linear-progress"><span></span></div>
+                </div>
+                <div class="notification-card">
+                  <div class="notification-head">
+                    <div class="app-icon">A</div>
+                    <div class="notification-title">
+                      <strong>执行终端命令</strong>
+                      <small>AmberAgent · Android Shell · 3/7</small>
+                    </div>
+                    <span class="live-chip">工具中</span>
+                  </div>
+                  <div class="notification-body">
+                    安装并启动测试 APK。敏感模式下仅显示工具类型，不展示完整命令。
+                  </div>
+                </div>
+                <div class="notification-card">
+                  <div class="notification-head">
+                    <div class="app-icon">A</div>
+                    <div class="notification-title">
+                      <strong>需要确认</strong>
+                      <small>工具调用暂停中</small>
+                    </div>
+                    <span class="live-chip">等待</span>
+                  </div>
+                  <div class="notification-body">
+                    Chip 控制在 2-3 个汉字，正文保留“动作 + 对象 + 约束”。
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="scene" data-scene="settings">
+              <div class="topbar">
+                <button class="icon-button">&lt;</button>
+                <div class="topbar-title">
+                  <strong>设置</strong>
+                  <small>按日常使用优先级重排</small>
+                </div>
+              </div>
+              <div class="settings-list">
+                <div class="settings-hero">
+                  <h3>AmberAgent 配置中心</h3>
+                  <p>把 Agent 运行、模型服务、外观和数据管理拆成可扫读的 M3 ListItem 组。</p>
+                </div>
+                <div class="section-title">常用</div>
+                <div class="list-group">
+                  <div class="list-item">
+                    <div class="leading-box">UI</div>
+                    <div class="list-text"><strong>显示与聊天外观</strong><small>字体、消息气泡、Markdown、头像</small></div>
+                    <span class="chip selected">跟随系统</span>
+                  </div>
+                  <div class="list-item">
+                    <div class="leading-box">AI</div>
+                    <div class="list-text"><strong>默认模型</strong><small>GPT-5.5 · 搜索关 · 推理中</small></div>
+                    <span class="chip">编辑</span>
+                  </div>
+                </div>
+                <div class="section-title">Agent 运行</div>
+                <div class="list-group">
+                  <div class="list-item">
+                    <div class="leading-box">MEM</div>
+                    <div class="list-text"><strong>记忆</strong><small>长期记忆、规则和工作偏好</small></div>
+                    <div class="switch" aria-hidden="true"></div>
+                  </div>
+                  <div class="list-item">
+                    <div class="leading-box">MCP</div>
+                    <div class="list-text"><strong>扩展与权限</strong><small>MCP、工具审批、安全边界</small></div>
+                    <span class="chip">3 项</span>
+                  </div>
+                  <div class="list-item">
+                    <div class="leading-box">$</div>
+                    <div class="list-text"><strong>执行环境</strong><small>终端运行时、Sandbox、Live Status</small></div>
+                    <span class="chip">健康</span>
+                  </div>
+                </div>
+                <div class="section-title">数据</div>
+                <div class="list-group">
+                  <div class="list-item">
+                    <div class="leading-box">DB</div>
+                    <div class="list-text"><strong>备份与文件</strong><small>聊天附件、导入导出、存储占用</small></div>
+                    <span class="chip">128 MB</span>
+                  </div>
+                </div>
+              </div>
+              <div class="fab-nav"><span class="active">UI</span><span>AI</span><span>DB</span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="notes" aria-label="Implementation notes">
+      <div class="note"><strong>聊天流</strong><span>重构重点是 timeline 节奏、Markdown 外层 Surface、CoT/Tool 的状态语言；不进入 Markdown 内部。</span></div>
+      <div class="note"><strong>Composer</strong><span>只整理底部输入区视觉和安全区边界；输入状态、picker、WebView 预览、Sandbox 逻辑保持原样。</span></div>
+      <div class="note"><strong>Live Status</strong><span>优化 title/content/chipText 的长度和扫读性；不改通知 icon、largeIcon、promoted ongoing 决策。</span></div>
+      <div class="note"><strong>Settings</strong><span>首页用分组、ListItem、Switch 建层级；不改 Screen 路由，不碰 SettingVM。</span></div>
+    </section>
+  </main>
+
+  <script>
+    const sceneButtons = Array.from(document.querySelectorAll("[data-scene-button]"));
+    const scenes = Array.from(document.querySelectorAll("[data-scene]"));
+
+    sceneButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.dataset.sceneButton;
+        sceneButtons.forEach((item) => item.classList.toggle("active", item === button));
+        scenes.forEach((scene) => scene.classList.toggle("active", scene.dataset.scene === target));
+      });
+    });
+  </script>
+</body>
+</html>

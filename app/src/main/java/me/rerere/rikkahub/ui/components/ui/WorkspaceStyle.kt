@@ -3,7 +3,6 @@ package me.rerere.rikkahub.ui.components.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +28,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import me.rerere.rikkahub.ui.theme.LocalAmoledDarkMode
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 @Immutable
 data class WorkspaceColors(
@@ -61,7 +62,27 @@ enum class WorkspaceTone {
 @Composable
 fun workspaceColors(): WorkspaceColors {
     val scheme = MaterialTheme.colorScheme
-    return if (isSystemInDarkTheme()) {
+    if (LocalAmoledDarkMode.current) {
+        return WorkspaceColors(
+            canvas = Color(0xFF000000),
+            paper = Color(0xFF050505),
+            row = Color(0xFF090909),
+            note = Color(0xFF0D0D0D),
+            ink = Color(0xFFF1F3F5),
+            muted = Color(0xFFA7ABB2),
+            faint = Color(0xFF666C74),
+            hairline = Color(0xFF20242A),
+            blue = Color(0xFF4EA6FF),
+            blueContainer = Color(0xFF071B2E),
+            green = Color(0xFF6DD58C),
+            greenContainer = Color(0xFF071A10),
+            amber = Color(0xFFE5B567),
+            amberContainer = Color(0xFF1F170A),
+            red = Color(0xFFFF8F86),
+            redContainer = Color(0xFF21100F),
+        )
+    }
+    return if (LocalDarkMode.current) {
         WorkspaceColors(
             canvas = scheme.surfaceContainerLowest,
             paper = scheme.surface,
@@ -69,16 +90,16 @@ fun workspaceColors(): WorkspaceColors {
             note = scheme.surfaceContainer,
             ink = scheme.onSurface,
             muted = scheme.onSurfaceVariant,
-            faint = scheme.onSurfaceVariant.copy(alpha = 0.62f),
-            hairline = scheme.outlineVariant.copy(alpha = 0.36f),
-            blue = Color(0xFF7DB7FF),
-            blueContainer = Color(0xFF14283B),
-            green = Color(0xFF76D487),
-            greenContainer = Color(0xFF16351E),
-            amber = Color(0xFFE6A93C),
-            amberContainer = Color(0xFF3D2C12),
-            red = Color(0xFFFF9A91),
-            redContainer = Color(0xFF3C1714),
+            faint = Color(0xFF70757E),
+            hairline = Color(0xFF2B2F35),
+            blue = Color(0xFF4EA6FF),
+            blueContainer = Color(0xFF10263A),
+            green = Color(0xFF6DD58C),
+            greenContainer = Color(0xFF102A1A),
+            amber = Color(0xFFE5B567),
+            amberContainer = Color(0xFF352715),
+            red = Color(0xFFFF8F86),
+            redContainer = Color(0xFF3A1715),
         )
     } else {
         WorkspaceColors(

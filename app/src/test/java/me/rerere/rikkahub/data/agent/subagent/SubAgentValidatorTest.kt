@@ -52,7 +52,14 @@ class SubAgentValidatorTest {
         val result = SubAgentValidator.resolveDefinition(
             input = input,
             setting = setting,
-            availableToolNames = setOf("file_read", "file_search", "terminal_execute"),
+            availableToolNames = setOf(
+                "file_read",
+                "file_search",
+                "terminal_execute",
+                "http_request",
+                "officepro_capture_context",
+                "officepro_context_digest",
+            ),
         )
 
         assertEquals(setOf("file_read", "file_search"), result.definition.toolAllowlist)

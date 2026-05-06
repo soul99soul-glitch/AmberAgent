@@ -52,6 +52,9 @@ class AmberAccessibilityService : AccessibilityService() {
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
+    fun activePackageName(): String? =
+        rootInActiveWindow?.packageName?.toString()
+
     fun dumpUiTree(maxNodes: Int = 120): String {
         val root = rootInActiveWindow ?: return ""
         val lines = mutableListOf<String>()

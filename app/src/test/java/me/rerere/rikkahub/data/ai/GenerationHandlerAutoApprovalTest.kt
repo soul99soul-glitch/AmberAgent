@@ -79,6 +79,37 @@ class GenerationHandlerAutoApprovalTest {
         )
     }
 
+    @Test
+    fun httpGetAndHeadDoNotPauseEvenWhenHttpToolRequiresApproval() {
+        assertFalse(
+            shouldPauseForToolApproval(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"GET","url":"https://example.com"}"""),
+                autoApproveTools = false,
+            )
+        )
+        assertFalse(
+            shouldPauseForToolApproval(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"HEAD","url":"https://example.com"}"""),
+                autoApproveTools = true,
+            )
+        )
+    }
+
+    @Test
+    fun httpMutatingMethodsAlwaysPause() {
+        listOf("POST", "PUT", "PATCH", "DELETE").forEach { method ->
+            assertTrue(
+                shouldPauseForToolApproval(
+                    toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                    tool = toolCall("http_request", """{"method":"$method","url":"https://example.com"}"""),
+                    autoApproveTools = true,
+                )
+            )
+        }
+    }
+
     private fun approvalTool(name: String, allowsAutoApproval: Boolean = true) = Tool(
         name = name,
         description = "",
@@ -87,9 +118,9 @@ class GenerationHandlerAutoApprovalTest {
         execute = { emptyList() },
     )
 
-    private fun toolCall(name: String) = UIMessagePart.Tool(
+    private fun toolCall(name: String, input: String = "{}") = UIMessagePart.Tool(
         toolCallId = "call_$name",
         toolName = name,
-        input = "{}",
+        input = input,
     )
 }

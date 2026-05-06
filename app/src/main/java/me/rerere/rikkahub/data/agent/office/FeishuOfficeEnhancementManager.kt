@@ -61,7 +61,14 @@ class FeishuOfficeEnhancementManager(
     }
 
     fun setIncludeNotificationsByDefault(enabled: Boolean) {
-        appScope.launch { updateSetting { it.copy(includeNotificationsByDefault = enabled) } }
+        appScope.launch {
+            updateSetting {
+                it.copy(
+                    includeNotificationsByDefault = enabled,
+                    workDashboard = it.workDashboard.copy(includeNotifications = enabled),
+                )
+            }
+        }
     }
 
     fun setIncludeUsageByDefault(enabled: Boolean) {
@@ -69,15 +76,105 @@ class FeishuOfficeEnhancementManager(
     }
 
     fun setIncludeCurrentScreenByDefault(enabled: Boolean) {
-        appScope.launch { updateSetting { it.copy(includeCurrentScreenByDefault = enabled) } }
+        appScope.launch {
+            updateSetting {
+                it.copy(
+                    includeCurrentScreenByDefault = enabled,
+                    workDashboard = it.workDashboard.copy(includeCurrentScreen = enabled),
+                )
+            }
+        }
     }
 
     fun setIncludeMcpHintsByDefault(enabled: Boolean) {
-        appScope.launch { updateSetting { it.copy(includeMcpHintsByDefault = enabled) } }
+        appScope.launch {
+            updateSetting {
+                it.copy(
+                    includeMcpHintsByDefault = enabled,
+                    workDashboard = it.workDashboard.copy(includeMcpSources = enabled),
+                )
+            }
+        }
     }
 
     fun setDefaultOutputDir(outputDir: String) {
-        appScope.launch { updateSetting { it.copy(defaultOutputDir = sanitizeWorkspaceDir(outputDir)) } }
+        appScope.launch {
+            updateSetting {
+                val sanitized = sanitizeWorkspaceDir(outputDir)
+                it.copy(
+                    defaultOutputDir = sanitized,
+                    workDashboard = it.workDashboard.copy(defaultOutputDir = sanitized),
+                )
+            }
+        }
+    }
+
+    fun setWorkDashboardProjectKeywords(raw: String) {
+        appScope.launch {
+            updateSetting { setting ->
+                setting.copy(
+                    workDashboard = setting.workDashboard.copy(
+                        defaultProjectKeywords = parseProjectKeywords(raw),
+                    )
+                )
+            }
+        }
+    }
+
+    fun setWorkDashboardIncludeModelCouncil(enabled: Boolean) {
+        appScope.launch {
+            updateSetting { setting ->
+                setting.copy(workDashboard = setting.workDashboard.copy(includeModelCouncil = enabled))
+            }
+        }
+    }
+
+    fun setWorkDashboardIncludeMcpSources(enabled: Boolean) {
+        appScope.launch {
+            updateSetting { setting ->
+                setting.copy(workDashboard = setting.workDashboard.copy(includeMcpSources = enabled))
+            }
+        }
+    }
+
+    fun updateProject(project: FeishuWorkProject) {
+        appScope.launch { saveProject(project) }
+    }
+
+    suspend fun saveProject(project: FeishuWorkProject) {
+        updateSetting { setting ->
+            val currentProjects = setting.workDashboard.projects.ifEmpty { defaultFeishuWorkProjects() }
+            val nextProjects = currentProjects
+                .filterNot { it.id == project.id }
+                .plus(project)
+                .sortedBy { it.name }
+                .take(24)
+            setting.copy(
+                workDashboard = setting.workDashboard.copy(
+                    projects = nextProjects,
+                    defaultProjectKeywords = nextProjects.flatMap { it.keywords }.distinct().take(24),
+                )
+            )
+        }
+    }
+
+    fun restoreDefaultProjects() {
+        appScope.launch {
+            updateSetting { setting ->
+                val defaults = defaultFeishuWorkProjects()
+                val currentProjects = setting.workDashboard.projects
+                val customProjects = currentProjects.filter { current ->
+                    defaults.none { it.id == current.id }
+                }
+                val projects = defaults + customProjects
+                setting.copy(
+                    workDashboard = setting.workDashboard.copy(
+                        projects = projects,
+                        defaultProjectKeywords = projects.flatMap { it.keywords }.distinct().take(24),
+                    )
+                )
+            }
+        }
     }
 
     fun refresh() {
@@ -134,6 +231,7 @@ class FeishuOfficeEnhancementManager(
 
     fun readScreen(maxNodes: Int = 160): FeishuOfficeScreenSnapshot {
         val service = requireAccessibilityService()
+        requireTargetAppInForeground(service)
         val uiTree = service.dumpUiTree(maxNodes.coerceIn(40, 260))
         val visibleText = FeishuOfficeEnhancementPlanner.extractVisibleText(uiTree)
         val title = FeishuOfficeEnhancementPlanner.guessTitle(uiTree)
@@ -145,6 +243,14 @@ class FeishuOfficeEnhancementManager(
             visibleText = visibleText,
             uiTree = uiTree,
         )
+    }
+
+    private fun requireTargetAppInForeground(service: AmberAccessibilityService) {
+        val activePackage = service.activePackageName()
+        val targetPackage = state.value.targetPackage
+        require(activePackage == targetPackage) {
+            "out-of-target-app: current foreground package is ${activePackage ?: "unknown"}, expected $targetPackage"
+        }
     }
 
     suspend fun openAndSearch(query: String): FeishuOfficeSearchResult {
@@ -363,6 +469,7 @@ class FeishuOfficeEnhancementManager(
             lastKnownTitle = title,
             lastError = error,
             updatedAtMs = System.currentTimeMillis(),
+            workDashboard = setting.workDashboard,
         )
     }
 
@@ -436,6 +543,15 @@ class FeishuOfficeEnhancementManager(
         } else {
             parts.joinToString("/")
         }
+    }
+
+    private fun parseProjectKeywords(raw: String): List<String> {
+        val parsed = raw.split(',', '，', '\n', ';', '；')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(12)
+        return parsed.ifEmpty { listOf("Q 代", "MiClaw", "Lhasa", "AI 办公") }
     }
 
     private companion object {

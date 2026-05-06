@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.data.datastore
 
-import me.rerere.ai.provider.ProviderSetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,19 +7,23 @@ import org.junit.Test
 
 class DefaultProvidersTest {
     @Test
-    fun `default providers should include vercel ai gateway with expected balance config`() {
-        val vercelProviders = DEFAULT_PROVIDERS
-            .filterIsInstance<ProviderSetting.OpenAI>()
-            .filter { it.name == "Vercel AI Gateway" }
+    fun `default providers are curated and deletable`() {
+        assertEquals(
+            listOf("OpenAI", "Gemini", "DeepSeek", "OpenRouter", "月之暗面", "xAI"),
+            DEFAULT_PROVIDERS.map { it.name },
+        )
+        assertTrue(DEFAULT_PROVIDERS.all { !it.builtIn })
+        assertFalse(DEFAULT_PROVIDERS.any { it.name == "AmberAgent" })
+        assertFalse(DEFAULT_PROVIDERS.any { it.name == "AiHubMix" })
+        assertFalse(DEFAULT_PROVIDERS.any { it.name == "Vercel AI Gateway" })
+    }
 
-        assertEquals(1, vercelProviders.size)
-
-        val provider = vercelProviders.single()
-        assertEquals("https://ai-gateway.vercel.sh/v1", provider.baseUrl)
-        assertFalse(provider.enabled)
-        assertTrue(provider.builtIn)
-        assertTrue(provider.balanceOption.enabled)
-        assertEquals("/credits", provider.balanceOption.apiPath)
-        assertEquals("balance", provider.balanceOption.resultPath)
+    @Test
+    fun `removed default providers include legacy AmberAgent`() {
+        assertTrue(
+            REMOVED_DEFAULT_PROVIDER_IDS.any {
+                it.toString() == "a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"
+            },
+        )
     }
 }

@@ -777,6 +777,7 @@ private fun ReasoningLevel.settingLabel(): String = when (this) {
     ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
     ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
     ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
+    ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
 }
 
 @Composable

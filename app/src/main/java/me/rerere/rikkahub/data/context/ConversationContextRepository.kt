@@ -34,6 +34,11 @@ class ConversationContextRepository(
         compactDAO.insert(compact.toEntity())
     }
 
+    suspend fun invalidateCompacts(conversationId: Uuid, reason: String) {
+        compactDAO.deleteByConversation(conversationId.toString())
+        insertEvent(conversationId, "compact_invalidated", null, reason)
+    }
+
     suspend fun insertEvent(conversationId: Uuid, eventType: String, summaryId: String?, message: String) {
         eventDAO.insert(
             ConversationContextEventEntity(

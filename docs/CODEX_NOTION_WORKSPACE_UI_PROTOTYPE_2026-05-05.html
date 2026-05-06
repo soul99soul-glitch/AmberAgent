@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AmberAgent Notion Workspace UI Prototype</title>
+  <style>
+    :root {
+      --page: #f6f5f4;
+      --paper: #ffffff;
+      --ink: rgba(0, 0, 0, 0.94);
+      --ink-soft: #31302e;
+      --muted: #615d59;
+      --faint: #a39e98;
+      --line: rgba(0, 0, 0, 0.10);
+      --line-soft: rgba(0, 0, 0, 0.065);
+      --line-hair: rgba(0, 0, 0, 0.045);
+      --hover: rgba(0, 0, 0, 0.035);
+      --blue: #0075de;
+      --blue-soft: #f2f9ff;
+      --blue-text: #097fe8;
+      --green: #1aae39;
+      --orange: #dd5b00;
+      --red: #c5281c;
+      --warm-row: #fbfaf9;
+      --warm-note: #faf8f6;
+      --shadow: rgba(0,0,0,0.04) 0 4px 18px, rgba(0,0,0,0.027) 0 2px 8px, rgba(0,0,0,0.02) 0 1px 3px, rgba(0,0,0,0.01) 0 0 1px;
+      --deep-shadow: rgba(0,0,0,0.01) 0 1px 3px, rgba(0,0,0,0.02) 0 3px 7px, rgba(0,0,0,0.02) 0 7px 15px, rgba(0,0,0,0.04) 0 14px 28px, rgba(0,0,0,0.05) 0 23px 52px;
+      --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      --radius-card: 12px;
+      --radius-panel: 16px;
+      --radius-ui: 5px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 10% -12%, rgba(255,255,255,0.95), transparent 36%),
+        linear-gradient(180deg, #fff 0%, var(--page) 48%, #efeeec 100%);
+      color: var(--ink);
+      font-family: var(--font);
+      font-feature-settings: "lnum", "locl";
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1480px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 40px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 40px;
+      align-items: end;
+      padding: 28px 4px 36px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--blue-text);
+      background: var(--blue-soft);
+      border: 1px solid rgba(0, 117, 222, 0.14);
+      border-radius: 9999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.125px;
+      width: fit-content;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+      background: currentColor;
+      display: inline-block;
+    }
+
+    h1 {
+      margin: 18px 0 14px;
+      color: var(--ink);
+      font-size: clamp(38px, 5.2vw, 72px);
+      line-height: 0.98;
+      letter-spacing: -2.1px;
+      max-width: 780px;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.55;
+      max-width: 740px;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .principle {
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      padding: 14px;
+      box-shadow: rgba(0,0,0,0.02) 0 1px 2px;
+    }
+
+    .principle strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 5px;
+    }
+
+    .principle span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .compare {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .comparison-card {
+      background: rgba(255,255,255,0.76);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+      min-width: 0;
+    }
+
+    .comparison-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .comparison-head h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: -0.25px;
+    }
+
+    .comparison-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.42;
+      max-width: 520px;
+    }
+
+    .tag {
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 9999px;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.125px;
+      background: rgba(0,0,0,0.05);
+      color: var(--ink-soft);
+      border: 1px solid var(--line-soft);
+    }
+
+    .tag.blue {
+      background: var(--blue-soft);
+      color: var(--blue-text);
+      border-color: rgba(0,117,222,0.15);
+    }
+
+    .device-wrap {
+      display: grid;
+      place-items: center;
+      padding: 10px 0 2px;
+    }
+
+    .device {
+      width: min(100%, 390px);
+      aspect-ratio: 390 / 812;
+      background: #191817;
+      border-radius: 34px;
+      padding: 10px;
+      box-shadow: var(--deep-shadow);
+    }
+
+    .workspace-device {
+      background: linear-gradient(180deg, #35312d 0%, #1f1d1b 100%);
+      border-radius: 30px;
+      padding: 7px;
+    }
+
+    .screen {
+      height: 100%;
+      overflow: hidden;
+      border-radius: 26px;
+      background: var(--paper);
+      border: 1px solid rgba(255,255,255,0.12);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .workspace-device .screen {
+      border-radius: 23px;
+      border-color: rgba(255,255,255,0.10);
+    }
+
+    .screen.now {
+      background: #fbfbff;
+    }
+
+    .generic-status {
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      color: rgba(0,0,0,0.55);
+      font-size: 10px;
+      letter-spacing: 0.25px;
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+
+    .tiny-bars {
+      display: inline-flex;
+      align-items: end;
+      gap: 2px;
+      height: 10px;
+    }
+
+    .tiny-bars i {
+      width: 2px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 2px;
+    }
+
+    .tiny-bars i:nth-child(1) { height: 4px; }
+    .tiny-bars i:nth-child(2) { height: 6px; }
+    .tiny-bars i:nth-child(3) { height: 8px; }
+    .tiny-bars i:nth-child(4) { height: 10px; }
+
+    .now-top {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+      background: rgba(247,247,255,0.9);
+    }
+
+    .now-top .title,
+    .notion-top .title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .now-top .subtitle,
+    .notion-top .subtitle {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .now-scroll {
+      flex: 1;
+      padding: 14px 12px 104px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(0,117,222,0.06), transparent 34%),
+        #fbfbff;
+    }
+
+    .m3-bubble {
+      width: fit-content;
+      max-width: 88%;
+      padding: 11px 13px;
+      border-radius: 22px;
+      font-size: 12px;
+      line-height: 1.48;
+      border: 1px solid transparent;
+    }
+
+    .m3-bubble.user {
+      margin-left: auto;
+      background: #d7e3ff;
+      color: #071a3a;
+      border-bottom-right-radius: 8px;
+    }
+
+    .m3-bubble.assistant {
+      background: #ffffff;
+      border-color: rgba(0,0,0,0.08);
+      color: var(--ink);
+      box-shadow: rgba(0,0,0,0.05) 0 2px 8px;
+      border-top-left-radius: 8px;
+    }
+
+    .m3-tool {
+      background: #fff;
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 20px;
+      box-shadow: rgba(0,0,0,0.04) 0 2px 10px;
+      padding: 10px;
+      font-size: 12px;
+    }
+
+    .m3-tool .row,
+    .notion-tool .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .m3-tool .progress {
+      margin-top: 9px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(0,117,222,0.12);
+      overflow: hidden;
+    }
+
+    .m3-tool .progress span {
+      display: block;
+      width: 52%;
+      height: 100%;
+      background: #2b69d1;
+      border-radius: inherit;
+    }
+
+    .now-composer {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      padding: 10px;
+      border-radius: 24px;
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: rgba(0,0,0,0.12) 0 8px 24px;
+    }
+
+    .now-composer .input {
+      color: rgba(0,0,0,0.42);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .button-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .rounds {
+      display: flex;
+      gap: 6px;
+    }
+
+    .round {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.05);
+      color: rgba(0,0,0,0.56);
+      font-size: 13px;
+    }
+
+    .send {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: #2f64d6;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    .notion-top {
+      padding: 12px 16px 10px;
+      background: var(--paper);
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .crumbs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--faint);
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .workspace-tabs {
+      display: flex;
+      gap: 6px;
+      margin-top: 9px;
+      overflow: hidden;
+    }
+
+    .workspace-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      padding: 4px 7px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .workspace-tab.active {
+      background: var(--warm-row);
+      color: var(--ink-soft);
+      border-color: var(--line);
+    }
+
+    .page-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--muted);
+      background: #fff;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .notion-scroll {
+      flex: 1;
+      overflow: hidden;
+      padding: 15px 18px 108px;
+      background:
+        linear-gradient(180deg, #fff 0%, #fff 62%, rgba(246,245,244,0.66) 100%);
+      -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 calc(100% - 120px), transparent 100%);
+      mask-image: linear-gradient(180deg, #000 0%, #000 calc(100% - 120px), transparent 100%);
+    }
+
+    .doc-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 25px;
+      line-height: 1.08;
+      letter-spacing: -0.55px;
+      font-weight: 780;
+      margin: 4px 0 10px;
+    }
+
+    .page-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 9999px;
+      padding: 4px 8px;
+      background: rgba(0,0,0,0.045);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.125px;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .properties {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--warm-row);
+      margin: 0 0 12px;
+    }
+
+    .property-row {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 8px;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--line-hair);
+      font-size: 11px;
+    }
+
+    .property-row:last-child {
+      border-bottom: 0;
+    }
+
+    .property-key {
+      color: var(--faint);
+      font-weight: 650;
+    }
+
+    .property-value {
+      color: var(--ink-soft);
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pill.blue {
+      color: var(--blue-text);
+      background: var(--blue-soft);
+      border-color: rgba(0,117,222,0.14);
+    }
+
+    .pill.green {
+      color: #117b28;
+      background: #edf9ef;
+    }
+
+    .pill.orange {
+      color: var(--orange);
+      background: #fff4eb;
+    }
+
+    .block {
+      position: relative;
+      padding: 7px 0 7px 22px;
+      font-size: 13px;
+      line-height: 1.54;
+      color: var(--ink-soft);
+    }
+
+    .block::before {
+      content: "";
+      position: absolute;
+      left: 6px;
+      top: 17px;
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.18);
+    }
+
+    .block::after {
+      content: "⋮⋮";
+      position: absolute;
+      left: -1px;
+      top: 8px;
+      color: transparent;
+      font-size: 10px;
+      letter-spacing: -3px;
+      transition: color 120ms ease;
+    }
+
+    .block:hover::after {
+      color: rgba(0,0,0,0.22);
+    }
+
+    .block.user {
+      margin: 9px 0;
+      padding: 10px 12px 10px 16px;
+      border-left: 3px solid rgba(0,0,0,0.16);
+      background: var(--warm-note);
+      border-radius: 6px;
+      color: rgba(0,0,0,0.78);
+    }
+
+    .block.user::before {
+      display: none;
+    }
+
+    .block h3 {
+      margin: 0 0 5px;
+      font-size: 14px;
+      letter-spacing: -0.1px;
+    }
+
+    .toggle {
+      border-radius: 6px;
+      transition: background 160ms ease;
+    }
+
+    .toggle:hover {
+      background: var(--hover);
+    }
+
+    .toggle .chevron {
+      color: var(--faint);
+      font-size: 11px;
+      margin-right: 4px;
+    }
+
+    .notion-tool {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #fff;
+      padding: 10px;
+      margin: 8px 0 8px 20px;
+      box-shadow: rgba(0,0,0,0.02) 0 1px 2px;
+    }
+
+    .notion-tool::before {
+      content: "tool_call";
+      display: block;
+      width: fit-content;
+      margin-bottom: 8px;
+      padding: 2px 6px;
+      border-radius: 9999px;
+      background: rgba(0,0,0,0.045);
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .notion-tool .name {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .file-icon {
+      width: 21px;
+      height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: linear-gradient(180deg, #fff 0%, #f8f7f6 100%);
+      position: relative;
+      flex: none;
+    }
+
+    .file-icon::after {
+      content: "";
+      position: absolute;
+      left: 5px;
+      right: 5px;
+      top: 7px;
+      height: 1px;
+      background: rgba(0,0,0,0.18);
+      box-shadow: 0 5px 0 rgba(0,0,0,0.14), 0 10px 0 rgba(0,0,0,0.10);
+    }
+
+    .notion-tool .desc {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .mini-progress {
+      margin-top: 9px;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+
+    .mini-progress span {
+      display: block;
+      width: 42%;
+      height: 100%;
+      background: var(--blue);
+      border-radius: inherit;
+    }
+
+    .notion-composer {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: rgba(255,255,255,0.98);
+      box-shadow: var(--shadow);
+      padding: 9px;
+    }
+
+    .notion-composer::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      top: -10px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(0,0,0,0.08), transparent);
+    }
+
+    .composer-field {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      min-height: 42px;
+      color: var(--faint);
+      font-size: 12px;
+      line-height: 1.45;
+      padding: 2px 1px 8px;
+    }
+
+    .slash {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 5px;
+      background: rgba(0,0,0,0.045);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+      flex: none;
+    }
+
+    .composer-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--line-soft);
+      padding-top: 8px;
+    }
+
+    .notion-btns {
+      display: flex;
+      gap: 6px;
+    }
+
+    .square-btn {
+      min-width: 27px;
+      height: 27px;
+      border: 1px solid var(--line-soft);
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 8px;
+      color: var(--muted);
+      background: #fff;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .send-square {
+      width: 29px;
+      height: 29px;
+      border-radius: 5px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--blue);
+      font-size: 13px;
+      box-shadow: rgba(0,117,222,0.22) 0 2px 8px;
+    }
+
+    .below {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+    }
+
+    .panel {
+      background: rgba(255,255,255,0.82);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .panel h2 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: -0.35px;
+      line-height: 1.15;
+    }
+
+    .panel > p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .scene-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .scene-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      padding: 12px;
+      background: #fff;
+      min-height: 126px;
+    }
+
+    .scene-card h3 {
+      margin: 0 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      letter-spacing: -0.1px;
+    }
+
+    .scene-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.48;
+    }
+
+    .status-toast {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #fff;
+      box-shadow: var(--shadow);
+      padding: 12px;
+      margin-top: 10px;
+    }
+
+    .status-toast .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .status-toast strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .status-toast span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .settings-list {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .settings-section {
+      padding: 10px 12px 6px;
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15px;
+      background: #fafafa;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .setting-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .setting-row:last-child {
+      border-bottom: 0;
+    }
+
+    .row-icon {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .setting-row strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .setting-row span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .switch {
+      width: 34px;
+      height: 19px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.09);
+      position: relative;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .switch::after {
+      content: "";
+      position: absolute;
+      width: 15px;
+      height: 15px;
+      border-radius: 999px;
+      top: 1px;
+      left: 1px;
+      background: #fff;
+      box-shadow: rgba(0,0,0,0.18) 0 1px 2px;
+    }
+
+    .switch.on {
+      background: var(--blue);
+    }
+
+    .switch.on::after {
+      transform: translateX(15px);
+    }
+
+    .token-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .token-row {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .token-row:last-child {
+      border-bottom: 0;
+    }
+
+    .token-name {
+      color: var(--faint);
+      font-weight: 650;
+      font-size: 12px;
+    }
+
+    .swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .swatch {
+      height: 26px;
+      min-width: 52px;
+      border-radius: 5px;
+      border: 1px solid var(--line);
+      box-shadow: rgba(0,0,0,0.02) 0 1px 2px;
+    }
+
+    .control-map {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .control-table {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 112px 1fr;
+      gap: 14px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .control-row:last-child {
+      border-bottom: 0;
+    }
+
+    .control-row b {
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
+    .control-row span {
+      color: var(--muted);
+    }
+
+    .control-preview {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: linear-gradient(180deg, #fff 0%, #fbfaf9 100%);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      min-height: 360px;
+    }
+
+    .source-note {
+      margin-top: 14px;
+      color: var(--faint);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .neutral-app {
+      max-width: 420px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .neutral-topbar {
+      height: 48px;
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #fff;
+    }
+
+    .neutral-icon-btn {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .neutral-icon-btn:hover {
+      background: var(--hover);
+      border-color: var(--line-soft);
+    }
+
+    .neutral-title {
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: -0.1px;
+    }
+
+    .neutral-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .neutral-content {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .neutral-list-item {
+      display: grid;
+      grid-template-columns: 30px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+      padding: 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .neutral-list-item strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .neutral-list-item span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .neutral-field {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 8px;
+      color: var(--faint);
+      background: #fff;
+    }
+
+    .neutral-sheet {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      background: #fff;
+      box-shadow: rgba(0,0,0,0.025) 0 3px 12px;
+      overflow: hidden;
+    }
+
+    .sheet-head {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .sheet-body {
+      padding: 10px 12px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .impl {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .impl-step {
+      background: rgba(255,255,255,0.82);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      padding: 14px;
+    }
+
+    .impl-step b {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .impl-step span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1120px) {
+      .hero,
+      .compare,
+      .below,
+      .control-map {
+        grid-template-columns: 1fr;
+      }
+
+      .device {
+        max-width: 390px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100vw - 22px, 1480px);
+        padding-top: 20px;
+      }
+
+      .hero {
+        gap: 20px;
+        padding-bottom: 22px;
+      }
+
+      h1 {
+        letter-spacing: -1.2px;
+      }
+
+      .principles,
+      .scene-grid,
+      .impl {
+        grid-template-columns: 1fr;
+      }
+
+      .comparison-card,
+      .panel {
+        padding: 14px;
+        border-radius: 14px;
+      }
+
+      .comparison-head {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow"><span class="dot"></span>AmberAgent UI Direction C</div>
+        <h1>Android 交互骨架，Notion 中性外观。</h1>
+        <p>
+          这版把 AmberAgent 从“聊天 App”改写成“Agent 工作区”：消息是文档块，工具调用是数据库状态行，
+          reasoning 是可折叠的工作日志，设置页像 workspace index。底层仍可用 Android 标准控件语义，
+          但视觉不走 iOS，也不走 Google Material。
+        </p>
+      </div>
+      <div class="principles" aria-label="Design principles">
+        <div class="principle">
+          <strong>Warm paper canvas</strong>
+          <span>白色页面 + 暖灰底，不靠 Material 动态色，也不靠 iOS 毛玻璃。</span>
+        </div>
+        <div class="principle">
+          <strong>Blocks over bubbles</strong>
+          <span>用户输入像引用块，Agent 输出像正文段落，减少聊天泡泡的即时通讯感。</span>
+        </div>
+        <div class="principle">
+          <strong>Whisper borders</strong>
+          <span>1px 轻分割线、低透明阴影，强调结构而不是控件存在感。</span>
+        </div>
+        <div class="principle">
+          <strong>Blue only when needed</strong>
+          <span>蓝色只用于主操作、运行状态和链接，避免彩色控件堆叠。</span>
+        </div>
+        <div class="principle">
+          <strong>Android semantics</strong>
+          <span>保留 Scaffold、TopBar、LazyColumn、ListItem、TextField、Switch、Sheet 的交互预期。</span>
+        </div>
+        <div class="principle">
+          <strong>Neutral skin</strong>
+          <span>自定义轻边框和小圆角，不使用 Material 动态色、tonal 层级和 Google 式胶囊控件。</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="compare" aria-label="Before and after comparison">
+      <article class="comparison-card">
+        <div class="comparison-head">
+          <div>
+            <h2>现在：移动聊天界面</h2>
+            <p>以气泡、圆形按钮、底部 composer 为中心，控件更容易看出移动平台和 Material 结构。</p>
+          </div>
+          <span class="tag">Current</span>
+        </div>
+        <div class="device-wrap">
+          <div class="device">
+            <div class="screen now">
+              <div class="generic-status">
+                <span>09:41</span>
+                <span class="tiny-bars"><i></i><i></i><i></i><i></i></span>
+              </div>
+              <div class="now-top">
+                <div class="title">AmberAgent</div>
+                <div class="subtitle">Qwen3-Coder · 流式回复中</div>
+              </div>
+              <div class="now-scroll">
+                <div class="m3-bubble user">帮我检查这个仓库最近 UI 改动，有没有明显风险。</div>
+                <div class="m3-bubble assistant">我会先读取 handoff 和关键 UI 文件，然后给出一个分阶段的风险判断。</div>
+                <div class="m3-tool">
+                  <div class="row">
+                    <strong>执行工具</strong>
+                    <span class="pill blue">运行中</span>
+                  </div>
+                  <div style="color: var(--muted); margin-top: 6px;">rg / sed · ChatMessage.kt</div>
+                  <div class="progress"><span></span></div>
+                </div>
+                <div class="m3-bubble assistant">初步风险点集中在消息分组、底部 padding 和工具卡运行态。</div>
+              </div>
+              <div class="now-composer">
+                <div class="input">Ask AmberAgent...</div>
+                <div class="button-row">
+                  <div class="rounds">
+                    <span class="round">+</span>
+                    <span class="round">M</span>
+                    <span class="round">R</span>
+                  </div>
+                  <span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="comparison-card">
+        <div class="comparison-head">
+          <div>
+            <h2>重构后：Notion Workspace Log</h2>
+            <p>把聊天流改成可扫读的文档工作日志：块级结构、轻量状态、可折叠 reasoning 和数据库式工具行。</p>
+          </div>
+          <span class="tag blue">Proposed</span>
+        </div>
+        <div class="device-wrap">
+          <div class="device workspace-device">
+            <div class="screen">
+              <div class="generic-status">
+                <span>Local workspace</span>
+                <span class="tiny-bars"><i></i><i></i><i></i><i></i></span>
+              </div>
+              <div class="notion-top">
+                <div class="crumbs">
+                  <span class="page-icon">A</span>
+                  <span>AmberAgent</span>
+                  <span>/</span>
+                  <span>工作日志</span>
+                </div>
+                <div class="title">UI 重构审计</div>
+                <div class="subtitle">本地模型 · 工具执行受控</div>
+                <div class="workspace-tabs">
+                  <span class="workspace-tab active">Chat log</span>
+                  <span class="workspace-tab">Tools</span>
+                  <span class="workspace-tab">Files</span>
+                </div>
+              </div>
+              <div class="notion-scroll">
+                <div class="doc-title"><span class="page-icon">#</span><span>Chat timeline audit</span></div>
+                <div class="page-meta">
+                  <span class="pill blue"><span class="dot"></span>工具</span>
+                  <span class="pill green">3 checks passed</span>
+                  <span class="pill">branch · experiment</span>
+                </div>
+                <div class="properties">
+                  <div class="property-row">
+                    <span class="property-key">Status</span>
+                    <span class="property-value">运行中 · compile gate required</span>
+                  </div>
+                  <div class="property-row">
+                    <span class="property-key">Model</span>
+                    <span class="property-value">Qwen3-Coder · local workspace</span>
+                  </div>
+                  <div class="property-row">
+                    <span class="property-key">Scope</span>
+                    <span class="property-value">ChatMessage / Composer / Settings</span>
+                  </div>
+                </div>
+                <div class="block user">帮我检查这个仓库最近 UI 改动，有没有明显风险。</div>
+                <div class="block">
+                  <h3>审计顺序</h3>
+                  我会先读取 handoff 和关键 UI 文件，再把风险拆成消息渲染、composer 边界和状态通知三部分。
+                </div>
+                <div class="block toggle"><span class="chevron">▾</span><strong>Reasoning log</strong> · 空 reasoning marker 不能切断可见文本。</div>
+                <div class="notion-tool">
+                  <div class="row">
+                    <div class="name"><span class="file-icon"></span><span>ChatMessage.kt</span></div>
+                    <span class="pill blue">读取中</span>
+                  </div>
+                  <div class="desc">检查 MarkdownBlock 外层 Surface；不进入 Markdown 内部。</div>
+                  <div class="mini-progress"><span></span></div>
+                </div>
+              </div>
+              <div class="notion-composer">
+                <div class="composer-field">
+                  <span class="slash">/</span>
+                  <span>输入下一条指令，或插入文件、工具、模型上下文...</span>
+                </div>
+                <div class="composer-actions">
+                  <div class="notion-btns">
+                    <span class="square-btn">File</span>
+                    <span class="square-btn">Model</span>
+                    <span class="square-btn">MCP</span>
+                  </div>
+                  <span class="send-square">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="below">
+      <article class="panel">
+        <h2>AmberAgent 场景落点</h2>
+        <p>不是把 Notion 网页照搬到手机里，而是提炼它的工作区语法：块、属性、状态、轻分割和低饱和度。</p>
+        <div class="scene-grid">
+          <div class="scene-card">
+            <h3><span class="page-icon">1</span>聊天流</h3>
+            <p>用户消息改成引用块；Agent 正文是文档段落；时间线靠块间距和左侧弱标记组织。</p>
+          </div>
+          <div class="scene-card">
+            <h3><span class="page-icon">2</span>工具调用</h3>
+            <p>工具卡像一条数据库记录：文件/命令名、状态 pill、短说明、细进度条。</p>
+          </div>
+          <div class="scene-card">
+            <h3><span class="page-icon">3</span>Live Status</h3>
+            <p>通知文案继续短，但语气像 workspace activity：动作、对象、约束，不露敏感命令。</p>
+            <div class="status-toast">
+              <div class="row">
+                <div>
+                  <strong>AmberAgent 正在工作</strong>
+                  <span>读取 UI 文件 · 仅审计当前分支</span>
+                </div>
+                <span class="pill blue">工具</span>
+              </div>
+            </div>
+          </div>
+          <div class="scene-card">
+            <h3><span class="page-icon">4</span>底部 Composer</h3>
+            <p>从“聊天输入框”收敛成 block insert 区：左侧 slash、底部属性按钮、右侧小蓝发送。</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <h2>设置首页像 Workspace Settings</h2>
+        <p>分组更像 Notion 左侧设置页：轻图标、低边框、switch 小而明确，弱化平台默认控件感。</p>
+        <div class="settings-list">
+          <div class="settings-section">常用</div>
+          <div class="setting-row">
+            <span class="row-icon">Aa</span>
+            <div><strong>外观与显示</strong><span>主题、字体密度、Markdown 展示</span></div>
+            <span class="pill">打开</span>
+          </div>
+          <div class="setting-row">
+            <span class="row-icon">M</span>
+            <div><strong>默认模型</strong><span>Qwen3-Coder · reasoning 默认关闭</span></div>
+            <span class="pill blue">已选</span>
+          </div>
+          <div class="settings-section">Agent 运行</div>
+          <div class="setting-row">
+            <span class="row-icon">T</span>
+            <div><strong>工具权限</strong><span>审批、终端、Sandbox、文件访问</span></div>
+            <span class="switch on"></span>
+          </div>
+          <div class="setting-row">
+            <span class="row-icon">S</span>
+            <div><strong>Sandbox</strong><span>Workspace peek 与安全边界</span></div>
+            <span class="pill orange">受控</span>
+          </div>
+          <div class="settings-section">模型与服务</div>
+          <div class="setting-row">
+            <span class="row-icon">P</span>
+            <div><strong>Provider</strong><span>OpenAI compatible · BYOK</span></div>
+            <span class="pill green">正常</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="control-map">
+      <article class="panel">
+        <h2>Android 控件语义怎么保留</h2>
+        <p>这不是做一个 WebView 皮肤，而是在 Compose 里继续使用稳定、可访问的 Android 交互结构，只把视觉 token 换成 Notion-like 中性系统。</p>
+        <div class="control-table">
+          <div class="control-row">
+            <b>Top app bar</b>
+            <span>仍然有返回、标题、搜索、更多；视觉改为 48dp 平直工具栏、轻分割线、无 Material 大色块。</span>
+          </div>
+          <div class="control-row">
+            <b>LazyColumn</b>
+            <span>继续承担长聊天性能；item 从气泡改成文档块、引用块、工具记录行。</span>
+          </div>
+          <div class="control-row">
+            <b>TextField</b>
+            <span>保留输入、焦点、IME、附件逻辑；外观改成 1px 边框 block insert 区。</span>
+          </div>
+          <div class="control-row">
+            <b>ListItem / Switch</b>
+            <span>设置页仍是 Android 列表语义；图标容器、switch、trailing 状态都做成 workspace row。</span>
+          </div>
+          <div class="control-row">
+            <b>Sheet / Dialog</b>
+            <span>保留底部弹层和审批流程；视觉用白纸面板、短标题、轻分割，不做 iOS 半透明抽屉。</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <h2>标准控件的中性皮肤</h2>
+        <p>下面这组控件可以直接映射到 Android 端：不是 Material 默认样式，也不是 iOS 仿制，而是 Notion workspace 的功能件。</p>
+        <div class="control-preview">
+          <div class="neutral-app">
+            <div class="neutral-topbar">
+              <span class="neutral-icon-btn">‹</span>
+              <span class="neutral-title">Agent Settings</span>
+              <span class="neutral-actions">
+                <span class="neutral-icon-btn">⌕</span>
+                <span class="neutral-icon-btn">···</span>
+              </span>
+            </div>
+            <div class="neutral-content">
+              <div class="neutral-list-item">
+                <span class="row-icon">M</span>
+                <div><strong>默认模型</strong><span>Qwen3-Coder · 本地工作区</span></div>
+                <span class="pill blue">已选</span>
+              </div>
+              <div class="neutral-list-item">
+                <span class="row-icon">T</span>
+                <div><strong>工具执行</strong><span>审批后运行终端和文件操作</span></div>
+                <span class="switch on"></span>
+              </div>
+              <div class="neutral-field">
+                <span class="slash">/</span>
+                <span>写一条指令，或插入上下文块...</span>
+                <span class="send-square">↑</span>
+              </div>
+              <div class="neutral-sheet">
+                <div class="sheet-head">
+                  <span>Tool approval</span>
+                  <span class="pill orange">等待</span>
+                </div>
+                <div class="sheet-body">
+                  执行 <strong>compileDebugKotlin</strong>。命令内容收起展示，用户可展开查看完整参数。
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="impl" aria-label="Implementation direction">
+      <div class="impl-step">
+        <b>Phase A · 原型评审</b>
+        <span>先用这份 HTML 确认是否从 M3 视觉转为 Android 语义 + Notion 中性皮肤。</span>
+      </div>
+      <div class="impl-step">
+        <b>Phase B · Chat timeline</b>
+        <span>只改 MarkdownBlock 外层和周边块结构，不动 Markdown 内部和流式分组语义。</span>
+      </div>
+      <div class="impl-step">
+        <b>Phase C · Composer & Tools</b>
+        <span>输入区、附件 chip、工具状态卡统一为 4/8/12px 半径和 whisper border。</span>
+      </div>
+      <div class="impl-step">
+        <b>Phase D · Settings & APK</b>
+        <span>设置首页转为 workspace index；编译、回归测试、真机 smoke 后再交 APK。</span>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 24px;">
+      <h2>Design Tokens</h2>
+      <p>这些 token 可以直接映射到 Compose 里的局部色值、shape、border 和 elevation，不需要改 Provider、Tool、Room 或 Markdown runtime。</p>
+      <div class="token-list">
+        <div class="token-row">
+          <span class="token-name">Palette</span>
+          <span class="swatches">
+            <span class="swatch" style="background:#ffffff"></span>
+            <span class="swatch" style="background:#f6f5f4"></span>
+            <span class="swatch" style="background:#31302e"></span>
+            <span class="swatch" style="background:#615d59"></span>
+            <span class="swatch" style="background:#0075de"></span>
+          </span>
+        </div>
+        <div class="token-row">
+          <span class="token-name">Radius</span>
+          <span>4px buttons/input · 8px inline containers · 12px cards · 16px featured panels · 9999px status pills</span>
+        </div>
+        <div class="token-row">
+          <span class="token-name">Border</span>
+          <span>1px solid rgba(0,0,0,0.10) as default divider; avoid thick outline and high-elevation Material surfaces</span>
+        </div>
+        <div class="token-row">
+          <span class="token-name">Typography</span>
+          <span>System sans fallback; 400 body, 500 UI, 650 status, 750 title; no platform display font dependency</span>
+        </div>
+      </div>
+      <div class="source-note">
+        Style basis: borrowed as design principles from OpenDesign's Notion-inspired system: warm neutrals, near-black text, whisper borders, low-opacity layered shadows, small-radius controls, and sparse blue accents. AmberAgent keeps its own product structure and assets.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

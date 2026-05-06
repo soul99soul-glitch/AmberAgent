@@ -32,7 +32,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -103,9 +105,11 @@ import me.rerere.rikkahub.ui.pages.setting.SettingAgentExecutionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentPermissionsPage
+import me.rerere.rikkahub.ui.pages.setting.SettingCronTasksPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalICloudPage
+import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalModelCouncilPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalOfficeProPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalSubAgentPage
@@ -139,6 +143,7 @@ class RouteActivity : ComponentActivity() {
     private val okHttpClient by inject<OkHttpClient>()
     private val settingsStore by inject<SettingsStore>()
     private var navStack: MutableList<NavKey>? = null
+    private var newIntentHandler: ((Intent) -> Unit)? = null
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
@@ -196,18 +201,18 @@ class RouteActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ShareHandler(backStack: MutableList<NavKey>) {
-        val shareAction = remember(intent) { intent?.action }
-        val shareText = remember(intent) { intent?.extractSharedText().orEmpty() }
-        val streamUris = remember(intent) {
-            when (intent?.action) {
-                Intent.ACTION_SEND -> intent?.extractSingleStreamUri().orEmpty()
-                Intent.ACTION_SEND_MULTIPLE -> intent?.extractMultipleStreamUris().orEmpty()
+    private fun ShareHandler(backStack: MutableList<NavKey>, currentIntent: Intent?) {
+        val shareAction = remember(currentIntent) { currentIntent?.action }
+        val shareText = remember(currentIntent) { currentIntent?.extractSharedText().orEmpty() }
+        val streamUris = remember(currentIntent) {
+            when (currentIntent?.action) {
+                Intent.ACTION_SEND -> currentIntent.extractSingleStreamUri().orEmpty()
+                Intent.ACTION_SEND_MULTIPLE -> currentIntent.extractMultipleStreamUris().orEmpty()
                 else -> emptyList()
             }
         }
 
-        LaunchedEffect(backStack, shareAction, shareText, streamUris) {
+        LaunchedEffect(shareAction, shareText, streamUris) {
             when (shareAction) {
                 Intent.ACTION_SEND,
                 Intent.ACTION_SEND_MULTIPLE -> {
@@ -223,10 +228,13 @@ class RouteActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // Navigate to the chat screen if a conversation ID is provided
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
-        }    }
+        }
+        newIntentHandler?.invoke(intent)
+    }
 
     @Composable
     fun AppRoutes() {
@@ -261,9 +269,13 @@ class RouteActivity : ComponentActivity() {
         }
 
         val backStack = rememberNavBackStack(startScreen)
-        SideEffect { this@RouteActivity.navStack = backStack }
+        var currentIntent by remember { mutableStateOf(intent) }
+        SideEffect {
+            this@RouteActivity.navStack = backStack
+            this@RouteActivity.newIntentHandler = { currentIntent = it }
+        }
 
-        ShareHandler(backStack)
+        ShareHandler(backStack, currentIntent)
 
         SharedTransitionLayout {
             CompositionLocalProvider(
@@ -425,6 +437,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingAgentExtensionsPage()
                             }
 
+                            entry<Screen.SettingCronTasks> {
+                                SettingCronTasksPage()
+                            }
+
                             entry<Screen.SettingAgentExecution> {
                                 SettingAgentExecutionPage()
                             }
@@ -471,6 +487,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingExperimentalSubAgent> {
                                 SettingExperimentalSubAgentPage()
+                            }
+
+                            entry<Screen.SettingExperimentalModelCouncil> {
+                                SettingExperimentalModelCouncilPage()
                             }
 
                             entry<Screen.SettingSystemAccess> {
@@ -671,6 +691,9 @@ sealed interface Screen : NavKey {
     data object SettingAgentExtensions : Screen
 
     @Serializable
+    data object SettingCronTasks : Screen
+
+    @Serializable
     data object SettingAgentExecution : Screen
 
     @Serializable
@@ -705,6 +728,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingExperimentalSubAgent : Screen
+
+    @Serializable
+    data object SettingExperimentalModelCouncil : Screen
 
     @Serializable
     data object SettingSystemAccess : Screen

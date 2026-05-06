@@ -18,14 +18,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -35,14 +39,18 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.system.AgentPermissionCapability
 import me.rerere.rikkahub.data.agent.system.AgentPermissionRisk
 import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupScope
@@ -53,10 +61,17 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingSystemAccessPage(
     permissionBroker: AgentPermissionBroker = koinInject(),
+    settingsStore: SettingsStore = koinInject(),
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val externalAccess = settings.agentRuntime.externalFileAccess
+    var externalRootInput by remember(externalAccess.roots) {
+        mutableStateOf(externalAccess.roots.firstOrNull().orEmpty())
+    }
     var refreshToken by remember { mutableIntStateOf(0) }
     val runtimePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -192,6 +207,103 @@ fun SettingSystemAccessPage(
                                 }
                             )
                         }
+                }
+            }
+
+            item("external_file_access") {
+                CardGroup(title = { Text("外部文件访问范围") }) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        headlineContent = { Text("全文件访问 allowlist") },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("授权后也只允许 Agent 访问这里列出的绝对路径前缀。写入、删除和覆盖仍会二次确认。")
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = if (externalAccess.enabled) "已启用" else "未启用",
+                                        color = if (externalAccess.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    )
+                                    Text("根目录 ${externalAccess.roots.size} 个")
+                                }
+                                OutlinedTextField(
+                                    value = externalRootInput,
+                                    onValueChange = { externalRootInput = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    label = { Text("允许访问的绝对路径") },
+                                    supportingText = { Text("例如 /storage/emulated/0/Download 或 /sdcard/Documents") },
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            val root = externalRootInput.trim()
+                                            scope.launch {
+                                                settingsStore.update { current ->
+                                                    current.copy(
+                                                        agentRuntime = current.agentRuntime.copy(
+                                                            externalFileAccess = current.agentRuntime.externalFileAccess.copy(
+                                                                enabled = true,
+                                                                roots = (current.agentRuntime.externalFileAccess.roots + root)
+                                                                    .map { it.trim() }
+                                                                    .filter { it.isNotBlank() }
+                                                                    .distinct(),
+                                                            )
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        enabled = externalRootInput.isNotBlank(),
+                                    ) {
+                                        Text("加入并启用", maxLines = 1)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            scope.launch {
+                                                settingsStore.update { current ->
+                                                    current.copy(
+                                                        agentRuntime = current.agentRuntime.copy(
+                                                            externalFileAccess = current.agentRuntime.externalFileAccess.copy(
+                                                                enabled = false,
+                                                                roots = emptyList(),
+                                                            )
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        },
+                                    ) {
+                                        Text("清空", maxLines = 1)
+                                    }
+                                }
+                                if (externalAccess.roots.isNotEmpty()) {
+                                    Text(externalAccess.roots.joinToString("\n"))
+                                }
+                            }
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = externalAccess.enabled,
+                                onCheckedChange = { enabled ->
+                                    scope.launch {
+                                        settingsStore.update { current ->
+                                            current.copy(
+                                                agentRuntime = current.agentRuntime.copy(
+                                                    externalFileAccess = current.agentRuntime.externalFileAccess.copy(enabled = enabled)
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        },
+                    )
                 }
             }
         }

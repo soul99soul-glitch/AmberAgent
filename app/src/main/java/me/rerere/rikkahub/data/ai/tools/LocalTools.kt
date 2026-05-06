@@ -20,8 +20,10 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
+import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
@@ -91,10 +93,12 @@ class LocalTools(
     private val screenAutomationTools: ScreenAutomationTools,
     private val systemAccessTools: SystemAccessTools,
     private val workspaceArtifactTools: WorkspaceArtifactTools,
+    private val externalFileTools: ExternalFileTools,
     private val permissionBroker: AgentPermissionBroker,
     private val webViewOperationStore: WebViewOperationStore,
     private val iCloudDriveTools: ICloudDriveTools,
     private val feishuOfficeTools: FeishuOfficeTools,
+    private val agentCronTools: AgentCronTools,
     private val settingsStore: SettingsStore,
 ) {
     val javascriptTool by lazy {
@@ -622,7 +626,7 @@ class LocalTools(
                 properties = buildJsonObject {
                     put("category", buildJsonObject {
                         put("type", "string")
-                        put("description", "Optional category filter: workspace, cloud, terminal, web, webview, screen, system, memory, context, skill, mcp, utility.")
+                        put("description", "Optional category filter: workspace, external_file, cloud, office, terminal, web, webview, screen, system, memory, context, cron, subagent, model_council, skill, mcp, utility.")
                     })
                     put("query", buildJsonObject {
                         put("type", "string")
@@ -677,7 +681,7 @@ class LocalTools(
                                     put("needs_approval", metadata.needsApproval)
                                     put("allows_auto_approval", metadata.autoApprovable)
                                     put("output_budget_chars", metadata.outputBudgetChars)
-                                    put("risk", capabilities.maxByOrNull { it.risk.ordinal }?.risk?.name ?: if (metadata.needsApproval) "Sensitive" else "Normal")
+                                    put("risk", capabilities.maxByOrNull { it.risk.ordinal }?.risk?.name ?: metadata.risk.name)
                                     put("required_permissions", buildJsonArray {
                                         capabilities.forEach { capability ->
                                             add(
@@ -724,7 +728,11 @@ class LocalTools(
                 val id = input.jsonObject["capability_id"]?.jsonPrimitive?.contentOrNull
                 val includeHowToGrant = input.jsonObject["include_how_to_grant"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
                 val capabilities = permissionBroker.capabilities.filter { id == null || it.id == id }
+                val allFilesCapability = permissionBroker.getCapability("manage_all_files")
                 val payload = buildJsonObject {
+                    put("all_files_access_declared", permissionBroker.getStatus(allFilesCapability) != me.rerere.rikkahub.data.agent.system.AgentPermissionStatus.Unsupported)
+                    put("all_files_access_granted", permissionBroker.getStatus(allFilesCapability) == me.rerere.rikkahub.data.agent.system.AgentPermissionStatus.Granted)
+                    put("all_files_access_manage_intent_available", permissionBroker.createSpecialAccessIntent("manage_all_files") != null)
                     put(
                         "capabilities",
                         buildJsonArray {
@@ -811,6 +819,7 @@ class LocalTools(
         if (options.contains(LocalToolOption.WorkspaceFiles)) {
             tools.addAll(workspaceTools.getTools())
             tools.addAll(workspaceArtifactTools.getTools())
+            tools.addAll(externalFileTools.getTools())
         }
         if (options.contains(LocalToolOption.Terminal)) {
             tools.addAll(terminalTools.getTools())
@@ -837,6 +846,7 @@ class LocalTools(
             tools.addAll(iCloudDriveTools.getTools())
         }
         tools.add(permissionsStatusTool)
+        tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
         return tools
     }

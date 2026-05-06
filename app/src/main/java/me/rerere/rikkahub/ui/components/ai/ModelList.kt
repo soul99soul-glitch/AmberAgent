@@ -58,6 +58,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastFilter
 import androidx.compose.ui.util.fastForEach
@@ -98,12 +99,6 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 
-private val AmberAgentBuiltInProviderId = Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce")
-
-private fun ProviderSetting.isVisibleInModelPicker(): Boolean {
-    return !(builtIn && id == AmberAgentBuiltInProviderId)
-}
-
 @Composable
 fun ModelSelector(
     modelId: Uuid?,
@@ -117,9 +112,7 @@ fun ModelSelector(
 ) {
     var popup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val visibleProviders = remember(providers) {
-        providers.fastFilter { it.isVisibleInModelPicker() }
-    }
+    val visibleProviders = providers
     val model = visibleProviders.findModelById(modelId ?: Uuid.random())
 
     if (!onlyIcon) {
@@ -145,7 +138,7 @@ fun ModelSelector(
                         text = model?.compactDisplayName() ?: stringResource(R.string.model_list_select_model),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                     )
                 }
             }
@@ -254,8 +247,23 @@ fun ModelSelector(
 private fun Model.compactDisplayName(): String {
     val raw = displayName.ifBlank { modelId }.trim()
     if (raw.isBlank()) return raw
-    return raw.split('-', '_', ' ')
+    val tokens = raw.split('-', '_', ' ')
         .filter { it.isNotBlank() }
+    val displayTokens = buildList {
+        var index = 0
+        while (index < tokens.size) {
+            val token = tokens[index]
+            val next = tokens.getOrNull(index + 1)
+            if (token.all { it.isDigit() } && next?.all { it.isDigit() } == true) {
+                add("$token.$next")
+                index += 2
+            } else {
+                add(token)
+                index += 1
+            }
+        }
+    }
+    return displayTokens
         .joinToString(" ") { token ->
             when {
                 token.equals("deepseek", ignoreCase = true) -> "DeepSeek"
@@ -287,7 +295,6 @@ private fun ColumnScope.ModelList(
         val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
         if (model.type != modelType) return@mapNotNull null
         val provider = model.findProvider(providers = providers, checkOverwrite = false) ?: return@mapNotNull null
-        if (!provider.isVisibleInModelPicker()) return@mapNotNull null
         model to provider
     }
 

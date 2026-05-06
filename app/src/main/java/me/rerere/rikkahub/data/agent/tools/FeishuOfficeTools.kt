@@ -20,8 +20,12 @@ import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementPlanner
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementState
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeContextBundle
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeDashboardSummary
+import me.rerere.rikkahub.data.agent.office.FeishuDocumentWarroomTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeReportResult
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeScreenSnapshot
+import me.rerere.rikkahub.data.agent.office.FeishuWorkDraft
+import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
+import me.rerere.rikkahub.data.agent.office.FeishuWorkReport
 
 class FeishuOfficeTools(
     private val manager: FeishuOfficeEnhancementManager,
@@ -30,6 +34,18 @@ class FeishuOfficeTools(
     fun getTools(): List<Tool> = listOf(
         statusTool,
         dashboardTool,
+        dailyRadarTool,
+        projectBriefingTool,
+        documentWarroomTool,
+        openItemsRadarTool,
+        meetingClosureTool,
+        createTaskDraftTool,
+        createBaseRecordDraftTool,
+        replyDraftTool,
+        projectListTool,
+        projectUpdateTool,
+        projectContextTool,
+        projectReportTool,
         captureContextTool,
         makeReportTool,
         openTool,
@@ -100,6 +116,7 @@ class FeishuOfficeTools(
                 }
             )
         },
+        needsApproval = true,
         execute = { input ->
             trackOfficeTool("officepro_capture_context", "捕获飞书办公上下文", input.safePreview()) {
                 ensureEnabled()
@@ -122,6 +139,522 @@ class FeishuOfficeTools(
                     put("template", template.wireName)
                     putBundle(bundle, includeScreenTree = false)
                     put("digest", digest)
+                }
+            }
+        },
+    )
+
+    private val dailyRadarTool = Tool(
+        name = "officepro_daily_radar",
+        description = "Generate a read-first daily Feishu radar from 小米办公 Pro notifications, usage signals, optional current screen, workspace docs, and Feishu MCP hints. Returns a Markdown draft and suggested /workspace path; it does not write files.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("workspace_paths", stringArrayProp("Optional /workspace documents to include."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("include_mcp_sources", booleanProp("Include Feishu MCP source hints. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                }
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_daily_radar", "今日飞书雷达", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = input.boolean("include_mcp_sources") ?: dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildDailyRadarReport(
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkReport(report)
+                }
+            }
+        },
+    )
+
+    private val projectBriefingTool = Tool(
+        name = "officepro_project_briefing",
+        description = "Generate a 10-minute product-market briefing for Q 代, MiClaw, Lhasa, AI 办公, or a custom project. Returns a Markdown draft and suggested /workspace path; it does not write files.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("project", stringProp("Project name, for example Q 代, MiClaw, Lhasa, AI 办公."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace documents to include."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("include_mcp_sources", booleanProp("Include Feishu MCP source hints. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                },
+                required = listOf("project"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_project_briefing", "项目 Briefing", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = input.boolean("include_mcp_sources") ?: dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildProjectBriefingReport(
+                    project = input.requiredString("project"),
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkReport(report)
+                }
+            }
+        },
+    )
+
+    private val documentWarroomTool = Tool(
+        name = "officepro_document_warroom",
+        description = "Build a document war room draft from visible 小米办公 Pro screen, workspace docs, Feishu MCP hints, and optional Model Council guidance. Returns structured Markdown; it does not write files.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("template", enumProp("Document analysis template.", FeishuOfficeAnalysisTemplate.entries.map { it.wireName }))
+                    put("warroom_template", enumProp("V5 document war room template. Defaults from template for compatibility.", FeishuDocumentWarroomTemplate.entries.map { it.wireName }))
+                    put("workspace_paths", stringArrayProp("Optional /workspace documents to include."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("include_mcp_sources", booleanProp("Include Feishu MCP source hints. Defaults to Work Dashboard setting."))
+                    put("include_model_council", booleanProp("Add Model Council follow-up guidance. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                }
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_document_warroom", "文档作战室", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val template = FeishuOfficeAnalysisTemplate.fromWireName(input.string("template"))
+                val warroomTemplate = input.string("warroom_template")
+                    ?.let { FeishuDocumentWarroomTemplate.fromWireName(it) }
+                    ?: FeishuDocumentWarroomTemplate.fromAnalysisTemplate(template)
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = input.boolean("include_mcp_sources") ?: dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildDocumentWarroomReport(
+                    template = template,
+                    bundle = bundle,
+                    includeModelCouncil = input.boolean("include_model_council") ?: dashboard.includeModelCouncil,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                    warroomTemplate = warroomTemplate,
+                )
+                textJson {
+                    putState(bundle.state)
+                    put("template", template.wireName)
+                    put("warroom_template", warroomTemplate.wireName)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkReport(report)
+                }
+            }
+        },
+    )
+
+    private val openItemsRadarTool = Tool(
+        name = "officepro_open_items_radar",
+        description = "Generate an open-items radar for Feishu/OfficePro work: unresolved issues, TBDs, risks, owner/deadline gaps, and draft landing actions. It does not write Feishu.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("project", stringProp("Optional project name or keyword."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace documents to include."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("include_mcp_sources", booleanProp("Include Feishu MCP source hints. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                }
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_open_items_radar", "遗留问题雷达", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = input.boolean("include_mcp_sources") ?: dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildOpenItemsRadarReport(
+                    project = input.string("project"),
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkReport(report)
+                }
+            }
+        },
+    )
+
+    private val meetingClosureTool = Tool(
+        name = "officepro_meeting_closure",
+        description = "Generate a meeting closure draft from OfficePro signals, workspace docs, and Feishu MCP hints: decisions, owners, deadlines, risks, and follow-up wording. It does not write Feishu.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("meeting_keyword", stringProp("Meeting title, keyword, or topic."))
+                    put("date", stringProp("Optional date or time range label."))
+                    put("workspace_paths", stringArrayProp("Optional meeting notes, minutes, docs, or exported files from /workspace."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("include_mcp_sources", booleanProp("Include Feishu MCP source hints. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                }
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_meeting_closure", "会议闭环", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = input.boolean("include_mcp_sources") ?: dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildMeetingClosureReport(
+                    meetingKeyword = input.string("meeting_keyword"),
+                    dateLabel = input.string("date"),
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkReport(report)
+                }
+            }
+        },
+    )
+
+    private val createTaskDraftTool = Tool(
+        name = "officepro_create_task_draft",
+        description = "Create a Feishu task draft JSON/Markdown from current OfficePro context. It does not call Feishu MCP or create a real task.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("title", stringProp("Task title."))
+                    put("owner", stringProp("Optional owner or assignee."))
+                    put("due", stringProp("Optional due date or deadline."))
+                    put("project", stringProp("Optional project name."))
+                    put("source_ref", stringProp("Optional source document, meeting, or chat reference."))
+                    put("details", stringProp("Optional task details or acceptance criteria."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace sources to include."))
+                    put("max_chars", integerProp("Maximum draft characters. Defaults to Work Dashboard setting."))
+                },
+                required = listOf("title"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_create_task_draft", "飞书任务草稿", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = false,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = false,
+                    includeMcpHints = dashboard.includeMcpSources,
+                )
+                val draft = FeishuOfficeEnhancementPlanner.buildTaskDraft(
+                    title = input.requiredString("title"),
+                    owner = input.string("owner"),
+                    due = input.string("due"),
+                    project = input.string("project"),
+                    sourceRef = input.string("source_ref"),
+                    details = input.string("details"),
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putWorkDraft(draft)
+                }
+            }
+        },
+    )
+
+    private val createBaseRecordDraftTool = Tool(
+        name = "officepro_create_base_record_draft",
+        description = "Create a Feishu Base record draft JSON/Markdown from current OfficePro context. It does not call Feishu MCP or write a real Base record.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("project", stringProp("Optional project name."))
+                    put("base_name", stringProp("Optional target Base name."))
+                    put("table_name", stringProp("Optional target table name."))
+                    put("record_type", stringProp("Record type, for example open_item, risk, selling_point, competitor."))
+                    put("fields_json", stringProp("Draft fields as JSON text."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace sources to include."))
+                    put("max_chars", integerProp("Maximum draft characters. Defaults to Work Dashboard setting."))
+                }
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_create_base_record_draft", "飞书 Base 记录草稿", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = false,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = false,
+                    includeMcpHints = dashboard.includeMcpSources,
+                )
+                val draft = FeishuOfficeEnhancementPlanner.buildBaseRecordDraft(
+                    project = input.string("project"),
+                    baseName = input.string("base_name"),
+                    tableName = input.string("table_name"),
+                    recordType = input.string("record_type"),
+                    fieldsJson = input.string("fields_json"),
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putWorkDraft(draft)
+                }
+            }
+        },
+    )
+
+    private val replyDraftTool = Tool(
+        name = "officepro_reply_draft",
+        description = "Create a Feishu comment/chat reply draft from OfficePro context. It does not send, comment, or write back.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("objective", stringProp("Reply objective or message intent."))
+                    put("audience", stringProp("Optional audience, person, group, or reviewer."))
+                    put("tone", stringProp("Optional tone, for example concise, firm, friendly, boss-review-ready."))
+                    put("source_ref", stringProp("Optional source document, meeting, or chat reference."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace sources to include."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum draft characters. Defaults to Work Dashboard setting."))
+                },
+                required = listOf("objective"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_reply_draft", "飞书回复草稿", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = false,
+                    includeMcpHints = dashboard.includeMcpSources,
+                )
+                val draft = FeishuOfficeEnhancementPlanner.buildReplyDraft(
+                    audience = input.string("audience"),
+                    tone = input.string("tone"),
+                    objective = input.requiredString("objective"),
+                    sourceRef = input.string("source_ref"),
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkDraft(draft)
+                }
+            }
+        },
+    )
+
+    private val projectListTool = Tool(
+        name = "officepro_project_list",
+        description = "List local Feishu WorkOS project knowledge packs, including Q 代, MiClaw, Lhasa, AI 办公, and user-defined projects.",
+        parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
+        execute = {
+            textJson {
+                putState(manager.state.value)
+                putProjects(manager.state.value.workDashboard.projects)
+            }
+        },
+    )
+
+    private val projectUpdateTool = Tool(
+        name = "officepro_project_update",
+        description = "Update a local Feishu WorkOS project knowledge pack. This mutates AmberAgent local settings only; it does not write Feishu.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("id", stringProp("Optional stable project id."))
+                    put("name", stringProp("Project name, for example Q 代, MiClaw, Lhasa."))
+                    put("keywords", stringArrayProp("Project keywords."))
+                    put("current_goal", stringProp("Current project goal."))
+                    put("core_selling_points", stringArrayProp("Core selling points to remember."))
+                    put("risks", stringArrayProp("Known risks."))
+                    put("open_questions", stringArrayProp("Open questions or TBDs."))
+                    put("key_decisions", stringArrayProp("Decisions already made."))
+                    put("recent_changes", stringArrayProp("Recent changes."))
+                    put("source_refs", stringArrayProp("Source document, meeting, or report references."))
+                },
+                required = listOf("name"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_project_update", "更新项目知识包", input.safePreview()) {
+                ensureEnabled()
+                val dashboard = manager.state.value.workDashboard
+                val existing = FeishuOfficeEnhancementPlanner.resolveProject(dashboard, input.string("id").orEmpty().ifBlank { input.string("name") })
+                    .takeIf { project -> dashboard.projects.any { it.id == project.id } }
+                val project = FeishuOfficeEnhancementPlanner.mergeProject(
+                    existing = existing,
+                    id = input.string("id"),
+                    name = input.requiredString("name"),
+                    keywords = input.stringList("keywords"),
+                    currentGoal = input.string("current_goal"),
+                    coreSellingPoints = input.stringList("core_selling_points"),
+                    risks = input.stringList("risks"),
+                    openQuestions = input.stringList("open_questions"),
+                    keyDecisions = input.stringList("key_decisions"),
+                    recentChanges = input.stringList("recent_changes"),
+                    sourceRefs = input.stringList("source_refs"),
+                    nowMs = System.currentTimeMillis(),
+                )
+                manager.saveProject(project)
+                textJson {
+                    putState(manager.state.value)
+                    putProject(project)
+                    put("markdown_index", FeishuOfficeEnhancementPlanner.buildProjectKnowledgeMarkdown(project))
+                    put("note", "Project knowledge was updated locally in AmberAgent settings. It was not written to Feishu.")
+                }
+            }
+        },
+    )
+
+    private val projectContextTool = Tool(
+        name = "officepro_project_context",
+        description = "Build a local project context report from a project knowledge pack plus optional OfficePro/workspace/MCP signals. Returns Markdown; it does not write files.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("project", stringProp("Project id, name, or keyword."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace documents to include."))
+                    put("include_current_screen", booleanProp("Read current 小米办公 Pro screen if available. Defaults to Work Dashboard setting."))
+                    put("include_mcp_sources", booleanProp("Include Feishu MCP source hints. Defaults to Work Dashboard setting."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                },
+                required = listOf("project"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            trackOfficeTool("officepro_project_context", "项目上下文", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val project = FeishuOfficeEnhancementPlanner.resolveProject(dashboard, input.requiredString("project"))
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = input.boolean("include_current_screen") ?: dashboard.includeCurrentScreen,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = input.boolean("include_mcp_sources") ?: dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildProjectContextReport(
+                    project = project,
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putProject(project)
+                    putBundle(bundle, includeScreenTree = false)
+                    putWorkReport(report)
+                }
+            }
+        },
+    )
+
+    private val projectReportTool = Tool(
+        name = "officepro_project_report",
+        description = "Generate a Markdown report draft for a local Feishu WorkOS project knowledge pack. It returns a suggested /workspace path and does not write files.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("project", stringProp("Project id, name, or keyword."))
+                    put("workspace_paths", stringArrayProp("Optional /workspace documents to include."))
+                    put("max_chars", integerProp("Maximum report characters. Defaults to Work Dashboard setting."))
+                },
+                required = listOf("project"),
+            )
+        },
+        execute = { input ->
+            trackOfficeTool("officepro_project_report", "项目报告草稿", input.safePreview()) {
+                ensureEnabled()
+                val state = manager.state.value
+                val dashboard = state.workDashboard
+                val project = FeishuOfficeEnhancementPlanner.resolveProject(dashboard, input.requiredString("project"))
+                val bundle = manager.captureContext(
+                    workspacePaths = input.stringList("workspace_paths"),
+                    includeCurrentScreen = false,
+                    includeNotifications = dashboard.includeNotifications,
+                    includeUsage = state.includeUsageByDefault,
+                    includeMcpHints = dashboard.includeMcpSources,
+                )
+                val report = FeishuOfficeEnhancementPlanner.buildProjectContextReport(
+                    project = project,
+                    bundle = bundle,
+                    maxChars = input.int("max_chars") ?: dashboard.maxReportChars,
+                )
+                textJson {
+                    putState(bundle.state)
+                    putProject(project)
+                    putWorkReport(report)
                 }
             }
         },
@@ -196,6 +729,7 @@ class FeishuOfficeTools(
                 }
             )
         },
+        needsApproval = true,
         execute = { input ->
             trackOfficeTool("officepro_read_screen", "读取办公屏幕", input) {
                 ensureEnabled()
@@ -252,6 +786,7 @@ class FeishuOfficeTools(
                 }
             )
         },
+        needsApproval = true,
         execute = { input ->
             trackOfficeTool("officepro_context_digest", "生成飞书办公上下文", input.safePreview()) {
                 ensureEnabled()
@@ -318,6 +853,10 @@ class FeishuOfficeTools(
         put("default_output_dir", state.defaultOutputDir)
         put("max_workspace_docs", state.maxWorkspaceDocs)
         put("max_report_chars", state.maxReportChars)
+        put("work_dashboard_enabled", state.workDashboard.enabled)
+        put("work_dashboard_projects", buildJsonArray { state.workDashboard.defaultProjectKeywords.forEach { add(it) } })
+        put("work_dashboard_include_model_council", state.workDashboard.includeModelCouncil)
+        put("work_dashboard_max_source_docs", state.workDashboard.maxSourceDocs)
         put("installed", state.installed)
         put("launchable", state.launchable)
         put("accessibility_ready", state.accessibilityReady)
@@ -339,6 +878,32 @@ class FeishuOfficeTools(
             put("suggested_actions", buildJsonArray { summary.suggestedActions.forEach { add(it) } })
             put("updated_at_ms", summary.updatedAtMs)
         })
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putProjects(projects: List<FeishuWorkProject>) {
+        put("projects", buildJsonArray {
+            projects.forEach { project ->
+                add(buildJsonObject { putProjectFields(project) })
+            }
+        })
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putProject(project: FeishuWorkProject) {
+        put("project", buildJsonObject { putProjectFields(project) })
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putProjectFields(project: FeishuWorkProject) {
+        put("id", project.id)
+        put("name", project.name)
+        put("keywords", buildJsonArray { project.keywords.forEach { add(it) } })
+        put("current_goal", project.currentGoal)
+        put("core_selling_points", buildJsonArray { project.coreSellingPoints.forEach { add(it) } })
+        put("risks", buildJsonArray { project.risks.forEach { add(it) } })
+        put("open_questions", buildJsonArray { project.openQuestions.forEach { add(it) } })
+        put("key_decisions", buildJsonArray { project.keyDecisions.forEach { add(it) } })
+        put("recent_changes", buildJsonArray { project.recentChanges.forEach { add(it) } })
+        put("source_refs", buildJsonArray { project.sourceRefs.forEach { add(it) } })
+        put("updated_at_ms", project.updatedAtMs)
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putBundle(
@@ -378,6 +943,61 @@ class FeishuOfficeTools(
             }
         })
         put("mcp_hints", buildJsonArray { bundle.mcpHints.forEach { add(it) } })
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putWorkReport(report: FeishuWorkReport) {
+        put("work_report", buildJsonObject {
+            put("title", report.title)
+            put("skill_id", report.skillId)
+            put("project", report.project.orEmpty())
+            put("output_path", report.outputPath)
+            put("truncated", report.truncated)
+            put("markdown", report.markdown)
+            put("sources", buildJsonArray {
+                report.sources.forEach { source ->
+                    add(buildJsonObject {
+                        put("type", source.type.wireName)
+                        put("title", source.title)
+                        put("source_ref", source.sourceRef)
+                        put("snippet", source.snippet)
+                        put("captured_at_ms", source.capturedAtMs)
+                        put("truncated", source.truncated)
+                    })
+                }
+            })
+        })
+        put(
+            "write_note",
+            "This OfficePro report tool does not write files. To persist the report, ask for approval and write markdown to output_path under /workspace.",
+        )
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putWorkDraft(draft: FeishuWorkDraft) {
+        put("work_draft", buildJsonObject {
+            put("type", draft.type.wireName)
+            put("title", draft.title)
+            put("target", draft.target)
+            put("requires_approval", draft.requiresApproval)
+            put("approval_note", draft.approvalNote)
+            put("markdown", draft.markdown)
+            put("payload_json", draft.payloadJson)
+            put("sources", buildJsonArray {
+                draft.sources.forEach { source ->
+                    add(buildJsonObject {
+                        put("type", source.type.wireName)
+                        put("title", source.title)
+                        put("source_ref", source.sourceRef)
+                        put("snippet", source.snippet)
+                        put("captured_at_ms", source.capturedAtMs)
+                        put("truncated", source.truncated)
+                    })
+                }
+            })
+        })
+        put(
+            "write_note",
+            "This V6 tool only creates a draft. Calling Feishu MCP to create tasks, Base records, comments, or replies requires a separate approval step.",
+        )
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putReport(result: FeishuOfficeReportResult) {
@@ -435,7 +1055,11 @@ class FeishuOfficeTools(
     private fun JsonElement.safePreview(): JsonElement =
         buildJsonObject {
             jsonObject.forEach { (key, value) ->
-                put(key, if (key.contains("query", ignoreCase = true)) JsonPrimitive("<redacted>") else value)
+                val sensitivePreview = key.contains("query", ignoreCase = true) ||
+                    key.contains("details", ignoreCase = true) ||
+                    key.contains("fields_json", ignoreCase = true) ||
+                    key.contains("objective", ignoreCase = true)
+                put(key, if (sensitivePreview) JsonPrimitive("<redacted>") else value)
             }
         }
 

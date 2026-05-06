@@ -184,7 +184,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     )
                                 ),
                             headlineContent = { Text("Notion style") },
-                            supportingContent = { Text("白色纸面 + 蓝色强调，后续补充深色工作区") },
+                            supportingContent = { Text("浅色纸面 / 深色工作区 + 蓝色强调") },
                             colors = CustomColors.listItemColors,
                         )
                     } else {

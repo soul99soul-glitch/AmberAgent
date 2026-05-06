@@ -32,6 +32,7 @@ import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.WebServerService
@@ -87,6 +88,9 @@ class RikkaHubApp : Application() {
 
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
+
+        // Reschedule persisted mobile cron tasks after app startup.
+        rescheduleCronTasks()
 
         // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
         registerChatServiceCleanup()
@@ -178,6 +182,16 @@ class RikkaHubApp : Application() {
                 }
             }.onFailure {
                 Log.e(TAG, "startWebServerIfEnabled failed", it)
+            }
+        }
+    }
+
+    private fun rescheduleCronTasks() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<AgentCronManager>().rescheduleAll()
+            }.onFailure {
+                Log.e(TAG, "rescheduleCronTasks failed", it)
             }
         }
     }

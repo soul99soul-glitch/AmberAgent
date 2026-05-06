@@ -3,12 +3,15 @@ package me.rerere.rikkahub.ui.pages.setting
 import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
-import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.MoreVertical
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +34,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -48,15 +53,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,10 +80,6 @@ import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
-import java.util.Locale
-import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
 import androidx.compose.foundation.lazy.items as lazyItems
 
@@ -90,34 +87,18 @@ import androidx.compose.foundation.lazy.items as lazyItems
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
-    val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var searchQuery by remember { mutableStateOf("") }
+    var pendingDeleteProvider by remember { mutableStateOf<ProviderSetting?>(null) }
     val lazyListState = rememberLazyListState()
-    val visibleProviders = remember(settings.providers) {
-        settings.providers.filterNot { it.isAmberAgentBuiltInProvider() }
-    }
-    val filteredProviders = remember(visibleProviders, searchQuery) {
+    val filteredProviders = remember(settings.providers, searchQuery) {
         if (searchQuery.isBlank()) {
-            visibleProviders
+            settings.providers
         } else {
-            visibleProviders.filter { provider ->
+            settings.providers.filter { provider ->
                 provider.name.contains(searchQuery, ignoreCase = true)
             }
         }
-    }
-    val isFiltering = searchQuery.isNotBlank()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        if (isFiltering) return@rememberReorderableLazyListState
-        val fromProvider = filteredProviders.getOrNull(from.index) ?: return@rememberReorderableLazyListState
-        val toProvider = filteredProviders.getOrNull(to.index) ?: return@rememberReorderableLazyListState
-        val newProviders = settings.providers.toMutableList().apply {
-            val fromIndex = indexOfFirst { it.id == fromProvider.id }
-            val toIndex = indexOfFirst { it.id == toProvider.id }
-            if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
-            add(toIndex, removeAt(fromIndex))
-        }
-        vm.updateSettings(settings.copy(providers = newProviders))
     }
 
     Scaffold(
@@ -130,22 +111,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 actions = {
-                    if(Locale.getDefault().language == "zh") {
-                        IconButton(
-                            onClick = {
-                                val aihubmixIndex = filteredProviders.indexOfFirst {
-                                    it.id.toString() == "1b1395ed-b702-4aeb-8bc1-b681c4456953"
-                                }
-                                if (aihubmixIndex != -1) {
-                                    scope.launch {
-                                        lazyListState.animateScrollToItem(aihubmixIndex)
-                                    }
-                                }
-                            }
-                        ) {
-                            AutoAIIcon("AiHubMix")
-                        }
-                    }
                     ImportProviderButton {
                         vm.updateSettings(
                             settings.copy(
@@ -206,45 +171,54 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 state = lazyListState,
             ) {
                 lazyItems(filteredProviders, key = { it.id }) { provider ->
-                    ReorderableItem(
-                        state = reorderableState,
-                        key = provider.id
-                    ) { isDragging ->
-                        ProviderItem(
-                            modifier = Modifier
-                                .scale(if (isDragging) 0.95f else 1f)
-                                .fillMaxWidth(),
-                            provider = provider,
-                            dragHandle = {
-                                val haptic = LocalHapticFeedback.current
-                                IconButton(
-                                    onClick = {},
-                                    enabled = !isFiltering,
-                                    modifier = Modifier.then(
-                                        if (!isFiltering) Modifier.longPressDraggableHandle(
-                                            onDragStarted = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-                                            },
-                                            onDragStopped = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                            }
-                                        ) else Modifier
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = HugeIcons.DragDropHorizontal,
-                                        contentDescription = null
-                                    )
-                                }
-                            },
-                            onClick = {
-                                navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                    ProviderItem(
+                        modifier = Modifier.fillMaxWidth(),
+                        provider = provider,
+                        onEdit = {
+                            navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                        },
+                        onCopy = {
+                            val copy = provider.copyProvider(
+                                id = Uuid.random(),
+                                name = "${provider.name} Copy",
+                                builtIn = false,
+                            )
+                            val providerIndex = settings.providers.indexOfFirst { it.id == provider.id }
+                            val newProviders = settings.providers.toMutableList().apply {
+                                add(if (providerIndex == -1) 0 else providerIndex + 1, copy)
                             }
-                        )
-                    }
+                            vm.updateSettings(settings.copy(providers = newProviders))
+                        },
+                        onDelete = {
+                            pendingDeleteProvider = provider
+                        },
+                    )
                 }
             }
         }
+    }
+
+    pendingDeleteProvider?.let { provider ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProvider = null },
+            title = { Text(stringResource(R.string.confirm_delete)) },
+            text = { Text(stringResource(R.string.setting_provider_page_delete_dialog_text)) },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProvider = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeleteProvider = null
+                        vm.updateSettings(settings.copy(providers = settings.providers - provider))
+                    },
+                ) {
+                    Text(stringResource(R.string.delete))
+                }
+            },
+        )
     }
 }
 
@@ -510,9 +484,11 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
 private fun ProviderItem(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
-    dragHandle: @Composable () -> Unit,
-    onClick: () -> Unit
+    onEdit: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -521,7 +497,7 @@ private fun ProviderItem(
             } else MaterialTheme.colorScheme.errorContainer,
         ),
         onClick = {
-            onClick()
+            onEdit()
         }
     ) {
         Row(
@@ -565,20 +541,43 @@ private fun ProviderItem(
                             )
                         )
                     }
-                    if (provider.name == "AiHubMix") {
-                        Tag(type = TagType.INFO) {
-                            Text("10% 优惠")
-                        }
-                    }
                 }
             }
-            dragHandle()
+            IconButton(onClick = { showMenu = true }) {
+                Icon(
+                    imageVector = HugeIcons.MoreVertical,
+                    contentDescription = stringResource(R.string.more_options),
+                )
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.edit)) },
+                    leadingIcon = { Icon(HugeIcons.Edit01, contentDescription = null) },
+                    onClick = {
+                        showMenu = false
+                        onEdit()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.copy)) },
+                    leadingIcon = { Icon(HugeIcons.Copy01, contentDescription = null) },
+                    onClick = {
+                        showMenu = false
+                        onCopy()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete)) },
+                    leadingIcon = { Icon(HugeIcons.Delete01, contentDescription = null) },
+                    onClick = {
+                        showMenu = false
+                        onDelete()
+                    },
+                )
+            }
         }
     }
-}
-
-private val AmberAgentBuiltInProviderId = Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce")
-
-private fun ProviderSetting.isAmberAgentBuiltInProvider(): Boolean {
-    return builtIn && id == AmberAgentBuiltInProviderId
 }

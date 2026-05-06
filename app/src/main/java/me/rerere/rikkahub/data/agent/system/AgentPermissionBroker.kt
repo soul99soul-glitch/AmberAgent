@@ -436,11 +436,11 @@ object AgentPermissionRegistry {
         AgentPermissionCapability(
             id = "manage_all_files",
             title = "全文件访问",
-            description = "高级实验权限。不会替代 SAF workspace，默认只在 debug 构建中可见。",
+            description = "高级实验权限。必须用户手动授权，且 Agent 只可访问设置中加入的外部路径。",
             specialAccess = AgentSpecialAccess.ManageAllFiles,
             risk = AgentPermissionRisk.High,
             minSdk = Build.VERSION_CODES.R,
-            debugOnly = true,
+            toolNames = listOf("external_file_list", "external_file_read", "external_file_write", "external_file_delete"),
         ),
         AgentPermissionCapability(
             id = "apps",

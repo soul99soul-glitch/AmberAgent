@@ -68,8 +68,10 @@ import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
+import me.rerere.rikkahub.data.agent.tools.ModelCouncilTools
 import me.rerere.rikkahub.data.agent.tools.SubAgentTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
@@ -150,6 +152,7 @@ class ChatService(
     private val workspaceManager: WorkspaceManager,
     private val contextEngine: ConversationContextEngine,
     private val subAgentManager: SubAgentManager,
+    private val modelCouncilManager: ModelCouncilManager,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -383,12 +386,14 @@ class ChatService(
                     val newConversation = conversation.copy(
                         messageNodes = conversation.messageNodes.subList(0, indexAt + 1)
                     )
+                    contextEngine.invalidateCompacts(conversationId, "message_regenerated")
                     saveConversation(conversationId, newConversation)
                     handleMessageComplete(conversationId)
                 } else {
                     if (regenerateAssistantMsg) {
                         val node = conversation.getMessageNodeByMessage(message)
                         val nodeIndex = conversation.messageNodes.indexOf(node)
+                        contextEngine.invalidateCompacts(conversationId, "message_regenerated")
                         handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
                     } else {
                         saveConversation(conversationId, conversation)
@@ -1074,6 +1079,7 @@ class ChatService(
 
         if (!edited) return
 
+        contextEngine.invalidateCompacts(conversationId, "message_edited")
         saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
     }
 
@@ -1110,6 +1116,7 @@ class ChatService(
             messageNodes = copiedNodes,
         )
 
+        contextEngine.invalidateCompacts(conversationId, "conversation_forked")
         saveConversation(forkConversation.id, forkConversation)
         return forkConversation
     }
@@ -1139,6 +1146,7 @@ class ChatService(
             }
         }
 
+        contextEngine.invalidateCompacts(conversationId, "message_branch_changed")
         saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
     }
 
@@ -1157,6 +1165,7 @@ class ChatService(
             return
         }
 
+        contextEngine.invalidateCompacts(conversationId, "message_deleted")
         saveConversation(conversationId, updatedConversation)
     }
 
@@ -1299,7 +1308,7 @@ class ChatService(
         }
         val baseRegistry = ToolRegistry.from(rawTools)
         val baseTools = baseRegistry.tools() + localTools.createToolsListTool(baseRegistry)
-        val finalRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
+        val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
             rawTools + SubAgentTools(
                 subAgentManager = subAgentManager,
                 parentConversationId = conversationId,
@@ -1307,6 +1316,14 @@ class ChatService(
             ).tools()
         } else {
             rawTools
+        }
+        val finalRawTools = if (settings.agentRuntime.modelCouncil.enabled) {
+            subAgentRawTools + ModelCouncilTools(
+                manager = modelCouncilManager,
+                workspaceManager = workspaceManager,
+            ).tools()
+        } else {
+            subAgentRawTools
         }
         val registry = ToolRegistry.from(finalRawTools)
         return registry.tools() + localTools.createToolsListTool(registry)

@@ -145,6 +145,7 @@ fun ReasoningPicker(
                         ReasoningLevel.MEDIUM -> ReasoningMedium
                         ReasoningLevel.HIGH -> ReasoningHigh
                         ReasoningLevel.XHIGH -> ReasoningHigh
+                        ReasoningLevel.MAX -> ReasoningHigh
                     },
                     contentDescription = null,
                     modifier = Modifier.size(32.dp),
@@ -274,6 +275,7 @@ private fun ReasoningIcon(level: ReasoningLevel) {
         ReasoningLevel.MEDIUM -> Icon(ReasoningMedium, null)
         ReasoningLevel.HIGH -> Icon(ReasoningHigh, null)
         ReasoningLevel.XHIGH -> Icon(ReasoningHigh, null)
+        ReasoningLevel.MAX -> Icon(ReasoningHigh, null)
     }
 }
 
@@ -285,6 +287,7 @@ private fun ReasoningLevel.label(): String = when (this) {
     ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
     ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
     ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
+    ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
 }
 
 @Composable

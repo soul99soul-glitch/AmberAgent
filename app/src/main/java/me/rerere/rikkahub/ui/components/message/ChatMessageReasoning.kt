@@ -37,14 +37,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Idea01
+import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -202,16 +206,23 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
     val workspace = workspaceColors()
+    val settings = LocalSettings.current
+    val reasoningLevel = if (assistant != null && model != null) {
+        settings.resolveSessionDefaults(assistant, model).reasoningLevel
+    } else {
+        assistant?.reasoningLevel
+    }
+    val budgetLabel = reasoningLevel.reasoningBudgetLabel()
 
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
             Icon(
-                imageVector = HugeIcons.Idea01,
+                imageVector = HugeIcons.Brain02,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = workspace.muted,
+                modifier = Modifier.size(14.dp),
+                tint = workspace.blue.copy(alpha = 0.72f),
             )
         },
         label = {
@@ -223,18 +234,30 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         R.string.deep_thinking_seconds,
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat()
                     ),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = workspace.muted,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                    color = workspace.blue.copy(alpha = 0.72f),
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
         },
         extra = {
-            if (showThinkingTitle && state.duration > 0.seconds) {
+            val durationLabel = if (showThinkingTitle && state.duration > 0.seconds) {
+                state.duration.toString(DurationUnit.SECONDS, 1)
+            } else {
+                null
+            }
+            val metaText = listOfNotNull(durationLabel, budgetLabel).joinToString(" · ")
+            if (metaText.isNotBlank()) {
                 Text(
-                    text = state.duration.toString(DurationUnit.SECONDS, 1),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = workspace.faint,
+                    text = metaText,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                    color = workspace.blue.copy(alpha = 0.56f),
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -253,6 +276,17 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     )
 }
 
+private fun ReasoningLevel?.reasoningBudgetLabel(): String? = when (this) {
+    null,
+    ReasoningLevel.OFF -> null
+    ReasoningLevel.AUTO -> "auto"
+    else -> "≤ ${this.budgetTokens.formatReasoningBudget()} tokens"
+}
+
+private fun Int.formatReasoningBudget(): String {
+    return if (this >= 1_000) "${this / 1_000}K" else toString()
+}
+
 
 @Composable
 private fun ReasoningTitle(title: String) {
@@ -267,8 +301,11 @@ private fun ReasoningTitle(title: String) {
     ) {
         Text(
             text = it,
-            style = MaterialTheme.typography.titleSmall,
-            color = workspace.muted,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+            ),
+            color = workspace.blue.copy(alpha = 0.72f),
             modifier = Modifier
                 .padding(horizontal = 4.dp)
                 .shimmer(true),

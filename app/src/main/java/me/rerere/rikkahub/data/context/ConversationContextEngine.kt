@@ -45,6 +45,7 @@ class ConversationContextEngine(
         messages: List<UIMessage>,
         tools: List<Tool>,
         contextMessageSize: Int,
+        promptOverheadTokens: Int = 0,
     ): PreparedContext {
         val policy = settings.agentRuntime.contextCompaction.toCompactPolicy()
         if (conversation == null || !policy.enabled) {
@@ -54,11 +55,13 @@ class ConversationContextEngine(
 
         val compacts = contextRepository.getCompacts(conversation.id)
         val toolPromptEstimate = tools.sumOf { it.name.length + it.description.length } / 4
+        val overheadEstimate = toolPromptEstimate + promptOverheadTokens.coerceAtLeast(0)
         val plan = ConversationContextPlanner.planCompaction(
             nodes = conversation.messageNodes,
             activeCompacts = compacts,
             policy = policy,
             modelContextWindowTokens = model.contextWindowTokens,
+            extraTokenEstimate = overheadEstimate,
         )
         val shouldForce = plan.reason == "force_threshold"
         if (plan.shouldCompact && !policy.notifyOnly) {
@@ -90,7 +93,7 @@ class ConversationContextEngine(
             policy = policy,
             contextMessageSize = contextMessageSize,
         )
-        val estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + toolPromptEstimate
+        val estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
         return PreparedContext(
             messages = preparedMessages,
             tokenEstimate = estimate,
@@ -185,6 +188,10 @@ class ConversationContextEngine(
                 CompactResult(status = "failed", error = error.message ?: error::class.java.simpleName)
             }
         }
+    }
+
+    suspend fun invalidateCompacts(conversationId: Uuid, reason: String) {
+        contextRepository.invalidateCompacts(conversationId, reason)
     }
 
     suspend fun search(conversationId: Uuid, query: String, limit: Int): List<ContextSearchResult> {

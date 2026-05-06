@@ -70,6 +70,7 @@ class ICloudDriveTools(
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("path", stringProp("Vault-relative file path to read."))
+                    put("max_chars", integerProp("Maximum characters to return. Defaults to 65536; hard limit 262144."))
                 },
                 required = listOf("path"),
             )
@@ -77,10 +78,14 @@ class ICloudDriveTools(
         execute = { input ->
             trackICloudTool("icloud_read", "读取 iCloud", input) {
                 val result = manager.readText(input.requiredString("path"))
+                val maxChars = (input.int("max_chars") ?: 65_536).coerceIn(1, 262_144)
                 textJson {
                     putState(result.state)
                     put("path", result.path)
-                    put("content", result.value)
+                    put("content", result.value.take(maxChars))
+                    put("total_size_chars", result.value.length)
+                    put("truncated", result.value.length > maxChars)
+                    put("max_chars", maxChars)
                 }
             }
         },

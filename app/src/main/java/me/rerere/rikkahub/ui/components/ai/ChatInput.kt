@@ -57,7 +57,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
@@ -112,11 +111,11 @@ import com.yalantis.ucrop.UCropActivity
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.HazeMaterials
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
@@ -137,19 +136,15 @@ import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
-import me.rerere.hugeicons.stroke.Package
-import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewLink
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
-import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -160,7 +155,6 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
-import me.rerere.rikkahub.ui.components.ui.ExtensionSelector
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
@@ -169,7 +163,6 @@ import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
-import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -192,7 +185,6 @@ fun ChatInput(
     loading: Boolean,
     conversation: Conversation,
     settings: Settings,
-    mcpManager: McpManager,
     hazeState: HazeState,
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,
@@ -205,7 +197,6 @@ fun ChatInput(
     onUpdateChatModel: (Model) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
-    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
@@ -233,13 +224,9 @@ fun ChatInput(
     }
 
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
-    var showInjectionSheet by remember { mutableStateOf(false) }
-    var showCompressDialog by remember { mutableStateOf(false) }
     var showUsageSheet by remember { mutableStateOf(false) }
     fun dismissExpand() {
         expand = ExpandState.Collapsed
-        showInjectionSheet = false
-        showCompressDialog = false
     }
 
     fun expandToggle(type: ExpandState) {
@@ -379,8 +366,8 @@ fun ChatInput(
 
     // Collapse when ime is visible
     val imeVisile = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisile, showInjectionSheet, showCompressDialog, showUsageSheet) {
-        if (imeVisile && !showInjectionSheet && !showCompressDialog && !showUsageSheet) {
+    LaunchedEffect(imeVisile, showUsageSheet) {
+        if (imeVisile && !showUsageSheet) {
             dismissExpand()
         }
     }
@@ -442,6 +429,9 @@ fun ChatInput(
                     val chatModel = remember(settings.providers, selectedChatModelId) {
                         settings.providers.findModelById(selectedChatModelId)
                     }
+                    val chatProvider = remember(settings.providers, chatModel) {
+                        chatModel?.findProvider(settings.providers)
+                    }
                     TextInputRow(
                         state = state,
                         onSendMessage = { sendMessage() },
@@ -492,6 +482,8 @@ fun ChatInput(
                                         )
                                         ReasoningLevelChip(
                                             reasoningLevel = assistant.reasoningLevel,
+                                            model = chatModel,
+                                            provider = chatProvider,
                                             onUpdateReasoningLevel = {
                                                 onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                             },
@@ -499,17 +491,6 @@ fun ChatInput(
                                     }
                                 }
 
-                                // MCP
-                                if (settings.mcpServers.isNotEmpty()) {
-                                    McpPickerButton(
-                                        assistant = assistant,
-                                        servers = settings.mcpServers,
-                                        mcpManager = mcpManager,
-                                        onUpdateAssistant = {
-                                            onUpdateAssistant(it)
-                                        },
-                                    )
-                                }
                             }
                         }
 
@@ -608,16 +589,6 @@ fun ChatInput(
                         color = if (useComposerBlur) Color.Transparent else hazeTintColor,
                     ) {
                         FilesPicker(
-                            conversation = conversation,
-                            state = state,
-                            assistant = assistant,
-                            onCompressContext = onCompressContext,
-                            onUpdateAssistant = onUpdateAssistant,
-                            showInjectionSheet = showInjectionSheet,
-                            onShowInjectionSheetChange = { showInjectionSheet = it },
-                            showCompressDialog = showCompressDialog,
-                            onShowCompressDialogChange = { showCompressDialog = it },
-                            onDismiss = { dismissExpand() },
                             onTakePic = onLaunchCamera,
                             onPickImage = { imagePickerLauncher.launch("image/*") },
                             onPickVideo = { videoPickerLauncher.launch("video/*") },
@@ -646,7 +617,7 @@ private fun ContextUsageIndicator(
             ?.promptTokens
             ?: estimateConversationTokens(conversation)
     }
-    val contextWindow = remember(model?.modelId) {
+    val contextWindow = remember(model?.modelId, model?.contextWindowTokens) {
         model?.contextWindowTokens ?: model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
     }
     val ratio = if (contextWindow != null && contextWindow > 0) {
@@ -728,43 +699,66 @@ private data class ComposerUsageMetric(
 @Composable
 private fun ReasoningLevelChip(
     reasoningLevel: ReasoningLevel,
+    model: Model?,
+    provider: ProviderSetting?,
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val workspace = workspaceColors()
+    val options = remember(model?.modelId, model?.abilities, provider.providerRoutingKey()) {
+        model.reasoningOptions(provider)
+    }
+    val selectedLevel = remember(reasoningLevel, options) {
+        reasoningLevel.coerceToReasoningOptions(options)
+    }
+
+    LaunchedEffect(selectedLevel, reasoningLevel, options) {
+        if (selectedLevel != reasoningLevel) {
+            onUpdateReasoningLevel(selectedLevel)
+        }
+    }
 
     Box(modifier = modifier) {
         ComposerStatusChip(
-            text = reasoningLevel.composerLabel(),
-            accent = reasoningLevel.isEnabled,
+            text = options.labelFor(selectedLevel),
+            accent = selectedLevel.isEnabled,
             onClick = { expanded = true },
         )
 
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.width(176.dp),
+            modifier = Modifier
+                .width(232.dp)
+                .background(workspace.paper, RoundedCornerShape(10.dp)),
         ) {
             Column(
-                modifier = Modifier.padding(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ReasoningLevel.entries.chunked(2).fastForEach { row ->
+                Text(
+                    text = "Reasoning",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = workspace.muted,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                options.chunked(3).fastForEach { row ->
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
-                        row.fastForEach { level ->
+                        row.fastForEach { option ->
                             ReasoningLevelMenuCell(
-                                level = level,
-                                selected = level == reasoningLevel,
+                                label = option.label,
+                                selected = option.level == selectedLevel,
                                 onClick = {
-                                    onUpdateReasoningLevel(level)
+                                    onUpdateReasoningLevel(option.level)
                                     expanded = false
                                 },
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        if (row.size == 1) {
+                        repeat(3 - row.size) {
                             Spacer(modifier = Modifier.weight(1f))
                         }
                     }
@@ -776,7 +770,7 @@ private fun ReasoningLevelChip(
 
 @Composable
 private fun ReasoningLevelMenuCell(
-    level: ReasoningLevel,
+    label: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -784,8 +778,8 @@ private fun ReasoningLevelMenuCell(
     val workspace = workspaceColors()
     Surface(
         onClick = onClick,
-        modifier = modifier.height(34.dp),
-        shape = RoundedCornerShape(7.dp),
+        modifier = modifier.height(30.dp),
+        shape = RoundedCornerShape(6.dp),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         color = if (selected) workspace.blueContainer else Color.Transparent,
@@ -796,8 +790,8 @@ private fun ReasoningLevelMenuCell(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = level.composerLabel(),
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -903,6 +897,175 @@ private fun ReasoningLevel.composerLabel(): String = when (this) {
     ReasoningLevel.MEDIUM -> "medium"
     ReasoningLevel.HIGH -> "high"
     ReasoningLevel.XHIGH -> "xhigh"
+    ReasoningLevel.MAX -> "max"
+}
+
+private data class ReasoningOption(
+    val level: ReasoningLevel,
+    val label: String = level.composerLabel(),
+)
+
+private enum class ReasoningFamily {
+    CLAUDE_OPUS_47,
+    CLAUDE_MAX,
+    CLAUDE_HIGH,
+    OPENAI_XHIGH,
+    OPENAI,
+    DEEPSEEK,
+    BINARY,
+    GEMINI,
+    GENERIC,
+    NONE,
+}
+
+private fun List<ReasoningOption>.labelFor(level: ReasoningLevel): String {
+    return firstOrNull { it.level == level }?.label ?: level.composerLabel()
+}
+
+private fun reasoningOptionsOf(vararg levels: ReasoningLevel): List<ReasoningOption> {
+    return levels.map { ReasoningOption(it) }
+}
+
+private fun ReasoningLevel.coerceToReasoningOptions(options: List<ReasoningOption>): ReasoningLevel {
+    if (options.any { it.level == this }) return this
+    if ((this == ReasoningLevel.XHIGH || this == ReasoningLevel.MAX) && options.any { it.level == ReasoningLevel.MAX }) {
+        return ReasoningLevel.MAX
+    }
+    if (isEnabled && options.any { it.level == ReasoningLevel.AUTO }) {
+        return ReasoningLevel.AUTO
+    }
+    return options.firstOrNull()?.level ?: ReasoningLevel.OFF
+}
+
+private fun Model?.reasoningOptions(provider: ProviderSetting?): List<ReasoningOption> {
+    if (this == null) {
+        return reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+        )
+    }
+    return when (reasoningFamily(provider)) {
+        ReasoningFamily.CLAUDE_OPUS_47 -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+            ReasoningLevel.MAX,
+        )
+
+        ReasoningFamily.CLAUDE_MAX -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.MAX,
+        )
+
+        ReasoningFamily.CLAUDE_HIGH -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+        )
+
+        ReasoningFamily.OPENAI_XHIGH -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+        )
+
+        ReasoningFamily.OPENAI,
+        ReasoningFamily.GEMINI -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+        )
+
+        ReasoningFamily.DEEPSEEK -> listOf(
+            ReasoningOption(ReasoningLevel.OFF),
+            ReasoningOption(ReasoningLevel.AUTO, "on"),
+            ReasoningOption(ReasoningLevel.MAX),
+        )
+
+        ReasoningFamily.BINARY -> listOf(
+            ReasoningOption(ReasoningLevel.OFF),
+            ReasoningOption(ReasoningLevel.AUTO, "on"),
+        )
+
+        ReasoningFamily.GENERIC -> reasoningOptionsOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+        )
+
+        ReasoningFamily.NONE -> reasoningOptionsOf(ReasoningLevel.OFF)
+    }
+}
+
+private fun Model.reasoningFamily(provider: ProviderSetting?): ReasoningFamily {
+    val id = modelId.lowercase()
+    val providerKey = provider.providerRoutingKey()
+    return when {
+        "claude" in id || provider is ProviderSetting.Claude -> when {
+            id.contains("opus") && id.contains("4") && id.contains("7") -> ReasoningFamily.CLAUDE_OPUS_47
+            id.contains("mythos") -> ReasoningFamily.CLAUDE_MAX
+            id.contains("opus") && id.contains("4") && (id.contains("5") || id.contains("6")) -> ReasoningFamily.CLAUDE_MAX
+            id.contains("sonnet") && id.contains("4") && id.contains("6") -> ReasoningFamily.CLAUDE_HIGH
+            else -> ReasoningFamily.GENERIC
+        }
+
+        "deepseek" in id || providerKey == "deepseek" -> ReasoningFamily.DEEPSEEK
+        "kimi" in id || "moonshot" in id || providerKey == "kimi" -> ReasoningFamily.BINARY
+        "glm" in id || "zhipu" in id || providerKey == "zhipu" -> ReasoningFamily.BINARY
+        "mimo" in id -> ReasoningFamily.BINARY
+        id.isQwenPlusBinaryReasoningModel() -> ReasoningFamily.BINARY
+        provider is ProviderSetting.Google || providerKey == "gemini" -> ReasoningFamily.GEMINI
+        id.contains("gpt-5.5") || id.contains("gpt-5.4") -> ReasoningFamily.OPENAI_XHIGH
+        id.contains("gpt-5") || Regex("\\bo\\d+").containsMatchIn(id) -> ReasoningFamily.OPENAI
+        ModelAbility.REASONING in abilities -> ReasoningFamily.GENERIC
+        else -> ReasoningFamily.NONE
+    }
+}
+
+private fun String.isQwenPlusBinaryReasoningModel(): Boolean {
+    if (!contains("qwen") || !contains("plus")) return false
+    return Regex("""(^|[^0-9])3[._-]?5([^0-9]|$)""").containsMatchIn(this) ||
+        Regex("""(^|[^0-9])3[._-]?6([^0-9]|$)""").containsMatchIn(this)
+}
+
+private fun ProviderSetting?.providerRoutingKey(): String {
+    return when (this) {
+        is ProviderSetting.Claude -> "claude"
+        is ProviderSetting.Google -> "gemini"
+        is ProviderSetting.OpenAI -> {
+            val endpoint = "${baseUrl} ${name}".lowercase()
+            when {
+                "deepseek" in endpoint -> "deepseek"
+                "moonshot" in endpoint || "kimi" in endpoint -> "kimi"
+                "bigmodel" in endpoint || "zhipu" in endpoint -> "zhipu"
+                "api.openai.com" in endpoint || name.equals("openai", ignoreCase = true) -> "openai"
+                else -> ""
+            }
+        }
+
+        null -> ""
+    }
 }
 
 @Composable
@@ -2315,16 +2478,6 @@ private fun attachmentNameFromUrl(
 
 @Composable
 private fun FilesPicker(
-    conversation: Conversation,
-    assistant: Assistant,
-    state: ChatInputState,
-    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
-    onUpdateAssistant: (Assistant) -> Unit,
-    showInjectionSheet: Boolean,
-    onShowInjectionSheetChange: (Boolean) -> Unit,
-    showCompressDialog: Boolean,
-    onShowCompressDialogChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
     onTakePic: () -> Unit,
     onPickImage: () -> Unit,
     onPickVideo: () -> Unit,
@@ -2356,85 +2509,6 @@ private fun FilesPicker(
 
             FilePickButton(onClick = onPickFile)
         }
-
-        HorizontalDivider(
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // Extensions (Quick Messages + Prompt Injections + Skills)
-        val activeCount =
-            assistant.quickMessageIds.size + assistant.modeInjectionIds.size + assistant.lorebookIds.size + assistant.enabledSkills.size
-        ListItem(
-            leadingContent = {
-                Icon(
-                    imageVector = HugeIcons.Package,
-                    contentDescription = stringResource(R.string.assistant_page_tab_extensions),
-                )
-            },
-            headlineContent = {
-                Text(stringResource(R.string.assistant_page_tab_extensions))
-            },
-            trailingContent = {
-                if (activeCount > 0) {
-                    Text(
-                        text = activeCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            },
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.large)
-                .clickable {
-                    onShowInjectionSheetChange(true)
-                },
-        )
-
-        // Compress History Button
-        ListItem(
-            leadingContent = {
-                Icon(
-                    imageVector = HugeIcons.Package01,
-                    contentDescription = stringResource(R.string.chat_page_compress_context),
-                )
-            },
-            headlineContent = {
-                Text(stringResource(R.string.chat_page_compress_context))
-            },
-            trailingContent = {
-                if (conversation.messageNodes.isNotEmpty()) {
-                    Text(
-                        text = stringResource(R.string.chat_page_message_count, conversation.messageNodes.size),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.large)
-                .clickable {
-                    onShowCompressDialogChange(true)
-                },
-        )
-    }
-
-    // Injection Bottom Sheet
-    if (showInjectionSheet) {
-        InjectionQuickConfigSheet(
-            assistant = assistant,
-            settings = settings,
-            onUpdateAssistant = onUpdateAssistant,
-            onDismiss = { onShowInjectionSheetChange(false) })
-    }
-
-    // Compress Context Dialog
-    if (showCompressDialog) {
-        CompressContextDialog(onDismiss = {
-            onShowCompressDialogChange(false)
-            onDismiss()
-        }, onConfirm = { additionalPrompt, targetTokens, keepRecentMessages ->
-            onCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
-        })
     }
 }
 
@@ -2638,56 +2712,6 @@ private fun BigIconTextButton(
         }
         ProvideTextStyle(MaterialTheme.typography.bodySmall) {
             text()
-        }
-    }
-}
-
-@Composable
-private fun InjectionQuickConfigSheet(
-    assistant: Assistant, settings: Settings, onUpdateAssistant: (Assistant) -> Unit, onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    val navController = LocalNavController.current
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.75f)
-                .padding(horizontal = 16.dp),
-        ) {
-            ExtensionSelector(
-                assistant = assistant,
-                settings = settings,
-                onUpdate = onUpdateAssistant,
-                modifier = Modifier.weight(1f),
-                onNavigateToQuickMessages = {
-                    scope.launch {
-                        sheetState.hide()
-                        onDismiss()
-                        navController.navigate(Screen.QuickMessages)
-                    }
-                },
-                onNavigateToPrompts = {
-                    scope.launch {
-                        sheetState.hide()
-                        onDismiss()
-                        navController.navigate(Screen.Prompts)
-                    }
-                },
-                onNavigateToSkills = {
-                    scope.launch {
-                        sheetState.hide()
-                        onDismiss()
-                        navController.navigate(Screen.Skills)
-                    }
-                })
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

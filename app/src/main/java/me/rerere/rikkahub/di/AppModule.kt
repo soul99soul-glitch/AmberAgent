@@ -11,12 +11,17 @@ import me.rerere.rikkahub.data.ai.AILoggingManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
+import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.subagent.GenerationSubAgentRunner
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
+import me.rerere.rikkahub.data.agent.tools.AgentCronTools
+import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
@@ -101,7 +106,19 @@ val appModule = module {
     }
 
     single {
+        ProviderModelCouncilTextRunner(get())
+    }
+
+    single {
+        ModelCouncilManager(get(), get(), get(), get(), get<ProviderModelCouncilTextRunner>())
+    }
+
+    single {
         WorkspaceArtifactTools(get(), get(), get())
+    }
+
+    single {
+        ExternalFileTools(get(), get(), get())
     }
 
     single {
@@ -145,7 +162,15 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        AgentCronManager(get(), get())
+    }
+
+    single {
+        AgentCronTools(get())
+    }
+
+    single {
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -198,6 +223,7 @@ val appModule = module {
             workspaceManager = get(),
             contextEngine = get(),
             subAgentManager = get(),
+            modelCouncilManager = get(),
         )
     }
 

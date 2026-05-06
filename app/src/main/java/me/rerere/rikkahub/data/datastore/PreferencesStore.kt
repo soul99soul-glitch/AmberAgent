@@ -31,6 +31,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
+import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
@@ -190,9 +191,9 @@ class SettingsStore(
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
-                providers = JsonInstant.decodeFromString<List<ProviderSetting>>(
-                    preferences[PROVIDERS] ?: "[]"
-                ).withAmberAgentProviderBranding(),
+                providers = preferences[PROVIDERS]?.let { providersJson ->
+                    JsonInstant.decodeFromString<List<ProviderSetting>>(providersJson)
+                } ?: DEFAULT_PROVIDERS,
                 assistants = JsonInstant.decodeFromString<List<Assistant>>(
                     preferences[ASSISTANTS] ?: "[]"
                 ).withAmberAgentAssistantBranding(),
@@ -246,22 +247,18 @@ class SettingsStore(
             )
         }
         .map {
-            var providers = it.providers.ifEmpty { DEFAULT_PROVIDERS }.toMutableList()
-            DEFAULT_PROVIDERS.forEach { defaultProvider ->
-                if (providers.none { it.id == defaultProvider.id }) {
-                    providers.add(defaultProvider.copyProvider())
+            val providers = it.providers
+                .filterNot { provider -> provider.id in REMOVED_DEFAULT_PROVIDER_IDS }
+                .map { provider ->
+                    val defaultProvider = DEFAULT_PROVIDERS.find { it.id == provider.id }
+                    if (defaultProvider != null) {
+                        provider.copyProvider(
+                            builtIn = defaultProvider.builtIn,
+                            description = defaultProvider.description,
+                            shortDescription = defaultProvider.shortDescription,
+                        )
+                    } else provider
                 }
-            }
-            providers = providers.map { provider ->
-                val defaultProvider = DEFAULT_PROVIDERS.find { it.id == provider.id }
-                if (defaultProvider != null) {
-                    provider.copyProvider(
-                        builtIn = defaultProvider.builtIn,
-                        description = defaultProvider.description,
-                        shortDescription = defaultProvider.shortDescription,
-                    )
-                } else provider
-            }.toMutableList()
             val assistants = it.assistants.ifEmpty { DEFAULT_ASSISTANTS }.toMutableList()
             DEFAULT_ASSISTANTS.forEach { defaultAssistant ->
                 if (assistants.none { it.id == defaultAssistant.id }) {
@@ -566,6 +563,14 @@ data class AgentRuntimeSetting(
     val feishuOfficeEnhancement: FeishuOfficeEnhancementSetting = FeishuOfficeEnhancementSetting(),
     val contextCompaction: ContextCompactionSetting = ContextCompactionSetting(),
     val subAgent: SubAgentRuntimeSetting = SubAgentRuntimeSetting(),
+    val modelCouncil: ModelCouncilRuntimeSetting = ModelCouncilRuntimeSetting(),
+    val externalFileAccess: ExternalFileAccessSetting = ExternalFileAccessSetting(),
+)
+
+@Serializable
+data class ExternalFileAccessSetting(
+    val enabled: Boolean = false,
+    val roots: List<String> = emptyList(),
 )
 
 @Serializable
@@ -618,7 +623,7 @@ You are AmberAgent, an agent-only Android assistant.
 - Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
 - If you are unsure which skills are installed or enabled, call skills_list before use_skill.
 - If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
-- If the user asks about 小米办公 Pro / 飞书办公 work context, call officepro_status or officepro_dashboard first. Use officepro_capture_context or officepro_context_digest for read-first analysis, and officepro_make_report when the user wants a workspace Markdown draft. If Feishu MCP tools are available, call mcp_list/tools_list and prefer MCP for cloud document, calendar, task, meeting, or IM source material. Only use officepro_open/search after the user approves opening or driving the office app.
+- If the user asks about 小米办公 Pro / 飞书办公 work context, call officepro_status or officepro_dashboard first. Use officepro_daily_radar for today's work radar, officepro_project_briefing for Q 代/MiClaw/Lhasa-style project context, officepro_document_warroom for document review drafts, officepro_open_items_radar / officepro_meeting_closure for follow-up closure, and officepro_project_context/report/list/update for local project knowledge packs. Use officepro_create_task_draft, officepro_create_base_record_draft, and officepro_reply_draft only to produce drafts; never send, comment, create tasks, or write Base records without a separate approval and a real Feishu MCP/Skill write tool. Use officepro_capture_context or officepro_context_digest for lower-level read-first analysis, and officepro_make_report when the user wants a workspace Markdown draft. If Feishu MCP tools are available, call mcp_list/tools_list and prefer MCP for cloud document, calendar, task, meeting, or IM source material. Only use officepro_open/search after the user approves opening or driving the office app.
 - If subagent tools are available, use them only when the task is complex, clearly bounded, and benefits from isolated context or parallel viewpoints. Simple linear tasks must stay in the main Agent. Subagent results are evidence for the main Agent, not final truth.
 - For webpage tasks:
   - When the user asks to open, browse, view, inspect, or visually verify a webpage, call webview_open early so the live preview shows the page.
@@ -832,16 +837,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
         """.trimIndent()
     ),
 )
-
-private fun List<ProviderSetting>.withAmberAgentProviderBranding(): List<ProviderSetting> = map { provider ->
-    when {
-        provider.name == "RikkaHub" && provider.id == DEFAULT_PROVIDERS.first().id -> {
-            provider.copyProvider(name = "AmberAgent")
-        }
-
-        else -> provider
-    }
-}
 
 private fun List<Assistant>.withAmberAgentAssistantBranding(): List<Assistant> = map { assistant ->
     if (assistant.id == DEFAULT_ASSISTANT_ID) {

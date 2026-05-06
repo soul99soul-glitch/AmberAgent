@@ -13,6 +13,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -42,6 +45,7 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
 import me.rerere.rikkahub.data.context.ConversationContextEngine
+import me.rerere.rikkahub.data.context.ConversationContextPlanner
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Conversation
@@ -64,9 +68,21 @@ internal fun shouldPauseForToolApproval(
 ): Boolean {
     if (toolDef?.needsApproval != true) return false
     if (tool.approvalState !is ToolApprovalState.Auto) return false
+    if (tool.toolName == "http_request" && tool.isSafeHttpRequest()) return false
     if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME) return false
     val canAutoApprove = toolDef.allowsAutoApproval || autoApproveHighRiskTools
     return !(autoApproveTools && tool.toolName != ASK_USER_TOOL_NAME && canAutoApprove)
+}
+
+private fun UIMessagePart.Tool.isSafeHttpRequest(): Boolean {
+    val method = runCatching {
+        inputAsJson()
+            .jsonObject["method"]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.uppercase(Locale.ROOT)
+    }.getOrNull() ?: "GET"
+    return method in setOf("GET", "HEAD")
 }
 
 @Serializable
@@ -355,6 +371,39 @@ class GenerationHandler(
             emptyList()
         }
         val sessionDefaults = settings.resolveSessionDefaults(assistant, model)
+        val system = buildString {
+            append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
+
+            // 如果助手有系统提示，则添加到消息中
+            if (assistant.systemPrompt.isNotBlank()) {
+                if (isNotBlank()) appendLine()
+                append(assistant.systemPrompt)
+            }
+
+            // Agent memory layers
+            if (settings.agentRuntime.enableCoreMemory) {
+                appendLine()
+                append(buildCoreMemoryPrompt(memories = coreMemories))
+            }
+            if (settings.agentRuntime.enableShortTermMemory) {
+                appendLine()
+                append(buildShortTermMemoryPrompt(memories = shortTermMemories))
+            }
+            if (settings.agentRuntime.enableRecentChatsReference) {
+                appendLine()
+                append(buildRecentChatsPrompt(conversationRepo))
+            }
+            if (settings.agentRuntime.enableLongTermMemory) {
+                appendLine()
+                append(buildLongTermMemoryPrompt(memories = longTermMemories))
+            }
+
+            // 工具prompt
+            tools.forEach { tool ->
+                appendLine()
+                append(tool.systemPrompt(model, messages))
+            }
+        }
         val preparedContext = conversationContextEngine.prepareContext(
             conversation = conversation,
             settings = settings,
@@ -362,41 +411,9 @@ class GenerationHandler(
             messages = messages,
             tools = tools,
             contextMessageSize = sessionDefaults.contextMessageSize,
+            promptOverheadTokens = ConversationContextPlanner.estimateTokens(listOf(UIMessage.system(system))),
         )
         val internalMessages = buildList {
-            val system = buildString {
-                append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
-
-                // 如果助手有系统提示，则添加到消息中
-                if (assistant.systemPrompt.isNotBlank()) {
-                    if (isNotBlank()) appendLine()
-                    append(assistant.systemPrompt)
-                }
-
-                // Agent memory layers
-                if (settings.agentRuntime.enableCoreMemory) {
-                    appendLine()
-                    append(buildCoreMemoryPrompt(memories = coreMemories))
-                }
-                if (settings.agentRuntime.enableShortTermMemory) {
-                    appendLine()
-                    append(buildShortTermMemoryPrompt(memories = shortTermMemories))
-                }
-                if (settings.agentRuntime.enableRecentChatsReference) {
-                    appendLine()
-                    append(buildRecentChatsPrompt(conversationRepo))
-                }
-                if (settings.agentRuntime.enableLongTermMemory) {
-                    appendLine()
-                    append(buildLongTermMemoryPrompt(memories = longTermMemories))
-                }
-
-                // 工具prompt
-                tools.forEach { tool ->
-                    appendLine()
-                    append(tool.systemPrompt(model, messages))
-                }
-            }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(preparedContext.messages)
         }.transforms(

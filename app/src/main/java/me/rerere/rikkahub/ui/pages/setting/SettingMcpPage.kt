@@ -1,23 +1,19 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.FileImport
-import me.rerere.hugeicons.stroke.MessageBlocked
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Console
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.FlowRowOverflow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,11 +30,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -52,6 +48,7 @@ import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.SwitchSize
@@ -80,7 +77,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.InputSchema
-import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
@@ -91,6 +87,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -103,6 +100,7 @@ import org.koin.compose.koinInject
 fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val mcpConfigs = settings.mcpServers
+    val workspace = workspaceColors()
     val creationState = useEditState<McpServerConfig> {
         vm.updateSettings(
             settings.copy(
@@ -150,11 +148,17 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = workspace.paper,
+                    scrolledContainerColor = workspace.paper,
+                    titleContentColor = workspace.ink,
+                    navigationIconContentColor = workspace.muted,
+                    actionIconContentColor = workspace.blue,
+                )
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = workspace.canvas
     ) { innerPadding ->
         val mcpManager = koinInject<McpManager>()
         val status by mcpManager.syncingStatus.collectAsStateWithLifecycle()
@@ -174,8 +178,8 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(16.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 items(mcpConfigs, key = { it.id }) { mcpConfig ->
                     McpServerItem(
@@ -201,10 +205,15 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(text = stringResource(R.string.setting_mcp_page_no_mcp_servers_found))
+                    Text(
+                        text = stringResource(R.string.setting_mcp_page_no_mcp_servers_found),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = workspace.ink,
+                    )
                     Text(
                         text = stringResource(R.string.setting_mcp_page_add_one_to_get_started),
                         style = MaterialTheme.typography.bodySmall,
+                        color = workspace.muted,
                     )
                 }
             }
@@ -236,6 +245,7 @@ private fun McpServerItem(
     val status by mcpManager.getStatus(item).collectAsStateWithLifecycle(McpStatus.Idle)
     val dismissBoxState = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
+    val workspace = workspaceColors()
     SwipeToDismissBox(
         state = dismissBoxState,
         backgroundContent = {
@@ -264,44 +274,48 @@ private fun McpServerItem(
         enableDismissFromEndToStart = true,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = workspace.paper,
+            contentColor = workspace.ink,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                when (status) {
-                    McpStatus.Idle -> Icon(HugeIcons.MessageBlocked, null)
-                    McpStatus.Connecting -> CircularProgressIndicator(
-                        modifier = Modifier.size(
-                            24.dp
+                Surface(
+                    modifier = Modifier.size(34.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = workspace.row,
+                    contentColor = workspace.muted,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "{}",
+                            style = MaterialTheme.typography.labelMedium,
                         )
-                    )
-
-                    McpStatus.Connected -> Icon(HugeIcons.McpServer, null)
-                    is McpStatus.Reconnecting -> CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp)
-                    )
-                    is McpStatus.Error -> Icon(HugeIcons.AlertCircle, null)
+                    }
                 }
 
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Text(
                             text = item.commonOptions.name,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
                         val dotColor =
                             if (item.commonOptions.enable) MaterialTheme.extendColors.green6 else MaterialTheme.extendColors.red6
@@ -317,27 +331,61 @@ private fun McpServerItem(
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Tag(type = TagType.SUCCESS) {
-                            when (item) {
-                                is McpServerConfig.SseTransportServer -> Text("SSE")
-                                is McpServerConfig.StreamableHTTPServer -> Text("Streamable HTTP")
-                            }
-                        }
+                        McpInlinePill(text = item.transportLabel())
+                        McpInlinePill(text = status.statusLabel())
                     }
                 }
 
                 IconButton(
                     onClick = {
                         onEdit(item)
-                    }
+                    },
+                    modifier = Modifier.size(38.dp)
                 ) {
-                    Icon(HugeIcons.Settings03, null)
+                    Icon(
+                        HugeIcons.Settings03,
+                        null,
+                        modifier = Modifier.size(20.dp),
+                        tint = workspace.muted,
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun McpInlinePill(text: String) {
+    val workspace = workspaceColors()
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = workspace.row,
+        contentColor = workspace.muted,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
+}
+
+private fun McpServerConfig.transportLabel(): String = when (this) {
+    is McpServerConfig.SseTransportServer -> "SSE"
+    is McpServerConfig.StreamableHTTPServer -> "Streamable HTTP"
+}
+
+private fun McpStatus.statusLabel(): String = when (this) {
+    McpStatus.Idle -> "Idle"
+    McpStatus.Connecting -> "Connecting"
+    McpStatus.Connected -> "Connected"
+    is McpStatus.Reconnecting -> "Reconnecting"
+    is McpStatus.Error -> "Error"
 }
 
 @Composable
