@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -64,6 +65,12 @@ fun PulseBottomBar(
     onPlusClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Outer Box fills width so the bar is always horizontally centered;
+    // the inner pill clamps to a max width (480dp) so on tablets / wide
+    // screens the slots stay closely packed instead of stretching to
+    // fill the whole bottom edge. On phones the pill still grows to
+    // ~viewport-wide minus 14dp side padding so layout density matches
+    // the mockup.
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -72,6 +79,7 @@ fun PulseBottomBar(
     ) {
         Surface(
             modifier = Modifier
+                .widthIn(max = 480.dp)
                 .fillMaxWidth()
                 .height(56.dp),
             shape = RoundedCornerShape(28.dp),

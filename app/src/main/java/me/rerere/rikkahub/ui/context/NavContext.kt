@@ -30,6 +30,20 @@ class Navigator(private val backStack: MutableList<NavKey>) {
         backStack.add(screen)
     }
 
+    /**
+     * Push [screen] onto the backstack, but if the current top
+     * matches [replaceWhen], remove it first. Used for "+ new chat"
+     * flows where we want to swap one Chat for another without
+     * stacking and without nuking History underneath.
+     */
+    fun pushOrReplaceTop(screen: Screen, replaceWhen: (NavKey) -> Boolean) {
+        val top = backStack.lastOrNull()
+        if (top != null && replaceWhen(top)) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+        backStack.add(screen)
+    }
+
     fun popBackStack() {
         if (backStack.size > 1) backStack.removeLastOrNull()
     }

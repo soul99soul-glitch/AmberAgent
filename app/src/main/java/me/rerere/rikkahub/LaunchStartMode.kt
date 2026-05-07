@@ -48,6 +48,23 @@ fun resolveLaunchStartScreen(
     }
 }
 
+/**
+ * Returns the list of screens to seed the backstack with. Always
+ * includes Screen.History at the bottom so a back-press from any
+ * Chat lands on the conversations list instead of finishing the
+ * activity. When the resolved start screen IS Screen.History (HOME
+ * mode), the list is just [History]; otherwise the resolved start
+ * screen is layered on top of History.
+ */
+fun resolveLaunchBackStack(
+    mode: LaunchStartMode,
+    lastConversationId: String?,
+    newConversationId: String,
+): List<Screen> {
+    val start = resolveLaunchStartScreen(mode, lastConversationId, newConversationId)
+    return if (start is Screen.History) listOf(start) else listOf(Screen.History, start)
+}
+
 private fun String.isValidUuid(): Boolean = runCatching {
     Uuid.parse(this)
 }.isSuccess

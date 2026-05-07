@@ -256,7 +256,13 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
-        val startScreen = remember {
+        // Seed the backstack so a back-press from any Chat falls
+        // through to Screen.History instead of finishing the activity.
+        // For HOME mode this is just [History]; for chat-first launch
+        // modes this becomes [History, Chat(...)] — back from the chat
+        // pops to the conversations list, matching the Pulse mockup
+        // navigation model where History is the canonical home.
+        val initialBackStack = remember {
             val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
                 readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
             } else {
@@ -266,14 +272,14 @@ class RouteActivity : ComponentActivity() {
                 storedMode = readStringPreference(LAUNCH_START_MODE_PREF),
                 legacyCreateNewConversationOnStart = legacyCreateNew,
             )
-            resolveLaunchStartScreen(
+            resolveLaunchBackStack(
                 mode = startMode,
                 lastConversationId = readStringPreference(LAST_CONVERSATION_ID_PREF),
                 newConversationId = Uuid.random().toString(),
             )
         }
 
-        val backStack = rememberNavBackStack(startScreen)
+        val backStack = rememberNavBackStack(*initialBackStack.toTypedArray())
         var currentIntent by remember { mutableStateOf(intent) }
         SideEffect {
             this@RouteActivity.navStack = backStack

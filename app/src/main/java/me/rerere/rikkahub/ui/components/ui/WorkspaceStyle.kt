@@ -161,12 +161,18 @@ fun WorkspaceStatusPill(
     maxWidth: Dp = Dp.Unspecified,
 ) {
     val colors = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Pulse fix: filled tonal containers paired their *Container with the
+    // *raw* primary/secondary/error color (e.g. chartreuse on chartreuse-
+    // tinted, orange on peach), which made the icon/label illegible. Pair
+    // each container with its proper on*Container slot so contrast is
+    // guaranteed in both light and dark Pulse schemes.
     val (container, content) = when (tone) {
         WorkspaceTone.Neutral -> colors.row to colors.muted
-        WorkspaceTone.Accent -> colors.blueContainer to colors.blue
-        WorkspaceTone.Success -> colors.greenContainer to colors.green
-        WorkspaceTone.Warning -> colors.amberContainer to colors.amber
-        WorkspaceTone.Danger -> colors.redContainer to colors.red
+        WorkspaceTone.Accent -> scheme.primaryContainer to scheme.onPrimaryContainer
+        WorkspaceTone.Success -> scheme.primaryContainer to scheme.onPrimaryContainer
+        WorkspaceTone.Warning -> scheme.secondaryContainer to scheme.onSecondaryContainer
+        WorkspaceTone.Danger -> scheme.errorContainer to scheme.onErrorContainer
     }
     Surface(
         modifier = modifier.then(if (maxWidth != Dp.Unspecified) Modifier.width(maxWidth) else Modifier),
@@ -194,22 +200,27 @@ fun WorkspaceLeadingIcon(
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Filled tonal squircles need on*Container content colors to stay
+    // readable; the previous mapping rendered chartreuse on chartreuse
+    // and orange on peach. Neutral tone keeps a transparent surface so
+    // the icon falls through to ink on the parent's cream/dark ground.
     val tint = when (tone) {
         WorkspaceTone.Neutral -> colors.ink
-        WorkspaceTone.Accent -> colors.blue
-        WorkspaceTone.Success -> colors.green
-        WorkspaceTone.Warning -> colors.amber
-        WorkspaceTone.Danger -> colors.red
+        WorkspaceTone.Accent -> scheme.onPrimaryContainer
+        WorkspaceTone.Success -> scheme.onPrimaryContainer
+        WorkspaceTone.Warning -> scheme.onSecondaryContainer
+        WorkspaceTone.Danger -> scheme.onErrorContainer
     }
     Surface(
         modifier = modifier.size(size),
         shape = RoundedCornerShape(6.dp),
         color = when (tone) {
             WorkspaceTone.Neutral -> Color.Transparent
-            WorkspaceTone.Accent -> colors.blueContainer
-            WorkspaceTone.Success -> colors.greenContainer
-            WorkspaceTone.Warning -> colors.amberContainer
-            WorkspaceTone.Danger -> colors.redContainer
+            WorkspaceTone.Accent -> scheme.primaryContainer
+            WorkspaceTone.Success -> scheme.primaryContainer
+            WorkspaceTone.Warning -> scheme.secondaryContainer
+            WorkspaceTone.Danger -> scheme.errorContainer
         },
         contentColor = tint,
     ) {
@@ -258,19 +269,23 @@ fun WorkspaceIconButton(
     contentDescription: String?,
 ) {
     val colors = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Use on*Container slots for the icon tint when sitting on a filled
+    // tonal container — guarantees contrast in both Pulse light and dark
+    // schemes. Neutral keeps ink on cream/paper.
     val contentColor = when (tone) {
         WorkspaceTone.Neutral -> colors.ink
-        WorkspaceTone.Accent -> colors.blue
-        WorkspaceTone.Success -> colors.green
-        WorkspaceTone.Warning -> colors.amber
-        WorkspaceTone.Danger -> colors.red
+        WorkspaceTone.Accent -> scheme.onPrimaryContainer
+        WorkspaceTone.Success -> scheme.onPrimaryContainer
+        WorkspaceTone.Warning -> scheme.onSecondaryContainer
+        WorkspaceTone.Danger -> scheme.onErrorContainer
     }.copy(alpha = if (enabled) 1f else 0.36f)
     val resolvedContainer = containerColor ?: when (tone) {
         WorkspaceTone.Neutral -> colors.paper
-        WorkspaceTone.Accent -> colors.blueContainer
-        WorkspaceTone.Success -> colors.greenContainer
-        WorkspaceTone.Warning -> colors.amberContainer
-        WorkspaceTone.Danger -> colors.redContainer
+        WorkspaceTone.Accent -> scheme.primaryContainer
+        WorkspaceTone.Success -> scheme.primaryContainer
+        WorkspaceTone.Warning -> scheme.secondaryContainer
+        WorkspaceTone.Danger -> scheme.errorContainer
     }
     Surface(
         modifier = modifier

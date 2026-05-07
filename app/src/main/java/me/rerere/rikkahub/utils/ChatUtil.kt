@@ -18,13 +18,21 @@ fun navigateToChatPage(
     nodeId: Uuid? = null,
 ) {
     Log.i(TAG, "navigateToChatPage: navigate to $chatId")
-    navigator.clearAndNavigate(
-        Screen.Chat(
+    // Replace any Chat already on top so we don't stack chats every
+    // time the user taps "+", but PRESERVE everything beneath (the
+    // canonical History entry, in particular) so back from the new
+    // chat falls through to the conversations list. ShareHandler is
+    // a transient redirect surface — when it navigates to Chat we
+    // want to be replaced too, not stacked on top of, so back from
+    // the chat doesn't re-trigger the share handler in a loop.
+    navigator.pushOrReplaceTop(
+        screen = Screen.Chat(
             id = chatId.toString(),
             text = initText,
             files = initFiles.map { it.toString() },
             nodeId = nodeId?.toString(),
-        )
+        ),
+        replaceWhen = { it is Screen.Chat || it is Screen.ShareHandler },
     )
 }
 
