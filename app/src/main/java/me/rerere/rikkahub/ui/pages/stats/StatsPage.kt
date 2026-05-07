@@ -85,6 +85,18 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
                 contentPadding = padding + PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Pulse Token Usage hero — concentric chartreuse + orange
+                // rings around the lifetime token total, plus an OUT / IN /
+                // CACHED stat strip. Replaces the locked Token Usage screen
+                // from the Sleek mockup with the actual data we can show.
+                item {
+                    TokenUsageHeroCard(
+                        promptTokens = stats.totalPromptTokens,
+                        completionTokens = stats.totalCompletionTokens,
+                        cachedTokens = stats.totalCachedTokens,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
                 item {
                     HeatmapCard(
                         conversationsPerDay = stats.conversationsPerDay,
