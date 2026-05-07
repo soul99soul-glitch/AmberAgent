@@ -83,6 +83,8 @@ import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.SandboxActivitySheet
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -1059,22 +1061,18 @@ private fun TopBar(
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        titleState.confirm()
-                    }
-                ) {
-                    Text(stringResource(R.string.chat_page_save))
-                }
+                PulseDialogButton(
+                    onClick = { titleState.confirm() },
+                    text = stringResource(R.string.chat_page_save),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        titleState.dismiss()
-                    }
-                ) {
-                    Text(stringResource(R.string.chat_page_cancel))
-                }
+                PulseDialogButton(
+                    onClick = { titleState.dismiss() },
+                    text = stringResource(R.string.chat_page_cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         )
     }

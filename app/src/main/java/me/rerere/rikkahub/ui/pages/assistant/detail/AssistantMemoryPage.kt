@@ -297,6 +297,7 @@ private fun AssistantMemoryContent(
             pendingDeleteMemory = null
         },
         onDismiss = { pendingDeleteMemory = null },
+        destructive = true,
         text = {
             Text(
                 text = pendingDeleteMemory?.content.orEmpty(),

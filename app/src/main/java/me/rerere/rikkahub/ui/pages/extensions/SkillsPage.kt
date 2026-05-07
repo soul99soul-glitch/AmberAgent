@@ -211,6 +211,7 @@ fun SkillsPage() {
             deleteTarget = null
         },
         onDismiss = { deleteTarget = null },
+        destructive = true,
     ) {
         Text(stringResource(R.string.skills_page_delete_message, deleteTarget?.name ?: ""))
     }

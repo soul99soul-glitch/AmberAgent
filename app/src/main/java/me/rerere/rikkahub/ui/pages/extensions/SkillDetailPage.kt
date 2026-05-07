@@ -156,6 +156,7 @@ fun SkillDetailPage(skillName: String) {
             deleteTarget = null
         },
         onDismiss = { deleteTarget = null },
+        destructive = true,
     ) {
         Text(stringResource(R.string.skill_detail_page_delete_confirm, deleteTarget?.relativePath ?: ""))
     }

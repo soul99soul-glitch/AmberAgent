@@ -234,6 +234,95 @@ private fun PulseButtonImpl(
 }
 
 /**
+ * Pulse compact dialog button — same Pulse vocabulary as the four
+ * primary variants above but with reduced vertical padding (6dp vs.
+ * 12dp) so it slots into AlertDialog footers without making the
+ * dialog feel chunkier than M3's default TextButton-based footer.
+ * Pill shape across all variants since dialog buttons sit in a flat
+ * Row and the squircle would clash with adjacent peers.
+ *
+ * The variant param picks color treatment:
+ *   Primary    chartreuse + ink     → "Save", "Apply", non-destructive confirm
+ *   Secondary  sport-orange + cream → destructive confirm ("Delete", "Reset")
+ *   Ghost      transparent + ink    → dismiss / cancel
+ */
+@Composable
+fun PulseDialogButton(
+    onClick: () -> Unit,
+    text: String,
+    variant: PulseDialogVariant = PulseDialogVariant.Primary,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val container: androidx.compose.ui.graphics.Color
+    val content: androidx.compose.ui.graphics.Color
+    val border: BorderStroke?
+    when (variant) {
+        PulseDialogVariant.Primary -> {
+            container = MaterialTheme.colorScheme.primary
+            content = MaterialTheme.colorScheme.onPrimary
+            border = null
+        }
+        PulseDialogVariant.Secondary -> {
+            container = MaterialTheme.colorScheme.secondary
+            content = MaterialTheme.colorScheme.onSecondary
+            border = null
+        }
+        PulseDialogVariant.Ghost -> {
+            container = MaterialTheme.colorScheme.surface
+            content = MaterialTheme.colorScheme.onSurface
+            border = BorderStroke(
+                width = 1.5.dp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            )
+        }
+    }
+
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "pulseDialogButtonScale",
+    )
+
+    Surface(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                onClick = onClick,
+            ),
+        shape = CircleShape,
+        color = if (enabled) container else container.copy(alpha = 0.38f),
+        contentColor = if (enabled) content else content.copy(alpha = 0.50f),
+        border = border,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.05.em,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+enum class PulseDialogVariant { Primary, Secondary, Ghost }
+
+/**
  * Pulse circular icon button — the canonical top-bar / inline action
  * affordance from the Pulse mockup. Cream surface, 1.5dp ink hairline,
  * ink icon. Same press-spring as the Pulse buttons above so all

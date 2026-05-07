@@ -160,6 +160,7 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
             deleteTarget = null
         },
         onDismiss = { deleteTarget = null },
+        destructive = true,
     ) {
         Text(stringResource(R.string.quick_messages_page_delete_message, deleteTarget?.title ?: ""))
     }
