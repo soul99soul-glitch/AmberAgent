@@ -73,6 +73,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.ui.components.chat.ChatModelSwitchRow
+import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
@@ -1061,17 +1062,14 @@ private fun TopBar(
             actionIconContentColor = workspace.muted,
         ),
         navigationIcon = {
+            // Pulse navigation pattern: chat is now a detail surface
+            // reached by tapping a row in the Conversations home, so the
+            // navigation icon is a Back chevron (pop the backstack) rather
+            // than a hamburger that opens a drawer. The drawer composable
+            // is left in place for now — accessible via swipe — but no
+            // longer the primary entry into chat history.
             if (!bigScreen) {
-                WorkspaceIconButton(
-                    onClick = {
-                        scope.launch { drawerState.open() }
-                    },
-                    icon = HugeIcons.Menu03,
-                    size = 42.dp,
-                    iconSize = 24.dp,
-                    showBorder = false,
-                    contentDescription = "Messages",
-                )
+                BackButton()
             }
         },
         title = {

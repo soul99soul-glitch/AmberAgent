@@ -319,20 +319,12 @@ class RouteActivity : ComponentActivity() {
                             PulseBottomBar(
                                 activeDestination = pulseDest,
                                 onDestinationClick = { dest ->
+                                    // Chats tab → Conversations home (Screen.History);
+                                    // tapping while already on a Chat detail or History
+                                    // pops back to History so the page is the canonical
+                                    // landing surface for the Chats nav slot.
                                     val target: Screen = when (dest) {
-                                        PulseNavDestination.Chats -> {
-                                            // Tapping Chats while inside a chat
-                                            // is a no-op visually (the active
-                                            // pill already shows Chats); from
-                                            // a different primary tab, drop
-                                            // back to the most-recent chat
-                                            // experience by spawning a new
-                                            // navigation event through the
-                                            // utility helper rather than
-                                            // mutating backStack directly.
-                                            navigateToChatPage(Navigator(backStack))
-                                            return@PulseBottomBar
-                                        }
+                                        PulseNavDestination.Chats -> Screen.History
                                         PulseNavDestination.Search -> Screen.MessageSearch
                                         PulseNavDestination.Skills -> Screen.Skills
                                         PulseNavDestination.Settings -> Screen.Setting

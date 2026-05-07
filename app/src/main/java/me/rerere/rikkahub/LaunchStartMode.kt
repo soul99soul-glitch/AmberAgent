@@ -25,7 +25,13 @@ fun migrateLaunchStartMode(
     parseLaunchStartMode(storedMode)
         ?: when (legacyCreateNewConversationOnStart) {
             false -> LaunchStartMode.LAST_SESSION
-            true, null -> LaunchStartMode.NEW_CHAT
+            // Default for fresh installs on the Pulse-redesign branch is
+            // HOME — the app launches into the Conversations list page
+            // (Screen.History) instead of immediately spawning a new chat,
+            // matching the Pulse mockup where the conversations list is
+            // the primary entry surface and individual chats are detail
+            // views reached by tapping a row.
+            true, null -> LaunchStartMode.HOME
         }
 
 fun resolveLaunchStartScreen(
