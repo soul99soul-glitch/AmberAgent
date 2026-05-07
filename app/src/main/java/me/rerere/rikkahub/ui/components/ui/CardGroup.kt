@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -46,6 +47,7 @@ data class CardGroupItem(
     val leadingContent: (@Composable () -> Unit)?,
     val trailingContent: (@Composable () -> Unit)?,
     val colors: ListItemColors?,
+    val selected: Boolean,
 )
 
 class CardGroupScope {
@@ -59,6 +61,7 @@ class CardGroupScope {
         leadingContent: (@Composable () -> Unit)? = null,
         trailingContent: (@Composable () -> Unit)? = null,
         colors: ListItemColors? = null,
+        selected: Boolean = false,
         headlineContent: @Composable () -> Unit,
     ) {
         items.add(
@@ -71,6 +74,7 @@ class CardGroupScope {
                 leadingContent = leadingContent,
                 trailingContent = trailingContent,
                 colors = colors,
+                selected = selected,
             )
         )
     }
@@ -92,8 +96,12 @@ private fun CardGroupListItem(
     val topCorner = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner
     val bottomCorner = if (isPressed || count == 1 || isLast) CardGroupCorner else CardGroupInnerCorner
 
-    ListItem(
-        headlineContent = item.headlineContent,
+    // Pulse Phase B: when `selected` is true, render a 2dp chartreuse
+    // underline pinned flush to the row's bottom edge. Wrapping in a
+    // Column with a clipped shape keeps the underline inside the
+    // first/last row's rounded corners — no overflow into the gap
+    // between rows.
+    Column(
         modifier = item.modifier
             .fillMaxWidth()
             .clip(
@@ -113,12 +121,25 @@ private fun CardGroupListItem(
                     )
                 } else Modifier
             ),
-        overlineContent = item.overlineContent,
-        supportingContent = item.supportingContent,
-        leadingContent = item.leadingContent,
-        trailingContent = item.trailingContent,
-        colors = item.colors ?: defaultColors ?: CustomColors.listItemColors,
-    )
+    ) {
+        ListItem(
+            headlineContent = item.headlineContent,
+            modifier = Modifier.fillMaxWidth(),
+            overlineContent = item.overlineContent,
+            supportingContent = item.supportingContent,
+            leadingContent = item.leadingContent,
+            trailingContent = item.trailingContent,
+            colors = item.colors ?: defaultColors ?: CustomColors.listItemColors,
+        )
+        if (item.selected) {
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
+    }
 }
 
 @Composable
