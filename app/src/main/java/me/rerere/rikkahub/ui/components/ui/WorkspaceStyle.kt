@@ -59,68 +59,81 @@ enum class WorkspaceTone {
     Danger,
 }
 
+/**
+ * Pulse-pivoted WorkspaceColors: every token now derives from
+ * MaterialTheme.colorScheme (which is wired to PulseThemePreset's
+ * chartreuse + sport-orange + cream/ink palette via Phase 0+1).
+ *
+ * The original Codex implementation hardcoded blue/green/amber/red
+ * values that bypassed the theme, so flipping to the Pulse preset only
+ * affected components that already consumed colorScheme directly. By
+ * routing every workspace token through the active scheme here, all
+ * 18+ downstream files that consume workspaceColors() / WorkspaceTone
+ * automatically inherit Pulse without per-file edits.
+ *
+ * Tone-collapse rationale (intentional, not a bug):
+ *   - blue   ("Accent")  → primary    (chartreuse — the "active" color)
+ *   - green  ("Success") → primary    (chartreuse — Pulse treats success
+ *                                       and active as the same hue family)
+ *   - amber  ("Warning") → secondary  (sport-orange — "needs attention")
+ *   - red    ("Danger")  → error      (sport-orange — Pulse design has
+ *                                       no separate red; warning and
+ *                                       danger share hue but error is
+ *                                       its own M3 slot for downstream
+ *                                       components that style errors
+ *                                       differently)
+ *
+ * AMOLED branch: keep pure-black canvas for OLED battery savings, then
+ * pull accent colors from the dark Pulse scheme so chartreuse and
+ * sport-orange still pop on the true-black ground.
+ */
 @Composable
 fun workspaceColors(): WorkspaceColors {
     val scheme = MaterialTheme.colorScheme
     if (LocalAmoledDarkMode.current) {
+        // True-black canvas (#000) for OLED, layered surfaces a few notches
+        // brighter so cards still read as discrete from background. Accent
+        // hues come from the active Pulse dark scheme so the brand stays
+        // recognisable even with maximum contrast.
         return WorkspaceColors(
             canvas = Color(0xFF000000),
             paper = Color(0xFF050505),
-            row = Color(0xFF090909),
-            note = Color(0xFF0D0D0D),
-            ink = Color(0xFFF1F3F5),
-            muted = Color(0xFFA7ABB2),
-            faint = Color(0xFF666C74),
-            hairline = Color(0xFF20242A),
-            blue = Color(0xFF4EA6FF),
-            blueContainer = Color(0xFF071B2E),
-            green = Color(0xFF6DD58C),
-            greenContainer = Color(0xFF071A10),
-            amber = Color(0xFFE5B567),
-            amberContainer = Color(0xFF1F170A),
-            red = Color(0xFFFF8F86),
-            redContainer = Color(0xFF21100F),
-        )
-    }
-    return if (LocalDarkMode.current) {
-        WorkspaceColors(
-            canvas = scheme.surfaceContainerLowest,
-            paper = scheme.surface,
-            row = scheme.surfaceContainerLow,
-            note = scheme.surfaceContainer,
+            row = Color(0xFF0A0A0A),
+            note = Color(0xFF0E0E0E),
             ink = scheme.onSurface,
             muted = scheme.onSurfaceVariant,
-            faint = Color(0xFF70757E),
-            hairline = Color(0xFF2B2F35),
-            blue = Color(0xFF4EA6FF),
-            blueContainer = Color(0xFF10263A),
-            green = Color(0xFF6DD58C),
-            greenContainer = Color(0xFF102A1A),
-            amber = Color(0xFFE5B567),
-            amberContainer = Color(0xFF352715),
-            red = Color(0xFFFF8F86),
-            redContainer = Color(0xFF3A1715),
-        )
-    } else {
-        WorkspaceColors(
-            canvas = Color(0xFFF7F7F5),
-            paper = Color.White,
-            row = Color(0xFFF7F7F5),
-            note = Color(0xFFFBFBFA),
-            ink = Color(0xFF1F1F1F),
-            muted = Color(0xFF6B6761),
-            faint = Color(0xFF9B9690),
-            hairline = Color.Black.copy(alpha = 0.085f),
-            blue = Color(0xFF2383E2),
-            blueContainer = Color(0xFFEAF4FF),
-            green = Color(0xFF168A2D),
-            greenContainer = Color(0xFFEDF9EF),
-            amber = Color(0xFFD37A00),
-            amberContainer = Color(0xFFFFF4E8),
-            red = Color(0xFFC5281C),
-            redContainer = Color(0xFFFFEFED),
+            faint = scheme.onSurfaceVariant.copy(alpha = 0.55f),
+            hairline = scheme.outlineVariant,
+            blue = scheme.primary,
+            blueContainer = scheme.primaryContainer,
+            green = scheme.primary,
+            greenContainer = scheme.primaryContainer,
+            amber = scheme.secondary,
+            amberContainer = scheme.secondaryContainer,
+            red = scheme.error,
+            redContainer = scheme.errorContainer,
         )
     }
+    // Both light and dark Pulse schemes carry the same semantic mapping;
+    // colorScheme.* picks the right variant for each mode automatically.
+    return WorkspaceColors(
+        canvas = scheme.background,
+        paper = scheme.surface,
+        row = scheme.surfaceVariant,
+        note = scheme.surfaceContainerLow,
+        ink = scheme.onSurface,
+        muted = scheme.onSurfaceVariant,
+        faint = scheme.onSurfaceVariant.copy(alpha = 0.65f),
+        hairline = scheme.outlineVariant,
+        blue = scheme.primary,
+        blueContainer = scheme.primaryContainer,
+        green = scheme.primary,
+        greenContainer = scheme.primaryContainer,
+        amber = scheme.secondary,
+        amberContainer = scheme.secondaryContainer,
+        red = scheme.error,
+        redContainer = scheme.errorContainer,
+    )
 }
 
 @Composable
