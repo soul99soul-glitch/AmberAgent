@@ -127,11 +127,15 @@ import me.rerere.rikkahub.ui.pages.setting.SettingTTSPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
+import androidx.compose.material3.Scaffold
+import me.rerere.rikkahub.ui.components.nav.PulseBottomBar
+import me.rerere.rikkahub.ui.components.nav.PulseNavDestination
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
+import me.rerere.rikkahub.utils.navigateToChatPage
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.inject
 import org.koin.compose.koinInject
@@ -295,18 +299,68 @@ class RouteActivity : ComponentActivity() {
                     showCloseButton = true,
                 )
                 TTSController()
-                Box(
+                // Pulse floating bottom-pill nav: only render on primary
+                // destinations (Chat / Search / Skills / Settings / Stats).
+                // Detail pages (AssistantDetail, SettingProviderDetail,
+                // WebView, etc.) get null and the bottomBar slot is empty,
+                // so the Scaffold doesn't reserve any space and the page
+                // takes the full height. Center "+" is wired to start a
+                // fresh chat via navigateToChatPage rather than adding a
+                // dedicated destination, so it functions as a primary CTA
+                // distinct from the four nav slots.
+                val pulseDest = derivePulseDestination(backStack.lastOrNull() as? Screen)
+                Scaffold(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
-                ) {
-                    NavDisplay(
-                        backStack = backStack,
-                        entryDecorators = listOf(
-                            rememberSaveableStateHolderNavEntryDecorator(),
-                            rememberViewModelStoreNavEntryDecorator(),
-                        ),
-                        modifier = Modifier.fillMaxSize(),
+                        .background(MaterialTheme.colorScheme.background),
+                    containerColor = MaterialTheme.colorScheme.background,
+                    bottomBar = {
+                        if (pulseDest != null) {
+                            PulseBottomBar(
+                                activeDestination = pulseDest,
+                                onDestinationClick = { dest ->
+                                    val target: Screen = when (dest) {
+                                        PulseNavDestination.Chats -> {
+                                            // Tapping Chats while inside a chat
+                                            // is a no-op visually (the active
+                                            // pill already shows Chats); from
+                                            // a different primary tab, drop
+                                            // back to the most-recent chat
+                                            // experience by spawning a new
+                                            // navigation event through the
+                                            // utility helper rather than
+                                            // mutating backStack directly.
+                                            navigateToChatPage(Navigator(backStack))
+                                            return@PulseBottomBar
+                                        }
+                                        PulseNavDestination.Search -> Screen.MessageSearch
+                                        PulseNavDestination.Skills -> Screen.Skills
+                                        PulseNavDestination.Settings -> Screen.Setting
+                                    }
+                                    if (backStack.lastOrNull() != target) {
+                                        backStack.add(target)
+                                    }
+                                },
+                                onPlusClick = {
+                                    navigateToChatPage(Navigator(backStack))
+                                },
+                            )
+                        }
+                    },
+                ) { innerPadding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        NavDisplay(
+                            backStack = backStack,
+                            entryDecorators = listOf(
+                                rememberSaveableStateHolderNavEntryDecorator(),
+                                rememberViewModelStoreNavEntryDecorator(),
+                            ),
+                            modifier = Modifier.fillMaxSize(),
                         onBack = { backStack.removeLastOrNull() },
                         transitionSpec = {
                             if (backStack.size == 1) fadeIn() togetherWith fadeOut()
@@ -579,10 +633,32 @@ class RouteActivity : ComponentActivity() {
                             }
                         }
                     }
-                }
+                }  // close inner Box
+                }  // close Scaffold content lambda
             }
         }
     }
+}
+
+/**
+ * Maps the topmost backStack screen to its corresponding Pulse nav
+ * destination, returning null on detail screens where the bottom bar
+ * should not appear (assistant detail subpages, setting detail subpages,
+ * webview, image gen, etc.). Used by RouteActivity's outer Scaffold to
+ * decide whether to render PulseBottomBar.
+ *
+ * Stats and History fold into the Chats slot (history is just a chat
+ * list view; Stats reads as "your chat activity"). MessageSearch is
+ * its own Search slot. Skills + Setting are 1:1.
+ */
+private fun derivePulseDestination(top: Screen?): PulseNavDestination? = when (top) {
+    is Screen.Chat,
+    Screen.History,
+    Screen.Stats -> PulseNavDestination.Chats
+    Screen.MessageSearch -> PulseNavDestination.Search
+    Screen.Skills -> PulseNavDestination.Skills
+    Screen.Setting -> PulseNavDestination.Settings
+    else -> null
 }
 
 private fun Intent.extractSharedText(): String {
