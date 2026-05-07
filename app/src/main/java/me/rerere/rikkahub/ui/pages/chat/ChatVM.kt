@@ -40,6 +40,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
@@ -62,6 +63,8 @@ class ChatVM(
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val timelineLoadState: StateFlow<ConversationTimelineLoadState> =
+        chatService.getTimelineLoadStateFlow(_conversationId)
     val contextCompacts: StateFlow<List<ConversationCompact>> =
         contextRepository.getCompactsFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -277,6 +280,10 @@ class ChatVM(
         viewModelScope.launch {
             chatService.saveConversation(_conversationId, conversation.value)
         }
+    }
+
+    suspend fun ensureTimelineLoaded() {
+        chatService.ensureConversationTimelineLoaded(_conversationId)
     }
 
     fun updateTitle(title: String) {

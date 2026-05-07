@@ -119,7 +119,7 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
         if (loading) {
             while (isActive) {
                 state.duration = (reasoning.finishedAt ?: Clock.System.now()) - reasoning.createdAt
-                delay(50)
+                delay(250)
             }
         }
     }
@@ -203,7 +203,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     collapsedAdaptiveWidth: Boolean = false,
 ) {
     val (state, loading) = rememberReasoningState(reasoning)
-    val thinkingTitle = reasoning.reasoning.extractThinkingTitle().takeIf { loading }
+    val thinkingTitle = remember(reasoning.reasoning, loading) {
+        if (loading) reasoning.reasoning.extractThinkingTitle() else null
+    }
     val showThinkingTitle = thinkingTitle != null
     val workspace = workspaceColors()
     val settings = LocalSettings.current

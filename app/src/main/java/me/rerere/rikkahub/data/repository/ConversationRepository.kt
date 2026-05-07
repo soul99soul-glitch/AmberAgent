@@ -205,6 +205,39 @@ class ConversationRepository(
         } else null
     }
 
+    suspend fun getConversationTailById(uuid: Uuid, limit: Int): ConversationWindow? {
+        val entity = conversationDAO.getConversationById(uuid.toString()) ?: return null
+        val total = messageNodeDAO.countNodesOfConversation(entity.id)
+        val safeLimit = limit.coerceAtLeast(0)
+        val offset = (total - safeLimit).coerceAtLeast(0)
+        val nodes = loadMessageNodesPage(
+            conversationId = entity.id,
+            limit = safeLimit,
+            offset = offset,
+        )
+        return ConversationWindow(
+            conversation = conversationEntityToConversation(entity, nodes),
+            totalNodeCount = total,
+            oldestLoadedIndex = offset,
+        )
+    }
+
+    suspend fun getConversationNodePage(
+        conversationId: Uuid,
+        offset: Int,
+        limit: Int,
+    ): List<MessageNode> {
+        return loadMessageNodesPage(
+            conversationId = conversationId.toString(),
+            offset = offset.coerceAtLeast(0),
+            limit = limit.coerceAtLeast(0),
+        )
+    }
+
+    suspend fun countConversationNodes(conversationId: Uuid): Int {
+        return messageNodeDAO.countNodesOfConversation(conversationId.toString())
+    }
+
     suspend fun existsConversationById(uuid: Uuid): Boolean {
         return conversationDAO.existsById(uuid.toString())
     }
@@ -331,6 +364,31 @@ class ConversationRepository(
     }
 
     private suspend fun loadMessageNodes(conversationId: String): List<MessageNode> {
+        val total = messageNodeDAO.countNodesOfConversation(conversationId)
+        if (total <= 0) return emptyList()
+        return loadMessageNodesRange(conversationId = conversationId, offset = 0, total = total)
+    }
+
+    private suspend fun loadMessageNodesPage(
+        conversationId: String,
+        offset: Int,
+        limit: Int,
+    ): List<MessageNode> {
+        if (limit <= 0) return emptyList()
+        return loadMessageNodesRange(
+            conversationId = conversationId,
+            offset = offset,
+            total = offset + limit,
+            pageLimit = limit,
+        )
+    }
+
+    private suspend fun loadMessageNodesRange(
+        conversationId: String,
+        offset: Int,
+        total: Int,
+        pageLimit: Int = 64,
+    ): List<MessageNode> {
         val favoriteNodeIds = favoriteDAO
             .getFavoriteNodeIdsOfConversation(conversationId)
             .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
@@ -338,14 +396,16 @@ class ConversationRepository(
 
         return database.withTransaction {
             val nodes = mutableListOf<MessageNode>()
-            var offset = 0
-            val pageSize = 64
-            while (true) {
+            var currentOffset = offset.coerceAtLeast(0)
+            val endExclusive = total.coerceAtLeast(currentOffset)
+            val pageSize = pageLimit.coerceAtLeast(1).coerceAtMost(64)
+            while (currentOffset < endExclusive) {
+                val currentLimit = (endExclusive - currentOffset).coerceAtMost(pageSize)
                 val page = try {
-                    messageNodeDAO.getNodesOfConversationPaged(conversationId, pageSize, offset)
+                    messageNodeDAO.getNodesOfConversationPaged(conversationId, currentLimit, currentOffset)
                 } catch (e: SQLiteBlobTooBigException) {
                     e.printStackTrace()
-                    offset += pageSize
+                    currentOffset += currentLimit
                     continue
                 }
                 if (page.isEmpty()) break
@@ -361,7 +421,7 @@ class ConversationRepository(
                         )
                     )
                 }
-                offset += page.size
+                currentOffset += page.size
             }
             nodes
         }
@@ -396,4 +456,10 @@ data class LightConversationEntity(
 data class ConversationPageResult(
     val items: List<Conversation>,
     val nextOffset: Int?,
+)
+
+data class ConversationWindow(
+    val conversation: Conversation,
+    val totalNodeCount: Int,
+    val oldestLoadedIndex: Int,
 )

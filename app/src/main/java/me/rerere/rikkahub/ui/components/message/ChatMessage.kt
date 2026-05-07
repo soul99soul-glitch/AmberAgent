@@ -144,25 +144,27 @@ fun ChatMessage(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (!message.parts.isEmptyUIMessage()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                ChatMessageAssistantAvatar(
-                    message = message,
-                    model = model,
-                    assistant = assistant,
-                    loading = loading,
-                    modifier = Modifier.weight(1f)
-                )
-                ChatMessageUserAvatar(
-                    message = message,
-                    avatar = settings.userAvatar,
-                    nickname = settings.userNickname,
-                    modifier = Modifier.weight(1f)
-                )
+            when (message.role) {
+                MessageRole.ASSISTANT -> {
+                    ChatMessageAssistantAvatar(
+                        message = message,
+                        model = model,
+                        assistant = assistant,
+                        loading = loading,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                MessageRole.USER -> {
+                    ChatMessageUserAvatar(
+                        message = message,
+                        avatar = settings.userAvatar,
+                        nickname = settings.userNickname,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                else -> Unit
             }
         }
         ProvideTextStyle(textStyle) {
@@ -282,7 +284,6 @@ private fun MessagePartsBlock(
     val workspace = workspaceColors()
 
     // 消息输出HapticFeedback
-    val hapticFeedback = LocalHapticFeedback.current
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
 
@@ -306,14 +307,18 @@ private fun MessagePartsBlock(
             }
         }
     }
-    LaunchedEffect(settings.displaySetting) {
-        snapshotFlow { partsState }
-            .debounce(50.milliseconds)
-            .collect { parts ->
-                if (parts.isNotEmpty() && loading && settings.displaySetting.enableMessageGenerationHapticEffect) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+    val hapticEnabled = settings.displaySetting.enableMessageGenerationHapticEffect
+    if (loading && hapticEnabled) {
+        val hapticFeedback = LocalHapticFeedback.current
+        LaunchedEffect(hapticEnabled) {
+            snapshotFlow { partsState }
+                .debounce(50.milliseconds)
+                .collect { nextParts ->
+                    if (nextParts.isNotEmpty()) {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+                    }
                 }
-            }
+        }
     }
 
     // Render parts in original order (group thinking/tool as chain-of-thought)
@@ -327,6 +332,7 @@ private fun MessagePartsBlock(
                         modifier = Modifier.animateContentSizeIf(loading),
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                        animateContentChanges = loading,
                     ) { step ->
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {

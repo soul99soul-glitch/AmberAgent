@@ -4,7 +4,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import android.webkit.WebSettings
 import android.webkit.WebView as AndroidWebView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -73,6 +75,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -631,7 +634,7 @@ private fun ContextUsageIndicator(
     val latestNode = conversation.messageNodes.lastOrNull()
     val latestMessage = latestNode?.currentMessage
     val latestUsagePromptTokens = latestMessage?.usage?.promptTokens
-    val usedTokens = remember(
+    val latestAssistantUsageTokens = remember(
         conversation.id,
         conversation.messageNodes.size,
         latestNode?.id,
@@ -643,8 +646,26 @@ private fun ContextUsageIndicator(
             .firstOrNull { it.role == MessageRole.ASSISTANT && (it.usage?.promptTokens ?: 0) > 0 }
             ?.usage
             ?.promptTokens
-            ?: estimateConversationTokens(conversation)
     }
+    val estimatedTokens = remember(
+        conversation.id,
+        conversation.messageNodes.size,
+        latestNode?.id,
+    ) {
+        estimateConversationTokens(conversation)
+    }
+    val rawUsedTokens = latestAssistantUsageTokens ?: estimatedTokens
+    var stickyUsedTokens by remember(conversation.id) { mutableIntStateOf(0) }
+    LaunchedEffect(conversation.id, latestAssistantUsageTokens, rawUsedTokens) {
+        val shouldUpdate = latestAssistantUsageTokens != null ||
+            stickyUsedTokens == 0 ||
+            rawUsedTokens >= 1_000 ||
+            rawUsedTokens >= stickyUsedTokens
+        if (shouldUpdate) {
+            stickyUsedTokens = rawUsedTokens
+        }
+    }
+    val usedTokens = stickyUsedTokens.takeIf { it > 0 } ?: rawUsedTokens
     val contextWindow = remember(model?.modelId, model?.contextWindowTokens) {
         model?.contextWindowTokens ?: model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
     }
@@ -683,13 +704,19 @@ private fun ContextUsageIndicator(
             )
         }
         Text(
-            text = "Context ${usedTokens.formatNumber()} / ${contextWindow?.formatNumber() ?: "--"}",
+            text = "Context ${usedTokens.formatContextTokens()} / ${contextWindow?.formatNumber() ?: "--"}",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             color = workspace.muted.copy(alpha = 0.72f),
             maxLines = 1,
             overflow = TextOverflow.Clip,
         )
     }
+}
+
+private fun Int.formatContextTokens(): String = when {
+    this <= 0 -> "0"
+    this < 1_000 -> "<1K"
+    else -> formatNumber()
 }
 
 private fun estimateConversationTokens(conversation: Conversation): Int {
@@ -1157,6 +1184,7 @@ private fun AgentOperationPreviewPeek(
         if (previewUrl != null) {
             WebOperationPreviewThumbnail(
                 url = previewUrl,
+                toolCallId = activity.toolCallId,
                 onOpen = onOpen,
             )
         } else {
@@ -1186,20 +1214,35 @@ private fun AgentOperationPreviewPeek(
 @Composable
 private fun WebOperationPreviewThumbnail(
     url: String,
+    toolCallId: String,
     onOpen: () -> Unit,
 ) {
     val webViewOperationStore: WebViewOperationStore = koinInject()
     val webState by webViewOperationStore.state.collectAsState()
-    val isCurrentPreview = webState.requestedUrl == url || webState.url == url
+    val normalizedUrl = remember(url) { url.normalizedWebPreviewUrl() }
+    val isCurrentPreview = remember(
+        toolCallId,
+        normalizedUrl,
+        webState.toolCallId,
+        webState.requestedUrl,
+        webState.committedUrl,
+        webState.url,
+    ) {
+        webState.toolCallId == toolCallId ||
+            sequenceOf(webState.requestedUrl, webState.committedUrl, webState.url)
+                .filter { it.isNotBlank() }
+                .map { it.normalizedWebPreviewUrl() }
+                .any { it == normalizedUrl }
+    }
     val thumbnailFile = webState.thumbnailPath
         .takeIf { isCurrentPreview && it.isNotBlank() }
         ?.let(::File)
         ?.takeIf { it.exists() && it.length() > 0L }
     val showFrozenThumbnail = thumbnailFile != null &&
         webState.status in setOf(WebViewLoadStatus.READY, WebViewLoadStatus.STALLED, WebViewLoadStatus.FAILED)
-    LaunchedEffect(url, isCurrentPreview) {
+    LaunchedEffect(toolCallId, normalizedUrl, isCurrentPreview) {
         if (!isCurrentPreview) {
-            webViewOperationStore.open(url)
+            webViewOperationStore.open(url, toolCallId = toolCallId)
         }
     }
     val loadId = webState.loadId.takeIf { isCurrentPreview }
@@ -1209,13 +1252,9 @@ private fun WebOperationPreviewThumbnail(
             useWideViewPort = true
             loadWithOverviewMode = true
             textZoom = 85
+            disablePreviewDarkening()
         },
     )
-    LaunchedEffect(loadId, url) {
-        if (!loadId.isNullOrBlank()) {
-            state.loadUrl(url)
-        }
-    }
     DisposableEffect(loadId) {
         if (!loadId.isNullOrBlank()) {
             webViewOperationStore.markRendererActive(loadId, true)
@@ -1315,6 +1354,28 @@ private fun WebOperationPreviewPlaceholder(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
+    }
+}
+
+private fun String.normalizedWebPreviewUrl(): String {
+    val raw = trim()
+    if (raw.isBlank()) return raw
+    return runCatching {
+        raw.toUri()
+            .buildUpon()
+            .fragment(null)
+            .build()
+            .toString()
+            .trimEnd('/')
+    }.getOrDefault(raw.trimEnd('/'))
+}
+
+@Suppress("DEPRECATION")
+private fun WebSettings.disablePreviewDarkening() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        isAlgorithmicDarkeningAllowed = false
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        forceDark = WebSettings.FORCE_DARK_OFF
     }
 }
 

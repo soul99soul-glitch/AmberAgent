@@ -13,6 +13,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -122,6 +125,9 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
 private const val GENERATION_CHECKPOINT_INTERVAL_MS = 10_000L
+private const val INITIAL_TIMELINE_NODE_COUNT = 80
+private const val TIMELINE_PREFETCH_BATCH_SIZE = 40
+private const val TIMELINE_PREFETCH_DELAY_MS = 32L
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -179,6 +185,8 @@ class ChatService(
     private val _sessionsVersion = MutableStateFlow(0L)
     private val trustedRunToolNames = ConcurrentHashMap<Uuid, Set<String>>()
     private val generationCheckpointAt = ConcurrentHashMap<Uuid, Long>()
+    private val timelinePrefetchJobs = ConcurrentHashMap<Uuid, Job>()
+    private val timelineLoadMutexes = ConcurrentHashMap<Uuid, Mutex>()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -255,6 +263,8 @@ class ChatService(
             return
         }
         if (sessions.remove(conversationId, session)) {
+            timelinePrefetchJobs.remove(conversationId)?.cancel()
+            timelineLoadMutexes.remove(conversationId)
             session.cleanup()
             _sessionsVersion.value++
             Log.i(TAG, "removeSession: $conversationId (remaining: ${sessions.size})")
@@ -346,6 +356,10 @@ class ChatService(
         return getOrCreateSession(conversationId).state
     }
 
+    fun getTimelineLoadStateFlow(conversationId: Uuid): StateFlow<ConversationTimelineLoadState> {
+        return getOrCreateSession(conversationId).timelineLoadState
+    }
+
     fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> {
         val session = sessions[conversationId] ?: return flowOf(null)
         return session.generationJob
@@ -404,11 +418,24 @@ class ChatService(
     // ---- 初始化对话 ----
 
     suspend fun initializeConversation(conversationId: Uuid) {
-        getOrCreateSession(conversationId) // 确保 session 存在
-        val conversation = conversationRepo.getConversationById(conversationId)
-        if (conversation != null) {
-            updateConversation(conversationId, conversation)
-            settingsStore.updateAssistant(conversation.assistantId)
+        val session = getOrCreateSession(conversationId) // 确保 session 存在
+        if (session.timelineLoadState.value.initialized) return
+
+        val window = conversationRepo.getConversationTailById(conversationId, INITIAL_TIMELINE_NODE_COUNT)
+        if (window != null) {
+            updateConversation(conversationId, window.conversation)
+            session.setTimelineLoadState(
+                ConversationTimelineLoadState(
+                    initialized = true,
+                    totalNodeCount = window.totalNodeCount,
+                    loadedNodeCount = window.conversation.messageNodes.size,
+                    oldestLoadedIndex = window.oldestLoadedIndex,
+                    isFullyLoaded = window.oldestLoadedIndex == 0,
+                    prefetchingOlder = false,
+                )
+            )
+            settingsStore.updateAssistant(window.conversation.assistantId)
+            startTimelineHistoryPrefetch(conversationId)
         } else {
             // 新建对话, 并添加预设消息
             val currentSettings = settingsStore.settingsFlowRaw.first()
@@ -419,6 +446,98 @@ class ChatService(
                 newConversation = true
             ).updateCurrentMessages(assistant.presetMessages)
             updateConversation(conversationId, newConversation)
+            session.setTimelineLoadState(
+                ConversationTimelineLoadState(
+                    initialized = true,
+                    totalNodeCount = newConversation.messageNodes.size,
+                    loadedNodeCount = newConversation.messageNodes.size,
+                    oldestLoadedIndex = 0,
+                    isFullyLoaded = true,
+                    prefetchingOlder = false,
+                )
+            )
+        }
+    }
+
+    private fun startTimelineHistoryPrefetch(conversationId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        if (session.timelineLoadState.value.isFullyLoaded) return
+        if (timelinePrefetchJobs[conversationId]?.isActive == true) return
+
+        timelinePrefetchJobs[conversationId] = appScope.launch(Dispatchers.IO) {
+            try {
+                while (loadOlderTimelineBatch(conversationId, TIMELINE_PREFETCH_BATCH_SIZE)) {
+                    delay(TIMELINE_PREFETCH_DELAY_MS)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "timeline prefetch failed for $conversationId", e)
+                sessions[conversationId]?.let { currentSession ->
+                    currentSession.setTimelineLoadState(
+                        currentSession.timelineLoadState.value.copy(prefetchingOlder = false)
+                    )
+                }
+            } finally {
+                timelinePrefetchJobs.remove(conversationId)
+            }
+        }
+    }
+
+    private suspend fun ensureFullConversationLoaded(conversationId: Uuid): Conversation {
+        val session = getOrCreateSession(conversationId)
+        if (session.timelineLoadState.value.isFullyLoaded) {
+            return session.state.value
+        }
+
+        timelinePrefetchJobs.remove(conversationId)?.cancel()
+        while (!session.timelineLoadState.value.isFullyLoaded) {
+            val loaded = loadOlderTimelineBatch(conversationId, TIMELINE_PREFETCH_BATCH_SIZE)
+            if (!loaded) break
+        }
+        return session.state.value
+    }
+
+    suspend fun ensureConversationTimelineLoaded(conversationId: Uuid): Conversation {
+        return ensureFullConversationLoaded(conversationId)
+    }
+
+    private suspend fun loadOlderTimelineBatch(conversationId: Uuid, batchSize: Int): Boolean {
+        val mutex = timelineLoadMutexes.computeIfAbsent(conversationId) { Mutex() }
+        return mutex.withLock {
+            val session = sessions[conversationId] ?: return@withLock false
+            val loadState = session.timelineLoadState.value
+            if (!loadState.initialized || loadState.isFullyLoaded || loadState.oldestLoadedIndex <= 0) {
+                session.setTimelineLoadState(loadState.copy(prefetchingOlder = false, isFullyLoaded = true))
+                return@withLock false
+            }
+
+            val nextOffset = (loadState.oldestLoadedIndex - batchSize).coerceAtLeast(0)
+            val nextLimit = loadState.oldestLoadedIndex - nextOffset
+            session.setTimelineLoadState(loadState.copy(prefetchingOlder = true))
+
+            val olderNodes = conversationRepo.getConversationNodePage(
+                conversationId = conversationId,
+                offset = nextOffset,
+                limit = nextLimit,
+            )
+            val currentConversation = session.state.value
+            val existingNodeIds = currentConversation.messageNodes.mapTo(mutableSetOf()) { it.id }
+            val mergedNodes = olderNodes.filterNot { it.id in existingNodeIds } + currentConversation.messageNodes
+            val updatedConversation = currentConversation.copy(messageNodes = mergedNodes)
+            updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+
+            val isFullyLoaded = nextOffset == 0 || olderNodes.isEmpty()
+            session.setTimelineLoadState(
+                loadState.copy(
+                    initialized = true,
+                    loadedNodeCount = mergedNodes.size,
+                    oldestLoadedIndex = nextOffset,
+                    isFullyLoaded = isFullyLoaded,
+                    prefetchingOlder = false,
+                )
+            )
+            !isFullyLoaded
         }
     }
 
@@ -606,7 +725,7 @@ class ChatService(
 
         val job = appScope.launch {
             try {
-                val conversation = session.state.value
+                val conversation = ensureFullConversationLoaded(conversationId)
 
                 if (message.role == MessageRole.USER) {
                     // 如果是用户消息，则截止到当前消息
@@ -652,7 +771,7 @@ class ChatService(
 
         val job = appScope.launch {
             try {
-                val conversation = session.state.value
+                val conversation = ensureFullConversationLoaded(conversationId)
                 val approvedToolName = conversation.findToolName(toolCallId)
                 val newApprovalState = when {
                     answer != null -> ToolApprovalState.Answered(answer)
@@ -714,7 +833,7 @@ class ChatService(
 
         val job = appScope.launch {
             try {
-                val conversation = session.state.value
+                val conversation = ensureFullConversationLoaded(conversationId)
                 var changed = false
 
                 val updatedNodes = conversation.messageNodes.map { node ->
@@ -782,6 +901,7 @@ class ChatService(
         } else {
             model.displayName
         }
+        ensureFullConversationLoaded(conversationId)
 
         runCatching {
             val initialConversation = getConversationFlow(conversationId).value
@@ -1144,12 +1264,17 @@ class ChatService(
         targetTokens: Int,
         keepRecentMessages: Int = 32
     ): Result<Unit> = runCatching {
+        val fullConversation = if (conversation.id == conversationId) {
+            ensureFullConversationLoaded(conversationId)
+        } else {
+            conversation
+        }
         val settings = settingsStore.settingsFlow.first()
-        if (keepRecentMessages > 0 && conversation.currentMessages.size <= keepRecentMessages) {
+        if (keepRecentMessages > 0 && fullConversation.currentMessages.size <= keepRecentMessages) {
             throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages))
         }
         val result = contextEngine.compactConversation(
-            conversation = conversation,
+            conversation = fullConversation,
             settings = settings,
             policy = settings.agentRuntime.contextCompaction.toCompactPolicy().copy(
                 enabled = true,
@@ -1367,7 +1492,14 @@ class ChatService(
             return // 新会话且为空时不保存
         }
 
-        val updatedConversation = conversation.copy()
+        val updatedConversation = if (exists && !getOrCreateSession(conversationId).timelineLoadState.value.isFullyLoaded) {
+            mergeConversationWindowIntoFull(
+                fullConversation = ensureFullConversationLoaded(conversationId),
+                windowConversation = conversation,
+            )
+        } else {
+            conversation.copy()
+        }
         updateConversation(conversationId, updatedConversation)
 
         if (!exists) {
@@ -1375,6 +1507,30 @@ class ChatService(
         } else {
             conversationRepo.updateConversation(updatedConversation)
         }
+    }
+
+    private fun mergeConversationWindowIntoFull(
+        fullConversation: Conversation,
+        windowConversation: Conversation,
+    ): Conversation {
+        val windowNodesById = windowConversation.messageNodes.associateBy { it.id }
+        val mergedNodes = fullConversation.messageNodes
+            .map { node -> windowNodesById[node.id] ?: node }
+            .toMutableList()
+        val fullNodeIds = fullConversation.messageNodes.mapTo(mutableSetOf()) { it.id }
+        windowConversation.messageNodes
+            .filterNot { it.id in fullNodeIds }
+            .forEach { mergedNodes.add(it) }
+
+        return fullConversation.copy(
+            assistantId = windowConversation.assistantId,
+            title = windowConversation.title,
+            chatSuggestions = windowConversation.chatSuggestions,
+            isPinned = windowConversation.isPinned,
+            autoApproveToolCalls = windowConversation.autoApproveToolCalls,
+            updateAt = windowConversation.updateAt,
+            messageNodes = mergedNodes,
+        )
     }
 
     // ---- 翻译消息 ----
@@ -1451,7 +1607,7 @@ class ChatService(
         if (parts.isEmptyInputMessage()) return
         val processedParts = preprocessUserInputParts(parts)
 
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = ensureFullConversationLoaded(conversationId)
         var edited = false
 
         val updatedNodes = currentConversation.messageNodes.map { node ->
@@ -1479,7 +1635,7 @@ class ChatService(
         conversationId: Uuid,
         messageId: Uuid
     ): Conversation {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = ensureFullConversationLoaded(conversationId)
         val targetNodeIndex = currentConversation.messageNodes.indexOfFirst { node ->
             node.messages.any { it.id == messageId }
         }
@@ -1518,7 +1674,7 @@ class ChatService(
         nodeId: Uuid,
         selectIndex: Int
     ) {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = ensureFullConversationLoaded(conversationId)
         val targetNode = currentConversation.messageNodes.firstOrNull { it.id == nodeId }
             ?: throw NotFoundException("Message node not found")
 
@@ -1547,7 +1703,7 @@ class ChatService(
         messageId: Uuid,
         failIfMissing: Boolean = true,
     ) {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = ensureFullConversationLoaded(conversationId)
         val updatedConversation = buildConversationAfterMessageDelete(currentConversation, messageId)
 
         if (updatedConversation == null) {

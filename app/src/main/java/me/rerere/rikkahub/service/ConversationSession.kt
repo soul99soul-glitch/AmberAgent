@@ -16,6 +16,15 @@ import kotlin.uuid.Uuid
 private const val TAG = "ConversationSession"
 private const val IDLE_TIMEOUT_MS = 5_000L
 
+data class ConversationTimelineLoadState(
+    val initialized: Boolean = false,
+    val totalNodeCount: Int = 0,
+    val loadedNodeCount: Int = 0,
+    val oldestLoadedIndex: Int = 0,
+    val isFullyLoaded: Boolean = true,
+    val prefetchingOlder: Boolean = false,
+)
+
 class ConversationSession(
     val id: Uuid,
     initial: Conversation,
@@ -26,6 +35,9 @@ class ConversationSession(
 ) {
     // 会话状态
     val state = MutableStateFlow(initial)
+
+    private val _timelineLoadState = MutableStateFlow(ConversationTimelineLoadState())
+    val timelineLoadState: StateFlow<ConversationTimelineLoadState> = _timelineLoadState.asStateFlow()
 
     // 原子引用计数
     private val refCount = AtomicInteger(0)
@@ -88,6 +100,10 @@ class ConversationSession(
     }
 
     fun getJob(): Job? = _generationJob.value
+
+    fun setTimelineLoadState(state: ConversationTimelineLoadState) {
+        _timelineLoadState.value = state
+    }
 
     fun enqueuePendingUserMessage(message: PendingUserMessage): Boolean {
         var accepted = false

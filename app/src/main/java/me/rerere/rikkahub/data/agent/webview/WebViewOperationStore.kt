@@ -86,6 +86,10 @@ class WebViewOperationStore {
 
     fun shouldCaptureThumbnail(loadId: String, url: String?, now: Long = System.currentTimeMillis()): Boolean {
         if (url.isNullOrBlank()) return false
+        val current = _state.value
+        if (current.loadId == loadId && current.thumbnailPath.isNotBlank()) {
+            return false
+        }
         val key = "$loadId|$url"
         if (key == lastThumbnailCaptureKey && now - lastThumbnailCaptureAtMillis < THUMBNAIL_CAPTURE_INTERVAL_MS) {
             return false

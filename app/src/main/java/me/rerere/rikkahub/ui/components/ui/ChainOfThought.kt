@@ -74,6 +74,7 @@ fun <T> ChainOfThought(
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
     collapsedAdaptiveWidth: Boolean = false,
+    animateContentChanges: Boolean = true,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -90,8 +91,14 @@ fun <T> ChainOfThought(
             Column(
                 modifier = Modifier
                     .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .animateContentSize(
-                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                    .then(
+                        if (animateContentChanges) {
+                            Modifier.animateContentSize(
+                                animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                            )
+                        } else {
+                            Modifier
+                        }
                     ),
             ) {
                 val visibleSteps = if (expanded || !canCollapse) {

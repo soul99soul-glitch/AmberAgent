@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -111,6 +112,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
+    val timelineLoadState by vm.timelineLoadState.collectAsStateWithLifecycle()
     val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
@@ -183,20 +185,27 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val chatListState = rememberLazyListState()
-    LaunchedEffect(vm) {
-        if (nodeId == null && !vm.chatListInitialized && chatListState.layoutInfo.totalItemsCount > 0) {
-            chatListState.scrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
-            vm.chatListInitialized = true
+    LaunchedEffect(nodeId, conversation.messageNodes.size, timelineLoadState.initialized) {
+        if (nodeId == null && !vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
+            withFrameNanos { }
+            val lastIndex = chatListState.layoutInfo.totalItemsCount - 1
+            if (lastIndex >= 0) {
+                chatListState.scrollToItem(lastIndex)
+                vm.chatListInitialized = true
+            }
         }
     }
 
-    LaunchedEffect(nodeId, conversation.messageNodes.size) {
+    LaunchedEffect(nodeId, conversation.messageNodes.size, timelineLoadState.isFullyLoaded) {
         if (nodeId != null && conversation.messageNodes.isNotEmpty() && !vm.chatListInitialized) {
             val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
             if (index >= 0) {
-                chatListState.scrollToItem(index)
+                val listIndex = index + if (!timelineLoadState.isFullyLoaded) 1 else 0
+                chatListState.scrollToItem(listIndex)
+                vm.chatListInitialized = true
+            } else if (!timelineLoadState.isFullyLoaded) {
+                vm.ensureTimelineLoaded()
             }
-            vm.chatListInitialized = true
         }
     }
 
@@ -219,6 +228,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
+                    timelineLoadState = timelineLoadState,
                     pendingUserMessages = pendingUserMessageState.value,
                     contextCompacts = contextCompacts,
                     drawerState = drawerState,
@@ -254,6 +264,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
+                    timelineLoadState = timelineLoadState,
                     pendingUserMessages = pendingUserMessageState.value,
                     contextCompacts = contextCompacts,
                     drawerState = drawerState,
@@ -283,6 +294,7 @@ private fun ChatPageContent(
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
+    timelineLoadState: me.rerere.rikkahub.service.ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     drawerState: DrawerState,
@@ -478,6 +490,7 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 state = chatListState,

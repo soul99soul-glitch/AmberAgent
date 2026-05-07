@@ -25,6 +25,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -61,6 +65,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,11 +78,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -106,6 +111,7 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
@@ -127,6 +133,7 @@ private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineSelectionToolbarOffset = 56.dp
+private const val UserScrollAutoFollowResumeDelayMs = 2_000L
 
 private fun Conversation.latestRenderToken(): String {
     val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
@@ -179,6 +186,44 @@ private fun Modifier.dashedRoundedBorder(color: Color, radius: androidx.compose.
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(9.dp.toPx(), 7.dp.toPx())),
             ),
         )
+    }
+}
+
+@Composable
+private fun TimelineHistoryLoadingIndicator(
+    prefetching: Boolean,
+    loadedNodeCount: Int,
+    totalNodeCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = workspace.paper.copy(alpha = 0.72f),
+        contentColor = workspace.muted,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PigLoadingIndicator(modifier = Modifier.size(18.dp))
+            Text(
+                text = if (prefetching) {
+                    "正在预取更早消息 $loadedNodeCount/$totalNodeCount"
+                } else {
+                    "更早消息准备中 $loadedNodeCount/$totalNodeCount"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = workspace.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -305,6 +350,7 @@ private fun PendingUserMessageBubble(
 fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
     state: LazyListState,
@@ -351,6 +397,7 @@ fun ChatList(
             ChatListNormal(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 state = state,
@@ -384,6 +431,7 @@ fun ChatList(
 private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    timelineLoadState: ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     state: LazyListState,
@@ -412,6 +460,12 @@ private fun ChatListNormal(
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
     var isRecentScroll by remember { mutableStateOf(false) }
+    var touchAutoScrollHold by remember { mutableStateOf(false) }
+    var scrollAutoScrollHold by remember { mutableStateOf(false) }
+    var autoScrollCooldown by remember { mutableStateOf(false) }
+    var resumeFollowAfterPause by remember { mutableStateOf(false) }
+    var showResumeFollowButton by remember { mutableStateOf(false) }
+    var autoScrollCooldownGeneration by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     val workspace = workspaceColors()
@@ -434,21 +488,47 @@ private fun ChatListNormal(
         }
     }
 
+    fun startAutoScrollCooldown() {
+        autoScrollCooldown = true
+        resumeFollowAfterPause = false
+        showResumeFollowButton = false
+        autoScrollCooldownGeneration += 1
+    }
+
+    LaunchedEffect(autoScrollCooldownGeneration) {
+        if (autoScrollCooldownGeneration > 0) {
+            delay(UserScrollAutoFollowResumeDelayMs)
+            autoScrollCooldown = false
+            if (state.distanceToListEnd() <= 20) {
+                resumeFollowAfterPause = true
+            } else {
+                showResumeFollowButton = true
+            }
+        }
+    }
+
     // 聊天选择
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
-    val compactMarkersByEndIndex = remember(contextCompacts) {
+    val compactMarkersByEndIndex = remember(contextCompacts, timelineLoadState.oldestLoadedIndex) {
         contextCompacts
             .filter { compact -> compact.status == "completed" }
-            .groupBy { compact -> compact.sourceEndIndex }
+            .mapNotNull { compact ->
+                val visibleEndIndex = compact.sourceEndIndex - timelineLoadState.oldestLoadedIndex
+                visibleEndIndex.takeIf { it >= 0 }?.let { it to compact }
+            }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
     }
     val autoScrollAllowed by remember {
         derivedStateOf {
             settings.displaySetting.enableAutoScroll &&
                 (loadingState || pendingUserMessages.isNotEmpty()) &&
                 !state.isScrollInProgress &&
-                state.isNearListEnd()
+                !touchAutoScrollHold &&
+                !scrollAutoScrollHold &&
+                !autoScrollCooldown &&
+                (state.isNearListEnd() || resumeFollowAfterPause)
         }
     }
     val useTimelineHaze by remember {
@@ -487,7 +567,13 @@ private fun ChatListNormal(
                     withFrameNanos { }
                     val lastIndex = state.layoutInfo.totalItemsCount - 1
                     if (lastIndex >= 0) {
-                        state.scrollToItem(lastIndex)
+                        if (resumeFollowAfterPause) {
+                            state.animateScrollToItem(lastIndex)
+                        } else {
+                            state.scrollToItem(lastIndex)
+                        }
+                        resumeFollowAfterPause = false
+                        showResumeFollowButton = false
                     }
                 }
             }
@@ -496,10 +582,16 @@ private fun ChatListNormal(
         // 判断最近是否滚动
         LaunchedEffect(state.isScrollInProgress) {
             if (state.isScrollInProgress) {
+                scrollAutoScrollHold = true
+                autoScrollCooldown = false
+                resumeFollowAfterPause = false
+                showResumeFollowButton = false
                 isRecentScroll = true
-                delay(1500)
-                isRecentScroll = false
             } else {
+                if (scrollAutoScrollHold) {
+                    scrollAutoScrollHold = false
+                    startAutoScrollCooldown()
+                }
                 delay(1500)
                 isRecentScroll = false
             }
@@ -520,12 +612,40 @@ private fun ChatListNormal(
                 .then(
                     if (useTimelineHaze) Modifier.hazeSource(state = hazeState) else Modifier
                 )
-                .padding(top = innerPadding.calculateTopPadding()),
+                .padding(top = innerPadding.calculateTopPadding())
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        touchAutoScrollHold = true
+                        autoScrollCooldown = false
+                        resumeFollowAfterPause = false
+                        showResumeFollowButton = false
+                        try {
+                            waitForUpOrCancellation()
+                        } finally {
+                            touchAutoScrollHold = false
+                            startAutoScrollCooldown()
+                        }
+                    }
+                },
         ) {
+            if (!timelineLoadState.isFullyLoaded) {
+                item(
+                    key = "timeline-history-loading",
+                    contentType = "history-loading",
+                ) {
+                    TimelineHistoryLoadingIndicator(
+                        prefetching = timelineLoadState.prefetchingOlder,
+                        loadedNodeCount = timelineLoadState.loadedNodeCount,
+                        totalNodeCount = timelineLoadState.totalNodeCount,
+                    )
+                }
+            }
+
             itemsIndexed(
                 items = conversation.messageNodes,
                 key = { index, item -> item.id },
-                contentType = { _, _ -> "message" },
+                contentType = { _, item -> "message-${item.currentMessage.role}" },
             ) { index, node ->
                 Column {
                     val markers = compactMarkersByEndIndex[index - 1].orEmpty()
@@ -546,10 +666,16 @@ private fun ChatListNormal(
                         selectedKeys = selectedItems,
                         enabled = selecting,
                     ) {
+                        val messageModel = remember(node.currentMessage.modelId, settings.providers) {
+                            node.currentMessage.modelId?.let { settings.findModelById(it) }
+                        }
+                        val assistant = remember(settings.assistants, conversation.assistantId) {
+                            settings.getAssistantById(conversation.assistantId)
+                        }
                         ChatMessage(
                             node = node,
-                            model = node.currentMessage.modelId?.let { settings.findModelById(it) },
-                            assistant = settings.getAssistantById(conversation.assistantId),
+                            model = messageModel,
+                            assistant = assistant,
                             loading = loading && index == conversation.messageNodes.lastIndex,
                             onRegenerate = {
                                 onRegenerate(node.currentMessage)
@@ -751,6 +877,34 @@ private fun ChatListNormal(
                 state = state
             )
 
+            AnimatedVisibility(
+                visible = showResumeFollowButton && !captureProgress,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = 20.dp,
+                        bottom = innerPadding.calculateBottomPadding() + 80.dp,
+                    ),
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
+            ) {
+                FilledIconButton(
+                    onClick = {
+                        scope.launch {
+                            showResumeFollowButton = false
+                            autoScrollCooldown = false
+                            resumeFollowAfterPause = false
+                            val lastIndex = state.layoutInfo.totalItemsCount - 1
+                            if (lastIndex >= 0) {
+                                state.animateScrollToItem(lastIndex)
+                            }
+                        }
+                    },
+                ) {
+                    Icon(HugeIcons.ArrowDownDouble, contentDescription = "回到底部")
+                }
+            }
+
             // Suggestion
             if (conversation.chatSuggestions.isNotEmpty() && !captureProgress) {
                 ChatSuggestionsRow(
@@ -795,6 +949,13 @@ private fun LazyListState.isNearListEnd(bufferItems: Int = 2): Boolean {
     if (totalItems == 0) return true
     val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
     return lastVisibleIndex >= totalItems - 1 - bufferItems
+}
+
+private fun LazyListState.distanceToListEnd(): Int {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) return 0
+    val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return 0
+    return (totalItems - 1 - lastVisibleIndex).coerceAtLeast(0)
 }
 
 private fun buildHighlightedText(
