@@ -376,6 +376,7 @@ private fun ChatPageContent(
                     conversation = conversation,
                     pendingQueueCount = pendingQueueCount,
                     hazeState = hazeState,
+                    timelineScrolling = chatListState.isScrollInProgress,
                     onCancelClick = {
                         vm.stopGeneration()
                     },

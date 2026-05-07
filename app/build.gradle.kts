@@ -24,8 +24,8 @@ android {
         applicationId = "me.rerere.amberagent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 188
-        versionName = "1.1.1"
+        versionCode = 189
+        versionName = "1.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -141,7 +141,6 @@ android {
         compilerOptions.optIn.add("kotlin.uuid.ExperimentalUuidApi")
         compilerOptions.optIn.add("kotlin.time.ExperimentalTime")
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
-        compilerOptions.optIn.add("androidx.navigation3.runtime.ExperimentalNavigation3Api")
     }
 }
 

@@ -203,8 +203,8 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     collapsedAdaptiveWidth: Boolean = false,
 ) {
     val (state, loading) = rememberReasoningState(reasoning)
-    val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
-    val showThinkingTitle = loading && thinkingTitle != null
+    val thinkingTitle = reasoning.reasoning.extractThinkingTitle().takeIf { loading }
+    val showThinkingTitle = thinkingTitle != null
     val workspace = workspaceColors()
     val settings = LocalSettings.current
     val reasoningLevel = if (assistant != null && model != null) {
@@ -226,8 +226,8 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             )
         },
         label = {
-            if (showThinkingTitle) {
-                ReasoningTitle(title = thinkingTitle!!)
+            if (thinkingTitle != null) {
+                ReasoningTitle(title = thinkingTitle)
             } else {
                 Text(
                     text = stringResource(

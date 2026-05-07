@@ -27,6 +27,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -57,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -239,55 +242,60 @@ private fun PendingUserMessageBubble(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.86f),
-            horizontalAlignment = Alignment.End,
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.TopEnd,
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .dashedRoundedBorder(borderColor, 10.dp),
-                shape = RoundedCornerShape(10.dp),
-                color = workspace.paper.copy(alpha = 0.62f),
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
+            val bubbleMaxWidth = maxOf(96.dp, minOf(maxWidth * 0.72f, 560.dp))
+            Column(
+                horizontalAlignment = Alignment.End,
             ) {
-                Row(
-                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                Surface(
+                    modifier = Modifier
+                        .widthIn(min = 96.dp, max = bubbleMaxWidth)
+                        .dashedRoundedBorder(borderColor, 10.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = workspace.paper.copy(alpha = 0.62f),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
                 ) {
-                    Text(
-                        text = message.previewText(),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = textColor,
-                    )
-                    IconButton(
-                        onClick = onCancel,
-                        modifier = Modifier.size(26.dp),
+                    Row(
+                        modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = "取消排队消息",
-                            tint = textColor.copy(alpha = 0.72f),
-                            modifier = Modifier.size(15.dp),
+                        Text(
+                            text = message.previewText(),
+                            modifier = Modifier.weight(1f, fill = false),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = textColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        IconButton(
+                            onClick = onCancel,
+                            modifier = Modifier.size(26.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Cancel01,
+                                contentDescription = "取消排队消息",
+                                tint = textColor.copy(alpha = 0.72f),
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
                     }
                 }
-            }
-            if (queueCount != null && queueCount > 0) {
-                Text(
-                    text = "已排队 $queueCount 条",
-                    modifier = Modifier
-                        .padding(top = 4.dp, end = 2.dp)
-                        .clickable { onOpenQueue() },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = workspace.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (queueCount != null && queueCount > 0) {
+                    Text(
+                        text = "已排队 $queueCount 条",
+                        modifier = Modifier
+                            .padding(top = 4.dp, end = 2.dp)
+                            .clickable { onOpenQueue() },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -430,6 +438,22 @@ private fun ChatListNormal(
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
+    val compactMarkersByEndIndex = remember(contextCompacts) {
+        contextCompacts
+            .filter { compact -> compact.status == "completed" }
+            .groupBy { compact -> compact.sourceEndIndex }
+    }
+    val autoScrollAllowed by remember {
+        derivedStateOf {
+            settings.displaySetting.enableAutoScroll &&
+                (loadingState || pendingUserMessages.isNotEmpty()) &&
+                !state.isScrollInProgress &&
+                state.isNearListEnd()
+        }
+    }
+    val useTimelineHaze by remember {
+        derivedStateOf { !state.isScrollInProgress }
+    }
 
     // 自动跟随键盘滚动
     ImeLazyListAutoScroller(lazyListState = state)
@@ -452,13 +476,13 @@ private fun ChatListNormal(
         if (settings.displaySetting.enableAutoScroll) {
             val latestRenderToken = conversation.latestRenderToken()
             LaunchedEffect(
-                loadingState,
                 latestRenderToken,
                 processingStatus,
                 conversation.messageNodes.size,
                 pendingUserMessages.size,
+                autoScrollAllowed,
             ) {
-                if ((loadingState || pendingUserMessages.isNotEmpty()) && !state.isScrollInProgress && state.isNearListEnd()) {
+                if (autoScrollAllowed) {
                     withFrameNanos { }
                     withFrameNanos { }
                     val lastIndex = state.layoutInfo.totalItemsCount - 1
@@ -493,19 +517,18 @@ private fun ChatListNormal(
             verticalArrangement = Arrangement.spacedBy(TimelineItemSpacing),
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(state = hazeState)
+                .then(
+                    if (useTimelineHaze) Modifier.hazeSource(state = hazeState) else Modifier
+                )
                 .padding(top = innerPadding.calculateTopPadding()),
         ) {
             itemsIndexed(
                 items = conversation.messageNodes,
                 key = { index, item -> item.id },
+                contentType = { _, _ -> "message" },
             ) { index, node ->
                 Column {
-                    val markers = remember(contextCompacts, index) {
-                        contextCompacts.filter { compact ->
-                            compact.status == "completed" && compact.sourceEndIndex == index - 1
-                        }
-                    }
+                    val markers = compactMarkersByEndIndex[index - 1].orEmpty()
                     markers.forEach {
                         ContextCompactMarker(
                             modifier = Modifier.padding(bottom = TimelineItemSpacing)
@@ -566,6 +589,7 @@ private fun ChatListNormal(
             itemsIndexed(
                 items = pendingUserMessages,
                 key = { _, item -> "pending-${item.id}" },
+                contentType = { _, _ -> "pending" },
             ) { index, pendingMessage ->
                 PendingUserMessageBubble(
                     message = pendingMessage,
@@ -576,7 +600,10 @@ private fun ChatListNormal(
             }
 
             if (loading) {
-                item(LoadingIndicatorKey) {
+                item(
+                    key = LoadingIndicatorKey,
+                    contentType = "loading",
+                ) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = workspace.paper,
@@ -608,7 +635,10 @@ private fun ChatListNormal(
             }
 
             // 为了能正确滚动到这
-            item(ScrollBottomKey) {
+            item(
+                key = ScrollBottomKey,
+                contentType = "scroll-bottom",
+            ) {
                 Spacer(
                     Modifier
                         .fillMaxWidth()

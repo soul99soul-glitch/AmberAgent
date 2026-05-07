@@ -198,7 +198,7 @@ fun ChatMessage(
             exit = slideOutVertically { it / 2 } + fadeOut()
         ) {
             Column(
-                modifier = Modifier.animateContentSize()
+                modifier = Modifier.animateContentSizeIf(loading && lastMessage)
             ) {
                 ChatMessageActionButtons(
                     message = message,
@@ -261,6 +261,9 @@ fun ChatMessage(
     }
 }
 
+private fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
+    if (enabled) animateContentSize() else this
+
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
@@ -321,7 +324,7 @@ private fun MessagePartsBlock(
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
                     ChainOfThought(
-                        modifier = Modifier.animateContentSize(),
+                        modifier = Modifier.animateContentSizeIf(loading),
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                     ) { step ->
@@ -360,7 +363,7 @@ private fun MessagePartsBlock(
                                 Surface(
                                     modifier = Modifier
                                         .widthIn(max = 560.dp)
-                                        .animateContentSize(),
+                                        .animateContentSizeIf(loading),
                                     shape = RoundedCornerShape(6.dp),
                                     color = workspace.note,
                                     contentColor = workspace.ink,
@@ -395,7 +398,7 @@ private fun MessagePartsBlock(
                                     Surface(
                                         modifier = Modifier
                                             .widthIn(max = 640.dp)
-                                            .animateContentSize(),
+                                            .animateContentSizeIf(loading),
                                         shape = RoundedCornerShape(8.dp),
                                         color = workspace.paper,
                                         contentColor = workspace.ink,
@@ -423,7 +426,7 @@ private fun MessagePartsBlock(
                                         ),
                                         onClickCitation = handleClickCitation,
                                         modifier = Modifier
-                                            .animateContentSize()
+                                            .animateContentSizeIf(loading)
                                     )
                                 }
                             }
@@ -581,7 +584,7 @@ private fun MessagePartsBlock(
     // Annotations (always rendered at the end)
     if (annotations.isNotEmpty()) {
         Column(
-            modifier = Modifier.animateContentSize(),
+            modifier = Modifier.animateContentSizeIf(loading),
         ) {
             var expand by remember { mutableStateOf(false) }
             if (expand) {

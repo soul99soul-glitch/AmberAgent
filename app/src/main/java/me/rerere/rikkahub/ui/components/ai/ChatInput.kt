@@ -192,6 +192,7 @@ fun ChatInput(
     pendingQueueCount: Int = 0,
     settings: Settings,
     hazeState: HazeState,
+    timelineScrolling: Boolean = false,
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,
     sandboxActivity: SandboxActivityUiState? = null,
@@ -213,7 +214,7 @@ fun ChatInput(
     val workspace = workspaceColors()
     val hazeTintColor = workspace.paper
     val composerShape = RoundedCornerShape(8.dp)
-    val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE
+    val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE && !timelineScrolling
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
