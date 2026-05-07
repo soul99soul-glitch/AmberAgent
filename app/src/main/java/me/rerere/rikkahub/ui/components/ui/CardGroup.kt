@@ -18,6 +18,7 @@ import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.ui.unit.em
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -132,9 +133,21 @@ fun CardGroup(
 
     Column(modifier = modifier) {
         if (title != null) {
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
-                ProvideTextStyle(MaterialTheme.typography.titleSmall) {
-                    Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 8.dp)) {
+            // Pulse section label: secondary (sport-orange), bold, letter-spaced.
+            // Reads as a deliberate eyebrow above each modular card group instead
+            // of a quiet warm-grey caption — matches the Pulse mockup's
+            // "TYPOGRAPHY", "GRANTED", "RECENT" treatment. We don't force
+            // uppercasing here because the app mixes Chinese and English titles
+            // and uppercasing the Latin half alone reads as a typo. The
+            // colour + weight + tracking carry the signal regardless.
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.secondary) {
+                ProvideTextStyle(
+                    MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        letterSpacing = 0.10.em,
+                    )
+                ) {
+                    Box(modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 8.dp)) {
                         title()
                     }
                 }
