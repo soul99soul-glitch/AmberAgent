@@ -106,7 +106,10 @@ fun ColumnScope.ConversationList(
     LazyColumn(
         state = listState,
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        // Increased gap so each tan-card row reads as a discrete module
+        // rather than a continuous list — matches the Pulse mockup's
+        // breathing-room density.
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (conversations.itemCount == 0) {
             item {
@@ -219,18 +222,27 @@ private fun ConversationItem(
     onClick: (Conversation) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val workspace = workspaceColors()
+    // Pulse modular row: each conversation is its own tan card; selection
+    // promotes to the chartreuse-tinted primaryContainer instead of the old
+    // workspace.blueContainer wash. Title color follows the same intent
+    // (onPrimaryContainer when selected → ink at full saturation).
     val backgroundColor = if (selected) {
-        workspace.blueContainer
+        MaterialTheme.colorScheme.primaryContainer
     } else {
-        Color.Transparent
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val titleColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
     }
     var showDropdownMenu by remember {
         mutableStateOf(false)
     }
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(backgroundColor)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = LocalIndication.current,
@@ -238,36 +250,46 @@ private fun ConversationItem(
                 onLongClick = {
                     showDropdownMenu = true
                 }
-            )
-            .background(backgroundColor),
+            ),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 46.dp)
-                .padding(horizontal = 10.dp, vertical = 10.dp),
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Running-state indicator promoted to a leading chartreuse dot.
+            // It sits inline with the title rather than as a trailing icon so
+            // the eye notices "this thread is alive" before scanning the title.
+            AnimatedVisibility(loading) {
+                Box(
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .size(7.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
             Text(
                 text = conversation.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (selected) workspace.blue else workspace.ink,
+                color = titleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
 
-            // 置顶图标
+            // 置顶图标 — pinned threads get a small chartreuse dot trailing
+            // the title (echoes the pinned-row treatment in the Pulse mockup).
             AnimatedVisibility(conversation.isPinned) {
-                Icon(
-                    imageVector = HugeIcons.Pin,
-                    contentDescription = "Pinned",
-                    modifier = Modifier.size(15.dp),
-                    tint = workspace.faint
+                Box(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary)
                 )
-            }
-            AnimatedVisibility(loading) {
-                ConversationRunningIndicator()
             }
             DropdownMenu(
                 expanded = showDropdownMenu,
