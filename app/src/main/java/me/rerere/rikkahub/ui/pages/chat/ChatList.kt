@@ -115,6 +115,7 @@ import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
+import me.rerere.rikkahub.ui.components.chat.NewChatHero
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
@@ -639,6 +640,25 @@ private fun ChatListNormal(
                         loadedNodeCount = timelineLoadState.loadedNodeCount,
                         totalNodeCount = timelineLoadState.totalNodeCount,
                     )
+                }
+            }
+
+            // Empty-state hero. Renders only when the conversation has no
+            // message nodes AND the timeline isn't actively loading older
+            // history. The pending-message and suggestions overlays continue
+            // to render via their own paths (see ChatSuggestionsRow below
+            // and the pending-bubble item further down) so we don't conflict
+            // with them when the user has already typed something into the
+            // composer for a fresh thread.
+            if (conversation.messageNodes.isEmpty() &&
+                pendingUserMessages.isEmpty() &&
+                timelineLoadState.isFullyLoaded
+            ) {
+                item(
+                    key = "new-chat-hero",
+                    contentType = "new-chat-hero",
+                ) {
+                    NewChatHero()
                 }
             }
 
