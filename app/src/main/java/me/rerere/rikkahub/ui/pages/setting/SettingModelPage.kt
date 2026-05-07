@@ -64,7 +64,10 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
@@ -78,8 +81,16 @@ import org.koin.androidx.compose.koinViewModel
 fun SettingModelPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val workspace = workspaceColors()
     var showGroupDefaults by remember { mutableStateOf(false) }
+    val activeChatModel = remember(settings) {
+        settings.providers
+            .flatMap { it.models }
+            .firstOrNull { it.id.toString() == settings.chatModelId.toString() }
+    }
+    val activeProvider = remember(settings, activeChatModel) {
+        if (activeChatModel == null) null
+        else settings.providers.firstOrNull { provider -> provider.models.any { it.id == activeChatModel.id } }
+    }
 
     Scaffold(
         topBar = {
@@ -91,22 +102,35 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
-                    titleContentColor = workspace.ink,
-                    navigationIconContentColor = workspace.muted,
-                ),
+                // Inherits Pulse top-bar treatment (background-bleeding, no
+                // surface tint band) from CustomColors.topBarColors via the
+                // Phase 5 flatten — chartreuse action icons, ink title.
+                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspace.canvas,
+        containerColor = MaterialTheme.colorScheme.background,
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = contentPadding + PaddingValues(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
+            // Pulse spotlight: sport-orange CTA-style card showing the
+            // currently-active chat model. Mirrors the Pulse mockup's
+            // Model Picker spotlight ("CURRENTLY ACTIVE" eyebrow + bold
+            // model name + provider line). Only renders when a model is
+            // actually configured — prevents an empty orange bar on
+            // first-launch before the user picks anything.
+            if (activeChatModel != null) {
+                item("activeSpotlight") {
+                    ActiveModelSpotlight(
+                        modelName = activeChatModel.displayName,
+                        providerName = activeProvider?.name ?: "",
+                    )
+                }
+            }
+
             item("chat") {
                 ModelSection(
                     title = { Text(stringResource(R.string.setting_model_page_chat_section)) },
@@ -834,4 +858,59 @@ private fun SettingModelLeadingIcon(
         iconSize = 15.dp,
         tone = tone,
     )
+}
+
+/**
+ * Pulse "currently active model" spotlight card — orange-filled hero
+ * sitting at the top of the Model settings page. Mirrors the Pulse
+ * mockup's Model Picker spotlight treatment: ALL-CAPS eyebrow on
+ * cream-tinted secondaryContainer text, model display name in cream
+ * extra-bold, provider line in cream at 75% alpha.
+ *
+ * Why orange and not chartreuse: chartreuse signals "active in flight"
+ * (primary actions, running state). Orange signals "headline value
+ * worth reading" (hero numerals, critical CTAs). The current model is
+ * a CONFIGURED value, not an in-flight state, so orange is the
+ * truthful hue.
+ */
+@Composable
+private fun ActiveModelSpotlight(
+    modelName: String,
+    providerName: String,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.secondary,
+        contentColor = MaterialTheme.colorScheme.onSecondary,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "CURRENTLY ACTIVE",
+                color = MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.85f),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.10.em,
+                ),
+            )
+            Text(
+                text = modelName,
+                color = MaterialTheme.colorScheme.onSecondary,
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.02).em,
+                ),
+            )
+            if (providerName.isNotBlank()) {
+                Text(
+                    text = providerName,
+                    color = MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
 }
