@@ -6,6 +6,7 @@ import me.rerere.rikkahub.ui.theme.presets.AmberAgentClashThemePreset
 import me.rerere.rikkahub.ui.theme.presets.AutumnThemePreset
 import me.rerere.rikkahub.ui.theme.presets.BlackThemePreset
 import me.rerere.rikkahub.ui.theme.presets.OceanThemePreset
+import me.rerere.rikkahub.ui.theme.presets.PulseThemePreset
 import me.rerere.rikkahub.ui.theme.presets.SakuraThemePreset
 import me.rerere.rikkahub.ui.theme.presets.SpringThemePreset
 
@@ -20,8 +21,13 @@ data class PresetTheme(
     }
 }
 
+// Pulse is listed first AND is the default fallback so a fresh install or any
+// migration falling through findPresetTheme()'s default arm picks up the new
+// design system. The other presets stay registered for backwards compatibility
+// with existing user selections; switching back is a one-tap operation.
 val PresetThemes by lazy {
     listOf(
+        PulseThemePreset,
         AmberAgentClashThemePreset,
         SakuraThemePreset,
         OceanThemePreset,
@@ -32,5 +38,5 @@ val PresetThemes by lazy {
 }
 
 fun findPresetTheme(id: String): PresetTheme {
-    return PresetThemes.find { it.id == id } ?: AmberAgentClashThemePreset
+    return PresetThemes.find { it.id == id } ?: PulseThemePreset
 }

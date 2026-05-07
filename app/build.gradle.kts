@@ -85,7 +85,14 @@ android {
             buildConfigField("Boolean", "NOTION_LIKE", "false")
         }
         debug {
-            applicationIdSuffix = ".debug"
+            // Pulse-redesign lane suffix so this APK installs alongside the
+            // Codex (`.debug`) lane and the frozen M3 (`.debug.claude`) lane
+            // on the same device. Final applicationId:
+            // me.rerere.amberagent.debug.pulse
+            applicationIdSuffix = ".debug.pulse"
+            // Override app_name only for this variant so the launcher icon
+            // label distinguishes the three lanes side-by-side.
+            resValue("string", "app_name", "AmberAgent · Pulse")
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "NOTION_LIKE", "false")
@@ -117,6 +124,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // Required for the resValue("string", "app_name", …) override in the
+        // Pulse debug variant to differentiate side-by-side installs.
+        resValues = true
     }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
