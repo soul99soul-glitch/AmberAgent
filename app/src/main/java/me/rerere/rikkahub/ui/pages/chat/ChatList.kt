@@ -115,6 +115,7 @@ import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
+import me.rerere.rikkahub.ui.components.ai.PulseActivityIndicator
 import me.rerere.rikkahub.ui.components.chat.NewChatHero
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
@@ -197,22 +198,29 @@ private fun TimelineHistoryLoadingIndicator(
     totalNodeCount: Int,
     modifier: Modifier = Modifier,
 ) {
-    val workspace = workspaceColors()
+    // Pulse history-prefetch indicator: ink spotlight surface with the
+    // signature chartreuse pulse-track bars in place of the older pig-style
+    // spinner. Reuses the same visual hierarchy as PulseActivityIndicator
+    // (ink card + chartreuse animation + warm-grey text) so prefetching
+    // older messages reads as the same "active operation" family as
+    // streaming generation, just with different copy.
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = workspace.paper.copy(alpha = 0.72f),
-        contentColor = workspace.muted,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.tertiary,
+        contentColor = MaterialTheme.colorScheme.onTertiary,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            PigLoadingIndicator(modifier = Modifier.size(18.dp))
+            // Inline pulse-track bars only (no inner label) — the message
+            // text below carries the semantic content. Compact 5-bar mode
+            // keeps it from competing horizontally with the prefetch text.
+            PulseActivityIndicator(label = null, barCount = 5)
             Text(
                 text = if (prefetching) {
                     "正在预取更早消息 $loadedNodeCount/$totalNodeCount"
@@ -220,7 +228,7 @@ private fun TimelineHistoryLoadingIndicator(
                     "更早消息准备中 $loadedNodeCount/$totalNodeCount"
                 },
                 style = MaterialTheme.typography.labelMedium,
-                color = workspace.muted,
+                color = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.85f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
