@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -348,6 +350,12 @@ private fun AgentToolCallCapsule(
     val tone = toolStatusTone(status)
     val shape = RoundedCornerShape(10.dp)
     val kindDescription = toolKindLabel(kind, toolName)
+    // Pulse running-state stripe: when a tool is in flight we render a 4dp
+    // chartreuse bar flush against the surface's left edge, *inside* the
+    // rounded clip so the corners stay clean. The stripe replaces the older
+    // status-tone-only signal with a much louder "this is alive" cue that
+    // matches the Pulse mockup's tool-card treatment. Non-running states
+    // collapse the stripe to zero width, leaving the original layout intact.
     Surface(
         modifier = modifier
             .wrapContentWidth(align = Alignment.Start)
@@ -367,10 +375,21 @@ private fun AgentToolCallCapsule(
         shadowElevation = 1.dp,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.height(IntrinsicSize.Min),
         ) {
+            if (status == AgentToolStatus.RUNNING) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
+            Column(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -407,16 +426,19 @@ private fun AgentToolCallCapsule(
                 }
             }
             if (loading && status == AgentToolStatus.RUNNING) {
+                // Pulse the same chartreuse primary as the left stripe; the
+                // bottom progress bar reads as a continuation of the stripe.
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
                         .clip(CircleShape),
-                    color = workspace.blue,
+                    color = MaterialTheme.colorScheme.primary,
                     trackColor = workspace.hairline,
                 )
             }
-        }
+            }  // close Column
+        }  // close Row
     }
 }
 
