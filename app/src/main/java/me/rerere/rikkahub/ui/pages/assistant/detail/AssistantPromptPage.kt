@@ -79,6 +79,7 @@ import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TextArea
@@ -394,7 +395,7 @@ private fun AssistantPromptContent(
                         )
                     }
                 }
-                Button(
+                PulsePrimaryButton(
                     onClick = {
                         val lastRole = assistant.presetMessages.lastOrNull()?.role ?: MessageRole.ASSISTANT
                         val nextRole = when (lastRole) {
@@ -411,10 +412,10 @@ private fun AssistantPromptContent(
                             )
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(HugeIcons.Add01, null)
-                }
+                    text = stringResource(R.string.add),
+                    leadingIcon = HugeIcons.Add01,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -442,7 +443,7 @@ private fun AssistantPromptContent(
                         index = index
                     )
                 }
-                Button(
+                PulsePrimaryButton(
                     onClick = {
                         onUpdate(
                             assistant.copy(
@@ -452,10 +453,10 @@ private fun AssistantPromptContent(
                             )
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(HugeIcons.Add01, null)
-                }
+                    text = stringResource(R.string.add),
+                    leadingIcon = HugeIcons.Add01,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }

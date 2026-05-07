@@ -23,7 +23,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilledTonalButton
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -142,18 +142,17 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
                     textStyle = MaterialTheme.typography.headlineSmall,
                 )
 
-                FilledTonalButton(
+                PulseGhostButton(
                     onClick = {
                         scope.launch {
                             clipboard.getClipEntry()?.clipData?.getText()?.let {
                                 vm.updateInputText(it)
                             }
                         }
-                    }
-                ) {
-                    Icon(HugeIcons.Clipboard, null)
-                    Text("粘贴文本", modifier = Modifier.padding(start = 4.dp))
-                }
+                    },
+                    text = "粘贴文本",
+                    leadingIcon = HugeIcons.Clipboard,
+                )
             }
 
             // 翻译进度条
@@ -183,7 +182,7 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
             }
 
             AnimatedVisibility(translatedText.isNotBlank()) {
-                FilledTonalButton(
+                PulseGhostButton(
                     onClick = {
                         scope.launch {
                             clipboard.setClipEntry(
@@ -194,11 +193,10 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
                                 )
                             )
                         }
-                    }
-                ) {
-                    Icon(HugeIcons.Clipboard, null)
-                    Text("复制翻译结果", modifier = Modifier.padding(start = 4.dp))
-                }
+                    },
+                    text = "复制翻译结果",
+                    leadingIcon = HugeIcons.Clipboard,
+                )
             }
         }
     }
