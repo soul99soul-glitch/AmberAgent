@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1454,6 +1455,7 @@ private fun ExperimentHeroCard(
     trailing: @Composable () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
@@ -1466,11 +1468,13 @@ private fun ExperimentHeroCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
+            // Pulse Phase E: hero leading-icon chip matches the
+            // Phase A circular-ink-with-chartreuse treatment.
             Surface(
                 modifier = Modifier.size(34.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
+                shape = CircleShape,
+                color = workspace.ink,
+                contentColor = scheme.primary,
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     icon()
@@ -1506,6 +1510,7 @@ private fun ExperimentFeatureRow(
     description: String,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1515,11 +1520,17 @@ private fun ExperimentFeatureRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Pulse Phase E: bespoke leading-icon chip now mirrors the
+        // Phase A WorkspaceLeadingIcon treatment — circular ink chip
+        // with chartreuse glyph — so experimental sub-pages visually
+        // align with the rest of settings without the heavier
+        // architectural swap to CardGroup (which would lose the
+        // bespoke section/divider scaffolding these pages rely on).
         Surface(
-            modifier = Modifier.size(34.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = workspace.row,
-            contentColor = workspace.muted,
+            modifier = Modifier.size(32.dp),
+            shape = CircleShape,
+            color = workspace.ink,
+            contentColor = scheme.primary,
         ) {
             Box(contentAlignment = Alignment.Center) {
                 icon()
