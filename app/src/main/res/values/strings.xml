@@ -1013,8 +1013,11 @@
   <string name="skills_page_delete_message">Are you sure you want to delete "%s"? This action cannot be undone.</string>
   <string name="skills_page_delete_title">Delete Skill</string>
   <string name="skills_page_downloading">Downloading...</string>
+  <string name="skills_page_empty_active_title">No active skills</string>
   <string name="skills_page_empty_hint">Tap the + button at the bottom right to add a Skill</string>
   <string name="skills_page_empty_title">No Skills</string>
+  <string name="skills_page_filter_active">Active</string>
+  <string name="skills_page_filter_all">All</string>
   <string name="skills_page_import_confirm">Import</string>
   <string name="skills_page_import_description">Enter a GitHub repository URL, and the SKILL.md file in the root directory will be downloaded automatically.</string>
   <string name="skills_page_import_failed">Import failed: %s</string>
@@ -1029,6 +1032,13 @@
   <string name="skills_page_save_failed">Save failed, please check the Skill format</string>
   <string name="skills_page_skill_content_label">SKILL.md Content</string>
   <string name="skills_page_skill_name">Skill name: %s</string>
+  <string name="skills_page_spotlight_eyebrow">Most used</string>
+  <string name="skills_page_spotlight_on_pill">ON</string>
+  <string name="skills_page_stat_active">Active</string>
+  <string name="skills_page_stat_installed">Installed</string>
+  <string name="skills_page_stat_issues">Issues</string>
+  <string name="skills_page_status_off">Off</string>
+  <string name="skills_page_status_on">On</string>
   <string name="skills_page_title">Skills</string>
   <string name="stats_page_cached_tokens">Cached Tokens</string>
   <string name="stats_page_dow_fri">Fri</string>
