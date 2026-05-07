@@ -184,10 +184,18 @@ object CustomColors {
                     actionIconContentColor = colorScheme.primary,
                 )
             }
-            return if (!LocalDarkMode.current) TopAppBarDefaults.topAppBarColors(
-                containerColor = colorScheme.surfaceContainer,
-                scrolledContainerColor = colorScheme.surfaceContainer
-            ) else TopAppBarDefaults.topAppBarColors()
+            // Pulse top bar: bleed into the page background (cream in light,
+            // near-black in dark). No surface-container tint band, no
+            // scrolled-container shift — the bar reads as part of the page,
+            // letting the title carry the weight. Action icons pick up the
+            // chartreuse primary so the rare action affordance pops.
+            return TopAppBarDefaults.topAppBarColors(
+                containerColor = colorScheme.background,
+                scrolledContainerColor = colorScheme.background,
+                titleContentColor = colorScheme.onBackground,
+                navigationIconContentColor = colorScheme.onBackground,
+                actionIconContentColor = colorScheme.primary,
+            )
         }
 
     val cardColors: CardColors
