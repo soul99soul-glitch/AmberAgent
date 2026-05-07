@@ -5,7 +5,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -203,9 +205,11 @@ class AgentToolDispatcher(
         var retryAttempt = 1
         while (true) {
             try {
+                currentCoroutineContext().ensureActive()
                 return tool.copy(output = execute())
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
+                currentCoroutineContext().ensureActive()
                 val decision = GenerationFailureClassifier.decide(
                     error = error,
                     attempt = retryAttempt,

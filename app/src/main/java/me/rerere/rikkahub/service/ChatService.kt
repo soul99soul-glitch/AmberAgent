@@ -872,7 +872,9 @@ class ChatService(
                 },
             ).onCompletion { cause ->
                 cancelLiveUpdateNotification(conversationId)
-                stopGenerationKeepAlive(conversationId)
+                if (!hasQueuedContinuation(conversationId)) {
+                    stopGenerationKeepAlive(conversationId)
+                }
 
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = getConversationFlow(conversationId).value.copy(
@@ -914,7 +916,9 @@ class ChatService(
             }
         }.onFailure {
             trustedRunToolNames.remove(conversationId)
-            stopGenerationKeepAlive(conversationId)
+            if (!hasQueuedContinuation(conversationId)) {
+                stopGenerationKeepAlive(conversationId)
+            }
             val latestConversation = getConversationFlow(conversationId).value
             checkpointConversation(conversationId, latestConversation, force = true)
             generationCheckpointAt.remove(conversationId)
@@ -946,6 +950,10 @@ class ChatService(
                 generateSuggestion(conversationId, finalConversation)
             }
         }
+    }
+
+    private fun hasQueuedContinuation(conversationId: Uuid): Boolean {
+        return sessions[conversationId]?.pendingUserMessages?.value?.isNotEmpty() == true
     }
 
     private fun cleanupRunResourcesIfDone(conversationId: Uuid, conversation: Conversation) {

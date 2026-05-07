@@ -2,9 +2,11 @@ package me.rerere.rikkahub.data.ai
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -504,10 +506,12 @@ class GenerationHandler(
         var retryAttempt = 1
         while (true) {
             try {
+                currentCoroutineContext().ensureActive()
                 block()
                 processingStatus.value = null
                 return
             } catch (error: Throwable) {
+                currentCoroutineContext().ensureActive()
                 val decision = GenerationFailureClassifier.decide(
                     error = error,
                     attempt = retryAttempt,
