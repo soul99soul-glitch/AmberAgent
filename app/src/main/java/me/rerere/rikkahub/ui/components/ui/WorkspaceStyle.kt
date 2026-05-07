@@ -195,18 +195,21 @@ fun WorkspaceStatusPill(
 fun WorkspaceLeadingIcon(
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    size: Dp = 28.dp,
-    iconSize: Dp = 17.dp,
+    size: Dp = 32.dp,
+    iconSize: Dp = 16.dp,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
     val scheme = MaterialTheme.colorScheme
-    // Filled tonal squircles need on*Container content colors to stay
-    // readable; the previous mapping rendered chartreuse on chartreuse
-    // and orange on peach. Neutral tone keeps a transparent surface so
-    // the icon falls through to ink on the parent's cream/dark ground.
+    // Pulse Phase A: Neutral leading icons render as ink-filled circular
+    // chips with a chartreuse glyph — matches the mockup's settings-row
+    // aesthetic. Colored tones keep their on*Container content mapping
+    // from Phase 18 (chartreuseContainer + ink, etc.) so warning/danger
+    // stays legible on its respective tinted ground. Shape is now
+    // CircleShape across all tones per user override (mockup showed
+    // squircle but user explicitly asked for round).
     val tint = when (tone) {
-        WorkspaceTone.Neutral -> colors.ink
+        WorkspaceTone.Neutral -> scheme.primary
         WorkspaceTone.Accent -> scheme.onPrimaryContainer
         WorkspaceTone.Success -> scheme.onPrimaryContainer
         WorkspaceTone.Warning -> scheme.onSecondaryContainer
@@ -214,9 +217,9 @@ fun WorkspaceLeadingIcon(
     }
     Surface(
         modifier = modifier.size(size),
-        shape = RoundedCornerShape(6.dp),
+        shape = CircleShape,
         color = when (tone) {
-            WorkspaceTone.Neutral -> Color.Transparent
+            WorkspaceTone.Neutral -> colors.ink
             WorkspaceTone.Accent -> scheme.primaryContainer
             WorkspaceTone.Success -> scheme.primaryContainer
             WorkspaceTone.Warning -> scheme.secondaryContainer
