@@ -868,6 +868,11 @@ private fun ReasoningLevelMenuCell(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Pulse Phase D MEDIUM: was primaryContainer + primary content
+    // (chartreuse-on-pale-chartreuse). Pair primaryContainer with
+    // onPrimaryContainer for the selected state so the chip text is
+    // legible.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
         Surface(
             onClick = onClick,
@@ -875,8 +880,8 @@ private fun ReasoningLevelMenuCell(
             shape = RoundedCornerShape(6.dp),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            color = if (selected) workspace.blueContainer else Color.Transparent,
-            contentColor = if (selected) workspace.blue else workspace.ink,
+            color = if (selected) scheme.primaryContainer else Color.Transparent,
+            contentColor = if (selected) scheme.onPrimaryContainer else workspace.ink,
         ) {
             Box(
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -901,6 +906,10 @@ private fun ComposerStatusChip(
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Pulse Phase D MEDIUM: pair primaryContainer with onPrimaryContainer
+    // for the accent state instead of primary-on-primaryContainer
+    // (chartreuse-on-pale-chartreuse).
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
         Surface(
             onClick = onClick,
@@ -908,9 +917,12 @@ private fun ComposerStatusChip(
             shape = RoundedCornerShape(8.dp),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            color = if (accent) workspace.blueContainer else workspace.paper,
-            contentColor = if (accent) workspace.blue else workspace.ink,
-            border = BorderStroke(1.dp, if (accent) workspace.blue.copy(alpha = 0.18f) else workspace.hairline),
+            color = if (accent) scheme.primaryContainer else workspace.paper,
+            contentColor = if (accent) scheme.onPrimaryContainer else workspace.ink,
+            border = BorderStroke(
+                1.dp,
+                if (accent) scheme.onPrimaryContainer.copy(alpha = 0.18f) else workspace.hairline,
+            ),
         ) {
             Box(
                 modifier = Modifier.padding(horizontal = 10.dp),
@@ -2085,14 +2097,18 @@ private fun ActionIconButton(
     content: @Composable () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Pulse Phase D MEDIUM: composer button accent state pairs
+    // primaryContainer with onPrimaryContainer (was primary-on-
+    // primaryContainer = chartreuse-on-pale-chartreuse).
     Surface(
         onClick = onClick,
         modifier = Modifier.size(ComposerButtonSize),
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        color = if (accent) workspace.blueContainer else workspace.paper,
-        contentColor = if (accent) workspace.blue else workspace.ink,
+        color = if (accent) scheme.primaryContainer else workspace.paper,
+        contentColor = if (accent) scheme.onPrimaryContainer else workspace.ink,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Box(
@@ -2122,11 +2138,15 @@ private fun TextInputRow(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (state.isEditing()) {
+            // Pulse Phase D MEDIUM: editing-status banner now uses
+            // onPrimaryContainer content (ink) on primaryContainer
+            // (pale chartreuse) instead of chartreuse-on-pale-chartreuse.
+            val scheme = MaterialTheme.colorScheme
             Surface(
                 shape = RoundedCornerShape(6.dp),
-                color = workspace.blueContainer,
-                contentColor = workspace.blue,
-                border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.16f)),
+                color = scheme.primaryContainer,
+                contentColor = scheme.onPrimaryContainer,
+                border = BorderStroke(1.dp, scheme.onPrimaryContainer.copy(alpha = 0.16f)),
             ) {
                 Row(
                     modifier = Modifier

@@ -1,10 +1,13 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -63,25 +66,40 @@ fun ImagePreviewDialog(
                     .padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                IconButton(
-                    onClick = {
-                        lifecycleOwner.lifecycleScope.launch {
-                            runCatching {
-                                toaster.show("正在保存")
-                                val imgUrl = images[state.currentPage]
-                                filesManager.saveMessageImage(context, imgUrl)
-                                toaster.show(message = "已保存图片", type = ToastType.Success)
-                            }.onFailure {
-                                it.printStackTrace()
-                                toaster.show(
-                                    message = it.toString(),
-                                    type = ToastType.Error
-                                )
+                // Pulse Phase D MEDIUM: bare Color.White icon was
+                // brittle — invisible on light/bright images. Ink
+                // scrim chip behind the icon guarantees contrast on
+                // any image content (white-glyph-on-ink reads on
+                // every image).
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            color = Color.Black.copy(alpha = 0.55f),
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    IconButton(
+                        onClick = {
+                            lifecycleOwner.lifecycleScope.launch {
+                                runCatching {
+                                    toaster.show("正在保存")
+                                    val imgUrl = images[state.currentPage]
+                                    filesManager.saveMessageImage(context, imgUrl)
+                                    toaster.show(message = "已保存图片", type = ToastType.Success)
+                                }.onFailure {
+                                    it.printStackTrace()
+                                    toaster.show(
+                                        message = it.toString(),
+                                        type = ToastType.Error
+                                    )
+                                }
                             }
                         }
+                    ) {
+                        Icon(HugeIcons.Download01, null, tint = Color.White)
                     }
-                ) {
-                    Icon(HugeIcons.Download01, null, tint = Color.White)
                 }
             }
         }

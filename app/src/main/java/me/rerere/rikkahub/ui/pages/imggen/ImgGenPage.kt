@@ -423,10 +423,14 @@ private fun ImageGalleryScreen(
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Column {
+                                        // Pulse Phase D MEDIUM: model
+                                        // label was primary (chartreuse)
+                                        // on cream — low contrast.
+                                        // Switched to onSurface (ink).
                                         Text(
                                             text = it.model,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
                                             text = it.prompt.take(20) + if (it.prompt.length > 20) "..." else "",

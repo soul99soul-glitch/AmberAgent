@@ -234,25 +234,25 @@ private fun AssistantPromptContent(
                         append(" ")
                         append(stringResource(R.string.assistant_page_template_variable_role))
                         append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.secondary)) {
                             append("{{ role }}")
                         }
                         append(", ")
                         append(stringResource(R.string.assistant_page_template_variable_message))
                         append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.secondary)) {
                             append("{{ message }}")
                         }
                         append(", ")
                         append(stringResource(R.string.assistant_page_template_variable_time))
                         append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.secondary)) {
                             append("{{ time }}")
                         }
                         append(", ")
                         append(stringResource(R.string.assistant_page_template_variable_date))
                         append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.secondary)) {
                             append("{{ date }}")
                         }
                     })
