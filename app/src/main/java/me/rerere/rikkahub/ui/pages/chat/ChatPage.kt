@@ -123,27 +123,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
 
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val softwareKeyboardController = LocalSoftwareKeyboardController.current
-
-    // Handle back press when drawer is open
-    BackHandler(enabled = drawerState.isOpen) {
-        scope.launch {
-            drawerState.close()
-        }
-    }
-
-    // Hide keyboard when drawer is open
-    LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen) {
-            softwareKeyboardController?.hide()
-        }
-    }
-
-    val windowAdaptiveInfo = currentWindowDpSize()
-    val isBigScreen =
-        windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
-
+    // Drawer state, big-screen permanent-drawer detection, and the
+    // associated BackHandler / keyboard-hide effects all gone — Pulse no
+    // longer uses a navigation drawer; ConversationsHome (Screen.History)
+    // is the canonical conversations list and the bottom-pill nav handles
+    // primary destination switching. ChatPage is now a pure detail
+    // surface: top bar back-button → pop to ConversationsHome.
     val inputState = vm.inputState
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
@@ -211,81 +196,27 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    when {
-        isBigScreen -> {
-            PermanentNavigationDrawer(
-                drawerContent = {
-                    ChatDrawerContent(
-                        navController = navController,
-                        current = conversation,
-                        vm = vm,
-                        settings = setting,
-                        drawerState = drawerState,
-                    )
-                }
-            ) {
-                ChatPageContent(
-                    inputState = inputState,
-                    loadingJob = loadingJob,
-                    processingStatus = processingStatus,
-                    setting = setting,
-                    conversation = conversation,
-                    timelineLoadState = timelineLoadState,
-                    pendingUserMessages = pendingUserMessageState.value,
-                    contextCompacts = contextCompacts,
-                    drawerState = drawerState,
-                    navController = navController,
-                    vm = vm,
-                    chatListState = chatListState,
-                    enableWebSearch = enableWebSearch,
-                    currentChatModel = currentChatModel,
-                    bigScreen = true,
-                    errors = errors,
-                    onDismissError = { vm.dismissError(it) },
-                    onClearAllErrors = { vm.clearAllErrors() },
-                )
-            }
-        }
-
-        else -> {
-            ModalNavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = {
-                    ChatDrawerContent(
-                        navController = navController,
-                        current = conversation,
-                        vm = vm,
-                        settings = setting,
-                        drawerState = drawerState,
-                    )
-                }
-            ) {
-                ChatPageContent(
-                    inputState = inputState,
-                    loadingJob = loadingJob,
-                    processingStatus = processingStatus,
-                    setting = setting,
-                    conversation = conversation,
-                    timelineLoadState = timelineLoadState,
-                    pendingUserMessages = pendingUserMessageState.value,
-                    contextCompacts = contextCompacts,
-                    drawerState = drawerState,
-                    navController = navController,
-                    vm = vm,
-                    chatListState = chatListState,
-                    enableWebSearch = enableWebSearch,
-                    currentChatModel = currentChatModel,
-                    bigScreen = false,
-                    errors = errors,
-                    onDismissError = { vm.dismissError(it) },
-                    onClearAllErrors = { vm.clearAllErrors() },
-                )
-            }
-            BackHandler(drawerState.isOpen) {
-                scope.launch { drawerState.close() }
-            }
-        }
-    }
+    // Pulse layout: chat is a detail surface with no drawer. Big screens
+    // and phones use the same single-column layout; the master-detail
+    // tablet pattern is parked (Phase 25 may revisit).
+    ChatPageContent(
+        inputState = inputState,
+        loadingJob = loadingJob,
+        processingStatus = processingStatus,
+        setting = setting,
+        conversation = conversation,
+        timelineLoadState = timelineLoadState,
+        pendingUserMessages = pendingUserMessageState.value,
+        contextCompacts = contextCompacts,
+        navController = navController,
+        vm = vm,
+        chatListState = chatListState,
+        enableWebSearch = enableWebSearch,
+        currentChatModel = currentChatModel,
+        errors = errors,
+        onDismissError = { vm.dismissError(it) },
+        onClearAllErrors = { vm.clearAllErrors() },
+    )
 }
 
 @Composable
@@ -294,12 +225,10 @@ private fun ChatPageContent(
     loadingJob: Job?,
     processingStatus: String? = null,
     setting: Settings,
-    bigScreen: Boolean,
     conversation: Conversation,
     timelineLoadState: me.rerere.rikkahub.service.ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
-    drawerState: DrawerState,
     navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
@@ -375,8 +304,6 @@ private fun ChatPageContent(
                     TopBar(
                         settings = setting,
                         conversation = conversation,
-                        bigScreen = bigScreen,
-                        drawerState = drawerState,
                         previewMode = previewMode,
                         onNewChat = {
                             navigateToChatPage(navController)
@@ -1039,8 +966,6 @@ private fun String.compactSandboxText(maxLength: Int): String {
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
-    drawerState: DrawerState,
-    bigScreen: Boolean,
     previewMode: Boolean,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
@@ -1062,15 +987,11 @@ private fun TopBar(
             actionIconContentColor = workspace.muted,
         ),
         navigationIcon = {
-            // Pulse navigation pattern: chat is now a detail surface
-            // reached by tapping a row in the Conversations home, so the
-            // navigation icon is a Back chevron (pop the backstack) rather
-            // than a hamburger that opens a drawer. The drawer composable
-            // is left in place for now — accessible via swipe — but no
-            // longer the primary entry into chat history.
-            if (!bigScreen) {
-                BackButton()
-            }
+            // Pulse navigation pattern: chat is a detail surface reached
+            // by tapping a row in the Conversations home. Back chevron
+            // pops the backstack to ConversationsHome — same on every
+            // screen size now that the permanent drawer pattern is gone.
+            BackButton()
         },
         title = {
             val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
