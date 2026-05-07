@@ -172,11 +172,18 @@ private fun ReasoningContent(
             }
     ) {
         SelectionContainer {
+            // Pulse reasoning panel: ink spotlight surface with chartreuse text.
+            // Reasoning is the agent's internal monologue — visually it should
+            // feel like peering into the engine, not a normal message bubble.
+            // Mapping to Pulse semantic slots:
+            //   tertiaryContainer  → ink-soft (the spotlight surface family)
+            //   onTertiaryContainer→ chartreuse (high-contrast on dark)
+            // No border — the inversion of palette already separates it from
+            // surrounding content; an extra hairline reads as visual noise.
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-                border = BorderStroke(1.dp, workspace.hairline),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
             ) {
                 MarkdownBlock(
                     content = reasoning.reasoning.replaceRegexes(
@@ -187,7 +194,7 @@ private fun ReasoningContent(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }
         }
@@ -220,17 +227,22 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
         icon = {
+            // Brain icon: chartreuse-tinted at 80% to read as "live thinking"
+            // without going full-saturation. Keep below 1.0 alpha so it doesn't
+            // out-shout the message body that follows after collapse.
             Icon(
                 imageVector = HugeIcons.Brain02,
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
-                tint = workspace.blue.copy(alpha = 0.72f),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.80f),
             )
         },
         label = {
             if (thinkingTitle != null) {
                 ReasoningTitle(title = thinkingTitle)
             } else {
+                // "Deep thinking · X.Xs" — chartreuse primary at 80% alpha so it
+                // tracks the brain icon's tone consistently.
                 Text(
                     text = stringResource(
                         R.string.deep_thinking_seconds,
@@ -240,7 +252,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Normal,
                     ),
-                    color = workspace.blue.copy(alpha = 0.72f),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.80f),
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -253,13 +265,17 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             }
             val metaText = listOfNotNull(durationLabel, budgetLabel).joinToString(" · ")
             if (metaText.isNotBlank()) {
+                // Meta line (duration · budget): warm grey instead of dimmed
+                // chartreuse. Two stacked chartreuse-tinted lines would read
+                // as visual noise; the meta line steps back into onSurfaceVariant
+                // so the eye prioritises the active label.
                 Text(
                     text = metaText,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Normal,
                     ),
-                    color = workspace.blue.copy(alpha = 0.56f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }

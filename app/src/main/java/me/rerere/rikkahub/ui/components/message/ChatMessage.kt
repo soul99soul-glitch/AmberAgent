@@ -366,53 +366,62 @@ private fun MessagePartsBlock(
                     is UIMessagePart.Text -> {
                         SelectionContainer {
                             if (role == MessageRole.USER) {
+                                // Pulse user bubble: tan surfaceVariant, asymmetric
+                                // squircle corners (28/8/28/28) with the top-right
+                                // tucked in to read as "outgoing from this side".
+                                // Dropped the workspace.blue 3dp left stripe — it
+                                // was a workspace-style accent that doesn't belong
+                                // in the Pulse vocabulary, where user authorship
+                                // is signalled by alignment + corner asymmetry alone.
                                 Surface(
                                     modifier = Modifier
                                         .widthIn(max = 560.dp)
                                         .animateContentSizeIf(loading),
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = workspace.note,
-                                    contentColor = workspace.ink,
+                                    shape = RoundedCornerShape(
+                                        topStart = 28.dp,
+                                        topEnd = 8.dp,
+                                        bottomEnd = 28.dp,
+                                        bottomStart = 28.dp,
+                                    ),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                     tonalElevation = 0.dp,
                                     shadowElevation = 0.dp,
-                                    border = BorderStroke(1.dp, workspace.hairline),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     onClick = { onUserMessageClick?.invoke() },
                                 ) {
-                                    Row(
-                                        modifier = Modifier.height(IntrinsicSize.Min),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxHeight()
-                                                .width(3.dp)
-                                                .background(workspace.blue)
+                                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                                        MarkdownBlock(
+                                            content = part.text.replaceRegexes(
+                                                assistant = assistant,
+                                                scope = AssistantAffectScope.USER,
+                                                visual = true,
+                                            ),
+                                            onClickCitation = handleClickCitation
                                         )
-                                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
-                                            MarkdownBlock(
-                                                content = part.text.replaceRegexes(
-                                                    assistant = assistant,
-                                                    scope = AssistantAffectScope.USER,
-                                                    visual = true,
-                                                ),
-                                                onClickCitation = handleClickCitation
-                                            )
-                                        }
                                     }
                                 }
                             } else {
                                 if (settings.displaySetting.showAssistantBubble) {
+                                    // Pulse assistant bubble (when enabled): a softer
+                                    // surfaceContainerLow surface so the assistant's
+                                    // text differs subtly from the user's tan bubble
+                                    // without competing visually. Symmetric 18dp
+                                    // corners — assistant messages are conversational
+                                    // ground; only the user's outgoing message gets
+                                    // the asymmetric tuck.
                                     Surface(
                                         modifier = Modifier
                                             .widthIn(max = 640.dp)
                                             .animateContentSizeIf(loading),
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = workspace.paper,
-                                        contentColor = workspace.ink,
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        contentColor = MaterialTheme.colorScheme.onSurface,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
-                                        border = BorderStroke(1.dp, workspace.hairline),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     ) {
-                                        Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+                                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                                             MarkdownBlock(
                                                 content = part.text.replaceRegexes(
                                                     assistant = assistant,
