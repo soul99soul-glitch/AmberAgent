@@ -86,10 +86,14 @@ fun BackgroundPicker(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Pulse Phase C HIGH: was colorScheme.primary
+                // (chartreuse) text on cream — yellow-on-cream
+                // disappeared. Switch to onSurface (ink) so the
+                // "background set" confirmation reads clearly.
                 Text(
                     text = stringResource(R.string.assistant_page_background_set),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(

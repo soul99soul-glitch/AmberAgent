@@ -51,13 +51,19 @@ fun BackupReminderCard(
                 imageVector = HugeIcons.DatabaseRestore,
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.secondary,
             )
             Column(modifier = Modifier.weight(1f)) {
+                // Pulse Phase C HIGH: title was colorScheme.primary
+                // (chartreuse) on cream Card — yellow-green-on-cream
+                // contrast was ~3:1, fails WCAG AA. Switching to
+                // onSurface (ink) keeps the reminder card legible
+                // while the leading icon's secondary (sport-orange)
+                // tint carries the "needs attention" signal instead.
                 Text(
                     text = stringResource(R.string.backup_page_reminder_title),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 val lastBackupText = if (config.lastBackupTime == 0L) {
                     stringResource(R.string.backup_page_reminder_never_backed_up)

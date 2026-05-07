@@ -1641,11 +1641,20 @@ private fun ExperimentBooleanPill(
     ready: Boolean,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Pulse Phase C HIGH: was rendering chartreuse-on-pale-chartreuse
+    // (workspace.blue at 10% alpha + workspace.blue content) — text
+    // functionally invisible. Pair primaryContainer with
+    // onPrimaryContainer (ink in light, chartreuse in dark) for the
+    // ready state so the label stays readable in both schemes.
     Surface(
         shape = RoundedCornerShape(999.dp),
-        color = if (ready) workspace.blue.copy(alpha = 0.1f) else workspace.row,
-        contentColor = if (ready) workspace.blue else workspace.muted,
-        border = BorderStroke(1.dp, if (ready) workspace.blue.copy(alpha = 0.22f) else workspace.hairline),
+        color = if (ready) scheme.primaryContainer else workspace.row,
+        contentColor = if (ready) scheme.onPrimaryContainer else workspace.muted,
+        border = BorderStroke(
+            1.dp,
+            if (ready) scheme.onPrimaryContainer.copy(alpha = 0.22f) else workspace.hairline,
+        ),
     ) {
         Text(
             text = "$label ${if (ready) stringResource(R.string.setting_experimental_ready) else stringResource(R.string.setting_experimental_missing)}",

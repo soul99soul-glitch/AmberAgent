@@ -76,6 +76,10 @@ fun TagsInput(
         }
 
         // 添加按钮
+        // Pulse Phase C HIGH: tint was colorScheme.primary (chartreuse)
+        // on the default tonal Surface (cream-with-tint) — the "+"
+        // glyph faded into the surface. Switch to onSurfaceVariant
+        // (warm grey) for a quieter affordance that's still legible.
         Surface(
             shape = CircleShape,
             tonalElevation = 2.dp,
@@ -88,7 +92,7 @@ fun TagsInput(
                 modifier = Modifier
                     .padding(6.dp)
                     .size(16.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
