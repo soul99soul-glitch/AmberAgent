@@ -14,9 +14,11 @@ import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.MoreVertical
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,12 +28,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -39,28 +40,28 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
@@ -70,8 +71,11 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
-import me.rerere.rikkahub.ui.components.ui.Tag
-import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.PulseSecondaryButton
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -101,6 +105,16 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
         }
     }
 
+    // Stat counts power the hero card. Configured = providers with at
+    // least one model wired up; Models = sum across all providers. Both
+    // recompute cheaply from settings.providers.
+    val configuredCount = remember(settings.providers) {
+        settings.providers.count { it.enabled && it.models.isNotEmpty() }
+    }
+    val modelCount = remember(settings.providers) {
+        settings.providers.sumOf { it.models.size }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -118,13 +132,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             )
                         )
                     }
-                    AddButton {
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(it) + settings.providers
-                            )
-                        )
-                    }
                 },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors
@@ -138,38 +145,67 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Search bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text(stringResource(R.string.setting_provider_page_search_providers)) },
-                leadingIcon = {
-                    Icon(HugeIcons.Search01, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = CircleShape,
-            )
-
-
             LazyColumn(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                    .fillMaxSize()
                     .imePadding(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = 16.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 state = lazyListState,
             ) {
+                // Hero stat card row — 2-up tiles. Configured count goes
+                // chartreuse-filled (the active brand accent) so it reads
+                // as the primary metric; Models is plain tan as the
+                // contextual aggregate.
+                item {
+                    StatHeroRow(
+                        configuredCount = configuredCount,
+                        modelCount = modelCount,
+                    )
+                }
+
+                // Search bar — pill-shaped to match Pulse vocabulary.
+                item {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        placeholder = { Text(stringResource(R.string.setting_provider_page_search_providers)) },
+                        leadingIcon = {
+                            Icon(HugeIcons.Search01, contentDescription = null)
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(HugeIcons.Cancel01, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = CircleShape,
+                    )
+                }
+
+                // ALL-CAPS section eyebrow above the list.
+                item {
+                    Text(
+                        text = stringResource(R.string.setting_provider_page_section_label).uppercase(),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.08.em,
+                        ),
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp),
+                    )
+                }
+
                 lazyItems(filteredProviders, key = { it.id }) { provider ->
                     ProviderItem(
                         modifier = Modifier.fillMaxWidth(),
@@ -194,6 +230,24 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                 }
+
+                // Sport-orange "+ Add Provider" CTA at the bottom of the
+                // list — matches the mockup pattern of putting the
+                // primary list-mutating action below the rows it acts on.
+                item {
+                    AddProviderCTA(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        onAdd = {
+                            vm.updateSettings(
+                                settings.copy(
+                                    providers = listOf(it) + settings.providers
+                                )
+                            )
+                        },
+                    )
+                }
             }
         }
     }
@@ -204,19 +258,142 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             title = { Text(stringResource(R.string.confirm_delete)) },
             text = { Text(stringResource(R.string.setting_provider_page_delete_dialog_text)) },
             dismissButton = {
-                TextButton(onClick = { pendingDeleteProvider = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
+                PulseDialogButton(
+                    onClick = { pendingDeleteProvider = null },
+                    text = stringResource(R.string.cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         pendingDeleteProvider = null
                         vm.updateSettings(settings.copy(providers = settings.providers - provider))
                     },
-                ) {
-                    Text(stringResource(R.string.delete))
+                    text = stringResource(R.string.delete),
+                    variant = PulseDialogVariant.Secondary,
+                )
+            },
+        )
+    }
+}
+
+/**
+ * Hero stat row at the top of the providers list. Two square-ish tiles
+ * showing CONFIGURED count (chartreuse-filled, the brand "active"
+ * accent) and MODELS count (plain tan, the contextual aggregate).
+ * Reads at a glance — matches the Pulse mockup's two-up KPI pattern.
+ */
+@Composable
+private fun StatHeroRow(
+    configuredCount: Int,
+    modelCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        StatTile(
+            modifier = Modifier.weight(1f),
+            label = stringResource(R.string.setting_provider_page_stat_configured),
+            value = configuredCount.toString().padStart(2, '0'),
+            container = MaterialTheme.colorScheme.primary,
+            content = MaterialTheme.colorScheme.onPrimary,
+            border = null,
+        )
+        StatTile(
+            modifier = Modifier.weight(1f),
+            label = stringResource(R.string.setting_provider_page_stat_models),
+            value = modelCount.toString().padStart(2, '0'),
+            container = MaterialTheme.colorScheme.surfaceVariant,
+            content = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        )
+    }
+}
+
+@Composable
+private fun StatTile(
+    label: String,
+    value: String,
+    container: androidx.compose.ui.graphics.Color,
+    content: androidx.compose.ui.graphics.Color,
+    border: BorderStroke?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = container,
+        contentColor = content,
+        border = border,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.1.em,
+                ),
+                color = content.copy(alpha = 0.78f),
+            )
+            Text(
+                text = value,
+                fontSize = 36.sp,
+                fontWeight = FontWeight.Black,
+                color = content,
+            )
+        }
+    }
+}
+
+/**
+ * Sport-orange CTA card at the bottom of the provider list. Renders as
+ * a pill-bordered tan card with the "+ Add Provider" PulseSecondaryButton
+ * inside, so the action reads as deliberate (a row in the list) rather
+ * than a free-floating button. Tapping opens the provider-add dialog
+ * with the same flow as the previous TopBar action.
+ */
+@Composable
+private fun AddProviderCTA(
+    onAdd: (ProviderSetting) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val dialogState = useEditState<ProviderSetting> { onAdd(it) }
+
+    PulseSecondaryButton(
+        onClick = { dialogState.open(ProviderSetting.OpenAI()) },
+        text = stringResource(R.string.setting_provider_page_add_provider),
+        leadingIcon = HugeIcons.Add01,
+        modifier = modifier,
+    )
+
+    if (dialogState.isEditing) {
+        AlertDialog(
+            onDismissRequest = { dialogState.dismiss() },
+            title = { Text(stringResource(R.string.setting_provider_page_add_provider)) },
+            text = {
+                dialogState.currentState?.let {
+                    ProviderConfigure(it) { newState -> dialogState.currentState = newState }
                 }
+            },
+            confirmButton = {
+                PulseDialogButton(
+                    onClick = { dialogState.confirm() },
+                    text = stringResource(R.string.setting_provider_page_add),
+                    variant = PulseDialogVariant.Primary,
+                )
+            },
+            dismissButton = {
+                PulseDialogButton(
+                    onClick = { dialogState.dismiss() },
+                    text = stringResource(R.string.cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             },
         )
     }
@@ -261,7 +438,7 @@ private fun ImportProviderButton(
             },
             text = {
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.setting_provider_page_import_dialog_message),
@@ -271,39 +448,21 @@ private fun ImportProviderButton(
 
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // 主要操作：扫描二维码
-                        Button(
+                        // Scan QR (primary action — chartreuse Pulse pill)
+                        PulsePrimaryButton(
                             onClick = {
                                 showImportDialog = false
                                 scanQrCodeLauncher.launch(null)
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            shape = MaterialTheme.shapes.large
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Camera01,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = stringResource(R.string.setting_provider_page_scan_qr_code),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
+                            text = stringResource(R.string.setting_provider_page_scan_qr_code),
+                            leadingIcon = HugeIcons.Camera01,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
 
-                        // 次要操作：从相册选择
-                        OutlinedButton(
+                        // Pick from gallery (secondary action — ghost outline)
+                        PulseGhostButton(
                             onClick = {
                                 showImportDialog = false
                                 pickImageLauncher.launch(
@@ -312,42 +471,20 @@ private fun ImportProviderButton(
                                     )
                                 )
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            shape = MaterialTheme.shapes.large
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Image02,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = stringResource(R.string.setting_provider_page_select_from_gallery),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
+                            text = stringResource(R.string.setting_provider_page_select_from_gallery),
+                            leadingIcon = HugeIcons.Image02,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = { showImportDialog = false },
-                    shape = MaterialTheme.shapes.large
-                ) {
-                    Text(
-                        text = stringResource(R.string.cancel),
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
+                    text = stringResource(R.string.cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         )
     }
@@ -403,7 +540,6 @@ private fun handleImageQRCode(
     context: android.content.Context
 ) {
     runCatching {
-        // 使用ImageUtils解析二维码
         val qrContent = ImageUtils.decodeQRCodeFromUri(context, uri)
 
         if (qrContent.isNullOrEmpty()) {
@@ -428,58 +564,19 @@ private fun handleImageQRCode(
     }
 }
 
-
-@Composable
-private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
-    val dialogState = useEditState<ProviderSetting> {
-        onAdd(it)
-    }
-
-    IconButton(
-        onClick = {
-            dialogState.open(ProviderSetting.OpenAI())
-        }
-    ) {
-        Icon(HugeIcons.Add01, "Add")
-    }
-
-    if (dialogState.isEditing) {
-        AlertDialog(
-            onDismissRequest = {
-                dialogState.dismiss()
-            },
-            title = {
-                Text(stringResource(R.string.setting_provider_page_add_provider))
-            },
-            text = {
-                dialogState.currentState?.let {
-                    ProviderConfigure(it) { newState ->
-                        dialogState.currentState = newState
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        dialogState.confirm()
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_add))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        dialogState.dismiss()
-                    }
-                ) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
-}
-
+/**
+ * Provider row card. Tan/cream surface with:
+ *   - Provider icon (AutoAIIcon) on the left
+ *   - Name + short description stacked
+ *   - Right side: chartreuse pulse-dot for enabled (sport-orange dot for
+ *     disabled), model count in mono labelSmall, then the more-actions
+ *     menu trigger
+ *
+ * Disabled state: card uses a subdued container with reduced content
+ * alpha, and the leading dot flips to sport-orange to read as a warning
+ * without the M3 errorContainer's heavy fill that the previous
+ * implementation used (which made disabled providers look like errors).
+ */
 @Composable
 private fun ProviderItem(
     provider: ProviderSetting,
@@ -489,94 +586,120 @@ private fun ProviderItem(
     onDelete: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val enabled = provider.enabled
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = if (provider.enabled) {
-                CustomColors.listItemColors.containerColor
-            } else MaterialTheme.colorScheme.errorContainer,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ),
-        onClick = {
-            onEdit()
-        }
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        ),
+        shape = RoundedCornerShape(20.dp),
+        onClick = onEdit,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(start = 16.dp, end = 4.dp, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AutoAIIcon(
                 name = provider.name,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(40.dp),
             )
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    text = provider.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                    CompositionLocalProvider(LocalContentColor provides LocalContentColor.current.copy(alpha = 0.7f)) {
-                        provider.shortDescription()
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Tag(type = if (provider.enabled) TagType.SUCCESS else TagType.WARNING) {
-                        Text(stringResource(if (provider.enabled) R.string.setting_provider_page_enabled else R.string.setting_provider_page_disabled))
-                    }
-                    Tag(type = TagType.INFO) {
-                        Text(
-                            stringResource(
-                                R.string.setting_provider_page_model_count,
-                                provider.models.size
-                            )
-                        )
-                    }
+                    // Pulse dot — chartreuse when enabled, sport-orange
+                    // when disabled. The dot reads at-a-glance and frees
+                    // up horizontal space the old Tag stack consumed.
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (enabled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.secondary
+                            ),
+                    )
+                    Text(
+                        text = provider.name,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-            }
-            IconButton(onClick = { showMenu = true }) {
-                Icon(
-                    imageVector = HugeIcons.MoreVertical,
-                    contentDescription = stringResource(R.string.more_options),
+                Text(
+                    text = stringResource(
+                        R.string.setting_provider_page_model_count,
+                        provider.models.size,
+                    ),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.05.em,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.edit)) },
-                    leadingIcon = { Icon(HugeIcons.Edit01, contentDescription = null) },
-                    onClick = {
-                        showMenu = false
-                        onEdit()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.copy)) },
-                    leadingIcon = { Icon(HugeIcons.Copy01, contentDescription = null) },
-                    onClick = {
-                        showMenu = false
-                        onCopy()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.delete)) },
-                    leadingIcon = { Icon(HugeIcons.Delete01, contentDescription = null) },
-                    onClick = {
-                        showMenu = false
-                        onDelete()
-                    },
-                )
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = HugeIcons.MoreVertical,
+                        contentDescription = stringResource(R.string.more_options),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.edit)) },
+                        leadingIcon = { Icon(HugeIcons.Edit01, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            onEdit()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.copy)) },
+                        leadingIcon = { Icon(HugeIcons.Copy01, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            onCopy()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(R.string.delete),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                HugeIcons.Delete01,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onDelete()
+                        },
+                    )
+                }
             }
         }
     }
