@@ -1208,6 +1208,11 @@
   <string name="setting_agent_permissions_page_title">Permissions &amp; Approval</string>
   <string name="setting_agent_permissions_access_section">System Access</string>
   <string name="setting_agent_permissions_approval_section">Approval Policy</string>
+  <string name="setting_agent_permissions_trust_eyebrow">Trust level</string>
+  <string name="setting_agent_permissions_trust_label_gated">Gated</string>
+  <string name="setting_agent_permissions_trust_label_partial">Partial</string>
+  <string name="setting_agent_permissions_trust_label_open">Open</string>
+  <string name="setting_agent_permissions_trust_caption">Each lit dot relaxes one approval gate. Fewer dots means more confirmations, more dots means faster execution.</string>
   <string name="setting_experimental_page_title">Experimental Features</string>
   <string name="setting_sandbox_page_title">Sandbox Runtime</string>
   <string name="setting_sandbox_workspace_section">Workspace</string>
