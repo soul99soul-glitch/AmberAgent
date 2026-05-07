@@ -3,16 +3,15 @@ package me.rerere.rikkahub.ui.pages.setting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.QuillWrite01
+import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Cancel01
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -22,12 +21,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
@@ -36,7 +38,9 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +76,7 @@ import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.reflect.full.primaryConstructor
+import kotlin.uuid.Uuid
 
 @Composable
 fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
@@ -79,6 +84,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val lazyListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var editingService by remember { mutableStateOf<SearchServiceEditorTarget?>(null) }
 
     Scaffold(
         topBar = {
@@ -92,16 +98,10 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 actions = {
                     IconButton(
                         onClick = {
-                            val newService = SearchServiceOptions.BingLocalOptions()
-                            vm.updateSettings(
-                                settings.copy(
-                                    searchServices = listOf(newService) + settings.searchServices,
-                                    searchEnabledServiceIds = listOf(newService.id) + settings.searchEnabledServiceIds,
-                                )
+                            editingService = SearchServiceEditorTarget(
+                                index = null,
+                                service = SearchServiceOptions.BingLocalOptions(),
                             )
-                            scope.launch {
-                                lazyListState.animateScrollToItem(0)
-                            }
                         }
                     ) {
                         Icon(
@@ -124,12 +124,14 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             val toIndex = to.index - offset
 
             if (fromIndex >= 0 && toIndex >= 0 && fromIndex < settings.searchServices.size && toIndex < settings.searchServices.size) {
+                val selectedServiceId = settings.searchServices.getOrNull(settings.searchServiceSelected)?.id
                 val newServices = settings.searchServices.toMutableList().apply {
                     add(toIndex, removeAt(fromIndex))
                 }
                 vm.updateSettings(
                     settings.copy(
-                        searchServices = newServices
+                        searchServices = newServices,
+                        searchServiceSelected = resolveSelectedSearchIndex(newServices, selectedServiceId),
                     )
                 )
             }
@@ -173,29 +175,24 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                             }
                             vm.updateSettings(settings.copy(searchEnabledServiceIds = enabledIds))
                         },
-                        onUpdateService = { updatedService ->
-                            val newServices = settings.searchServices.toMutableList()
-                            val wasEnabled = service.id in settings.searchEnabledServiceIds
-                            newServices[index] = updatedService
-                            val enabledIds = if (wasEnabled) {
-                                settings.searchEnabledServiceIds.filterNot { it == service.id } + updatedService.id
-                            } else {
-                                settings.searchEnabledServiceIds
-                            }
-                            vm.updateSettings(
-                                settings.copy(
-                                    searchServices = newServices,
-                                    searchEnabledServiceIds = enabledIds.distinct(),
-                                )
+                        onEditService = {
+                            editingService = SearchServiceEditorTarget(
+                                index = index,
+                                service = service,
                             )
                         },
                         onDeleteService = {
                             if (settings.searchServices.size > 1) {
+                                val selectedServiceId = settings.searchServices.getOrNull(settings.searchServiceSelected)?.id
                                 val newServices = settings.searchServices.toMutableList()
                                 newServices.removeAt(index)
                                 vm.updateSettings(
                                     settings.copy(
                                         searchServices = newServices,
+                                        searchServiceSelected = resolveSelectedSearchIndex(
+                                            services = newServices,
+                                            selectedServiceId = selectedServiceId.takeUnless { it == service.id },
+                                        ),
                                         searchEnabledServiceIds = settings.searchEnabledServiceIds.filterNot {
                                             it == service.id
                                         },
@@ -240,8 +237,78 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             }
         }
     }
+
+    editingService?.let { target ->
+        SearchServiceEditorSheet(
+            title = if (target.index == null) {
+                stringResource(R.string.setting_page_search_add_provider)
+            } else {
+                stringResource(R.string.edit)
+            },
+            confirmText = if (target.index == null) {
+                stringResource(R.string.setting_page_search_add_provider)
+            } else {
+                stringResource(R.string.chat_page_save)
+            },
+            initialService = target.service,
+            onDismiss = {
+                editingService = null
+            },
+            onConfirm = { updatedService ->
+                if (target.index == null) {
+                    vm.updateSettings(
+                        settings.copy(
+                            searchServices = listOf(updatedService) + settings.searchServices,
+                            searchEnabledServiceIds = (listOf(updatedService.id) + settings.searchEnabledServiceIds).distinct(),
+                            searchServiceSelected = 0,
+                        )
+                    )
+                    scope.launch {
+                        lazyListState.animateScrollToItem(1)
+                    }
+                } else {
+                    val currentIndex = settings.searchServices.indexOfFirst { it.id == target.service.id }
+                        .takeIf { it >= 0 }
+                        ?: target.index
+                    if (currentIndex in settings.searchServices.indices) {
+                        val oldService = settings.searchServices[currentIndex]
+                        val wasEnabled = oldService.id in settings.searchEnabledServiceIds
+                        val newServices = settings.searchServices.toMutableList()
+                        newServices[currentIndex] = updatedService
+                        val enabledIds = if (wasEnabled) {
+                            settings.searchEnabledServiceIds.filterNot { it == oldService.id } + updatedService.id
+                        } else {
+                            settings.searchEnabledServiceIds
+                        }
+                        vm.updateSettings(
+                            settings.copy(
+                                searchServices = newServices,
+                                searchEnabledServiceIds = enabledIds.distinct(),
+                            )
+                        )
+                    }
+                }
+                editingService = null
+            },
+        )
+    }
 }
 
+private data class SearchServiceEditorTarget(
+    val index: Int?,
+    val service: SearchServiceOptions,
+)
+
+private fun resolveSelectedSearchIndex(
+    services: List<SearchServiceOptions>,
+    selectedServiceId: Uuid?,
+): Int {
+    if (services.isEmpty()) return 0
+    return selectedServiceId
+        ?.let { id -> services.indexOfFirst { it.id == id } }
+        ?.takeIf { it >= 0 }
+        ?: 0
+}
 
 @Composable
 private fun AgentSearchEnableCard(
@@ -298,16 +365,12 @@ private fun SearchProviderCard(
     service: SearchServiceOptions,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
-    onUpdateService: (SearchServiceOptions) -> Unit,
+    onEditService: () -> Unit,
     onDeleteService: () -> Unit,
     canDelete: Boolean,
     modifier: Modifier = Modifier,
     dragHandle: @Composable () -> Unit = {}
 ) {
-    var options by remember(service) {
-        mutableStateOf(service)
-    }
-    var expand by remember { mutableStateOf(false) }
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -316,68 +379,32 @@ private fun SearchProviderCard(
     ) {
         Column(
             modifier = Modifier
-                .animateContentSize()
                 .fillMaxWidth()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Select(
-                    options = SearchServiceOptions.TYPES.keys.toList(),
-                    selectedOption = options::class,
-                    optionToString = { SearchServiceOptions.TYPES[it] ?: "[Unknown]" },
-                    onOptionSelected = {
-                        options = it.primaryConstructor!!.callBy(mapOf())
-                        onUpdateService(options)
-                    },
-                    optionLeading = {
-                        AutoAIIcon(
-                            name = SearchServiceOptions.TYPES[it] ?: it.simpleName ?: "unknown",
-                            modifier = Modifier.size(24.dp)
-                        )
-                    },
-                    leading = {
-                        AutoAIIcon(
-                            name = SearchServiceOptions.TYPES[options::class] ?: "unknown",
-                            modifier = Modifier.size(24.dp)
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-
-                IconButton(
-                    onClick = {
-                        expand = !expand
-                    }
-                ) {
-                    Icon(
-                        imageVector = if (expand) HugeIcons.Cancel01 else HugeIcons.QuillWrite01,
-                        contentDescription = if (expand) "Hide details" else "Show details"
-                    )
-                }
-            }
-
-            SearchAbilityTagLine(options = options, modifier = Modifier.padding(horizontal = 8.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
+                AutoAIIcon(
+                    name = SearchServiceOptions.TYPES[service::class] ?: "Search",
+                    modifier = Modifier.size(32.dp)
+                )
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = stringResource(R.string.setting_page_search_use_for_agent),
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = SearchServiceOptions.TYPES[service::class] ?: "Search",
+                        style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = stringResource(R.string.setting_page_search_use_for_agent_desc),
+                        text = if (enabled) {
+                            stringResource(R.string.setting_page_search_use_for_agent)
+                        } else {
+                            stringResource(R.string.setting_provider_page_disabled)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -388,115 +415,23 @@ private fun SearchProviderCard(
                 )
             }
 
-            AnimatedVisibility(expand) {
+            SearchAbilityTagLine(options = service)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    when (options) {
-                        is SearchServiceOptions.TavilyOptions -> {
-                            TavilyOptions(options as SearchServiceOptions.TavilyOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.ExaOptions -> {
-                            ExaOptions(options as SearchServiceOptions.ExaOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.ZhipuOptions -> {
-                            ZhipuOptions(options as SearchServiceOptions.ZhipuOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.SearXNGOptions -> {
-                            SearXNGOptions(options as SearchServiceOptions.SearXNGOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.LinkUpOptions -> {
-                            SearchLinkUpOptions(options as SearchServiceOptions.LinkUpOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.BraveOptions -> {
-                            BraveOptions(options as SearchServiceOptions.BraveOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.MetasoOptions -> {
-                            MetasoOptions(options as SearchServiceOptions.MetasoOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.OllamaOptions -> {
-                            OllamaOptions(options as SearchServiceOptions.OllamaOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.PerplexityOptions -> {
-                            PerplexityOptions(options as SearchServiceOptions.PerplexityOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.BingLocalOptions -> {}
-
-                        is SearchServiceOptions.FirecrawlOptions -> {
-                            FirecrawlOptions(options as SearchServiceOptions.FirecrawlOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.JinaOptions -> {
-                            JinaOptions(options as SearchServiceOptions.JinaOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.BochaOptions -> {
-                            BochaOptions(options as SearchServiceOptions.BochaOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.RikkaHubOptions -> {
-                            RikkaHubOptions(options as SearchServiceOptions.RikkaHubOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-
-                        is SearchServiceOptions.GrokOptions -> {
-                            GrokOptions(options as SearchServiceOptions.GrokOptions) {
-                                options = it
-                                onUpdateService(options)
-                            }
-                        }
-                    }
-
-                    ProvideTextStyle(MaterialTheme.typography.labelMedium) {
-                        SearchService.getService(options).Description()
-                    }
+                    Text(
+                        text = stringResource(R.string.setting_page_search_use_for_agent_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
@@ -518,12 +453,184 @@ private fun SearchProviderCard(
 
                 Spacer(Modifier.weight(1f))
 
+                TextButton(onClick = onEditService) {
+                    Icon(
+                        imageVector = HugeIcons.PencilEdit01,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text(stringResource(R.string.edit))
+                }
+
                 IconButton(
                     onClick = {}
                 ) {
                     dragHandle()
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchServiceEditorSheet(
+    title: String,
+    confirmText: String,
+    initialService: SearchServiceOptions,
+    onDismiss: () -> Unit,
+    onConfirm: (SearchServiceOptions) -> Unit,
+) {
+    val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var options by remember(initialService) { mutableStateOf(initialService) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = bottomSheetState,
+        dragHandle = {
+            BottomSheetDefaults.DragHandle()
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.86f)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Select(
+                    options = SearchServiceOptions.TYPES.keys.toList(),
+                    selectedOption = options::class,
+                    optionToString = { SearchServiceOptions.TYPES[it] ?: "[Unknown]" },
+                    onOptionSelected = {
+                        options = it.primaryConstructor!!.callBy(mapOf())
+                    },
+                    optionLeading = {
+                        AutoAIIcon(
+                            name = SearchServiceOptions.TYPES[it] ?: it.simpleName ?: "unknown",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    },
+                    leading = {
+                        AutoAIIcon(
+                            name = SearchServiceOptions.TYPES[options::class] ?: "unknown",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                SearchAbilityTagLine(options = options)
+
+                SearchServiceOptionsEditor(
+                    options = options,
+                    onUpdateOptions = {
+                        options = it
+                    },
+                )
+
+                ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+                    SearchService.getService(options).Description()
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+
+                TextButton(
+                    onClick = {
+                        onConfirm(options)
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(confirmText)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchServiceOptionsEditor(
+    options: SearchServiceOptions,
+    onUpdateOptions: (SearchServiceOptions) -> Unit,
+) {
+    when (options) {
+        is SearchServiceOptions.TavilyOptions -> {
+            TavilyOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.ExaOptions -> {
+            ExaOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.ZhipuOptions -> {
+            ZhipuOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.SearXNGOptions -> {
+            SearXNGOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.LinkUpOptions -> {
+            SearchLinkUpOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.BraveOptions -> {
+            BraveOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.MetasoOptions -> {
+            MetasoOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.OllamaOptions -> {
+            OllamaOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.PerplexityOptions -> {
+            PerplexityOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.BingLocalOptions -> Unit
+
+        is SearchServiceOptions.FirecrawlOptions -> {
+            FirecrawlOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.JinaOptions -> {
+            JinaOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.BochaOptions -> {
+            BochaOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.RikkaHubOptions -> {
+            RikkaHubOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.GrokOptions -> {
+            GrokOptions(options) { onUpdateOptions(it) }
         }
     }
 }
