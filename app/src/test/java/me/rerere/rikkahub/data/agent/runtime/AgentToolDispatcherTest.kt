@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.GenerationRetrySetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,15 +64,65 @@ class AgentToolDispatcherTest {
         assertTrue(text.contains("permission_trace"))
     }
 
+    @Test
+    fun safeReadOnlyToolRetriesTransientFailure() = runBlocking {
+        var attempts = 0
+        val result = dispatcher.execute(
+            tool = toolCall("file_read"),
+            toolDef = Tool(
+                name = "file_read",
+                description = "",
+                execute = {
+                    attempts++
+                    if (attempts == 1) error("HTTP 503 temporarily unavailable")
+                    listOf(UIMessagePart.Text("ok"))
+                },
+            ),
+            retrySetting = retrySetting(),
+        )!!
+
+        assertEquals(2, attempts)
+        assertEquals("ok", (result.output.single() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun mutatingToolDoesNotAutoRetry() = runBlocking {
+        var attempts = 0
+        val result = dispatcher.execute(
+            tool = toolCall("memory_tool", input = """{"action":"create"}"""),
+            toolDef = Tool(
+                name = "memory_tool",
+                description = "",
+                execute = {
+                    attempts++
+                    error("HTTP 503 temporarily unavailable")
+                },
+            ),
+            retrySetting = retrySetting(),
+        )!!
+        val text = (result.output.single() as UIMessagePart.Text).text
+
+        assertEquals(1, attempts)
+        assertTrue(text.contains("\"status\":\"failed\""))
+    }
+
     private fun tool(name: String, output: String) = Tool(
         name = name,
         description = "",
         execute = { listOf(UIMessagePart.Text(output)) },
     )
 
-    private fun toolCall(name: String, id: String = "call_$name") = UIMessagePart.Tool(
+    private fun retrySetting() = GenerationRetrySetting(
+        enabled = true,
+        maxRetries = 5,
+        initialDelayMs = 1L,
+        maxDelayMs = 1L,
+        jitterRatio = 0f,
+    )
+
+    private fun toolCall(name: String, id: String = "call_$name", input: String = "{}") = UIMessagePart.Tool(
         toolCallId = id,
         toolName = name,
-        input = "{}",
+        input = input,
     )
 }

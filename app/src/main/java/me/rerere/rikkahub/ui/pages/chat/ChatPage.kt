@@ -3,6 +3,8 @@ package me.rerere.rikkahub.ui.pages.chat
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -73,6 +75,9 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.PendingUserMessage
+import me.rerere.rikkahub.service.PendingUserMessageMode
+import me.rerere.rikkahub.service.previewText
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.SandboxActivitySheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
@@ -109,6 +114,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
+    val pendingUserMessageState = vm.pendingUserMessages.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
@@ -213,6 +219,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
+                    pendingUserMessages = pendingUserMessageState.value,
                     contextCompacts = contextCompacts,
                     drawerState = drawerState,
                     navController = navController,
@@ -247,6 +254,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
+                    pendingUserMessages = pendingUserMessageState.value,
                     contextCompacts = contextCompacts,
                     drawerState = drawerState,
                     navController = navController,
@@ -275,6 +283,7 @@ private fun ChatPageContent(
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
+    pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     drawerState: DrawerState,
     navController: Navigator,
@@ -290,6 +299,7 @@ private fun ChatPageContent(
     val toaster = LocalToaster.current
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
+    var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val hazeState = rememberHazeState()
     val activityStore: AgentToolActivityStore = koinInject()
@@ -332,6 +342,7 @@ private fun ChatPageContent(
     }
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
+    val pendingQueueCount = pendingUserMessages.size
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -363,6 +374,7 @@ private fun ChatPageContent(
                     loading = loadingJob != null,
                     settings = setting,
                     conversation = conversation,
+                    pendingQueueCount = pendingQueueCount,
                     hazeState = hazeState,
                     onCancelClick = {
                         vm.stopGeneration()
@@ -393,7 +405,10 @@ private fun ChatPageContent(
                     } else {
                         null
                     },
-                    onSendClick = {
+                    onOpenQueue = {
+                        queuePanelOpen = true
+                    },
+                    onSendClick = { queueMode ->
                         if (currentChatModel == null) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                             return@ChatInput
@@ -404,21 +419,28 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            vm.handleMessageSend(inputState.getContents())
+                            vm.handleMessageSend(
+                                content = inputState.getContents(),
+                                queueMode = queueMode,
+                            )
                             scope.launch {
                                 chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
                             }
                         }
                         inputState.clearInput()
                     },
-                    onLongSendClick = {
+                    onLongSendClick = { queueMode ->
                         if (inputState.isEditing()) {
                             vm.handleMessageEdit(
                                 parts = inputState.getContents(),
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            vm.handleMessageSend(content = inputState.getContents(), answer = false)
+                            vm.handleMessageSend(
+                                content = inputState.getContents(),
+                                answer = false,
+                                queueMode = queueMode,
+                            )
                             scope.launch {
                                 chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
                             }
@@ -455,6 +477,7 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 state = chatListState,
                 loading = loadingJob != null,
@@ -523,6 +546,9 @@ private fun ChatPageContent(
                 onToggleFavorite = { node ->
                     vm.toggleMessageFavorite(node)
                 },
+                onCancelPendingMessage = { messageId ->
+                    vm.cancelPendingUserMessage(messageId)
+                },
             )
         }
 
@@ -548,6 +574,138 @@ private fun ChatPageContent(
                 } else {
                     null
                 },
+            )
+        }
+
+        if (queuePanelOpen) {
+            PendingUserMessageQueueDialog(
+                messages = pendingUserMessages,
+                onDismiss = { queuePanelOpen = false },
+                onCancelMessage = { vm.cancelPendingUserMessage(it) },
+                onMoveMessage = { id, offset -> vm.movePendingUserMessage(id, offset) },
+                onClear = { vm.clearPendingUserMessages() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingUserMessageQueueDialog(
+    messages: List<PendingUserMessage>,
+    onDismiss: () -> Unit,
+    onCancelMessage: (String) -> Unit,
+    onMoveMessage: (String, Int) -> Unit,
+    onClear: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("排队消息")
+        },
+        text = {
+            if (messages.isEmpty()) {
+                Text(
+                    text = "当前没有排队消息。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = workspace.muted,
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    messages.forEachIndexed { index, message ->
+                        PendingUserMessageQueueRow(
+                            index = index,
+                            total = messages.size,
+                            message = message,
+                            onCancel = { onCancelMessage(message.id) },
+                            onMoveUp = { onMoveMessage(message.id, -1) },
+                            onMoveDown = { onMoveMessage(message.id, 1) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+        dismissButton = {
+            if (messages.isNotEmpty()) {
+                TextButton(onClick = onClear) {
+                    Text("清空")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun PendingUserMessageQueueRow(
+    index: Int,
+    total: Int,
+    message: PendingUserMessage,
+    onCancel: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val modeLabel = when (message.mode) {
+        PendingUserMessageMode.FOLLOWUP -> "排队下一轮"
+        PendingUserMessageMode.STEER -> "等待插话点"
+        PendingUserMessageMode.COLLECT -> "收集多条"
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "#${index + 1} · $modeLabel",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = workspace.muted,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = onMoveUp,
+                        enabled = index > 0,
+                    ) {
+                        Text("上移")
+                    }
+                    TextButton(
+                        onClick = onMoveDown,
+                        enabled = index < total - 1,
+                    ) {
+                        Text("下移")
+                    }
+                    TextButton(onClick = onCancel) {
+                        Text("取消")
+                    }
+                }
+            }
+            Text(
+                text = message.previewText(maxChars = 280),
+                style = MaterialTheme.typography.bodyMedium,
+                color = workspace.ink,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

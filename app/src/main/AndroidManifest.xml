@@ -177,6 +177,14 @@
         android:value="local web server for LLM chat UI" />
     </service>
     <service
+      android:name=".service.AgentGenerationForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="long-running AI generation and tool execution" />
+    </service>
+    <service
       android:name=".data.automation.AmberAccessibilityService"
       android:exported="true"
       android:label="@string/amberagent_accessibility_service_label"

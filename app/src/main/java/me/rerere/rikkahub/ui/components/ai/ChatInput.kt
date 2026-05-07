@@ -159,6 +159,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
@@ -188,6 +189,7 @@ fun ChatInput(
     state: ChatInputState,
     loading: Boolean,
     conversation: Conversation,
+    pendingQueueCount: Int = 0,
     settings: Settings,
     hazeState: HazeState,
     enableSearch: Boolean,
@@ -202,8 +204,9 @@ fun ChatInput(
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onCancelClick: () -> Unit,
-    onSendClick: () -> Unit,
-    onLongSendClick: () -> Unit,
+    onSendClick: (PendingUserMessageMode) -> Unit,
+    onLongSendClick: (PendingUserMessageMode) -> Unit,
+    onOpenQueue: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -215,16 +218,31 @@ fun ChatInput(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
+    var pendingSendMode by remember { mutableStateOf(PendingUserMessageMode.FOLLOWUP) }
+    val queueModeLabel = when (pendingSendMode) {
+        PendingUserMessageMode.FOLLOWUP -> "排队下一轮"
+        PendingUserMessageMode.STEER -> "引导当前任务"
+        PendingUserMessageMode.COLLECT -> "收集多条"
+    }
+
     fun sendMessage() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading) onCancelClick() else onSendClick()
+        if (loading && state.isEmpty()) {
+            onCancelClick()
+        } else {
+            onSendClick(if (loading) pendingSendMode else PendingUserMessageMode.FOLLOWUP)
+        }
     }
 
     fun sendMessageWithoutAnswer() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading) onCancelClick() else onLongSendClick()
+        if (loading && state.isEmpty()) {
+            onCancelClick()
+        } else {
+            onLongSendClick(if (loading) pendingSendMode else PendingUserMessageMode.FOLLOWUP)
+        }
     }
 
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
@@ -469,6 +487,16 @@ fun ChatInput(
                                         model = chatModel,
                                         modifier = Modifier.padding(start = 3.dp),
                                     )
+                                    if (pendingQueueCount > 0) {
+                                        Text(
+                                            text = "已排队 $pendingQueueCount 条",
+                                            modifier = Modifier.clickable { onOpenQueue() },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = workspace.muted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                     Row(
                                         verticalAlignment = Alignment.Bottom,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -492,6 +520,28 @@ fun ChatInput(
                                                 onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                             },
                                         )
+                                        if (loading && !state.isEmpty()) {
+                                            Surface(
+                                                onClick = {
+                                                    pendingSendMode = when (pendingSendMode) {
+                                                        PendingUserMessageMode.FOLLOWUP -> PendingUserMessageMode.STEER
+                                                        PendingUserMessageMode.STEER -> PendingUserMessageMode.COLLECT
+                                                        PendingUserMessageMode.COLLECT -> PendingUserMessageMode.FOLLOWUP
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = workspace.row,
+                                                border = BorderStroke(1.dp, workspace.hairline),
+                                            ) {
+                                                Text(
+                                                    text = queueModeLabel,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = workspace.muted,
+                                                    maxLines = 1,
+                                                )
+                                            }
+                                        }
                                     }
                                 }
 
@@ -511,6 +561,22 @@ fun ChatInput(
                             )
                         }
 
+                        if (loading && !state.isEmpty()) {
+                            ActionIconButton(
+                                onClick = {
+                                    dismissExpand()
+                                    onCancelClick()
+                                },
+                                accent = false,
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Cancel01,
+                                    contentDescription = stringResource(R.string.stop),
+                                    modifier = Modifier.size(ComposerButtonIconSize),
+                                )
+                            }
+                        }
+
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
@@ -527,12 +593,15 @@ fun ChatInput(
                                     }
                                 )
                         ) {
+                            val isQueueSend = loading && !state.isEmpty()
                             val containerColor = when {
+                                isQueueSend -> workspace.blue
                                 loading -> workspace.amberContainer
                                 state.isEmpty() -> workspace.row
                                 else -> workspace.blue
                             }
                             val contentColor = when {
+                                isQueueSend -> Color.White
                                 loading -> workspace.amber
                                 state.isEmpty() -> workspace.faint
                                 else -> Color.White
@@ -543,7 +612,7 @@ fun ChatInput(
                                 color = containerColor,
                                 border = BorderStroke(1.dp, if (state.isEmpty()) workspace.hairline else Color.Transparent),
                                 content = {})
-                            if (loading) {
+                            if (loading && state.isEmpty()) {
                                 KeepScreenOn()
                                 Icon(
                                     imageVector = HugeIcons.Cancel01,

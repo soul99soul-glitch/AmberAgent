@@ -1,9 +1,11 @@
 package me.rerere.rikkahub.data.agent.runtime
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -13,6 +15,8 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.toAgentToolFailurePayload
+import me.rerere.rikkahub.data.ai.GenerationFailureClassifier
+import me.rerere.rikkahub.data.ai.GenerationRetrySetting
 import me.rerere.rikkahub.data.agent.tools.ToolRisk
 import me.rerere.rikkahub.data.agent.tools.invocationPolicy
 
@@ -59,6 +63,7 @@ class AgentToolDispatcher(
         autoApproveHighRiskTools: Boolean = false,
         autoApprovedToolNames: Set<String> = emptySet(),
         prefetchedTools: Map<String, UIMessagePart.Tool> = emptyMap(),
+        retrySetting: GenerationRetrySetting = GenerationRetrySetting(enabled = false),
     ): List<UIMessagePart.Tool> {
         val reused = tools.mapNotNull { tool ->
             prefetchedTools[tool.toolCallId]?.takeIf { prefetched ->
@@ -77,6 +82,7 @@ class AgentToolDispatcher(
                             autoApproveTools = autoApproveTools,
                             autoApproveHighRiskTools = autoApproveHighRiskTools,
                             autoApprovedToolNames = autoApprovedToolNames,
+                            retrySetting = retrySetting,
                         )
                     }
                 }.awaitAll().filterNotNull()
@@ -90,6 +96,7 @@ class AgentToolDispatcher(
                     autoApproveTools = autoApproveTools,
                     autoApproveHighRiskTools = autoApproveHighRiskTools,
                     autoApprovedToolNames = autoApprovedToolNames,
+                    retrySetting = retrySetting,
                 )?.let { executed += it }
             }
             executed
@@ -106,6 +113,7 @@ class AgentToolDispatcher(
         autoApproveHighRiskTools: Boolean = false,
         autoApprovedToolNames: Set<String> = emptySet(),
         invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
+        retrySetting: GenerationRetrySetting = GenerationRetrySetting(enabled = false),
     ): UIMessagePart.Tool? {
         val decision = resolveDecision(
             toolDef = toolDef,
@@ -160,8 +168,14 @@ class AgentToolDispatcher(
                 val resolved = toolDef ?: error("Tool ${tool.toolName} not found")
                 val args = json.parseToJsonElement(tool.input.ifBlank { "{}" })
                 logInfo("execute: ${resolved.name} args=$args")
-                tracedTool.copy(output = resolved.execute(args))
+                executeResolvedToolWithRetry(
+                    tool = tracedTool,
+                    toolDef = resolved,
+                    retrySetting = retrySetting,
+                    execute = { resolved.execute(args) },
+                )
             }.getOrElse { error ->
+                if (error is CancellationException) throw error
                 logError("execute failed for ${tool.toolName}", error)
                 tracedTool.copy(
                     output = listOf(
@@ -179,6 +193,35 @@ class AgentToolDispatcher(
         }
     }
 
+    private suspend fun executeResolvedToolWithRetry(
+        tool: UIMessagePart.Tool,
+        toolDef: Tool,
+        retrySetting: GenerationRetrySetting,
+        execute: suspend () -> List<UIMessagePart>,
+    ): UIMessagePart.Tool {
+        val retryable = canRetrySafely(tool, toolDef, retrySetting)
+        var retryAttempt = 1
+        while (true) {
+            try {
+                return tool.copy(output = execute())
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                val decision = GenerationFailureClassifier.decide(
+                    error = error,
+                    attempt = retryAttempt,
+                    setting = retrySetting,
+                )
+                if (!retryable || !decision.retryable) throw error
+                logInfo(
+                    "execute: retry ${tool.toolName} $retryAttempt/${retrySetting.maxRetries} " +
+                        "after ${decision.delayMs}ms (${decision.category})"
+                )
+                delay(decision.delayMs)
+                retryAttempt++
+            }
+        }
+    }
+
     private fun canRunInParallel(tool: UIMessagePart.Tool, toolDef: Tool?): Boolean {
         if (tool.approvalState !is ToolApprovalState.Auto) return false
         val policy = toolDef?.invocationPolicy(tool.input) ?: return false
@@ -187,6 +230,20 @@ class AgentToolDispatcher(
             !policy.needsApproval &&
             policy.risk == ToolRisk.Normal &&
             policy.parallelGroup != null
+    }
+
+    private fun canRetrySafely(
+        tool: UIMessagePart.Tool,
+        toolDef: Tool,
+        retrySetting: GenerationRetrySetting,
+    ): Boolean {
+        if (!retrySetting.enabled) return false
+        if (tool.approvalState !is ToolApprovalState.Auto) return false
+        val policy = toolDef.invocationPolicy(tool.input)
+        return policy.concurrencySafe &&
+            !policy.mutates &&
+            !policy.needsApproval &&
+            policy.risk == ToolRisk.Normal
     }
 
     private fun UIMessagePart.Tool.withPermissionTrace(trace: JsonObject): UIMessagePart.Tool {

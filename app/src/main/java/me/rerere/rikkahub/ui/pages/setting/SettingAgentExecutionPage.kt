@@ -40,6 +40,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val toolLoopStepOptions = remember { listOf(64, 128, 256, 384, 512) }
+    val retryCountOptions = remember { listOf(1, 2, 3, 5) }
     val operationPreviewModeOptions = remember { AgentOperationPreviewMode.entries }
 
     Scaffold(
@@ -163,6 +164,80 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                         settings.copy(
                                             agentRuntime = settings.agentRuntime.copy(
                                                 hideSensitiveLiveStatus = checked
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                }
+            }
+
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_agent_execution_stability_section)) },
+                ) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_retry)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.generationRetry.enabled,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                generationRetry = settings.agentRuntime.generationRetry.copy(
+                                                    enabled = checked
+                                                )
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_count_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_count)) },
+                        trailingContent = {
+                            Select(
+                                options = retryCountOptions,
+                                selectedOption = settings.agentRuntime.generationRetry.maxRetries.coerceIn(1, 5),
+                                onOptionSelected = { maxRetries ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                generationRetry = settings.agentRuntime.generationRetry.copy(
+                                                    maxRetries = maxRetries
+                                                )
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = {
+                                    stringResource(R.string.setting_page_agent_generation_retry_count_value, it)
+                                },
+                                modifier = Modifier.width(104.dp),
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_keepalive_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_keepalive)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.keepGenerationAliveInBackground,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                keepGenerationAliveInBackground = checked
                                             )
                                         )
                                     )

@@ -69,9 +69,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -100,6 +103,9 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.PendingUserMessage
+import me.rerere.rikkahub.service.PendingUserMessageMode
+import me.rerere.rikkahub.service.previewText
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
@@ -159,6 +165,20 @@ private fun ToolApprovalState.compactRenderToken(): String = when (this) {
     is ToolApprovalState.Answered -> "answered:${answer.length}"
 }
 
+private fun Modifier.dashedRoundedBorder(color: Color, radius: androidx.compose.ui.unit.Dp): Modifier {
+    return drawBehind {
+        drawRoundRect(
+            color = color,
+            size = size,
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius.toPx(), radius.toPx()),
+            style = Stroke(
+                width = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(9.dp.toPx(), 7.dp.toPx())),
+            ),
+        )
+    }
+}
+
 @Composable
 private fun ContextCompactMarker(modifier: Modifier = Modifier) {
     val workspace = workspaceColors()
@@ -197,9 +217,71 @@ private fun ContextCompactMarker(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun PendingUserMessageBubble(
+    message: PendingUserMessage,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    val label = when (message.mode) {
+        PendingUserMessageMode.FOLLOWUP -> "排队中"
+        PendingUserMessageMode.STEER -> "等待插话点"
+        PendingUserMessageMode.COLLECT -> "收集中"
+    }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.86f)
+                .dashedRoundedBorder(workspace.muted.copy(alpha = 0.55f), 10.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = workspace.paper.copy(alpha = 0.62f),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                    )
+                    IconButton(
+                        onClick = onCancel,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = "取消排队消息",
+                            tint = workspace.muted,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                Text(
+                    text = message.previewText(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = workspace.muted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
     state: LazyListState,
     loading: Boolean,
@@ -222,6 +304,7 @@ fun ChatList(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
+    onCancelPendingMessage: (String) -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -243,6 +326,7 @@ fun ChatList(
             ChatListNormal(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 state = state,
                 loading = loading,
@@ -264,6 +348,7 @@ fun ChatList(
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
+                onCancelPendingMessage = onCancelPendingMessage,
             )
         }
     }
@@ -273,6 +358,7 @@ fun ChatList(
 private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
+    pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     state: LazyListState,
     loading: Boolean,
@@ -294,6 +380,7 @@ private fun ChatListNormal(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
+    onCancelPendingMessage: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
@@ -345,8 +432,14 @@ private fun ChatListNormal(
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             val latestRenderToken = conversation.latestRenderToken()
-            LaunchedEffect(loadingState, latestRenderToken, processingStatus, conversation.messageNodes.size) {
-                if (loadingState && !state.isScrollInProgress && state.isNearListEnd()) {
+            LaunchedEffect(
+                loadingState,
+                latestRenderToken,
+                processingStatus,
+                conversation.messageNodes.size,
+                pendingUserMessages.size,
+            ) {
+                if ((loadingState || pendingUserMessages.isNotEmpty()) && !state.isScrollInProgress && state.isNearListEnd()) {
                     withFrameNanos { }
                     withFrameNanos { }
                     val lastIndex = state.layoutInfo.totalItemsCount - 1
@@ -449,6 +542,16 @@ private fun ChatListNormal(
                         )
                     }
                 }
+            }
+
+            items(
+                items = pendingUserMessages,
+                key = { "pending-${it.id}" },
+            ) { pendingMessage ->
+                PendingUserMessageBubble(
+                    message = pendingMessage,
+                    onCancel = { onCancelPendingMessage(pendingMessage.id) },
+                )
             }
 
             if (loading) {

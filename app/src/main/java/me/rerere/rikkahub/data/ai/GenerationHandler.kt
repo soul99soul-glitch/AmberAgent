@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -51,6 +52,7 @@ import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
 import kotlin.time.Clock
@@ -106,6 +108,7 @@ class GenerationHandler(
         autoApproveHighRiskTools: Boolean = false,
         autoApprovedToolNames: Set<String> = emptySet(),
         conversation: Conversation? = null,
+        consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
     ): Flow<GenerationChunk> = flow {
         coroutineScope {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
@@ -268,6 +271,7 @@ class GenerationHandler(
                 autoApproveHighRiskTools = autoApproveHighRiskTools,
                 autoApprovedToolNames = autoApprovedToolNames,
                 prefetchedTools = speculativeRunner?.reusableResults(toolsToProcess).orEmpty(),
+                retrySetting = settings.agentRuntime.generationRetry,
             )
 
             if (executedTools.isEmpty()) {
@@ -294,6 +298,12 @@ class GenerationHandler(
                     )
                 )
             )
+
+            val steerMessages = consumeSteerMessages()
+            if (steerMessages.isNotEmpty()) {
+                messages = messages + steerMessages
+                emit(GenerationChunk.Messages(messages))
+            }
         }
 
         }
@@ -385,7 +395,8 @@ class GenerationHandler(
             processingStatus = processingStatus,
         )
 
-        var messages: List<UIMessage> = messages
+        val baseMessages: List<UIMessage> = messages
+        var messages: List<UIMessage> = baseMessages
         val params = TextGenerationParams(
             model = model,
             temperature = assistant.temperature,
@@ -403,60 +414,128 @@ class GenerationHandler(
             }
         )
         if (stream) {
-            aiLoggingManager.addLog(
-                AILogging.Generation(
-                    params = params,
-                    messages = messages,
-                    providerSetting = provider,
-                    stream = true
-                )
-            )
-            val accumulator = MessageStreamAccumulator(messages, model)
-            var lastFlushAt = 0L
-            providerImpl.streamText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params
-            ).collect { chunk ->
-                accumulator.append(chunk)
-                val now = System.currentTimeMillis()
-                if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
-                    messages = accumulator.snapshot()
-                    speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
+            runProviderCallWithRetry(
+                retrySetting = settings.agentRuntime.generationRetry,
+                processingStatus = processingStatus,
+                providerName = provider.name,
+                modelName = model.displayName,
+                onBeforeRetry = {
+                    messages = baseMessages
                     onUpdateMessages(messages)
-                    lastFlushAt = now
-                }
-            }
-            messages = accumulator.snapshot()
-            speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
-            onUpdateMessages(messages)
-        } else {
-            aiLoggingManager.addLog(
-                AILogging.Generation(
-                    params = params,
-                    messages = messages,
-                    providerSetting = provider,
-                    stream = false
+                },
+            ) {
+                aiLoggingManager.addLog(
+                    AILogging.Generation(
+                        params = params,
+                        messages = baseMessages,
+                        providerSetting = provider,
+                        stream = true
+                    )
                 )
-            )
-            val chunk = providerImpl.generateText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params,
-            )
-            messages = messages.handleMessageChunk(chunk = chunk, model = model)
-            chunk.usage?.let { usage ->
-                messages = messages.mapIndexed { index, message ->
-                    if (index == messages.lastIndex) {
-                        message.copy(
-                            usage = message.usage.merge(usage)
-                        )
-                    } else {
-                        message
+                val accumulator = MessageStreamAccumulator(baseMessages, model)
+                var lastFlushAt = 0L
+                providerImpl.streamText(
+                    providerSetting = provider,
+                    messages = internalMessages,
+                    params = params
+                ).collect { chunk ->
+                    accumulator.append(chunk)
+                    val now = System.currentTimeMillis()
+                    if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
+                        messages = accumulator.snapshot()
+                        speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
+                        onUpdateMessages(messages)
+                        lastFlushAt = now
                     }
                 }
+                messages = accumulator.snapshot()
+                speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
+                onUpdateMessages(messages)
             }
-            onUpdateMessages(messages)
+        } else {
+            runProviderCallWithRetry(
+                retrySetting = settings.agentRuntime.generationRetry,
+                processingStatus = processingStatus,
+                providerName = provider.name,
+                modelName = model.displayName,
+                onBeforeRetry = {
+                    messages = baseMessages
+                    onUpdateMessages(messages)
+                },
+            ) {
+                aiLoggingManager.addLog(
+                    AILogging.Generation(
+                        params = params,
+                        messages = baseMessages,
+                        providerSetting = provider,
+                        stream = false
+                    )
+                )
+                val chunk = providerImpl.generateText(
+                    providerSetting = provider,
+                    messages = internalMessages,
+                    params = params,
+                )
+                messages = baseMessages.handleMessageChunk(chunk = chunk, model = model)
+                chunk.usage?.let { usage ->
+                    messages = messages.mapIndexed { index, message ->
+                        if (index == messages.lastIndex) {
+                            message.copy(
+                                usage = message.usage.merge(usage)
+                            )
+                        } else {
+                            message
+                        }
+                    }
+                }
+                onUpdateMessages(messages)
+            }
+        }
+    }
+
+    private suspend fun runProviderCallWithRetry(
+        retrySetting: GenerationRetrySetting,
+        processingStatus: MutableStateFlow<String?>,
+        providerName: String,
+        modelName: String,
+        onBeforeRetry: suspend () -> Unit,
+        block: suspend () -> Unit,
+    ) {
+        var retryAttempt = 1
+        while (true) {
+            try {
+                block()
+                processingStatus.value = null
+                return
+            } catch (error: Throwable) {
+                val decision = GenerationFailureClassifier.decide(
+                    error = error,
+                    attempt = retryAttempt,
+                    setting = retrySetting,
+                )
+                if (!decision.retryable) {
+                    processingStatus.value = null
+                    throw error
+                }
+                onBeforeRetry()
+                val seconds = (decision.delayMs / 1_000L).coerceAtLeast(1L)
+                val status = context.getString(
+                    R.string.generation_retry_status,
+                    seconds,
+                    retryAttempt,
+                    retrySetting.maxRetries,
+                    decision.reason,
+                )
+                processingStatus.value = status
+                Log.w(
+                    TAG,
+                    "Provider call failed; retrying $retryAttempt/${retrySetting.maxRetries} " +
+                        "after ${decision.delayMs}ms category=${decision.category} provider=$providerName model=$modelName",
+                    error,
+                )
+                delay(decision.delayMs)
+                retryAttempt++
+            }
         }
     }
 

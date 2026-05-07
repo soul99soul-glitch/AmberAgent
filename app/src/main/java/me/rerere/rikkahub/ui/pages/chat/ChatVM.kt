@@ -40,6 +40,8 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.PendingUserMessage
+import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import java.util.Locale
@@ -77,6 +79,10 @@ class ChatVM(
     val processingStatus: StateFlow<String?> =
         chatService
             .getProcessingStatusFlow(_conversationId)
+
+    val pendingUserMessages: StateFlow<List<PendingUserMessage>> =
+        chatService
+            .getPendingUserMessagesFlow(_conversationId)
 
     val conversationJobs = chatService
         .getConversationJobs()
@@ -172,11 +178,27 @@ class ChatVM(
      * @param content 消息内容
      * @param answer 是否触发消息生成，如果为false，则仅添加消息到消息列表中
      */
-    fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
+    fun handleMessageSend(
+        content: List<UIMessagePart>,
+        answer: Boolean = true,
+        queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
+    ) {
         if (content.isEmptyInputMessage()) return
         analytics.logEvent("ai_send_message", null)
 
-        chatService.sendMessage(_conversationId, content, answer)
+        chatService.sendMessage(_conversationId, content, answer, queueMode)
+    }
+
+    fun cancelPendingUserMessage(messageId: String) {
+        chatService.cancelPendingUserMessage(_conversationId, messageId)
+    }
+
+    fun clearPendingUserMessages() {
+        chatService.clearPendingUserMessages(_conversationId)
+    }
+
+    fun movePendingUserMessage(messageId: String, offset: Int) {
+        chatService.movePendingUserMessage(_conversationId, messageId, offset)
     }
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {

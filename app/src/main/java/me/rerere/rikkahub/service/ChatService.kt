@@ -28,8 +28,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
@@ -71,6 +80,9 @@ import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
+import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
+import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
+import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.AgentTaskTools
 import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
@@ -102,12 +114,14 @@ import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.utils.sendNotification
+import java.io.File
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
+private const val GENERATION_CHECKPOINT_INTERVAL_MS = 10_000L
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -164,6 +178,7 @@ class ChatService(
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
     private val _sessionsVersion = MutableStateFlow(0L)
     private val trustedRunToolNames = ConcurrentHashMap<Uuid, Set<String>>()
+    private val generationCheckpointAt = ConcurrentHashMap<Uuid, Long>()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -220,8 +235,12 @@ class ChatService(
                     id = id,
                     assistantId = settings.getCurrentAssistant().id
                 ),
+                initialPendingMessages = loadPendingUserMessages(id),
                 scope = appScope,
-                onIdle = { removeSession(it) }
+                onIdle = { removeSession(it) },
+                onPendingMessagesChanged = { sessionId, messages ->
+                    persistPendingUserMessages(sessionId, messages)
+                }
             ).also {
                 _sessionsVersion.value++
                 Log.i(TAG, "createSession: $id (total: ${sessions.size + 1})")
@@ -252,6 +271,63 @@ class ChatService(
         sessions[conversationId]?.release()
     }
 
+    private fun pendingUserMessageFile(conversationId: Uuid): File {
+        return File(context.filesDir, "amberagent/message-queue").resolve("$conversationId.json")
+    }
+
+    private fun loadPendingUserMessages(conversationId: Uuid): List<PendingUserMessage> {
+        val file = pendingUserMessageFile(conversationId)
+        if (!file.exists()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<PendingUserMessage>>(file.readText())
+        }.onFailure {
+            Log.w(TAG, "Failed to load pending user messages for $conversationId", it)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun persistPendingUserMessages(conversationId: Uuid, messages: List<PendingUserMessage>) {
+        runCatching {
+            val file = pendingUserMessageFile(conversationId)
+            if (messages.isEmpty()) {
+                file.delete()
+            } else {
+                file.parentFile?.mkdirs()
+                file.writeText(json.encodeToString(messages))
+            }
+        }.onFailure {
+            Log.w(TAG, "Failed to persist pending user messages for $conversationId", it)
+        }
+    }
+
+    private fun pendingUserMessageAuditFile(conversationId: Uuid): File {
+        return File(context.filesDir, "amberagent/message-queue").resolve("$conversationId.events.jsonl")
+    }
+
+    private fun recordPendingQueueEvent(
+        conversationId: Uuid,
+        event: String,
+        messageId: String? = null,
+        count: Int? = null,
+        detail: String? = null,
+    ) {
+        runCatching {
+            val file = pendingUserMessageAuditFile(conversationId)
+            file.parentFile?.mkdirs()
+            file.appendText(
+                buildJsonObject {
+                    put("created_at_ms", System.currentTimeMillis())
+                    put("conversation_id", conversationId.toString())
+                    put("event", event)
+                    messageId?.let { put("message_id", it) }
+                    count?.let { put("count", it) }
+                    detail?.let { put("detail", it) }
+                }.toString() + "\n"
+            )
+        }.onFailure {
+            Log.w(TAG, "Failed to write pending message audit for $conversationId", it)
+        }
+    }
+
     private fun launchWithConversationReference(
         conversationId: Uuid,
         block: suspend () -> Unit
@@ -278,6 +354,36 @@ class ChatService(
     fun getProcessingStatusFlow(conversationId: Uuid): StateFlow<String?> {
         val session = sessions[conversationId] ?: return MutableStateFlow(null)
         return session.processingStatus
+    }
+
+    fun getPendingUserMessagesFlow(conversationId: Uuid): StateFlow<List<PendingUserMessage>> {
+        return getOrCreateSession(conversationId).pendingUserMessages
+    }
+
+    fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
+        if (getOrCreateSession(conversationId).cancelPendingUserMessage(messageId)) {
+            recordPendingQueueEvent(conversationId, event = "cancel", messageId = messageId)
+        }
+    }
+
+    fun clearPendingUserMessages(conversationId: Uuid) {
+        val session = getOrCreateSession(conversationId)
+        val count = session.pendingUserMessages.value.size
+        if (count > 0) {
+            session.clearPendingUserMessages()
+            recordPendingQueueEvent(conversationId, event = "clear", count = count)
+        }
+    }
+
+    fun movePendingUserMessage(conversationId: Uuid, messageId: String, offset: Int) {
+        if (getOrCreateSession(conversationId).movePendingUserMessage(messageId, offset)) {
+            recordPendingQueueEvent(
+                conversationId = conversationId,
+                event = "move",
+                messageId = messageId,
+                detail = offset.toString(),
+            )
+        }
     }
 
     fun getConversationJobs(): Flow<Map<Uuid, Job?>> {
@@ -318,38 +424,155 @@ class ChatService(
 
     // ---- 发送消息 ----
 
-    fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
+    fun sendMessage(
+        conversationId: Uuid,
+        content: List<UIMessagePart>,
+        answer: Boolean = true,
+        queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
+    ) {
         if (content.isEmptyInputMessage()) return
 
         val session = getOrCreateSession(conversationId)
-        session.getJob()?.cancel()
         val processedContent = preprocessUserInputParts(content)
+        val shouldQueue = session.isGenerating || session.state.value.hasPendingOrUnexecutedTools()
+        val pendingMessage = PendingUserMessage(
+            id = Uuid.random().toString(),
+            parts = processedContent,
+            answer = answer,
+            mode = if (session.isGenerating) queueMode else PendingUserMessageMode.FOLLOWUP,
+        )
+
+        if (shouldQueue) {
+            val accepted = session.enqueuePendingUserMessage(pendingMessage)
+            if (!accepted) {
+                addError(
+                    IllegalStateException("消息队列已满，请先等待或取消一些排队消息。"),
+                    conversationId = conversationId,
+                    title = "消息未加入队列"
+                )
+            } else {
+                recordPendingQueueEvent(
+                    conversationId = conversationId,
+                    event = "enqueue",
+                    messageId = pendingMessage.id,
+                    detail = pendingMessage.mode.name.lowercase(),
+                )
+            }
+            return
+        }
+
+        launchPendingMessageLoop(conversationId, pendingMessage)
+    }
+
+    private fun launchPendingMessageLoop(
+        conversationId: Uuid,
+        firstMessage: PendingUserMessage? = null,
+    ) {
+        val session = getOrCreateSession(conversationId)
+        if (session.isGenerating || session.state.value.hasPendingOrUnexecutedTools()) {
+            firstMessage?.let { message ->
+                if (!session.enqueuePendingUserMessage(message)) {
+                    addError(
+                        IllegalStateException("消息队列已满，请先等待或取消一些排队消息。"),
+                        conversationId = conversationId,
+                        title = "消息未加入队列"
+                    )
+                } else {
+                    recordPendingQueueEvent(
+                        conversationId = conversationId,
+                        event = "enqueue",
+                        messageId = message.id,
+                        detail = message.mode.name.lowercase(),
+                    )
+                }
+            }
+            return
+        }
 
         val job = appScope.launch {
-            try {
-                val currentConversation = session.state.value
-
-                // 添加消息到列表
-                val newConversation = currentConversation.copy(
-                    messageNodes = currentConversation.messageNodes + UIMessage(
-                        role = MessageRole.USER,
-                        parts = processedContent,
-                    ).toMessageNode(),
-                )
-                saveConversation(conversationId, newConversation)
-
-                // 开始补全
-                if (answer) {
-                    handleMessageComplete(conversationId)
+            var nextMessage = firstMessage ?: session.dequeueNextPendingUserMessage()
+            while (nextMessage != null) {
+                try {
+                    val dispatchMessage = session.preparePendingMessageForDispatch(nextMessage)
+                    recordPendingQueueEvent(
+                        conversationId = conversationId,
+                        event = "dequeue",
+                        messageId = dispatchMessage.id,
+                        detail = dispatchMessage.mode.name.lowercase(),
+                    )
+                    appendUserMessage(conversationId, dispatchMessage)
+                    if (dispatchMessage.answer) {
+                        handleMessageComplete(conversationId)
+                    }
+                    _generationDoneFlow.emit(conversationId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
                 }
 
-                _generationDoneFlow.emit(conversationId)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+                val conversation = getConversationFlow(conversationId).value
+                if (conversation.hasPendingOrUnexecutedTools()) {
+                    break
+                }
+                nextMessage = session.dequeueNextPendingUserMessage()
             }
         }
         session.setJob(job)
+    }
+
+    private suspend fun appendUserMessage(
+        conversationId: Uuid,
+        message: PendingUserMessage,
+    ) {
+        val session = getOrCreateSession(conversationId)
+        val currentConversation = session.state.value
+        val newConversation = currentConversation.copy(
+            messageNodes = currentConversation.messageNodes + UIMessage(
+                role = MessageRole.USER,
+                parts = message.parts,
+            ).toMessageNode(),
+        )
+        saveConversation(conversationId, newConversation)
+    }
+
+    private suspend fun drainPendingUserMessagesInline(conversationId: Uuid) {
+        val session = getOrCreateSession(conversationId)
+        var nextMessage = session.dequeueNextPendingUserMessage()
+        while (nextMessage != null) {
+            val dispatchMessage = session.preparePendingMessageForDispatch(nextMessage)
+            recordPendingQueueEvent(
+                conversationId = conversationId,
+                event = "dequeue",
+                messageId = dispatchMessage.id,
+                detail = dispatchMessage.mode.name.lowercase(),
+            )
+            appendUserMessage(conversationId, dispatchMessage)
+            if (dispatchMessage.answer) {
+                handleMessageComplete(conversationId)
+            }
+            _generationDoneFlow.emit(conversationId)
+
+            val conversation = getConversationFlow(conversationId).value
+            if (conversation.hasPendingOrUnexecutedTools()) {
+                break
+            }
+            nextMessage = session.dequeueNextPendingUserMessage()
+        }
+    }
+
+    private fun ConversationSession.preparePendingMessageForDispatch(
+        message: PendingUserMessage,
+    ): PendingUserMessage {
+        return when {
+            message.isCollectable -> buildCollectedPendingUserMessage(
+                listOf(message) + dequeueLeadingCollectableMessages()
+            )
+
+            message.mode == PendingUserMessageMode.STEER -> message.asFollowup()
+            else -> message
+        }
     }
 
     private fun preprocessUserInputParts(parts: List<UIMessagePart>): List<UIMessagePart> {
@@ -471,6 +694,9 @@ class ChatService(
                 // Only continue generation when all pending tools are handled
                 if (!hasPendingTools) {
                     handleMessageComplete(conversationId)
+                    if (!getConversationFlow(conversationId).value.hasPendingOrUnexecutedTools()) {
+                        drainPendingUserMessagesInline(conversationId)
+                    }
                 }
 
                 _generationDoneFlow.emit(conversationId)
@@ -527,6 +753,9 @@ class ChatService(
 
                 if (!hasPendingTools) {
                     handleMessageComplete(conversationId)
+                    if (!getConversationFlow(conversationId).value.hasPendingOrUnexecutedTools()) {
+                        drainPendingUserMessagesInline(conversationId)
+                    }
                 }
 
                 _generationDoneFlow.emit(conversationId)
@@ -583,6 +812,13 @@ class ChatService(
                 senderName = senderName,
                 settings = settings,
             )
+            startGenerationKeepAlive(conversationId, senderName, settings)
+            val generationTaskId = startGenerationTask(
+                conversationId = conversationId,
+                senderName = senderName,
+                modelName = model.displayName,
+                settings = settings,
+            )
             val runTools = createRunTools(settings, conversationId)
             generationHandler.generateText(
                 settings = settings,
@@ -616,8 +852,27 @@ class ChatService(
                 ),
                 tools = runTools,
                 conversation = conversation,
+                consumeSteerMessages = {
+                    val consumed = getOrCreateSession(conversationId)
+                        .dequeueSteerPendingUserMessages()
+                    if (consumed.isNotEmpty()) {
+                        recordPendingQueueEvent(
+                            conversationId = conversationId,
+                            event = "steer_consumed",
+                            count = consumed.size,
+                        )
+                    }
+                    consumed
+                        .map { queued ->
+                            UIMessage(
+                                role = MessageRole.USER,
+                                parts = queued.parts,
+                            )
+                        }
+                },
             ).onCompletion { cause ->
                 cancelLiveUpdateNotification(conversationId)
+                stopGenerationKeepAlive(conversationId)
 
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = getConversationFlow(conversationId).value.copy(
@@ -627,6 +882,9 @@ class ChatService(
                     updateAt = Instant.now()
                 )
                 updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                checkpointConversation(conversationId, updatedConversation, force = true)
+                generationCheckpointAt.remove(conversationId)
+                finishGenerationTask(generationTaskId, cause)
                 cleanupRunResourcesIfDone(conversationId, updatedConversation)
 
                 // Show notification if app is not in foreground
@@ -643,6 +901,7 @@ class ChatService(
                         val updatedConversation = getConversationFlow(conversationId).value
                             .updateCurrentMessages(chunk.messages)
                         updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                        checkpointConversation(conversationId, updatedConversation)
 
                         updateAgentLiveStatus(
                             conversationId = conversationId,
@@ -655,6 +914,10 @@ class ChatService(
             }
         }.onFailure {
             trustedRunToolNames.remove(conversationId)
+            stopGenerationKeepAlive(conversationId)
+            val latestConversation = getConversationFlow(conversationId).value
+            checkpointConversation(conversationId, latestConversation, force = true)
+            generationCheckpointAt.remove(conversationId)
             screenCaptureManager.releaseSession()
             if (it is CancellationException || !settings.agentRuntime.enableLiveStatusNotification) {
                 cancelLiveUpdateNotification(conversationId)
@@ -934,6 +1197,115 @@ class ChatService(
 
     private fun cancelLiveUpdateNotification(conversationId: Uuid) {
         liveStatusNotifier.cancel(conversationId)
+    }
+
+    private suspend fun startGenerationTask(
+        conversationId: Uuid,
+        senderName: String,
+        modelName: String,
+        settings: Settings,
+    ): String {
+        val taskId = generationTaskId(conversationId)
+        val now = System.currentTimeMillis()
+        runCatching {
+            agentTaskScheduler.start(
+                snapshot = AgentTaskSnapshot(
+                    taskId = taskId,
+                    type = "generation",
+                    title = context.getString(R.string.generation_task_title),
+                    spec = buildJsonObject {
+                        put("sender", senderName)
+                        put("model", modelName)
+                        put("auto_retry", settings.agentRuntime.generationRetry.enabled)
+                        put("max_retries", settings.agentRuntime.generationRetry.maxRetries)
+                    },
+                    sourceConversationId = conversationId.toString(),
+                    sourceToolName = "chat_generation",
+                    status = AgentTaskStatus.RUNNING,
+                    createdAtMs = now,
+                    updatedAtMs = now,
+                    lastHeartbeatMs = now,
+                    cancelCapability = true,
+                    retryPolicy = AgentTaskRetryPolicy(
+                        retryable = true,
+                        requiresApproval = false,
+                        maxRetries = settings.agentRuntime.generationRetry.maxRetries,
+                        reason = "Temporary network or provider failures retry automatically during the live generation.",
+                    ),
+                ),
+                cancel = {
+                    stopGeneration(conversationId)
+                    true
+                },
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "startGenerationTask failed for $conversationId", error)
+        }
+        return taskId
+    }
+
+    private suspend fun finishGenerationTask(taskId: String, cause: Throwable?) {
+        runCatching {
+            when {
+                cause == null -> agentTaskScheduler.complete(taskId, summary = "Generation completed.")
+                cause is CancellationException -> agentTaskScheduler.fail(
+                    taskId = taskId,
+                    message = "Generation cancelled by user.",
+                    code = "cancelled",
+                )
+
+                else -> agentTaskScheduler.fail(
+                    taskId = taskId,
+                    message = cause.message ?: cause::class.java.simpleName,
+                    code = "generation_failed",
+                )
+            }
+        }.onFailure { error ->
+            Log.w(TAG, "finishGenerationTask failed for $taskId", error)
+        }
+    }
+
+    private fun generationTaskId(conversationId: Uuid): String =
+        "generation-$conversationId"
+
+    private fun startGenerationKeepAlive(
+        conversationId: Uuid,
+        senderName: String,
+        settings: Settings,
+    ) {
+        if (!settings.agentRuntime.keepGenerationAliveInBackground) return
+        AgentGenerationForegroundService.start(
+            context = context,
+            conversationId = conversationId.toString(),
+            title = senderName.ifBlank { context.getString(R.string.app_name) },
+            content = context.getString(R.string.generation_keepalive_content),
+        )
+    }
+
+    private fun stopGenerationKeepAlive(conversationId: Uuid) {
+        AgentGenerationForegroundService.stop(context, conversationId.toString())
+    }
+
+    private suspend fun checkpointConversation(
+        conversationId: Uuid,
+        conversation: Conversation,
+        force: Boolean = false,
+    ) {
+        val now = System.currentTimeMillis()
+        val last = generationCheckpointAt[conversationId] ?: 0L
+        if (!force && now - last < GENERATION_CHECKPOINT_INTERVAL_MS) return
+        generationCheckpointAt[conversationId] = now
+        runCatching {
+            val exists = conversationRepo.existsConversationById(conversation.id)
+            if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) return@runCatching
+            if (exists) {
+                conversationRepo.updateConversation(conversation)
+            } else {
+                conversationRepo.insertConversation(conversation)
+            }
+        }.onFailure { error ->
+            Log.w(TAG, "checkpointConversation failed for $conversationId", error)
+        }
     }
 
     private fun getPendingIntent(context: Context, conversationId: Uuid): PendingIntent {
@@ -1323,6 +1695,7 @@ class ChatService(
                         grantStore = sessionAccessGrantStore,
                     ).tools()
                 )
+                addAll(createConversationQueueTools(conversationId))
             }
             addAll(AgentTaskTools(agentTaskScheduler).tools())
         }
@@ -1401,12 +1774,19 @@ class ChatService(
         cancelLiveUpdateNotification(conversationId)
         trustedRunToolNames.remove(conversationId)
         screenCaptureManager.releaseSession()
+        if (sessions[conversationId]?.convertPendingSteerMessagesToFollowup() == true) {
+            recordPendingQueueEvent(conversationId, event = "steer_downgrade")
+        }
 
         val currentConversation = getConversationFlow(conversationId).value
-        val lastNode = currentConversation.messageNodes.lastOrNull() ?: return
+        val lastNode = currentConversation.messageNodes.lastOrNull() ?: run {
+            launchPendingMessageLoop(conversationId)
+            return
+        }
         val lastMessage = lastNode.currentMessage
         val updatedMessage = lastMessage.finishPendingTools(::cancelToolByUser)
         if (updatedMessage == lastMessage) {
+            launchPendingMessageLoop(conversationId)
             return
         }
 
@@ -1418,7 +1798,85 @@ class ChatService(
             )
         )
         saveConversation(conversationId, updatedConversation)
+        launchPendingMessageLoop(conversationId)
     }
+
+    private fun createConversationQueueTools(conversationId: Uuid): List<Tool> = listOf(
+        Tool(
+            name = "conversation_queue_status",
+            description = "Read queued user messages for the current conversation. This is read-only and never exposes messages from other conversations.",
+            parameters = {
+                InputSchema.Obj(properties = buildJsonObject {})
+            },
+            execute = {
+                val queued = getOrCreateSession(conversationId).pendingUserMessages.value
+                listOf(
+                    UIMessagePart.Text(
+                        buildJsonObject {
+                            put("status", "ok")
+                            put("count", queued.size)
+                            put("messages", buildJsonArray {
+                                queued.forEachIndexed { index, message ->
+                                    add(
+                                        buildJsonObject {
+                                            put("index", index)
+                                            put("id", message.id)
+                                            put("mode", message.mode.name.lowercase())
+                                            put("answer", message.answer)
+                                            put("created_at_ms", message.createdAtMs)
+                                            put("preview", message.previewText())
+                                        }
+                                    )
+                                }
+                            })
+                        }.toString()
+                    )
+                )
+            }
+        ),
+        Tool(
+            name = "conversation_queue_cancel",
+            description = "Cancel one queued user message by id, or clear the current conversation queue. Requires approval because it changes user-entered pending messages.",
+            needsApproval = true,
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("message_id", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Queued message id to cancel. Omit when clear_all=true.")
+                        })
+                        put("clear_all", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "Clear every queued message in the current conversation.")
+                        })
+                    }
+                )
+            },
+            execute = { input ->
+                val session = getOrCreateSession(conversationId)
+                val clearAll = input.jsonObject["clear_all"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                val messageId = input.jsonObject["message_id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val changed = if (clearAll) {
+                    val hadMessages = session.pendingUserMessages.value.isNotEmpty()
+                    clearPendingUserMessages(conversationId)
+                    hadMessages
+                } else {
+                    require(messageId.isNotBlank()) { "message_id is required unless clear_all=true" }
+                    val hadMessage = session.pendingUserMessages.value.any { it.id == messageId }
+                    cancelPendingUserMessage(conversationId, messageId)
+                    hadMessage
+                }
+                listOf(
+                    UIMessagePart.Text(
+                        buildJsonObject {
+                            put("status", if (changed) "cancelled" else "not_found")
+                            put("remaining", session.pendingUserMessages.value.size)
+                        }.toString()
+                    )
+                )
+            }
+        )
+    )
 }
 
 private fun Conversation.findToolName(toolCallId: String): String? =

@@ -35,6 +35,7 @@ import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import me.rerere.rikkahub.data.ai.GenerationRetrySetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
@@ -599,6 +600,8 @@ data class AgentRuntimeSetting(
     val externalFileAccess: ExternalFileAccessSetting = ExternalFileAccessSetting(),
     val harnessDebug: HarnessDebugSetting = HarnessDebugSetting(),
     val speculativeToolExecution: SpeculativeToolExecutionSetting = SpeculativeToolExecutionSetting(),
+    val generationRetry: GenerationRetrySetting = GenerationRetrySetting(),
+    val keepGenerationAliveInBackground: Boolean = true,
 )
 
 @Serializable

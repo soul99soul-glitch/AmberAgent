@@ -460,6 +460,10 @@
   <string name="notification_live_status_chip_failed">Fail</string>
   <string name="notification_live_status_chip_cancelled">Stop</string>
   <string name="notification_live_status_action_stop">Stop task</string>
+  <string name="generation_retry_status">Connection interrupted. Retrying in %1$d s (%2$d/%3$d): %4$s</string>
+  <string name="generation_keepalive_title">Amber is generating</string>
+  <string name="generation_keepalive_content">Keeping this reply running in the background.</string>
+  <string name="generation_task_title">Generating reply</string>
   <string name="notification_web_server_running">Web Server Running</string>
   <string name="notification_web_server_starting">Starting...</string>
   <string name="notification_web_server_stop">Stop</string>
@@ -1160,6 +1164,14 @@
   <string name="setting_agent_execution_page_title">Run &amp; Display</string>
   <string name="setting_agent_execution_display_section">Execution</string>
   <string name="setting_agent_execution_live_status_section">Live Status</string>
+  <string name="setting_agent_execution_stability_section">Generation Stability</string>
+  <string name="setting_page_agent_generation_retry">Auto retry generation</string>
+  <string name="setting_page_agent_generation_retry_desc">Retry temporary network or provider interruptions.</string>
+  <string name="setting_page_agent_generation_retry_count">Retry limit</string>
+  <string name="setting_page_agent_generation_retry_count_desc">Maximum retries for one provider call.</string>
+  <string name="setting_page_agent_generation_retry_count_value">%1$d times</string>
+  <string name="setting_page_agent_generation_keepalive">Background keepalive</string>
+  <string name="setting_page_agent_generation_keepalive_desc">Use a foreground notification while Amber is generating.</string>
   <string name="setting_agent_permissions_page_title">Permissions &amp; Approval</string>
   <string name="setting_agent_permissions_access_section">System Access</string>
   <string name="setting_agent_permissions_approval_section">Approval Policy</string>

@@ -460,6 +460,10 @@
   <string name="notification_live_status_chip_failed">失败</string>
   <string name="notification_live_status_chip_cancelled">取消</string>
   <string name="notification_live_status_action_stop">停止执行</string>
+  <string name="generation_retry_status">连接中断，%1$d 秒后重试（%2$d/%3$d）：%4$s</string>
+  <string name="generation_keepalive_title">Amber 正在生成</string>
+  <string name="generation_keepalive_content">正在后台保持这次回复运行。</string>
+  <string name="generation_task_title">生成回复</string>
   <string name="notification_web_server_running">Web服务器运行中</string>
   <string name="notification_web_server_starting">正在启动...</string>
   <string name="notification_web_server_stop">停止</string>
@@ -741,6 +745,14 @@
   <string name="setting_agent_execution_page_title">运行与显示</string>
   <string name="setting_agent_execution_display_section">运行</string>
   <string name="setting_agent_execution_live_status_section">实时状态</string>
+  <string name="setting_agent_execution_stability_section">生成稳定性</string>
+  <string name="setting_page_agent_generation_retry">自动重试生成</string>
+  <string name="setting_page_agent_generation_retry_desc">网络或服务临时中断时自动重试。</string>
+  <string name="setting_page_agent_generation_retry_count">重试上限</string>
+  <string name="setting_page_agent_generation_retry_count_desc">单次模型调用最多重试次数。</string>
+  <string name="setting_page_agent_generation_retry_count_value">%1$d 次</string>
+  <string name="setting_page_agent_generation_keepalive">后台生成保活</string>
+  <string name="setting_page_agent_generation_keepalive_desc">生成时使用前台通知降低后台中断概率。</string>
   <string name="setting_agent_permissions_page_title">权限与批准</string>
   <string name="setting_agent_permissions_access_section">系统权限</string>
   <string name="setting_agent_permissions_approval_section">批准策略</string>
