@@ -14,6 +14,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.toLocalString
+import me.rerere.search.JinaSearchService
 import me.rerere.search.ScrapedResult
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
@@ -23,16 +24,28 @@ fun createSearchTools(settings: Settings): Set<Tool> {
     return buildSet {
         val enabledServices = SearchAggregator.enabledServices(settings)
         val enabledServiceNames = enabledServices.joinToString { SearchServiceOptions.TYPES[it::class] ?: "Search" }
+        val builtinStatus = listOfNotNull(
+            "Jina Search/Reader".takeIf { settings.searchBuiltinJinaEnabled },
+            "DuckDuckGo".takeIf { settings.searchBuiltinDuckDuckGoEnabled },
+            "Bing".takeIf { settings.searchBuiltinBingEnabled },
+            "Wikipedia".takeIf { settings.searchBuiltinWikipediaEnabled },
+            "Hacker News".takeIf { settings.searchBuiltinHackerNewsEnabled },
+            "Google WebView fallback".takeIf { settings.searchGoogleWebViewFallbackEnabled },
+        ).joinToString().ifBlank { "none" }
         add(
             Tool(
                 name = "search_web",
                 description = """
-                    Search the web with all enabled search services, merge duplicated results, and report per-source status.
+                    Search the web through AmberAgent Search Orchestrator.
+                    It uses enabled API services first, then built-in public/vertical sources such as Jina, DuckDuckGo, Bing HTML fallback, Wikipedia, and Hacker News as fallback/cross-check.
                     Use this when the user asks for the latest news, current facts, or needs verification.
-                    Enabled services: ${enabledServiceNames.ifBlank { "none" }}.
+                    Enabled configured services: ${enabledServiceNames.ifBlank { "none" }}.
+                    Built-in sources: $builtinStatus.
                     For news/current events, set `topic=news` and choose `time_range` (`day` for today/latest, `week` for recent).
+                    For market/sales/share questions, set `topic=market`; the orchestrator will generate English market-data variants.
                     Generate focused keywords and run multiple searches when the topic is broad or likely to have gaps.
                     If snippets are not enough, call scrape_web on the most relevant source pages before answering.
+                    If ordinary sources are blocked or weak, set `allow_webview=true` or call webview_search_open using webview_fallback suggestions.
                     Today is ${LocalDate.now().toLocalString(true)}.
 
                     Response format:
@@ -52,19 +65,46 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     searchWebParameters()
                 },
                 execute = {
-                    val results = SearchAggregator.search(settings, it.jsonObject)
+                    val results = SearchOrchestrator.search(settings, it.jsonObject)
                     listOf(UIMessagePart.Text(results.toString()))
                 }
             )
         )
 
+        add(
+            Tool(
+                name = "search_sources_status",
+                description = "Return enabled Search Orchestrator sources, including configured API sources, built-in free public sources, and WebView fallback status.",
+                parameters = {
+                    InputSchema.Obj(properties = buildJsonObject { })
+                },
+                execute = {
+                    listOf(UIMessagePart.Text(SearchOrchestrator.status(settings).toString()))
+                }
+            )
+        )
+
+        add(
+            Tool(
+                name = "search_strategy_explain",
+                description = "Explain how search_web would rewrite this query, choose sources, and decide whether WebView fallback is available. It does not perform a search.",
+                parameters = {
+                    searchWebParameters()
+                },
+                execute = {
+                    listOf(UIMessagePart.Text(SearchOrchestrator.explain(settings, it.jsonObject).toString()))
+                }
+            )
+        )
+
         val scrapeServices = scrapeEnabledServices(settings)
-        if (scrapeServices.isNotEmpty()) {
+        if (scrapeServices.isNotEmpty() || settings.searchBuiltinJinaEnabled) {
             add(
                 Tool(
                     name = "scrape_web",
                     description = """
                         Scrape a URL for detailed page content.
+                        Built-in Jina Reader is available without an API key and is preferred when no configured scraping service is selected.
                         Use this when the user requests content from a specific page or when search snippets are insufficient.
                         Avoid using it for common questions unless the user asks.
                         """.trimIndent(),
@@ -73,12 +113,20 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     },
                     execute = {
                         val options = resolveScrapeService(settings, it.jsonObject)
-                        val service = SearchService.getService(options)
-                        val result = service.scrape(
-                            params = it.jsonObject,
-                            commonOptions = settings.searchCommonOptions,
-                            serviceOptions = options,
-                        )
+                        val result = if (options is SearchServiceOptions.JinaOptions) {
+                            JinaSearchService.scrape(
+                                params = it.jsonObject,
+                                commonOptions = settings.searchCommonOptions,
+                                serviceOptions = options,
+                            )
+                        } else {
+                            val service = SearchService.getService(options)
+                            service.scrape(
+                                params = it.jsonObject,
+                                commonOptions = settings.searchCommonOptions,
+                                serviceOptions = options,
+                            )
+                        }
                         val payload = JsonInstantPretty.encodeToJsonElement(
                             ScrapedResult.serializer(),
                             result.getOrThrow(),
@@ -103,6 +151,8 @@ private fun searchWebParameters(): InputSchema {
                 put("enum", buildJsonArray {
                     add("general")
                     add("news")
+                    add("market")
+                    add("technical")
                     add("finance")
                 })
             })
@@ -125,9 +175,29 @@ private fun searchWebParameters(): InputSchema {
                 put("type", "integer")
                 put("description", "maximum merged results to return")
             })
+            put("depth", buildJsonObject {
+                put("type", "string")
+                put("description", "search depth: quick uses fewer variants, standard rewrites queries, deep adds more variants and WebView fallback hints")
+                put("enum", buildJsonArray {
+                    add("quick")
+                    add("standard")
+                    add("deep")
+                })
+            })
+            put("allow_webview", buildJsonObject {
+                put("type", "boolean")
+                put("description", "whether to return WebView search fallback suggestions when ordinary sources are weak")
+            })
             put("services", buildJsonObject {
                 put("type", "array")
                 put("description", "optional enabled service names or ids to use")
+                put("items", buildJsonObject {
+                    put("type", "string")
+                })
+            })
+            put("preferred_sources", buildJsonObject {
+                put("type", "array")
+                put("description", "optional source names or ids to prefer; alias of services")
                 put("items", buildJsonObject {
                     put("type", "string")
                 })
@@ -165,9 +235,14 @@ private fun resolveScrapeService(settings: Settings, input: JsonObject): SearchS
         settings.searchServices.getOrNull(settings.searchServiceSelected)
             ?.takeIf { selected -> candidates.any { it.id == selected.id } }
             ?: candidates.firstOrNull()
+            ?: SearchServiceOptions.JinaOptions().takeIf { settings.searchBuiltinJinaEnabled }
     } else {
         SearchAggregator.enabledServices(settings, listOf(requested))
             .firstOrNull { SearchService.getService(it).scrapingParameters != null }
+            ?: SearchServiceOptions.JinaOptions().takeIf {
+                settings.searchBuiltinJinaEnabled && listOf("jina", "jina reader", "jina_reader", "jina builtin")
+                    .any { selector -> requested.lowercase().contains(selector) }
+            }
     }
-    return selected ?: error("No enabled search service supports scraping. Enable a scraping-capable search service in settings.")
+    return selected ?: error("No enabled search service supports scraping. Enable Jina Reader or another scraping-capable search service in settings.")
 }

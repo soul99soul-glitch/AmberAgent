@@ -197,7 +197,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("icloud_") -> "cloud"
     name.startsWith("officepro_") -> "office"
     name.startsWith("terminal_") -> "terminal"
-    name in setOf("search_web", "scrape_web", "http_request") -> "web"
+    name in setOf("search_web", "scrape_web", "search_sources_status", "search_strategy_explain", "http_request") -> "web"
     name.startsWith("webview_") -> "webview"
     name.startsWith("screen_") || name == "vlm_task" -> "screen"
     name.startsWith("sms_") || name.startsWith("contacts_") || name.startsWith("calendar_") ||

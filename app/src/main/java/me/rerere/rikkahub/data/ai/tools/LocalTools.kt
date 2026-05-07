@@ -38,6 +38,7 @@ import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
+import java.net.URLEncoder
 import java.time.ZonedDateTime
 import java.time.format.TextStyle
 import java.util.Locale
@@ -302,6 +303,72 @@ class LocalTools(
                         put("reason", reason)
                     }
                     put("note", "The live preview is loading. Use webview_wait_for_load or webview_read with wait_timeout_ms before relying on page text.")
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
+            }
+        )
+    }
+
+    val webViewSearchOpenTool by lazy {
+        Tool(
+            name = "webview_search_open",
+            description = """
+                Open a visible search results page in AmberAgent's live WebView preview.
+                Use this as a fallback when search_web reports weak/empty ordinary sources, when visual verification is needed, or when the user explicitly wants Google/DuckDuckGo/Bing results opened.
+                After opening, call webview_wait_for_load and webview_links or webview_read to inspect visible results.
+            """.trimIndent().replace("\n", " "),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("query", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Search query")
+                        })
+                        put("engine", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Search engine to open")
+                            put(
+                                "enum",
+                                buildJsonArray {
+                                    add("google")
+                                    add("duckduckgo")
+                                    add("bing")
+                                }
+                            )
+                        })
+                        put("reason", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Short reason for opening a visible search page")
+                        })
+                    },
+                    required = listOf("query")
+                )
+            },
+            execute = { input ->
+                val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?: error("query is required")
+                val engine = input.jsonObject["engine"]?.jsonPrimitive?.contentOrNull
+                    ?.lowercase(Locale.ROOT)
+                    ?.takeIf { it in setOf("google", "duckduckgo", "bing") }
+                    ?: "google"
+                val encoded = URLEncoder.encode(query, "UTF-8")
+                val url = when (engine) {
+                    "duckduckgo" -> "https://duckduckgo.com/?q=$encoded"
+                    "bing" -> "https://www.bing.com/search?q=$encoded"
+                    else -> "https://www.google.com/search?q=$encoded"
+                }
+                val loadId = webViewOperationStore.open(url)
+                val payload = buildJsonObject {
+                    put("status", "opened")
+                    put("runtime", "webview")
+                    put("engine", engine)
+                    put("query", query)
+                    put("url", url)
+                    put("load_id", loadId)
+                    input.jsonObject["reason"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let {
+                        put("reason", it)
+                    }
+                    put("note", "The visible search page is loading. Use webview_wait_for_load and webview_links/webview_read to inspect results.")
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
             }
@@ -1070,6 +1137,7 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.WebView)) {
             tools.add(webViewTool)
+            tools.add(webViewSearchOpenTool)
             tools.add(webViewWaitForLoadTool)
             tools.add(webViewReadTool)
             tools.add(webViewFindTextTool)

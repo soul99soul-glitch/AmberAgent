@@ -438,7 +438,7 @@ private fun ChatPageContent(
                         } else {
                             vm.handleMessageSend(
                                 content = inputState.getContents(),
-                                answer = false,
+                                answer = loadingJob != null && queueMode == PendingUserMessageMode.STEER,
                                 queueMode = queueMode,
                             )
                             scope.launch {
@@ -548,6 +548,9 @@ private fun ChatPageContent(
                 },
                 onCancelPendingMessage = { messageId ->
                     vm.cancelPendingUserMessage(messageId)
+                },
+                onOpenQueue = {
+                    queuePanelOpen = true
                 },
             )
         }
@@ -805,6 +808,7 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
         toolName in setOf(
             "search_web",
             "scrape_web",
+            "webview_search_open",
             "webview_open",
             "webview_wait_for_load",
             "webview_read",
@@ -850,6 +854,7 @@ private fun UIMessagePart.Tool.sandboxTitle(): String {
     return when (toolName) {
         "search_web" -> "网页搜索 ${input.getFirstStringContent("query", "q", "keyword", "keywords").orEmpty().compactSandboxText(20)}"
         "scrape_web" -> "打开网页 ${input.getFirstStringContent("url", "link", "uri").orEmpty().compactSandboxText(24)}"
+        "webview_search_open" -> "打开搜索页 ${input.getStringContent("query").orEmpty().compactSandboxText(20)}"
         "webview_open" -> "打开网页 ${input.getStringContent("url").orEmpty().compactSandboxText(24)}"
         "webview_wait_for_load" -> "等待网页加载"
         "webview_read" -> "读取网页内容"
@@ -892,6 +897,7 @@ private fun UIMessagePart.Tool.inputPreview(): String {
     return when (toolName) {
         "search_web" -> input.getFirstStringContent("query", "q", "keyword", "keywords")
         "scrape_web" -> input.getFirstStringContent("url", "link", "uri")
+        "webview_search_open" -> input.getStringContent("query")
         "webview_open" -> input.getStringContent("url")
         "webview_wait_for_load" -> input.getStringContent("target_url")
         "webview_read" -> input.getStringContent("url")
@@ -911,6 +917,7 @@ private fun UIMessagePart.Tool.inputPreview(): String {
 private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName == "search_web" -> "web-search"
     toolName == "scrape_web" -> "webview"
+    toolName == "webview_search_open" -> "webview"
     toolName == "webview_open" -> "webview"
     toolName == "webview_wait_for_load" -> "webview"
     toolName == "webview_read" -> "webview"
@@ -935,9 +942,12 @@ private fun UIMessagePart.Tool.hasFailure(): Boolean {
     val outputJson = outputJson()
     val exitCode = outputJson["exit_code"]?.jsonPrimitiveOrNull?.intOrNull
     val error = outputJson.getStringContent("error")
+    val status = outputJson["status"]?.jsonPrimitiveOrNull?.contentOrNull?.lowercase()
+    val failed = outputJson["failed"]?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == true
     return !error.isNullOrBlank() ||
         (exitCode != null && exitCode != 0) ||
-        outputText(MAX_SANDBOX_OUTPUT_TAIL_CHARS).contains("Exception", ignoreCase = true)
+        failed ||
+        status in setOf("failed", "error", "denied")
 }
 
 private fun UIMessagePart.Tool.outputTail(outputJson: JsonObject): String {

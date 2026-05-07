@@ -167,6 +167,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
 
     ToolNames.SEARCH_WEB -> HugeIcons.Search01
     ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
+    "webview_search_open" -> HugeIcons.GlobalSearch
     "webview_open" -> HugeIcons.GlobalSearch
     "webview_wait_for_load" -> HugeIcons.GlobalSearch
     "webview_read" -> HugeIcons.GlobalSearch
@@ -242,6 +243,7 @@ private fun getToolKind(toolName: String) = when {
 
     toolName == ToolNames.SEARCH_WEB ||
         toolName == ToolNames.SCRAPE_WEB ||
+        toolName == "webview_search_open" ||
         toolName == "webview_open" ||
         toolName == "webview_wait_for_load" ||
         toolName == "webview_read" -> AgentToolKind.WEB
@@ -263,12 +265,18 @@ private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): 
     val jsonObject = content?.jsonObjectOrNull
     val error = jsonObject?.getStringContent("error")
     val exitCode = jsonObject?.get("exit_code")?.jsonPrimitiveOrNull?.intOrNull
-    return !error.isNullOrBlank() ||
-        (exitCode != null && exitCode != 0) ||
-        output.filterIsInstance<UIMessagePart.Text>().any { part ->
-            part.text.contains("\"error\"", ignoreCase = true) ||
-                part.text.contains("Exception", ignoreCase = true)
-        }
+    val status = jsonObject?.get("status")?.jsonPrimitiveOrNull?.contentOrNull?.lowercase()
+    val failed = jsonObject?.get("failed")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == true
+    if (jsonObject != null) {
+        return !error.isNullOrBlank() ||
+            (exitCode != null && exitCode != 0) ||
+            failed ||
+            status in setOf("failed", "error", "denied")
+    }
+    return output.filterIsInstance<UIMessagePart.Text>().any { part ->
+        part.text.contains("\"error\"", ignoreCase = true) ||
+            part.text.contains("Exception", ignoreCase = true)
+    }
 }
 
 private fun toolStatusFromMessagePart(
@@ -431,6 +439,7 @@ private fun toolDisplayTitle(
     )
 
     ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
+    "webview_search_open" -> "打开搜索页 ${arguments.getStringContent("query")?.compactToolPreview(28).orEmpty()}"
     "webview_open" -> "打开网页 ${arguments.getStringContent("url")?.compactToolPreview(28).orEmpty()}"
     "webview_wait_for_load" -> "等待网页加载"
     "webview_read" -> "读取当前网页"

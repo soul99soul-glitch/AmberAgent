@@ -218,20 +218,13 @@ fun ChatInput(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
-    var pendingSendMode by remember { mutableStateOf(PendingUserMessageMode.FOLLOWUP) }
-    val queueModeLabel = when (pendingSendMode) {
-        PendingUserMessageMode.FOLLOWUP -> "排队下一轮"
-        PendingUserMessageMode.STEER -> "引导当前任务"
-        PendingUserMessageMode.COLLECT -> "收集多条"
-    }
-
     fun sendMessage() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
         if (loading && state.isEmpty()) {
             onCancelClick()
         } else {
-            onSendClick(if (loading) pendingSendMode else PendingUserMessageMode.FOLLOWUP)
+            onSendClick(PendingUserMessageMode.FOLLOWUP)
         }
     }
 
@@ -241,7 +234,7 @@ fun ChatInput(
         if (loading && state.isEmpty()) {
             onCancelClick()
         } else {
-            onLongSendClick(if (loading) pendingSendMode else PendingUserMessageMode.FOLLOWUP)
+            onLongSendClick(if (loading) PendingUserMessageMode.STEER else PendingUserMessageMode.FOLLOWUP)
         }
     }
 
@@ -487,16 +480,6 @@ fun ChatInput(
                                         model = chatModel,
                                         modifier = Modifier.padding(start = 3.dp),
                                     )
-                                    if (pendingQueueCount > 0) {
-                                        Text(
-                                            text = "已排队 $pendingQueueCount 条",
-                                            modifier = Modifier.clickable { onOpenQueue() },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = workspace.muted,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
                                     Row(
                                         verticalAlignment = Alignment.Bottom,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -520,28 +503,6 @@ fun ChatInput(
                                                 onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                             },
                                         )
-                                        if (loading && !state.isEmpty()) {
-                                            Surface(
-                                                onClick = {
-                                                    pendingSendMode = when (pendingSendMode) {
-                                                        PendingUserMessageMode.FOLLOWUP -> PendingUserMessageMode.STEER
-                                                        PendingUserMessageMode.STEER -> PendingUserMessageMode.COLLECT
-                                                        PendingUserMessageMode.COLLECT -> PendingUserMessageMode.FOLLOWUP
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = workspace.row,
-                                                border = BorderStroke(1.dp, workspace.hairline),
-                                            ) {
-                                                Text(
-                                                    text = queueModeLabel,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = workspace.muted,
-                                                    maxLines = 1,
-                                                )
-                                            }
-                                        }
                                     }
                                 }
 
@@ -559,22 +520,6 @@ fun ChatInput(
                                 contentDescription = stringResource(R.string.more_options),
                                 modifier = Modifier.size(ComposerButtonIconSize),
                             )
-                        }
-
-                        if (loading && !state.isEmpty()) {
-                            ActionIconButton(
-                                onClick = {
-                                    dismissExpand()
-                                    onCancelClick()
-                                },
-                                accent = false,
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Cancel01,
-                                    contentDescription = stringResource(R.string.stop),
-                                    modifier = Modifier.size(ComposerButtonIconSize),
-                                )
-                            }
                         }
 
                         Box(
@@ -1926,7 +1871,7 @@ private fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = w
 
 private fun SandboxActivityUiState.operationPreviewKind(): String = when {
     toolName == "search_web" -> "web search"
-    toolName == "scrape_web" || toolName == "webview_open" || toolName == "webview_wait_for_load" || toolName == "webview_read" -> "webview"
+    toolName == "scrape_web" || toolName == "webview_search_open" || toolName == "webview_open" || toolName == "webview_wait_for_load" || toolName == "webview_read" -> "webview"
     toolName.startsWith("icloud_") -> "icloud"
     toolName.startsWith("screen_") || toolName == "vlm_task" -> "screen"
     toolName.startsWith("file_") -> "workspace"
@@ -1962,7 +1907,7 @@ private fun SandboxActivityUiState.operationPreviewText(): String {
 }
 
 private fun SandboxActivityUiState.operationPreviewUrl(): String? {
-    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_open" && toolName != "webview_wait_for_load" && toolName != "webview_read") {
+    if (toolName != "search_web" && toolName != "scrape_web" && toolName != "webview_search_open" && toolName != "webview_open" && toolName != "webview_wait_for_load" && toolName != "webview_read") {
         return null
     }
 
@@ -1972,7 +1917,7 @@ private fun SandboxActivityUiState.operationPreviewUrl(): String? {
     val outputUrl = outputTail.firstHttpUrl()
     if (outputUrl != null) return outputUrl
 
-    if (toolName == "search_web" && inputPreview.isNotBlank()) {
+    if ((toolName == "search_web" || toolName == "webview_search_open") && inputPreview.isNotBlank()) {
         return "https://www.google.com/search?q=${URLEncoder.encode(inputPreview, "UTF-8")}"
     }
 

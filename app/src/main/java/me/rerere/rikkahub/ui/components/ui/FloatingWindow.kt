@@ -2,16 +2,22 @@ package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import com.petterp.floatingx.FloatingX
 import com.petterp.floatingx.assist.FxGravity
 import com.petterp.floatingx.listener.control.IFxAppControl
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.savedstate.compose.LocalSavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 
 @Composable
@@ -21,17 +27,25 @@ fun FloatingWindow(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val viewModelStoreOwner = LocalViewModelStoreOwner.current
+    val savedStateRegistryOwner = LocalSavedStateRegistryOwner.current
+    val latestContent by rememberUpdatedState(content)
     var window: IFxAppControl? by remember { mutableStateOf(null) }
 
-    LaunchedEffect(visibility) {
-        if (visibility) {
-            window?.show()
-        } else {
-            window?.hide()
+    DisposableEffect(
+        context,
+        lifecycleOwner,
+        viewModelStoreOwner,
+        savedStateRegistryOwner,
+        visibility,
+    ) {
+        if (!visibility) {
+            window?.cancel()
+            window = null
+            return@DisposableEffect onDispose {}
         }
-    }
 
-    DisposableEffect(context) {
         window = FloatingX.install {
             setTag(tag)
             setContext(context)
@@ -39,16 +53,20 @@ fun FloatingWindow(
             setOffsetXY(20f, -20f)
             setEnableAnimation(true)
             setLayoutView(ComposeView(context).apply {
+                setViewTreeLifecycleOwner(lifecycleOwner)
+                viewModelStoreOwner?.let { setViewTreeViewModelStoreOwner(it) }
+                setViewTreeSavedStateRegistryOwner(savedStateRegistryOwner)
                 setContent {
                     RikkahubTheme {
-                        content()
+                        latestContent()
                     }
                 }
             })
         }
-        if (visibility) window?.show() else window?.hide()
+        window?.show()
         onDispose {
             window?.cancel()
+            window = null
         }
     }
 }

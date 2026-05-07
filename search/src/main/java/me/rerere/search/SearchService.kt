@@ -52,6 +52,8 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.SearXNGOptions -> SearXNGService
                 is SearchServiceOptions.LinkUpOptions -> LinkUpService
                 is SearchServiceOptions.BraveOptions -> BraveSearchService
+                is SearchServiceOptions.SerperOptions -> SerperSearchService
+                is SearchServiceOptions.SerpApiOptions -> SerpApiSearchService
                 is SearchServiceOptions.MetasoOptions -> MetasoSearchService
                 is SearchServiceOptions.OllamaOptions -> OllamaSearchService
                 is SearchServiceOptions.PerplexityOptions -> PerplexitySearchService
@@ -103,6 +105,7 @@ data class SearchResult(
         val title: String,
         val url: String,
         val text: String,
+        val publishedAt: String? = null,
     )
 }
 
@@ -133,7 +136,7 @@ sealed class SearchServiceOptions {
         val DEFAULT = BingLocalOptions()
 
         val TYPES = mapOf(
-            BingLocalOptions::class to "Bing",
+            BingLocalOptions::class to "Bing HTML 兜底",
             RikkaHubOptions::class to "AmberAgent",
             ZhipuOptions::class to "智谱",
             TavilyOptions::class to "Tavily",
@@ -141,6 +144,8 @@ sealed class SearchServiceOptions {
             SearXNGOptions::class to "SearXNG",
             LinkUpOptions::class to "LinkUp",
             BraveOptions::class to "Brave",
+            SerperOptions::class to "Serper",
+            SerpApiOptions::class to "SerpAPI",
             MetasoOptions::class to "秘塔",
             OllamaOptions::class to "Ollama",
             PerplexityOptions::class to "Perplexity",
@@ -201,6 +206,20 @@ sealed class SearchServiceOptions {
     @Serializable
     @SerialName("brave")
     data class BraveOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+    ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("serper")
+    data class SerperOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+    ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("serpapi")
+    data class SerpApiOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
     ) : SearchServiceOptions()

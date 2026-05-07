@@ -27,7 +27,7 @@ class ConversationSessionQueueTest {
     }
 
     @Test
-    fun steerConsumptionOnlyTakesLeadingSteerMessages() {
+    fun steerMessagesAreInsertedBeforeFollowupMessages() {
         val session = session()
         session.enqueuePendingUserMessage(pending("steer-1", PendingUserMessageMode.STEER))
         session.enqueuePendingUserMessage(pending("steer-2", PendingUserMessageMode.STEER))
@@ -36,8 +36,8 @@ class ConversationSessionQueueTest {
 
         val consumed = session.dequeueSteerPendingUserMessages()
 
-        assertEquals(listOf("steer-1", "steer-2"), consumed.map { it.id })
-        assertEquals(listOf("followup", "steer-3"), session.pendingUserMessages.value.map { it.id })
+        assertEquals(listOf("steer-1", "steer-2", "steer-3"), consumed.map { it.id })
+        assertEquals(listOf("followup"), session.pendingUserMessages.value.map { it.id })
     }
 
     @Test

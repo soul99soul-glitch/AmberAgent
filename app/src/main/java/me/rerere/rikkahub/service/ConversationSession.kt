@@ -96,7 +96,14 @@ class ConversationSession(
                 current
             } else {
                 accepted = true
-                current + message
+                if (message.mode == PendingUserMessageMode.STEER) {
+                    val steerPrefixSize = current.indexOfFirst { it.mode != PendingUserMessageMode.STEER }
+                        .takeIf { it >= 0 }
+                        ?: current.size
+                    current.take(steerPrefixSize) + message + current.drop(steerPrefixSize)
+                } else {
+                    current + message
+                }
             }
         }
         if (accepted) {

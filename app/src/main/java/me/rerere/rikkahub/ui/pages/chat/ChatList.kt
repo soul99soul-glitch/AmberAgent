@@ -220,57 +220,73 @@ private fun ContextCompactMarker(modifier: Modifier = Modifier) {
 private fun PendingUserMessageBubble(
     message: PendingUserMessage,
     onCancel: () -> Unit,
+    queueCount: Int? = null,
+    onOpenQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    val label = when (message.mode) {
-        PendingUserMessageMode.FOLLOWUP -> "排队中"
-        PendingUserMessageMode.STEER -> "等待插话点"
-        PendingUserMessageMode.COLLECT -> "收集中"
+    val borderColor = when (message.mode) {
+        PendingUserMessageMode.FOLLOWUP -> workspace.muted.copy(alpha = 0.42f)
+        PendingUserMessageMode.STEER -> workspace.blue.copy(alpha = 0.48f)
+        PendingUserMessageMode.COLLECT -> workspace.blue.copy(alpha = 0.28f)
+    }
+    val textColor = when (message.mode) {
+        PendingUserMessageMode.FOLLOWUP -> workspace.muted
+        PendingUserMessageMode.STEER -> workspace.blue.copy(alpha = 0.82f)
+        PendingUserMessageMode.COLLECT -> workspace.muted.copy(alpha = 0.9f)
     }
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
     ) {
-        Surface(
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.86f)
-                .dashedRoundedBorder(workspace.muted.copy(alpha = 0.55f), 10.dp),
-            shape = RoundedCornerShape(10.dp),
-            color = workspace.paper.copy(alpha = 0.62f),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+                .fillMaxWidth(0.86f),
+            horizontalAlignment = Alignment.End,
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .dashedRoundedBorder(borderColor, 10.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = workspace.paper.copy(alpha = 0.62f),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = workspace.muted,
+                        text = message.previewText(),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = textColor,
                     )
                     IconButton(
                         onClick = onCancel,
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(26.dp),
                     ) {
                         Icon(
                             imageVector = HugeIcons.Cancel01,
                             contentDescription = "取消排队消息",
-                            tint = workspace.muted,
-                            modifier = Modifier.size(16.dp),
+                            tint = textColor.copy(alpha = 0.72f),
+                            modifier = Modifier.size(15.dp),
                         )
                     }
                 }
+            }
+            if (queueCount != null && queueCount > 0) {
                 Text(
-                    text = message.previewText(),
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "已排队 $queueCount 条",
+                    modifier = Modifier
+                        .padding(top = 4.dp, end = 2.dp)
+                        .clickable { onOpenQueue() },
+                    style = MaterialTheme.typography.labelSmall,
                     color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -305,6 +321,7 @@ fun ChatList(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onCancelPendingMessage: (String) -> Unit = {},
+    onOpenQueue: () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -349,6 +366,7 @@ fun ChatList(
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
                 onCancelPendingMessage = onCancelPendingMessage,
+                onOpenQueue = onOpenQueue,
             )
         }
     }
@@ -381,6 +399,7 @@ private fun ChatListNormal(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onCancelPendingMessage: (String) -> Unit = {},
+    onOpenQueue: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
@@ -544,13 +563,15 @@ private fun ChatListNormal(
                 }
             }
 
-            items(
+            itemsIndexed(
                 items = pendingUserMessages,
-                key = { "pending-${it.id}" },
-            ) { pendingMessage ->
+                key = { _, item -> "pending-${item.id}" },
+            ) { index, pendingMessage ->
                 PendingUserMessageBubble(
                     message = pendingMessage,
                     onCancel = { onCancelPendingMessage(pendingMessage.id) },
+                    queueCount = if (index == pendingUserMessages.lastIndex) pendingUserMessages.size else null,
+                    onOpenQueue = onOpenQueue,
                 )
             }
 

@@ -76,9 +76,13 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
             val request = Request.Builder()
                 .url(searchUrl)
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
                 .addHeader("Accept", "application/json")
                 .addHeader("Content-Type", "application/json")
+                .apply {
+                    if (serviceOptions.apiKey.isNotBlank()) {
+                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                    }
+                }
                 .build()
 
             val response = httpClient.newCall(request).await()
@@ -121,10 +125,14 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
             val request = Request.Builder()
                 .url(scrapeUrl)
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
                 .addHeader("Accept", "application/json")
                 .addHeader("Content-Type", "application/json")
                 .addHeader("X-Return-Format", "markdown")
+                .apply {
+                    if (serviceOptions.apiKey.isNotBlank()) {
+                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                    }
+                }
                 .build()
 
             val response = httpClient.newCall(request).await()

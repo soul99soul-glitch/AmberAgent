@@ -116,6 +116,12 @@ class SettingsStore(
         val SEARCH_COMMON = stringPreferencesKey("search_common")
         val SEARCH_SELECTED = intPreferencesKey("search_selected")
         val SEARCH_ENABLED_SERVICE_IDS = stringPreferencesKey("search_enabled_service_ids")
+        val SEARCH_BUILTIN_DUCKDUCKGO_ENABLED = booleanPreferencesKey("search_builtin_duckduckgo_enabled")
+        val SEARCH_BUILTIN_BING_ENABLED = booleanPreferencesKey("search_builtin_bing_enabled")
+        val SEARCH_BUILTIN_JINA_ENABLED = booleanPreferencesKey("search_builtin_jina_enabled")
+        val SEARCH_BUILTIN_WIKIPEDIA_ENABLED = booleanPreferencesKey("search_builtin_wikipedia_enabled")
+        val SEARCH_BUILTIN_HACKERNEWS_ENABLED = booleanPreferencesKey("search_builtin_hackernews_enabled")
+        val SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED = booleanPreferencesKey("search_google_webview_fallback_enabled")
 
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
@@ -220,6 +226,12 @@ class SettingsStore(
                 } ?: SearchCommonOptions(),
                 searchServiceSelected = selectedSearchIndex,
                 searchEnabledServiceIds = enabledSearchServiceIds,
+                searchBuiltinDuckDuckGoEnabled = preferences[SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] != false,
+                searchBuiltinBingEnabled = preferences[SEARCH_BUILTIN_BING_ENABLED] != false,
+                searchBuiltinJinaEnabled = preferences[SEARCH_BUILTIN_JINA_ENABLED] != false,
+                searchBuiltinWikipediaEnabled = preferences[SEARCH_BUILTIN_WIKIPEDIA_ENABLED] != false,
+                searchBuiltinHackerNewsEnabled = preferences[SEARCH_BUILTIN_HACKERNEWS_ENABLED] != false,
+                searchGoogleWebViewFallbackEnabled = preferences[SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] != false,
                 mcpServers = preferences[MCP_SERVERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -406,6 +418,12 @@ class SettingsStore(
                     settings.searchServices.any { service -> service.id == id }
                 }
             )
+            preferences[SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] = settings.searchBuiltinDuckDuckGoEnabled
+            preferences[SEARCH_BUILTIN_BING_ENABLED] = settings.searchBuiltinBingEnabled
+            preferences[SEARCH_BUILTIN_JINA_ENABLED] = settings.searchBuiltinJinaEnabled
+            preferences[SEARCH_BUILTIN_WIKIPEDIA_ENABLED] = settings.searchBuiltinWikipediaEnabled
+            preferences[SEARCH_BUILTIN_HACKERNEWS_ENABLED] = settings.searchBuiltinHackerNewsEnabled
+            preferences[SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] = settings.searchGoogleWebViewFallbackEnabled
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
@@ -537,6 +555,12 @@ data class Settings(
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
     val searchEnabledServiceIds: List<Uuid> = searchServices.take(1).map { it.id },
+    val searchBuiltinDuckDuckGoEnabled: Boolean = true,
+    val searchBuiltinBingEnabled: Boolean = true,
+    val searchBuiltinJinaEnabled: Boolean = true,
+    val searchBuiltinWikipediaEnabled: Boolean = true,
+    val searchBuiltinHackerNewsEnabled: Boolean = true,
+    val searchGoogleWebViewFallbackEnabled: Boolean = true,
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),

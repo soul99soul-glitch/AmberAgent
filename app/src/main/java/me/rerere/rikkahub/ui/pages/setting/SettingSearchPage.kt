@@ -118,8 +118,8 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
         containerColor = CustomColors.topBarColors.containerColor
     ) {
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-            // The first item is the global Agent search switch; service cards start after it.
-            val offset = 1
+            // The first two items are global/free-source cards; configured service cards start after them.
+            val offset = 2
             val fromIndex = from.index - offset
             val toIndex = to.index - offset
 
@@ -149,12 +149,52 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             item("agent_search_enable") {
                 AgentSearchEnableCard(
                     enabled = settings.enableWebSearch,
-                    enabledCount = settings.searchServices.count { it.id in settings.searchEnabledServiceIds },
-                    serviceCount = settings.searchServices.size,
+                    enabledCount = settings.searchServices.count { it.id in settings.searchEnabledServiceIds } +
+                        listOf(
+                            settings.searchBuiltinJinaEnabled,
+                            settings.searchBuiltinDuckDuckGoEnabled,
+                            settings.searchBuiltinBingEnabled,
+                            settings.searchBuiltinWikipediaEnabled,
+                            settings.searchBuiltinHackerNewsEnabled,
+                        ).count { it },
+                    serviceCount = settings.searchServices.size + 5,
                     onCheckedChange = { enabled ->
                         vm.updateSettings(settings.copy(enableWebSearch = enabled))
                     },
                 )
+            }
+
+            item("builtin_free_sources") {
+                BuiltinFreeSearchCard(
+                    jinaEnabled = settings.searchBuiltinJinaEnabled,
+                    duckDuckGoEnabled = settings.searchBuiltinDuckDuckGoEnabled,
+                    bingEnabled = settings.searchBuiltinBingEnabled,
+                    wikipediaEnabled = settings.searchBuiltinWikipediaEnabled,
+                    hackerNewsEnabled = settings.searchBuiltinHackerNewsEnabled,
+                    googleWebViewFallbackEnabled = settings.searchGoogleWebViewFallbackEnabled,
+                    onJinaEnabledChange = { enabled ->
+                        vm.updateSettings(settings.copy(searchBuiltinJinaEnabled = enabled))
+                    },
+                    onDuckDuckGoEnabledChange = { enabled ->
+                        vm.updateSettings(settings.copy(searchBuiltinDuckDuckGoEnabled = enabled))
+                    },
+                    onBingEnabledChange = { enabled ->
+                        vm.updateSettings(settings.copy(searchBuiltinBingEnabled = enabled))
+                    },
+                    onWikipediaEnabledChange = { enabled ->
+                        vm.updateSettings(settings.copy(searchBuiltinWikipediaEnabled = enabled))
+                    },
+                    onHackerNewsEnabledChange = { enabled ->
+                        vm.updateSettings(settings.copy(searchBuiltinHackerNewsEnabled = enabled))
+                    },
+                    onGoogleWebViewFallbackEnabledChange = { enabled ->
+                        vm.updateSettings(settings.copy(searchGoogleWebViewFallbackEnabled = enabled))
+                    },
+                )
+            }
+
+            item("recommended_search_sets") {
+                SearchRecommendationCard()
             }
 
             // 搜索提供商列表
@@ -264,7 +304,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                         )
                     )
                     scope.launch {
-                        lazyListState.animateScrollToItem(1)
+                        lazyListState.animateScrollToItem(2)
                     }
                 } else {
                     val currentIndex = settings.searchServices.indexOfFirst { it.id == target.service.id }
@@ -290,6 +330,142 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 }
                 editingService = null
             },
+        )
+    }
+}
+
+@Composable
+private fun SearchRecommendationCard() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.setting_page_search_recommend_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.setting_page_search_recommend_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BuiltinFreeSearchCard(
+    jinaEnabled: Boolean,
+    duckDuckGoEnabled: Boolean,
+    bingEnabled: Boolean,
+    wikipediaEnabled: Boolean,
+    hackerNewsEnabled: Boolean,
+    googleWebViewFallbackEnabled: Boolean,
+    onJinaEnabledChange: (Boolean) -> Unit,
+    onDuckDuckGoEnabledChange: (Boolean) -> Unit,
+    onBingEnabledChange: (Boolean) -> Unit,
+    onWikipediaEnabledChange: (Boolean) -> Unit,
+    onHackerNewsEnabledChange: (Boolean) -> Unit,
+    onGoogleWebViewFallbackEnabledChange: (Boolean) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = stringResource(R.string.setting_page_search_builtin_sources),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = stringResource(R.string.setting_page_search_builtin_sources_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            BuiltinSourceRow(
+                title = stringResource(R.string.setting_page_search_builtin_jina),
+                description = stringResource(R.string.setting_page_search_builtin_jina_desc),
+                checked = jinaEnabled,
+                onCheckedChange = onJinaEnabledChange,
+            )
+            BuiltinSourceRow(
+                title = stringResource(R.string.setting_page_search_builtin_duckduckgo),
+                description = stringResource(R.string.setting_page_search_builtin_duckduckgo_desc),
+                checked = duckDuckGoEnabled,
+                onCheckedChange = onDuckDuckGoEnabledChange,
+            )
+            BuiltinSourceRow(
+                title = stringResource(R.string.setting_page_search_builtin_bing),
+                description = stringResource(R.string.setting_page_search_builtin_bing_desc),
+                checked = bingEnabled,
+                onCheckedChange = onBingEnabledChange,
+            )
+            BuiltinSourceRow(
+                title = stringResource(R.string.setting_page_search_builtin_wikipedia),
+                description = stringResource(R.string.setting_page_search_builtin_wikipedia_desc),
+                checked = wikipediaEnabled,
+                onCheckedChange = onWikipediaEnabledChange,
+            )
+            BuiltinSourceRow(
+                title = stringResource(R.string.setting_page_search_builtin_hackernews),
+                description = stringResource(R.string.setting_page_search_builtin_hackernews_desc),
+                checked = hackerNewsEnabled,
+                onCheckedChange = onHackerNewsEnabledChange,
+            )
+            BuiltinSourceRow(
+                title = stringResource(R.string.setting_page_search_google_webview_fallback),
+                description = stringResource(R.string.setting_page_search_google_webview_fallback_desc),
+                checked = googleWebViewFallbackEnabled,
+                onCheckedChange = onGoogleWebViewFallbackEnabledChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BuiltinSourceRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
         )
     }
 }
@@ -597,6 +773,14 @@ private fun SearchServiceOptionsEditor(
 
         is SearchServiceOptions.BraveOptions -> {
             BraveOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.SerperOptions -> {
+            SerperOptions(options) { onUpdateOptions(it) }
+        }
+
+        is SearchServiceOptions.SerpApiOptions -> {
+            SerpApiOptions(options) { onUpdateOptions(it) }
         }
 
         is SearchServiceOptions.MetasoOptions -> {
@@ -969,6 +1153,46 @@ private fun BraveOptions(
                         apiKey = it
                     )
                 )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun SerperOptions(
+    options: SearchServiceOptions.SerperOptions,
+    onUpdateOptions: (SearchServiceOptions.SerperOptions) -> Unit
+) {
+    FormItem(
+        label = {
+            Text("API Key")
+        }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = {
+                onUpdateOptions(options.copy(apiKey = it))
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun SerpApiOptions(
+    options: SearchServiceOptions.SerpApiOptions,
+    onUpdateOptions: (SearchServiceOptions.SerpApiOptions) -> Unit
+) {
+    FormItem(
+        label = {
+            Text("API Key")
+        }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = {
+                onUpdateOptions(options.copy(apiKey = it))
             },
             modifier = Modifier.fillMaxWidth()
         )

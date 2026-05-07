@@ -12,6 +12,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+import java.net.URI
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Locale
 
@@ -58,20 +61,22 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
                 .header("Connection", "keep-alive")
                 .referrer("https://www.bing.com/")
                 .cookie("SRCHHPGUSR", "ULSR=1")
-                .timeout(5000)
+                .timeout(10_000)
                 .get()
 
-            // 解析搜索结果
-            val results = doc.select("li.b_algo").map { element ->
-                val title = element.select("h2").text()
-                val link = element.select("h2 > a").attr("href")
-                val snippet = element.select(".b_caption p").text()
-                SearchResultItem(
-                    title = title,
-                    url = link,
-                    text = snippet
-                )
+            val pageText = doc.text()
+            require(!pageText.contains("verify you are human", ignoreCase = true) &&
+                    !pageText.contains("unusual traffic", ignoreCase = true) &&
+                    !pageText.contains("captcha", ignoreCase = true)) {
+                "Bing blocked the request with a verification page"
             }
+
+            val primary = doc.select("li.b_algo").mapNotNull(::parseBingResult)
+            val fallback = if (primary.isEmpty()) parseFallbackLinks(doc.select("main h2 a, #b_results h2 a, h2 a")) else emptyList()
+            val results = (primary + fallback)
+                .filter { it.title.isNotBlank() && it.url.startsWith("http") }
+                .distinctBy { it.url }
+                .take(commonOptions.resultSize)
 
             require(results.isNotEmpty()) {
                 "Search failed: no results found"
@@ -79,6 +84,42 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
 
             SearchResult(items = results)
         }
+    }
+
+    private fun parseBingResult(element: Element): SearchResultItem? {
+        val anchor = element.selectFirst("h2 a") ?: return null
+        val title = anchor.text().trim()
+        val link = decodeBingUrl(anchor.attr("href")).trim()
+        val snippet = element.select(".b_caption p, .b_snippet, p").firstOrNull()?.text().orEmpty().trim()
+        return SearchResultItem(
+            title = title,
+            url = link,
+            text = snippet
+        )
+    }
+
+    private fun parseFallbackLinks(anchors: List<Element>): List<SearchResultItem> {
+        return anchors.mapNotNull { anchor ->
+            val title = anchor.text().trim()
+            val link = decodeBingUrl(anchor.attr("href")).trim()
+            if (title.isBlank() || !link.startsWith("http")) return@mapNotNull null
+            SearchResultItem(
+                title = title,
+                url = link,
+                text = anchor.parent()?.parent()?.text().orEmpty().take(500),
+            )
+        }
+    }
+
+    private fun decodeBingUrl(raw: String): String {
+        return runCatching {
+            val uri = URI(raw)
+            val target = uri.rawQuery
+                ?.split("&")
+                ?.firstOrNull { it.substringBefore("=") in setOf("u", "url") }
+                ?.substringAfter("=", "")
+            if (target.isNullOrBlank()) raw else URLDecoder.decode(target, "UTF-8")
+        }.getOrDefault(raw)
     }
 
     override suspend fun scrape(
