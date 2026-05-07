@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -21,9 +22,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -40,6 +41,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.util.fastForEach
@@ -52,6 +55,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -90,14 +95,18 @@ fun SettingAgentMemoryPage() {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { memoryDialogState.confirm() }) {
-                    Text(stringResource(R.string.assistant_page_save))
-                }
+                PulseDialogButton(
+                    onClick = { memoryDialogState.confirm() },
+                    text = stringResource(R.string.assistant_page_save),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { memoryDialogState.dismiss() }) {
-                    Text(stringResource(R.string.assistant_page_cancel))
-                }
+                PulseDialogButton(
+                    onClick = { memoryDialogState.dismiss() },
+                    text = stringResource(R.string.assistant_page_cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             },
         )
     }
@@ -123,6 +132,17 @@ fun SettingAgentMemoryPage() {
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Ink-grounded stat hero. Three KPI tiles share the dark
+            // canvas with chartreuse content — high-contrast, glanceable
+            // memory inventory at the top of the page. CORE = persistent
+            // user-curated memories; SHORT-TERM = working memory entries;
+            // LONG-TERM = consolidated condensed memories.
+            MemoryStatHero(
+                core = memories.size,
+                shortTerm = shortTermMemories.size,
+                longTerm = longTermMemories.size,
+            )
+
             AgentSoulCard(
                 value = settings.agentRuntime.agentSoulMarkdown,
                 onSave = { value ->
@@ -295,10 +315,89 @@ fun SettingAgentMemoryPage() {
             title = { Text(title) },
             text = { Text(text) },
             confirmButton = {
-                TextButton(onClick = { memoryInfoDialog = null }) {
-                    Text(stringResource(R.string.confirm))
-                }
+                PulseDialogButton(
+                    onClick = { memoryInfoDialog = null },
+                    text = stringResource(R.string.confirm),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
+        )
+    }
+}
+
+/**
+ * Three-tile ink-grounded stat hero for the Memory page. Each tile is
+ * the same dark surface but the value digit gets a different accent —
+ * chartreuse for the count that's most actively used (Core), orange
+ * for the working set (Short-term), cream for the consolidated archive
+ * (Long-term). Bold black 30sp digits on ink for "fitness-tech KPI"
+ * read at a glance.
+ */
+@Composable
+private fun MemoryStatHero(
+    core: Int,
+    shortTerm: Int,
+    longTerm: Int,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.tertiary,
+        contentColor = MaterialTheme.colorScheme.onTertiary,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MemoryStatSlot(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.setting_agent_memory_stat_core),
+                value = core.toString().padStart(2, '0'),
+                valueColor = MaterialTheme.colorScheme.primary,
+            )
+            MemoryStatSlot(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.setting_agent_memory_stat_short),
+                value = shortTerm.toString().padStart(2, '0'),
+                valueColor = MaterialTheme.colorScheme.secondary,
+            )
+            MemoryStatSlot(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.setting_agent_memory_stat_long),
+                value = longTerm.toString().padStart(2, '0'),
+                valueColor = MaterialTheme.colorScheme.onTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemoryStatSlot(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = label.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.1.em,
+            ),
+            color = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.65f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Black,
+            color = valueColor,
         )
     }
 }
@@ -385,19 +484,21 @@ private fun AgentSoulCard(
                 )
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         onSave(draft)
                         showEditor = false
                     },
-                ) {
-                    Text(stringResource(R.string.assistant_page_save))
-                }
+                    text = stringResource(R.string.assistant_page_save),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showEditor = false }) {
-                    Text(stringResource(R.string.assistant_page_cancel))
-                }
+                PulseDialogButton(
+                    onClick = { showEditor = false },
+                    text = stringResource(R.string.assistant_page_cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             },
         )
     }

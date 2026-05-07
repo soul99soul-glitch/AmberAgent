@@ -1152,6 +1152,9 @@
   <string name="setting_agent_memory_records_title">Memory Records</string>
   <string name="setting_agent_memory_short_records_title">Short-Term Records</string>
   <string name="setting_agent_memory_long_records_title">Long-Term Records</string>
+  <string name="setting_agent_memory_stat_core">Core</string>
+  <string name="setting_agent_memory_stat_short">Short-term</string>
+  <string name="setting_agent_memory_stat_long">Long-term</string>
   <string name="setting_agent_memory_edit_title">Edit Memory</string>
   <string name="setting_agent_memory_content_label">Memory content</string>
   <string name="setting_agent_memory_empty">No core memories yet.</string>
