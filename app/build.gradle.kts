@@ -21,7 +21,12 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.amberagent"
+        // Renamed from me.rerere.amberagent on this Pulse-redesign branch.
+        // The app's brand identity is "Pulse"; the Java/Kotlin source still
+        // lives under me.rerere.rikkahub.* (namespace above) — Android lets
+        // applicationId differ from the source package, so the rename is
+        // cosmetic and doesn't require touching every import.
+        applicationId = "me.rerere.pulse"
         minSdk = 26
         targetSdk = 37
         versionCode = 194
@@ -85,14 +90,14 @@ android {
             buildConfigField("Boolean", "NOTION_LIKE", "false")
         }
         debug {
-            // Pulse-redesign lane suffix so this APK installs alongside the
-            // Codex (`.debug`) lane and the frozen M3 (`.debug.claude`) lane
-            // on the same device. Final applicationId:
-            // me.rerere.amberagent.debug.pulse
-            applicationIdSuffix = ".debug.pulse"
-            // Override app_name only for this variant so the launcher icon
-            // label distinguishes the three lanes side-by-side.
-            resValue("string", "app_name", "AmberAgent · Pulse")
+            // Pulse debug variant. Final applicationId becomes me.rerere.pulse.debug
+            // — distinct from Codex's me.rerere.amberagent.debug and the
+            // frozen M3 lane's me.rerere.amberagent.debug.claude, so all three
+            // APKs continue to install side-by-side on the same device.
+            // The app_name resValue override is gone now that strings.xml
+            // already says "Pulse" — no need to differentiate via the
+            // launcher label.
+            applicationIdSuffix = ".debug"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "NOTION_LIKE", "false")

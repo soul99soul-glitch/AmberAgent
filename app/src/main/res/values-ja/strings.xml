@@ -7,7 +7,7 @@
   <string name="about_page_version">バージョン</string>
   <string name="about_page_website">ウェブサイト</string>
   <string name="add">追加</string>
-  <string name="app_name">Amber</string>
+  <string name="app_name">Pulse</string>
   <string name="assistant_detail_basic_desc">名前、アバター、モデル、パラメータを設定</string>
   <string name="assistant_detail_extensions_desc">プロンプトインジェクション、ロアブック、スキルを管理</string>
   <string name="assistant_detail_local_tools_desc">JavaScriptエンジンなどのローカルツールを有効化</string>

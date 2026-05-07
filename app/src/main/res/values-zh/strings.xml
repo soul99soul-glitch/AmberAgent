@@ -7,7 +7,7 @@
   <string name="about_page_version">版本</string>
   <string name="about_page_website">官网</string>
   <string name="add">添加</string>
-  <string name="app_name">Amber</string>
+  <string name="app_name">Pulse</string>
   <string name="assistant_detail_basic_desc">配置名称、头像、模型和参数</string>
   <string name="assistant_detail_extensions_desc">管理提示词注入、世界书和技能等扩展</string>
   <string name="assistant_detail_local_tools_desc">启用本地工具（如 JavaScript 引擎）</string>
