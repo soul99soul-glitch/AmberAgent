@@ -223,6 +223,27 @@ fun WorkspaceLeadingIcon(
     }
 }
 
+/**
+ * Pulse circular icon button.
+ *
+ * Replaces the old 6dp-rounded-square workspace icon button with a
+ * fully circular surface (mockup-faithful — every icon-button in the
+ * Pulse mockup is a circle). Shape and color treatment depend on tone
+ * + showBorder:
+ *
+ *   Neutral + showBorder=true    → cream surface with 1.5dp ink hairline
+ *                                   (default top-bar action affordance)
+ *   Neutral + showBorder=false   → transparent surface, ink icon
+ *                                   (text-button-equivalent for icons)
+ *   Accent (tone)                → chartreuse-tinted container, ink icon
+ *   Success / Warning / Danger   → matching tone container + content
+ *                                   (collapses to chartreuse / orange via
+ *                                   the Pulse workspace token mapping)
+ *
+ * Container override (containerColor param) bypasses tone — used when
+ * the call site needs a specific surface (e.g. ChatPage's TopBar
+ * "New Message" button overrides container to paper for visual rest).
+ */
 @Composable
 fun WorkspaceIconButton(
     onClick: () -> Unit,
@@ -244,15 +265,30 @@ fun WorkspaceIconButton(
         WorkspaceTone.Warning -> colors.amber
         WorkspaceTone.Danger -> colors.red
     }.copy(alpha = if (enabled) 1f else 0.36f)
+    val resolvedContainer = containerColor ?: when (tone) {
+        WorkspaceTone.Neutral -> colors.paper
+        WorkspaceTone.Accent -> colors.blueContainer
+        WorkspaceTone.Success -> colors.greenContainer
+        WorkspaceTone.Warning -> colors.amberContainer
+        WorkspaceTone.Danger -> colors.redContainer
+    }
     Surface(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
-        color = containerColor ?: if (tone == WorkspaceTone.Accent) colors.blueContainer else colors.paper,
+        shape = CircleShape,
+        color = resolvedContainer,
         contentColor = contentColor,
-        border = if (showBorder) workspaceBorder(alpha = if (enabled) 1f else 0.48f) else null,
+        border = if (showBorder) {
+            // 1.5dp ink hairline matches the Pulse mockup's outlined
+            // circular button treatment (e.g. top-bar back / search /
+            // info icons). Subtler than M3's default 1dp variant.
+            BorderStroke(
+                width = 1.5.dp,
+                color = colors.ink.copy(alpha = if (enabled) 0.85f else 0.36f),
+            )
+        } else null,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -264,6 +300,16 @@ fun WorkspaceIconButton(
     }
 }
 
+/**
+ * Pulse pill text button.
+ *
+ * The mockup's secondary text affordances ("View all", "See more",
+ * inline labels) all sit inside a pill shape with a subtle outline.
+ * Switched from the old 6dp rounded square to CircleShape (which
+ * Compose interprets as a fully-rounded pill at the row's height) and
+ * bumped padding so the touch target reads as a deliberate button
+ * rather than a tappable text label.
+ */
 @Composable
 fun WorkspaceTextButton(
     text: String,
@@ -273,7 +319,7 @@ fun WorkspaceTextButton(
 ) {
     val colors = workspaceColors()
     val contentColor = when (tone) {
-        WorkspaceTone.Neutral -> colors.muted
+        WorkspaceTone.Neutral -> colors.ink
         WorkspaceTone.Accent -> colors.blue
         WorkspaceTone.Success -> colors.green
         WorkspaceTone.Warning -> colors.amber
@@ -281,20 +327,23 @@ fun WorkspaceTextButton(
     }
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(CircleShape)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
+        shape = CircleShape,
         color = colors.paper,
         contentColor = contentColor,
-        border = workspaceBorder(),
+        border = BorderStroke(
+            width = 1.5.dp,
+            color = colors.ink.copy(alpha = 0.18f),
+        ),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = text,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
             )
         }

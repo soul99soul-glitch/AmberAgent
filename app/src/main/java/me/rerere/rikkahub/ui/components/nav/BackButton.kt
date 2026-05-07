@@ -35,11 +35,15 @@ fun BackButton(modifier: Modifier = Modifier) {
         return
     }
 
+    // Pulse circular outlined back button (36dp, 18dp icon). Inherits
+    // the cream-on-ink-hairline treatment from WorkspaceIconButton's
+    // Pulse-pivoted defaults — matches every other top-bar circular
+    // affordance in the Pulse mockup at the same visual density.
     WorkspaceIconButton(
         onClick = onBack,
         modifier = modifier,
-        size = 34.dp,
-        iconSize = 17.dp,
+        size = 36.dp,
+        iconSize = 18.dp,
         icon = HugeIcons.ArrowLeft01,
         contentDescription = contentDescription,
     )
