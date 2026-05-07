@@ -1,12 +1,17 @@
 package me.rerere.rikkahub.ui.components.chat
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -47,6 +52,8 @@ fun NewChatHero(
     greeting: String = "Hi.",
     eyebrow: String? = null,
     subtext: String? = null,
+    suggestions: List<String> = emptyList(),
+    onClickSuggestion: (String) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -89,6 +96,66 @@ fun NewChatHero(
                 text = subtext,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        // Suggestion cards: cream-soft surface, full-width, tap-to-fill.
+        // Per the Pulse mockup's "New Conversation" screen, the empty
+        // state shows three deliberate suggestion cards rather than the
+        // active-chat horizontal chip strip. Cards give each suggestion
+        // more room to breathe and read as conversational prompts rather
+        // than terse labels, which fits the "I just opened a fresh chat,
+        // what should I try" mindset.
+        if (suggestions.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            suggestions.take(SUGGESTION_LIMIT).forEach { suggestion ->
+                SuggestionCard(
+                    text = suggestion,
+                    onClick = { onClickSuggestion(suggestion) },
+                )
+            }
+        }
+    }
+}
+
+private const val SUGGESTION_LIMIT = 3
+
+@Composable
+private fun SuggestionCard(
+    text: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // Sport-orange leading "›" mark anchors each card. Avoiding
+            // emoji deliberately — emoji would look stickerish against
+            // the otherwise restrained Pulse palette, and choosing a
+            // per-suggestion emoji would require taxonomy we don't have
+            // for arbitrary user-generated suggestions.
+            Text(
+                text = "›",
+                color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                ),
+            )
+            Text(
+                text = text,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                ),
             )
         }
     }

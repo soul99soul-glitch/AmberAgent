@@ -653,11 +653,10 @@ private fun ChatListNormal(
 
             // Empty-state hero. Renders only when the conversation has no
             // message nodes AND the timeline isn't actively loading older
-            // history. The pending-message and suggestions overlays continue
-            // to render via their own paths (see ChatSuggestionsRow below
-            // and the pending-bubble item further down) so we don't conflict
-            // with them when the user has already typed something into the
-            // composer for a fresh thread.
+            // history. Suggestions are wired through the hero (cream cards)
+            // instead of the active-chat horizontal chip strip below — the
+            // cards form is what the Pulse mockup specifies for the empty
+            // state, and the chip row continues to handle non-empty chats.
             if (conversation.messageNodes.isEmpty() &&
                 pendingUserMessages.isEmpty() &&
                 timelineLoadState.isFullyLoaded
@@ -666,7 +665,10 @@ private fun ChatListNormal(
                     key = "new-chat-hero",
                     contentType = "new-chat-hero",
                 ) {
-                    NewChatHero()
+                    NewChatHero(
+                        suggestions = conversation.chatSuggestions,
+                        onClickSuggestion = onClickSuggestion,
+                    )
                 }
             }
 
@@ -933,8 +935,16 @@ private fun ChatListNormal(
                 }
             }
 
-            // Suggestion
-            if (conversation.chatSuggestions.isNotEmpty() && !captureProgress) {
+            // Suggestion chip overlay for the active-chat case only.
+            // When the conversation is empty, NewChatHero renders the
+            // suggestions as cream cards inline, so the chip strip would
+            // double-up. Gating on messageNodes.isNotEmpty() keeps the
+            // chips present for ongoing threads where they're a "what to
+            // ask next" affordance rather than a "first input" prompt.
+            if (conversation.chatSuggestions.isNotEmpty() &&
+                !captureProgress &&
+                conversation.messageNodes.isNotEmpty()
+            ) {
                 ChatSuggestionsRow(
                     conversation = conversation,
                     onClickSuggestion = onClickSuggestion,
