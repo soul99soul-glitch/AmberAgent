@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.LocalContentColor
@@ -32,6 +34,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.ui.theme.CustomColors
 
 private val CardGroupCorner = 12.dp
@@ -122,13 +126,30 @@ private fun CardGroupListItem(
                 } else Modifier
             ),
     ) {
+        // Pulse Phase F: a navigable row (onClick != null) without an
+        // explicit trailingContent gets a default muted chevron — visual
+        // affordance that the row leads somewhere. Rows that pass any
+        // trailingContent (Switch, status pill, custom widget) keep
+        // theirs untouched. Suppress the chevron by passing an empty
+        // composable as trailingContent.
+        val resolvedTrailing: (@Composable () -> Unit)? = item.trailingContent
+            ?: if (item.onClick != null) {
+                {
+                    Icon(
+                        imageVector = HugeIcons.ArrowRight01,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else null
         ListItem(
             headlineContent = item.headlineContent,
             modifier = Modifier.fillMaxWidth(),
             overlineContent = item.overlineContent,
             supportingContent = item.supportingContent,
             leadingContent = item.leadingContent,
-            trailingContent = item.trailingContent,
+            trailingContent = resolvedTrailing,
             colors = item.colors ?: defaultColors ?: CustomColors.listItemColors,
         )
         if (item.selected) {
