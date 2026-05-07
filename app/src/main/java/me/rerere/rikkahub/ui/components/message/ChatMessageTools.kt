@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -601,14 +603,20 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         )
 
         if (hasExtraContent) {
+            // Pulse extra-content panel — sits below the tool capsule and
+            // shows tool-specific previews (memory body, search answer,
+            // scraped URL, TTS text, attached images, denial reason). All
+            // colors mapped to M3 semantic slots so the panel inherits
+            // Pulse tokens via Phase 1's mapping (surfaceVariant = tan,
+            // onSurfaceVariant = warm grey, error = sport-orange).
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 32.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-                border = BorderStroke(1.dp, workspace.hairline),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -621,7 +629,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = memoryContent,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = workspace.muted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -633,7 +641,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = answer,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = workspace.muted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
@@ -652,7 +660,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 Text(
                                     text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = workspace.faint,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                                 )
                             }
                         }
@@ -662,7 +670,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         Text(
                             text = url,
                             style = MaterialTheme.typography.labelSmall,
-                            color = workspace.faint,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                         )
                     }
                     if (tool.toolName == ToolNames.TTS) {
@@ -675,7 +683,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             Text(
                                 text = text,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = workspace.muted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
@@ -712,7 +720,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             text = stringResource(R.string.chat_message_tool_denied) +
                                 if (reason.isNotBlank()) ": $reason" else "",
                             style = MaterialTheme.typography.labelSmall,
-                            color = workspace.red,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
@@ -945,34 +953,56 @@ private fun GenericToolPreview(
             .fillMaxHeight(0.8f)
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
+        // Pulse modal-sheet header: sport-orange ALL-CAPS eyebrow + ink
+        // headline + optional trailing destructive action. Replaces the
+        // earlier flat "Tool call" headlineSmall with a more deliberate
+        // header treatment that matches the Pulse mockup's tool-detail
+        // top region.
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                text = stringResource(R.string.chat_message_tool_call_title),
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center
-            )
-
-            if (isMemoryOperation && memoryId != null) {
-                IconButton(
-                    onClick = {
-                        scope.launch {
-                            memoryRepo.deleteMemory(memoryId)
-                            onDismissRequest()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "TOOL · ${toolName.uppercase()}",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.10.em,
+                    ),
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (isMemoryOperation && memoryId != null) {
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                memoryRepo.deleteMemory(memoryId)
+                                onDismissRequest()
+                            }
                         }
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Delete01,
+                            contentDescription = "Delete memory",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Delete01,
-                        contentDescription = "Delete memory"
-                    )
                 }
             }
+            Text(
+                text = stringResource(R.string.chat_message_tool_call_title),
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
         FormItem(
             label = {
