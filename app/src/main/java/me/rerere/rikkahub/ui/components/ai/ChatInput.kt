@@ -25,7 +25,11 @@ import androidx.compose.foundation.content.consume
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -526,13 +530,41 @@ fun ChatInput(
                             )
                         }
 
+                        // Pulse send button: chartreuse asymmetric squircle. The four
+                        // corners are split (20/6/20/6) so the shape reads as an
+                        // off-balance, sport-tech "go" pill rather than a plain rounded
+                        // square. Press tracked via collectIsPressedAsState; on press
+                        // the whole button springs to 0.92× scale with low-bounce damping
+                        // so release rebounds noticeably without feeling rubbery.
+                        // Colors map to Pulse semantic intents:
+                        //   - state.isEmpty                 → tan + warm-grey icon (idle, can't send)
+                        //   - loading & empty (cancel)     → ink + cream icon (spotlight stop affordance)
+                        //   - has text (primary send)      → chartreuse + ink icon (the go state)
+                        //   - has text & loading (queue)   → sport-orange + cream icon (queued send)
+                        val sendInteraction = remember { MutableInteractionSource() }
+                        val sendPressed by sendInteraction.collectIsPressedAsState()
+                        val sendEnabled = loading || !state.isEmpty()
+                        val sendScale by animateFloatAsState(
+                            targetValue = if (sendPressed && sendEnabled) 0.92f else 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                            label = "pulseSendScale",
+                        )
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .size(ComposerButtonSize)
-                                .clip(RoundedCornerShape(8.dp))
+                                .graphicsLayer {
+                                    scaleX = sendScale
+                                    scaleY = sendScale
+                                }
+                                .clip(RoundedCornerShape(20.dp, 6.dp, 20.dp, 6.dp))
                                 .combinedClickable(
-                                    enabled = loading || !state.isEmpty(),
+                                    interactionSource = sendInteraction,
+                                    indication = LocalIndication.current,
+                                    enabled = sendEnabled,
                                     onClick = {
                                         dismissExpand()
                                         sendMessage()
@@ -544,22 +576,27 @@ fun ChatInput(
                         ) {
                             val isQueueSend = loading && !state.isEmpty()
                             val containerColor = when {
-                                isQueueSend -> workspace.blue
-                                loading -> workspace.amberContainer
-                                state.isEmpty() -> workspace.row
-                                else -> workspace.blue
+                                isQueueSend -> MaterialTheme.colorScheme.secondary    // queued = orange
+                                loading -> MaterialTheme.colorScheme.tertiary         // cancel = ink spotlight
+                                state.isEmpty() -> MaterialTheme.colorScheme.surfaceVariant
+                                else -> MaterialTheme.colorScheme.primary              // ready = chartreuse
                             }
                             val contentColor = when {
-                                isQueueSend -> Color.White
-                                loading -> workspace.amber
-                                state.isEmpty() -> workspace.faint
-                                else -> Color.White
+                                isQueueSend -> MaterialTheme.colorScheme.onSecondary
+                                loading -> MaterialTheme.colorScheme.onTertiary
+                                state.isEmpty() -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.onPrimary            // ink on chartreuse
                             }
                             Surface(
                                 modifier = Modifier.fillMaxSize(),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(20.dp, 6.dp, 20.dp, 6.dp),
                                 color = containerColor,
-                                border = BorderStroke(1.dp, if (state.isEmpty()) workspace.hairline else Color.Transparent),
+                                // Idle state shows a faint hairline so the empty composer
+                                // still reads as a tappable affordance; active states
+                                // drop the border since the fill is loud enough.
+                                border = if (state.isEmpty() && !loading) {
+                                    BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                } else null,
                                 content = {})
                             if (loading && state.isEmpty()) {
                                 KeepScreenOn()
