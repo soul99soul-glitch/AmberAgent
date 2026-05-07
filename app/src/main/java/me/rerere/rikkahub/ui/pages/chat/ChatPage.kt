@@ -72,6 +72,7 @@ import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.ui.components.chat.ChatModelSwitchRow
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
@@ -363,22 +364,40 @@ private fun ChatPageContent(
         AssistantBackground(setting = setting)
         Scaffold(
             topBar = {
-                TopBar(
-                    settings = setting,
-                    conversation = conversation,
-                    bigScreen = bigScreen,
-                    drawerState = drawerState,
-                    previewMode = previewMode,
-                    onNewChat = {
-                        navigateToChatPage(navController)
-                    },
-                    onClickMenu = {
-                        previewMode = !previewMode
-                    },
-                    onUpdateTitle = {
-                        vm.updateTitle(it)
-                    },
-                )
+                // Pulse top region: TopAppBar with title + actions, then a
+                // horizontal model-switch strip directly below it. The strip
+                // is part of the topBar slot (not the body) so it stays
+                // pinned while the timeline scrolls and matches the Pulse
+                // mockup's chat-screen layout where the model chips live
+                // immediately under the title row.
+                Column {
+                    TopBar(
+                        settings = setting,
+                        conversation = conversation,
+                        bigScreen = bigScreen,
+                        drawerState = drawerState,
+                        previewMode = previewMode,
+                        onNewChat = {
+                            navigateToChatPage(navController)
+                        },
+                        onClickMenu = {
+                            previewMode = !previewMode
+                        },
+                        onUpdateTitle = {
+                            vm.updateTitle(it)
+                        },
+                    )
+                    ChatModelSwitchRow(
+                        currentModelId = currentChatModel?.id,
+                        providers = setting.providers,
+                        onSelectModel = { model ->
+                            vm.setChatModel(
+                                assistant = setting.getCurrentAssistant(),
+                                model = model,
+                            )
+                        },
+                    )
+                }
             },
             bottomBar = {
                 ChatInput(
