@@ -1,0 +1,32 @@
+<!--
+  Pulse adaptive-icon monochrome layer (Android 13+ themed icons).
+
+  When the user enables themed icons, the OS strips color and applies
+  its own tint based on the system color scheme. Only the silhouette
+  matters here: combine the ECG path AND the apex dot into one tinted
+  drawable so the focal point survives even when color is removed.
+
+  We drop the ink+orange split (since the OS will tint everything in a
+  single hue anyway) and merge them into a single white path. The OS
+  will overlay its tint and produce a coherent silhouette.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108"
+    android:tint="?attr/colorControlNormal">
+
+    <!-- ECG trace -->
+    <path
+        android:pathData="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Apex focal dot -->
+    <path
+        android:pathData="M 54,18 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0"
+        android:fillColor="#FFFFFFFF" />
+</vector>

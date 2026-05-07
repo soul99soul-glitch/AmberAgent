@@ -1,0 +1,46 @@
+<!--
+  Pulse adaptive-icon foreground: an ECG / data-pulse trace in ink with a
+  single sport-orange focal dot at the R-wave apex.
+
+  Reads three ways at once:
+    1. Heartbeat trace          — runs with the Pulse Performance brand
+    2. Data signal              — the AI is "listening" / "processing"
+    3. Implicit "A" silhouette  — the climb + apex echo AmberAgent's first letter
+
+  The geometry stays inside the adaptive-icon safe zone (centered 72dp
+  square within the 108dp viewport, so x:[18,90] y:[18,90]) so no
+  launcher mask crops the meaningful content. Stroke width is 4.5dp
+  with round caps + joins so it survives down to ~48px launcher renders
+  without losing the peak's sharpness.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+      ECG path:
+        flat baseline → small Q dip → sharp R climb to apex →
+        sharp S drop → small recovery → flat baseline.
+      The R apex sits at (54, 24) — the focal point under which the
+      sport-orange dot is anchored.
+    -->
+    <path
+        android:pathData="M 20,60 L 42,60 L 46,66 L 54,24 L 62,66 L 66,60 L 88,60"
+        android:strokeColor="#FF1A1A1A"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!--
+      Sport-orange focal dot at the apex. 6dp radius (12dp diameter) so
+      it stays legible at small launcher sizes (~3px at the smallest
+      common 48px render). Positioned slightly above the apex so it
+      reads as a separate "where the pulse is pointing" mark rather
+      than a connected node on the trace.
+    -->
+    <path
+        android:pathData="M 54,18 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0"
+        android:fillColor="#FFE85D2F" />
+</vector>
