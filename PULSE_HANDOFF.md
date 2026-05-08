@@ -116,6 +116,17 @@ results are visible in the commit messages.
 
 | Phase | Commit | TLDR |
 |---|---|---|
+| pJ2 | `01616f91` | SettingMcpPage tool card 12dp + 5 TextField → PulseTextField |
+| pJ1 | `7a9568d1` | SettingMcpPage stat hero + status palette → colorScheme (+ ProviderConnectionTester) |
+| pI2 | `0c08b030` | SettingSearchPage: 27 OutlinedTextField → PulseTextField |
+| pI1 | `f5c23e0e` | SettingSearchPage stat hero (Enabled / Built-in / External) |
+| pH3 | `16089cbc` | ProviderConfigure (16) + BalanceOption (2) TextField sweep |
+| pH2 | `0d2c349d` | ProviderDetail TextField sweep + WCAG fix + picker polish |
+| pH1 | `9e902ab1` | ProviderDetail SegmentedButton → WorkspaceSegmentedMultiChoice |
+| pG | `b0eaf70b` | PulseTextField wrapper (theme-aware OutlinedTextField) |
+| Phase II | `1426d876` | 11-phase tonality + transitions + a11y + i18n wave (95 files) |
+| pulse-fix-2 | `2195f6e0` | Cherry-pick upstream Xiaomi notifications |
+| codex-pick | `8b8b3b73` | Cherry-pick upstream Codex OAuth + message virtualization |
 | pF | `a3b031e7` | CardGroup default trailing chevron on navigable rows |
 | pE | `6be1953f` | Experimental page bespoke leading chips → Phase A treatment |
 | pD | `20f54fcd` | 4 MEDIUM contrast fixes (ChatInput ×4, syntax span, ImgGen, ImagePreview) |
@@ -134,23 +145,84 @@ results are visible in the commit messages.
 
 For everything older, `git log --oneline` or `git log --grep="pulse-"`.
 
+## Hard-bones wave (G–J) deliverables
+
+Wave G–J targeted the three remaining big pages flagged as "still
+M3-default" after Phase II:
+
+- **SettingProviderDetailPage.kt** (1616 LOC): SegmentedButton ×3 →
+  WorkspaceSegmentedMultiChoice (H1); 4 OutlinedTextField + model
+  picker hairline borders + WCAG-fixed focused label (H2);
+  ProviderConfigure (16) + BalanceOption (2) TextField sweep + Tester
+  palette (H3).
+- **SettingSearchPage.kt** (1576 LOC): 3-tile stat hero (I1); 27
+  OutlinedTextField → PulseTextField across 16 provider editors (I2).
+- **SettingMcpPage.kt** (1014 LOC): status dot palette + ink stat
+  hero (J1); McpToolCard 12dp + 5 OutlinedTextField → PulseTextField
+  (J2).
+
+Foundation: **PulseTextField.kt** wrapper (G) cascades chartreuse
+focus border + ink cursor + hairline outline to every PulseTextField
+call site automatically. **WorkspaceSegmentedMultiChoice** (H1)
+fills the multi-select gap left by single-select WorkspaceSegmentedChoice.
+
+After this wave: **49+ TextField call sites** on PulseTextField; the
+three hard-bones pages render Pulse-aligned at the form-widget level.
+
 ## Open follow-ups
 
-1. **`CardGroup.selected` API is dormant.** Phase B added the
+1. **Remaining OutlinedTextField call sites** (~108 across the app).
+   The G–J wave migrated 54 sites in the three hard-bones pages. The
+   rest live in: shared utility components (Form.kt, TextArea.kt,
+   UIAvatar.kt, Emoji.kt) which wrap OutlinedTextField directly,
+   assistant detail pages (Basic / Prompt / Property), various chat
+   surfaces (ChatInput, ChatList, ChatPage, ChatMessageTools,
+   CompressContextDialog, ModelList), plus extension / backup /
+   debug pages that weren't in scope. Migrating them is a future
+   "M3 mop-up" wave — most are mechanical sed sweeps once the call
+   site is structurally compatible.
+
+2. **`CardGroup.selected` API is dormant.** Phase B added the
    parameter but no caller passes `selected = true` yet. Wire it on
    whichever row should be highlighted (e.g. the active settings
    sub-page in a nav rail layout, if one is added).
 
-2. **Two ChatInput slash-command chips at lines ~2292 / ~2387** still
+3. **Two ChatInput slash-command chips at lines ~2292 / ~2387** still
    pair `workspace.blueContainer` (= `primaryContainer`) with
    `workspace.blue` (= `primary`) — same chartreuse-on-pale-chartreuse
    pattern that Phase D fixed at 4 other sites in the same file. Out
    of Phase D's mandate; small follow-up sweep.
 
-3. **Missing KDoc on `CardGroupItem.trailingContent`** — the chevron
+4. **Missing KDoc on `CardGroupItem.trailingContent`** — the chevron
    suppression escape hatch (`trailingContent = {}` to disable the
    Phase F default) is documented only in commit messages. One-line
    KDoc would help future callers.
+
+5. **`Tag.kt` extendColors palette.** TagType.SUCCESS / ERROR /
+   WARNING / INFO use `MaterialTheme.extendColors.green2` / `red2` /
+   `orange2` / `blue2` (BG) and `gray8` / `red8` / `orange8` / `blue8`
+   (text) — the legacy palette intentionally distinct from Pulse
+   semantics. If global Tag styling is desired, a single Tag.kt
+   edit propagates everywhere it's used. Not in scope for the G–J
+   wave.
+
+6. **MultiChoiceSegmentedButtonRow** still in `S3Tab.kt` /
+   `WebDavTab.kt` (backup feature). Out of hard-bones scope; needs a
+   small follow-up phase or rolls into a backup-page polish pass.
+
+7. **2× M3 SegmentedButton holdouts** in `SettingExperimentalPage.kt`
+   sub-pages (model council / sub-agent) — also out of hard-bones
+   scope.
+
+## Pulse coverage estimate (post-wave G–J)
+
+| Layer | Coverage |
+|---|---|
+| Visual identity (theme, button vocab, row vocab, leading icons) | ~95% |
+| Settings hierarchy (root + 11 CardGroup pages + 3 hard-bones rebuilt) | ~95% |
+| Assistant detail (basic / prompt / property) | partial — Phase 23 swept buttons, TextFields not yet migrated |
+| Chat surfaces (page, list, input, message components) | partial — Phase D fixed primary contrast, TextFields not migrated |
+| Code-identity (package namespace `me.rerere.rikkahub.*`) | unchanged — Phase K work, intentionally deferred |
 
 4. **`HistoryPage.kt:220` is deliberately NOT changed.** The
    conversations-home "04 ACTIVE THREADS · READY" 64sp ExtraBold
