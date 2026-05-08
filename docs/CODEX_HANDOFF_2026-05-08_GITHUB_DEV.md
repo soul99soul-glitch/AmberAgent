@@ -115,11 +115,12 @@ The user wants AmberAgent to eventually become independent from RikkaHub. Curren
 - `me.rerere.rikkahub` still appears across hundreds of files.
 - Android namespace is still `me.rerere.rikkahub`.
 - `RikkaHubApp`, `RikkahubTheme`, backup paths, README links, RikkaHub search service, and upstream license text still exist.
-- The Agent framework is not LangChain / AutoGen / CrewAI / LlamaIndex. It is:
-  - RikkaHub chat/provider/message foundation.
-  - Custom AmberAgent `GenerationHandler` tool loop.
-  - Custom `Tool` abstraction and `AgentToolDispatcher`.
+- The Agent runtime does not import LangChain / AutoGen / CrewAI / LlamaIndex as its core framework. More precisely, it is:
+  - RikkaHub chat/provider/message foundation, including the original basic tool-call loop shape in `GenerationHandler`.
+  - AmberAgent extensions on top of that loop: permission decisions, tool dispatch policy, speculative read-only tool execution, task runtime, terminal/workspace tools, subagents, cron, context compression, and long-running activity records.
+  - Project-local `Tool` abstraction and `AgentToolDispatcher` implementation.
   - MCP as an external tool protocol via `io.modelcontextprotocol:kotlin-sdk`.
+  - Open-source agent products such as Codex/opencode are reference points for OAuth/tooling behavior, not vendored core Agent framework code in this repo.
 
 If continuing the "detach from RikkaHub" work, split it into stages:
 
