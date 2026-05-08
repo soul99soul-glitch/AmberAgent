@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
+import me.rerere.rikkahub.ui.components.ui.PulseTextField
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -277,7 +277,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         )
     }
 
-    OutlinedTextField(
+    PulseTextField(
         value = provider.name,
         onValueChange = {
             onEdit(provider.copy(name = it.trim()))
@@ -320,7 +320,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
     )
 
     if (provider.authMode == OpenAIAuthMode.API_KEY) {
-        OutlinedTextField(
+        PulseTextField(
             value = provider.apiKey,
             onValueChange = {
                 onEdit(provider.copy(apiKey = it.trim()))
@@ -332,7 +332,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
             maxLines = 3,
         )
 
-        OutlinedTextField(
+        PulseTextField(
             value = provider.baseUrl,
             onValueChange = {
                 onEdit(provider.copy(baseUrl = it.trim()))
@@ -345,7 +345,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         )
 
         if (!provider.useResponseApi) {
-            OutlinedTextField(
+            PulseTextField(
                 value = provider.chatCompletionsPath,
                 onValueChange = {
                     onEdit(provider.copy(chatCompletionsPath = it.trim()))
@@ -383,7 +383,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedTextField(
+        PulseTextField(
             value = OPENAI_CODEX_BACKEND_BASE_URL,
             onValueChange = {},
             label = {
@@ -409,7 +409,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
+            PulseTextField(
                 value = oauthDeviceCode.orEmpty(),
                 onValueChange = {},
                 label = {
@@ -620,7 +620,7 @@ private fun ColumnScope.ProviderConfigureClaude(
         )
     }
 
-    OutlinedTextField(
+    PulseTextField(
         value = provider.name,
         onValueChange = {
             onEdit(provider.copy(name = it.trim()))
@@ -632,7 +632,7 @@ private fun ColumnScope.ProviderConfigureClaude(
         maxLines = 3,
     )
 
-    OutlinedTextField(
+    PulseTextField(
         value = provider.apiKey,
         onValueChange = {
             onEdit(provider.copy(apiKey = it.trim()))
@@ -644,7 +644,7 @@ private fun ColumnScope.ProviderConfigureClaude(
         maxLines = 3,
     )
 
-    OutlinedTextField(
+    PulseTextField(
         value = provider.baseUrl,
         onValueChange = {
             onEdit(provider.copy(baseUrl = it.trim()))
@@ -719,7 +719,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
         )
     }
 
-    OutlinedTextField(
+    PulseTextField(
         value = provider.name,
         onValueChange = {
             onEdit(provider.copy(name = it.trim()))
@@ -743,7 +743,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
     }
 
     if (!(provider.vertexAI && provider.useServiceAccount)) {
-        OutlinedTextField(
+        PulseTextField(
             value = provider.apiKey,
             onValueChange = {
                 onEdit(provider.copy(apiKey = it.trim()))
@@ -757,7 +757,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
     }
 
     if (!provider.vertexAI) {
-        OutlinedTextField(
+        PulseTextField(
             value = provider.baseUrl,
             onValueChange = {
                 onEdit(provider.copy(baseUrl = it.trim()))
@@ -797,7 +797,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
                 modifier = Modifier.fillMaxWidth(),
                 text = stringResource(R.string.setting_provider_page_import_service_account_json),
             )
-            OutlinedTextField(
+            PulseTextField(
                 value = provider.serviceAccountEmail,
                 onValueChange = {
                     onEdit(provider.copy(serviceAccountEmail = it.trim()))
@@ -807,7 +807,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
-            OutlinedTextField(
+            PulseTextField(
                 value = provider.privateKey,
                 onValueChange = {
                     onEdit(provider.copy(privateKey = it.trim()))
@@ -820,7 +820,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
                 minLines = 3,
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
             )
-            OutlinedTextField(
+            PulseTextField(
                 value = provider.location,
                 onValueChange = {
                     onEdit(provider.copy(location = it.trim()))
@@ -831,7 +831,7 @@ private fun ColumnScope.ProviderConfigureGoogle(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
-            OutlinedTextField(
+            PulseTextField(
                 value = provider.projectId,
                 onValueChange = {
                     onEdit(provider.copy(projectId = it.trim()))
