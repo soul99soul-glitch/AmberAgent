@@ -422,3 +422,56 @@ fun <T> WorkspaceSegmentedChoice(
         }
     }
 }
+
+/**
+ * Multi-select sibling of [WorkspaceSegmentedChoice]. Each option is
+ * independently toggleable; the [selected] set tracks all currently
+ * checked options. Tapping an option calls [onToggled] with the option
+ * + its new checked state.
+ *
+ * Visual treatment matches the single-select variant — chartreuse
+ * (workspace.row) fill on selected, muted on unselected — so the two
+ * form a coherent pair. Use this when the underlying state is a
+ * `List<T>` / `Set<T>` of independent toggles (input modalities,
+ * model abilities, etc.); use the single-select sibling for
+ * mutually-exclusive picks.
+ */
+@Composable
+fun <T> WorkspaceSegmentedMultiChoice(
+    options: List<T>,
+    selected: Set<T>,
+    modifier: Modifier = Modifier,
+    onToggled: (T, Boolean) -> Unit,
+    label: @Composable (T) -> Unit,
+) {
+    val workspace = workspaceColors()
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, workspace.hairline, RoundedCornerShape(6.dp))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEach { option ->
+            val isSelected = option in selected
+            Surface(
+                onClick = { onToggled(option, !isSelected) },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(4.dp),
+                color = if (isSelected) workspace.row else Color.Transparent,
+                contentColor = if (isSelected) workspace.ink else workspace.muted,
+            ) {
+                CompositionLocalProvider(LocalContentColor provides LocalContentColor.current) {
+                    ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            label(option)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

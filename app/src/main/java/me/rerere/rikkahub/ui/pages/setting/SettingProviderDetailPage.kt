@@ -45,11 +45,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.Switch
@@ -107,6 +104,7 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.ShareSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedMultiChoice
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.SiliconFlowPowerByIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -1068,63 +1066,55 @@ private fun ModelModalitySelector(
             stringResource(R.string.setting_provider_page_input_modality),
             style = MaterialTheme.typography.titleSmall
         )
-        MultiChoiceSegmentedButtonRow(
+        WorkspaceSegmentedMultiChoice(
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Modality.entries.forEachIndexed { index, modality ->
-                SegmentedButton(
-                    checked = modality in inputModalities,
-                    shape = SegmentedButtonDefaults.itemShape(index, Modality.entries.size),
-                    onCheckedChange = {
-                        if (it) {
-                            onUpdateInputModalities(inputModalities + modality)
-                        } else {
-                            onUpdateInputModalities(inputModalities - modality)
-                        }
-                    }
-                ) {
-                    Text(
-                        text = stringResource(
-                            when (modality) {
-                                Modality.TEXT -> R.string.setting_provider_page_text
-                                Modality.IMAGE -> R.string.setting_provider_page_image
-                            }
-                        )
-                    )
+            options = Modality.entries,
+            selected = inputModalities.toSet(),
+            onToggled = { modality, checked ->
+                if (checked) {
+                    onUpdateInputModalities(inputModalities + modality)
+                } else {
+                    onUpdateInputModalities(inputModalities - modality)
                 }
-            }
-        }
+            },
+            label = { modality ->
+                Text(
+                    text = stringResource(
+                        when (modality) {
+                            Modality.TEXT -> R.string.setting_provider_page_text
+                            Modality.IMAGE -> R.string.setting_provider_page_image
+                        }
+                    )
+                )
+            },
+        )
 
         Text(
             stringResource(R.string.setting_provider_page_output_modality),
             style = MaterialTheme.typography.titleSmall
         )
-        MultiChoiceSegmentedButtonRow(
+        WorkspaceSegmentedMultiChoice(
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Modality.entries.forEachIndexed { index, modality ->
-                SegmentedButton(
-                    checked = modality in outputModalities,
-                    shape = SegmentedButtonDefaults.itemShape(index, Modality.entries.size),
-                    onCheckedChange = {
-                        if (it) {
-                            onUpdateOutputModalities(outputModalities + modality)
-                        } else {
-                            onUpdateOutputModalities(outputModalities - modality)
-                        }
-                    }
-                ) {
-                    Text(
-                        text = stringResource(
-                            when (modality) {
-                                Modality.TEXT -> R.string.setting_provider_page_text
-                                Modality.IMAGE -> R.string.setting_provider_page_image
-                            }
-                        )
-                    )
+            options = Modality.entries,
+            selected = outputModalities.toSet(),
+            onToggled = { modality, checked ->
+                if (checked) {
+                    onUpdateOutputModalities(outputModalities + modality)
+                } else {
+                    onUpdateOutputModalities(outputModalities - modality)
                 }
-            }
-        }
+            },
+            label = { modality ->
+                Text(
+                    text = stringResource(
+                        when (modality) {
+                            Modality.TEXT -> R.string.setting_provider_page_text
+                            Modality.IMAGE -> R.string.setting_provider_page_image
+                        }
+                    )
+                )
+            },
+        )
     }
 }
 
@@ -1137,33 +1127,28 @@ fun ModalAbilitySelector(
         stringResource(R.string.setting_provider_page_abilities),
         style = MaterialTheme.typography.titleSmall
     )
-    MultiChoiceSegmentedButtonRow(
+    WorkspaceSegmentedMultiChoice(
         modifier = Modifier.fillMaxWidth(),
-    ) {
-        ModelAbility.entries.forEachIndexed { index, ability ->
-            SegmentedButton(
-                checked = ability in abilities,
-                shape = SegmentedButtonDefaults.itemShape(index, ModelAbility.entries.size),
-                onCheckedChange = {
-                    if (it) {
-                        onUpdateAbilities(abilities + ability)
-                    } else {
-                        onUpdateAbilities(abilities - ability)
+        options = ModelAbility.entries,
+        selected = abilities.toSet(),
+        onToggled = { ability, checked ->
+            if (checked) {
+                onUpdateAbilities(abilities + ability)
+            } else {
+                onUpdateAbilities(abilities - ability)
+            }
+        },
+        label = { ability ->
+            Text(
+                text = stringResource(
+                    when (ability) {
+                        ModelAbility.TOOL -> R.string.setting_provider_page_tool
+                        ModelAbility.REASONING -> R.string.setting_provider_page_reasoning
                     }
-                },
-                label = {
-                    Text(
-                        text = stringResource(
-                            when (ability) {
-                                ModelAbility.TOOL -> R.string.setting_provider_page_tool
-                                ModelAbility.REASONING -> R.string.setting_provider_page_reasoning
-                            }
-                        )
-                    )
-                }
+                )
             )
-        }
-    }
+        },
+    )
 }
 
 @Composable
