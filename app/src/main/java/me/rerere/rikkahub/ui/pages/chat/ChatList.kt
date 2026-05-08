@@ -25,10 +25,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -84,7 +82,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -149,7 +146,6 @@ private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineMessageInnerSpacing = 4.dp
 private val TimelineSelectionToolbarOffset = 56.dp
-private const val UserScrollAutoFollowResumeDelayMs = 2_000L
 private const val MarkdownPrewarmBeforeItems = 4
 private const val MarkdownPrewarmAfterItems = 8
 private const val MarkdownPrewarmMaxTexts = 32
@@ -412,6 +408,7 @@ fun ChatList(
     onDelete: (UIMessage) -> Unit = {},
     onUpdateMessage: (MessageNode) -> Unit = {},
     onClickSuggestion: (String) -> Unit = {},
+    onLongClickSuggestion: (String) -> Unit = {},
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onJumpToMessage: (Int) -> Unit = {},
@@ -458,6 +455,7 @@ fun ChatList(
                 onDelete = onDelete,
                 onUpdateMessage = onUpdateMessage,
                 onClickSuggestion = onClickSuggestion,
+                onLongClickSuggestion = onLongClickSuggestion,
                 onTranslate = onTranslate,
                 onClearTranslation = onClearTranslation,
                 animatedVisibilityScope = this@AnimatedContent,
@@ -492,6 +490,7 @@ private fun ChatListNormal(
     onDelete: (UIMessage) -> Unit,
     onUpdateMessage: (MessageNode) -> Unit,
     onClickSuggestion: (String) -> Unit,
+    onLongClickSuggestion: (String) -> Unit,
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)?,
     onClearTranslation: (UIMessage) -> Unit,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -502,18 +501,51 @@ private fun ChatListNormal(
     onOpenQueue: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
-    val loadingState by rememberUpdatedState(loading)
-    val activeGenerationState by rememberUpdatedState(loading || pendingUserMessages.isNotEmpty())
+    val activeGeneration = loading || pendingUserMessages.isNotEmpty()
+    val activeGenerationState by rememberUpdatedState(activeGeneration)
     var isRecentScroll by remember { mutableStateOf(false) }
-    var touchAutoScrollHold by remember { mutableStateOf(false) }
-    var scrollAutoScrollHold by remember { mutableStateOf(false) }
-    var autoScrollCooldown by remember { mutableStateOf(false) }
-    var resumeFollowAfterPause by remember { mutableStateOf(false) }
-    var generationFollowActive by remember(conversation.id) { mutableStateOf(false) }
-    var autoScrollCooldownGeneration by remember { mutableIntStateOf(0) }
+    var autoFollowActive by remember(conversation.id) { mutableStateOf(false) }
+    var userPausedAutoFollow by remember(conversation.id) { mutableStateOf(false) }
+    var programmaticScrollInProgress by remember(conversation.id) { mutableStateOf(false) }
+    var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
+    var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
     val density = LocalDensity.current
+    val bottomFollowBufferPx = with(density) { 48.dp.toPx().toInt() }
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     val workspace = workspaceColors()
+
+    fun beginProgrammaticScroll(): Int {
+        val token = programmaticScrollToken + 1
+        programmaticScrollToken = token
+        programmaticScrollInProgress = true
+        return token
+    }
+
+    fun endProgrammaticScroll(token: Int) {
+        scope.launch {
+            withFrameNanos { }
+            if (programmaticScrollToken == token) {
+                programmaticScrollInProgress = false
+            }
+        }
+    }
+
+    suspend fun scrollToTimelineBottom() {
+        val token = beginProgrammaticScroll()
+        try {
+            var lastIndex = state.layoutInfo.totalItemsCount - 1
+            if (lastIndex >= 0) {
+                state.scrollToItem(lastIndex)
+            }
+            withFrameNanos { }
+            lastIndex = state.layoutInfo.totalItemsCount - 1
+            if (lastIndex >= 0 && !state.isAtTimelineBottom(bottomFollowBufferPx)) {
+                state.scrollToItem(lastIndex)
+            }
+        } finally {
+            endProgrammaticScroll(token)
+        }
+    }
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -533,22 +565,6 @@ private fun ChatListNormal(
         }
     }
 
-    fun startAutoScrollCooldown() {
-        autoScrollCooldown = true
-        resumeFollowAfterPause = false
-        autoScrollCooldownGeneration += 1
-    }
-
-    LaunchedEffect(autoScrollCooldownGeneration) {
-        if (autoScrollCooldownGeneration > 0) {
-            delay(UserScrollAutoFollowResumeDelayMs)
-            autoScrollCooldown = false
-            if (activeGenerationState) {
-                resumeFollowAfterPause = true
-            }
-        }
-    }
-
     // 聊天选择
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
@@ -561,18 +577,6 @@ private fun ChatListNormal(
                 visibleEndIndex.takeIf { it >= 0 }?.let { it to compact }
             }
             .groupBy(keySelector = { it.first }, valueTransform = { it.second })
-    }
-    val autoScrollAllowed by remember {
-        derivedStateOf {
-            val shouldFollow = generationFollowActive || state.isNearListEnd() || resumeFollowAfterPause
-            settings.displaySetting.enableAutoScroll &&
-                activeGenerationState &&
-                !state.isScrollInProgress &&
-                !touchAutoScrollHold &&
-                !scrollAutoScrollHold &&
-                (!autoScrollCooldown || generationFollowActive || resumeFollowAfterPause) &&
-                shouldFollow
-        }
     }
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
@@ -601,17 +605,62 @@ private fun ChatListNormal(
         )
     }
     // 自动跟随键盘滚动
-    ImeLazyListAutoScroller(lazyListState = state)
+    ImeLazyListAutoScroller(
+        lazyListState = state,
+        shouldScroll = {
+            settings.displaySetting.enableAutoScroll &&
+                (autoFollowActive || state.isAtTimelineBottom(bottomFollowBufferPx) || state.isNearListEnd())
+        },
+        onProgrammaticScrollStart = {
+            imeProgrammaticScrollToken = beginProgrammaticScroll()
+        },
+        onProgrammaticScrollEnd = {
+            imeProgrammaticScrollToken?.let(::endProgrammaticScroll)
+            imeProgrammaticScrollToken = null
+        },
+    )
 
-    LaunchedEffect(loading, pendingUserMessages.size, conversation.id) {
-        if (loadingState || pendingUserMessages.isNotEmpty()) {
-            if (!touchAutoScrollHold && !scrollAutoScrollHold && !autoScrollCooldown) {
-                generationFollowActive = true
-            }
+    LaunchedEffect(
+        settings.displaySetting.enableAutoScroll,
+        activeGeneration,
+        conversation.id,
+    ) {
+        if (!settings.displaySetting.enableAutoScroll || !activeGeneration) {
+            autoFollowActive = false
+            userPausedAutoFollow = false
+        } else if (!userPausedAutoFollow) {
+            autoFollowActive = state.isAtTimelineBottom(bottomFollowBufferPx) ||
+                state.isNearListEnd(bufferItems = 4)
+        }
+    }
+
+    val latestMessage = conversation.currentMessages.lastOrNull()
+    LaunchedEffect(conversation.id, latestMessage?.id, activeGeneration) {
+        if (
+            activeGeneration &&
+            settings.displaySetting.enableAutoScroll &&
+            latestMessage?.role == MessageRole.USER
+        ) {
+            userPausedAutoFollow = false
+            autoFollowActive = true
+        }
+    }
+
+    LaunchedEffect(state.isScrollInProgress) {
+        if (state.isScrollInProgress) {
+            isRecentScroll = true
         } else {
-            generationFollowActive = false
-            resumeFollowAfterPause = false
-            autoScrollCooldown = false
+            if (activeGenerationState && !programmaticScrollInProgress) {
+                if (state.isAtTimelineBottom(bottomFollowBufferPx)) {
+                    userPausedAutoFollow = false
+                    autoFollowActive = true
+                } else {
+                    userPausedAutoFollow = true
+                    autoFollowActive = false
+                }
+            }
+            delay(1500)
+            isRecentScroll = false
         }
     }
 
@@ -699,44 +748,11 @@ private fun ChatListNormal(
                 processingStatus,
                 conversation.messageNodes.size,
                 pendingUserMessages.size,
-                autoScrollAllowed,
+                loading,
             ) {
-                if (autoScrollAllowed) {
-                    withFrameNanos { }
-                    withFrameNanos { }
-                    val lastIndex = state.layoutInfo.totalItemsCount - 1
-                    if (lastIndex >= 0) {
-                        if (resumeFollowAfterPause) {
-                            state.animateScrollToItem(lastIndex)
-                            generationFollowActive = true
-                        } else {
-                            state.scrollToItem(lastIndex)
-                        }
-                        resumeFollowAfterPause = false
-                    }
+                if (activeGenerationState && autoFollowActive && !userPausedAutoFollow) {
+                    scrollToTimelineBottom()
                 }
-            }
-        }
-
-        // 判断最近是否滚动
-        LaunchedEffect(state.isScrollInProgress) {
-            if (state.isScrollInProgress) {
-                if (touchAutoScrollHold) {
-                    scrollAutoScrollHold = true
-                    autoScrollCooldown = false
-                    resumeFollowAfterPause = false
-                    generationFollowActive = false
-                }
-                isRecentScroll = true
-            } else {
-                if (scrollAutoScrollHold) {
-                    scrollAutoScrollHold = false
-                    if (!autoScrollCooldown) {
-                        startAutoScrollCooldown()
-                    }
-                }
-                delay(1500)
-                isRecentScroll = false
             }
         }
 
@@ -755,21 +771,7 @@ private fun ChatListNormal(
                 .then(
                     if (useTimelineHaze) Modifier.hazeSource(state = hazeState) else Modifier
                 )
-                .padding(top = innerPadding.calculateTopPadding())
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        touchAutoScrollHold = true
-                        autoScrollCooldown = false
-                        resumeFollowAfterPause = false
-                        try {
-                            waitForUpOrCancellation()
-                        } finally {
-                            touchAutoScrollHold = false
-                            startAutoScrollCooldown()
-                        }
-                    }
-                },
+                .padding(top = innerPadding.calculateTopPadding()),
         ) {
             if (!timelineLoadState.isFullyLoaded) {
                 item(
@@ -1123,6 +1125,7 @@ private fun ChatListNormal(
                 ChatSuggestionsRow(
                     suggestions = actionSuggestions,
                     onClickSuggestion = onClickSuggestion,
+                    onLongClickSuggestion = onLongClickSuggestion,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
@@ -1162,6 +1165,14 @@ internal fun LazyListState.isNearListEnd(bufferItems: Int = 2): Boolean {
     if (totalItems == 0) return true
     val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
     return lastVisibleIndex >= totalItems - 1 - bufferItems
+}
+
+internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) return true
+    val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+    if (lastVisibleItem.index < totalItems - 1) return false
+    return lastVisibleItem.offset + lastVisibleItem.size <= layoutInfo.viewportEndOffset + bufferPx
 }
 
 private fun LazyListState.markdownPrewarmTexts(
@@ -1518,7 +1529,8 @@ private fun ChatListPreview(
 private fun ChatSuggestionsRow(
     modifier: Modifier = Modifier,
     suggestions: List<String>,
-    onClickSuggestion: (String) -> Unit
+    onClickSuggestion: (String) -> Unit,
+    onLongClickSuggestion: (String) -> Unit,
 ) {
     LazyRow(
         modifier = modifier
@@ -1533,10 +1545,11 @@ private fun ChatSuggestionsRow(
         ) { suggestion ->
             Surface(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(50)),
-                onClick = {
-                    onClickSuggestion(suggestion)
-                },
+                    .clip(RoundedCornerShape(50))
+                    .combinedClickable(
+                        onClick = { onClickSuggestion(suggestion) },
+                        onLongClick = { onLongClickSuggestion(suggestion) },
+                    ),
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
                 border = BorderStroke(

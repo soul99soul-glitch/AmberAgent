@@ -492,8 +492,7 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll &&
-                                chatListState.isNearListEnd(bufferItems = 4)
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             vm.handleMessageSend(
                                 content = inputState.getContents(),
                                 queueMode = queueMode,
@@ -511,8 +510,7 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll &&
-                                chatListState.isNearListEnd(bufferItems = 4)
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             vm.handleMessageSend(
                                 content = inputState.getContents(),
                                 answer = loadingJob != null && queueMode == PendingUserMessageMode.STEER,
@@ -602,11 +600,16 @@ private fun ChatPageContent(
                 onClickSuggestion = { suggestion ->
                     val text = suggestion.trim()
                     if (text.isNotEmpty()) {
+                        inputState.setMessageText(text)
+                    }
+                },
+                onLongClickSuggestion = { suggestion ->
+                    val text = suggestion.trim()
+                    if (text.isNotEmpty()) {
                         if (currentChatModel == null) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll &&
-                                chatListState.isNearListEnd(bufferItems = 4)
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             inputState.editingMessage = null
                             vm.handleMessageSend(
                                 content = listOf(UIMessagePart.Text(text)),
