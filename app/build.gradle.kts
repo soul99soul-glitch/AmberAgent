@@ -7,6 +7,25 @@ import java.net.URI
 import java.security.MessageDigest
 import java.util.Properties
 
+val buildLocalProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun projectProperty(vararg names: String): String =
+    names.firstNotNullOfOrNull { name ->
+        (findProperty(name) as? String)
+            ?: System.getenv(name)
+            ?: buildLocalProperties.getProperty(name)
+    }.orEmpty()
+
+fun String.asBuildConfigString(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"")
+
+val xiaomiXmsAppId = projectProperty("xiaomiXmsAppId", "XIAOMI_XMS_APP_ID")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -33,6 +52,8 @@ android {
         versionName = "1.2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId
+        manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -88,6 +109,9 @@ android {
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "NOTION_LIKE", "false")
+            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
+            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
         }
         debug {
             // Pulse debug variant. Final applicationId becomes me.rerere.pulse.debug
@@ -101,6 +125,9 @@ android {
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "NOTION_LIKE", "false")
+            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
+            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
         create("notion") {
             initWith(getByName("debug"))
@@ -109,6 +136,9 @@ android {
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
             buildConfigField("Boolean", "NOTION_LIKE", "true")
+            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
+            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
         create("baseline") {
             initWith(getByName("release"))
@@ -120,6 +150,9 @@ android {
             isShrinkResources = false
             isProfileable = true
             buildConfigField("Boolean", "NOTION_LIKE", "false")
+            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
+            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
     }
     compileOptions {

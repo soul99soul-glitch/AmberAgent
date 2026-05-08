@@ -470,7 +470,7 @@
   <string name="notification_live_status_chip_done">完成</string>
   <string name="notification_live_status_chip_failed">失败</string>
   <string name="notification_live_status_chip_cancelled">取消</string>
-  <string name="notification_live_status_action_stop">停止执行</string>
+  <string name="notification_live_status_action_stop">停止</string>
   <string name="generation_retry_status">连接中断，%1$d 秒后重试（%2$d/%3$d）：%4$s</string>
   <string name="generation_keepalive_title">Amber 正在生成</string>
   <string name="generation_keepalive_content">正在后台保持这次回复运行。</string>

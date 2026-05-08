@@ -96,6 +96,13 @@
     android:theme="@style/Theme.Rikkahub"
     android:usesCleartextTraffic="false"
     tools:targetApi="33">
+    <meta-data
+      android:name="com.xiaomi.xms.APP_ID"
+      android:value="${xiaomiXmsAppId}" />
+    <meta-data
+      android:name="com.xiaomi.xms.BUILD_TYPE_DEBUG"
+      android:value="${xiaomiXmsBuildTypeDebug}" />
+
     <activity
       android:name=".ui.activity.SafeModeActivity"
       android:exported="false"
