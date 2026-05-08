@@ -49,6 +49,7 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
 import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextPlanner
+import me.rerere.rikkahub.data.memory.recall.MemoryRecallStore
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Conversation
@@ -90,6 +91,7 @@ class GenerationHandler(
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepo: MemoryRepository,
+    private val memoryRecallStore: MemoryRecallStore,
     private val conversationRepo: ConversationRepository,
     private val aiLoggingManager: AILoggingManager,
     private val conversationContextEngine: ConversationContextEngine,
@@ -327,22 +329,8 @@ class GenerationHandler(
         conversation: Conversation? = null,
         speculativeRunner: SpeculativeToolRunner? = null,
     ) {
-        val coreMemories = if (settings.agentRuntime.enableCoreMemory) {
-            memories.orEmpty()
-        } else {
-            emptyList()
-        }
-        val shortTermMemories = if (settings.agentRuntime.enableShortTermMemory) {
-            memoryRepo.getShortTermMemories()
-        } else {
-            emptyList()
-        }
-        val longTermMemories = if (settings.agentRuntime.enableLongTermMemory) {
-            memoryRepo.getLongTermMemories()
-        } else {
-            emptyList()
-        }
         val sessionDefaults = settings.resolveSessionDefaults(assistant, model)
+        val memoryContextPrompt = memoryRecallStore.buildPrompt(settings, messages)
         val system = buildString {
             append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
 
@@ -352,22 +340,13 @@ class GenerationHandler(
                 append(assistant.systemPrompt)
             }
 
-            // Agent memory layers
-            if (settings.agentRuntime.enableCoreMemory) {
+            if (memoryContextPrompt.isNotBlank()) {
                 appendLine()
-                append(buildCoreMemoryPrompt(memories = coreMemories))
-            }
-            if (settings.agentRuntime.enableShortTermMemory) {
-                appendLine()
-                append(buildShortTermMemoryPrompt(memories = shortTermMemories))
+                append(memoryContextPrompt)
             }
             if (settings.agentRuntime.enableRecentChatsReference) {
                 appendLine()
                 append(buildRecentChatsPrompt(conversationRepo))
-            }
-            if (settings.agentRuntime.enableLongTermMemory) {
-                appendLine()
-                append(buildLongTermMemoryPrompt(memories = longTermMemories))
             }
 
             // 工具prompt

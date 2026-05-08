@@ -1173,7 +1173,7 @@
   <string name="setting_agent_memory_context_compaction_desc">When long conversations approach the model window, summarize older turns without deleting originals.</string>
   <string name="setting_agent_memory_context_compaction_notify_title">Only remind first</string>
   <string name="setting_agent_memory_context_compaction_notify_desc">Show context pressure but do not compact automatically.</string>
-  <string name="setting_agent_memory_context_compaction_defaults">Defaults: 70%% precompact, 85%% force, keep 12 recent turns.</string>
+  <string name="setting_agent_memory_context_compaction_defaults">Defaults: 70%% precompact, 85%% force, protect 8 recent turns / 16 messages.</string>
   <string name="setting_agent_memory_records_title">Memory Records</string>
   <string name="setting_agent_memory_short_records_title">Short-Term Records</string>
   <string name="setting_agent_memory_long_records_title">Long-Term Records</string>
@@ -1384,4 +1384,18 @@
   <string name="setting_page_agent_high_risk_auto_approve_desc">Allow SMS, calls, contacts and other sensitive actions.</string>
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">Enable high-risk auto approve?</string>
   <string name="setting_page_agent_high_risk_auto_approve_confirm_desc">AmberAgent will be allowed to automatically approve tools that can send messages, place direct calls, write contacts or calendars, and record audio. Keep this off unless you fully trust this device, model, and session context.</string>
+  <string name="live_companion_title">Live Companion</string>
+  <string name="setting_agent_execution_live_mode_section">Live companion</string>
+  <string name="setting_page_agent_live_mode">Enable Live companion</string>
+  <string name="setting_page_agent_live_mode_desc">Observe another app through Accessibility and update a compact read-only companion card.</string>
+  <string name="setting_page_agent_live_mode_auto_refresh">Auto refresh</string>
+  <string name="setting_page_agent_live_mode_auto_refresh_desc">Analyze only after the observed UI changes and becomes stable.</string>
+  <string name="setting_page_agent_live_mode_refresh_interval">Observe interval</string>
+  <string name="setting_page_agent_live_mode_refresh_interval_desc">How often Amber samples the UI tree before dedupe and throttling.</string>
+  <string name="setting_page_agent_live_mode_refresh_interval_value">%1$.1f s</string>
+  <string name="setting_page_agent_live_mode_max_nodes">Max UI nodes</string>
+  <string name="setting_page_agent_live_mode_max_nodes_desc">Upper bound for one UI-tree snapshot before analysis.</string>
+  <string name="setting_page_agent_live_mode_max_nodes_value">%1$d nodes</string>
+  <string name="setting_page_agent_live_mode_voice">Voice focus input</string>
+  <string name="setting_page_agent_live_mode_voice_desc">Use Android speech recognition to add a temporary focus instruction.</string>
 </resources>

@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -27,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -42,21 +44,27 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dokar.sonner.ToastType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlan
+import me.rerere.rikkahub.data.memory.model.MemoryCandidate
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
+import java.io.File
 
 @Composable
 fun SettingAgentMemoryPage() {
@@ -65,6 +73,13 @@ fun SettingAgentMemoryPage() {
     val memories by vm.memories.collectAsStateWithLifecycle()
     val shortTermMemories by vm.shortTermMemories.collectAsStateWithLifecycle()
     val longTermMemories by vm.longTermMemories.collectAsStateWithLifecycle()
+    val pendingCandidates by vm.pendingCandidates.collectAsStateWithLifecycle()
+    val recentMemoryEvents by vm.recentMemoryEvents.collectAsStateWithLifecycle()
+    val dreamPlan by vm.dreamPlan.collectAsStateWithLifecycle()
+    val memoryTaskRunning by vm.memoryTaskRunning.collectAsStateWithLifecycle()
+    val operationMessage by vm.operationMessage.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val memoryDialogState = useEditState<AssistantMemory> { memory ->
         if (memory.id == 0) {
@@ -75,6 +90,13 @@ fun SettingAgentMemoryPage() {
     }
     var pendingDeleteMemory by remember { mutableStateOf<AssistantMemory?>(null) }
     var memoryInfoDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    LaunchedEffect(operationMessage) {
+        operationMessage?.let { message ->
+            toaster.show(message, type = ToastType.Info)
+            vm.consumeOperationMessage()
+        }
+    }
 
     memoryDialogState.EditStateContent { memory, update ->
         AlertDialog(
@@ -232,7 +254,93 @@ fun SettingAgentMemoryPage() {
                         )
                     },
                 )
+                item(
+                    headlineContent = { Text("选择性召回") },
+                    supportingContent = {
+                        Text("每轮最多 ${settings.agentRuntime.memoryRecall.maxItems} 条、${settings.agentRuntime.memoryRecall.maxPromptChars} 字符，不再全量注入。")
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.agentRuntime.memoryRecall.debug,
+                            onCheckedChange = { enabled ->
+                                vm.updateAgentRuntime {
+                                    it.copy(memoryRecall = it.memoryRecall.copy(debug = enabled))
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text("记忆后台提取") },
+                    supportingContent = {
+                        Text("生成结束后提取候选记忆，待审核 ${pendingCandidates.size} 条，最近事件 ${recentMemoryEvents.size} 条。")
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.agentRuntime.memoryWorker.enabled,
+                            onCheckedChange = { enabled ->
+                                vm.updateAgentRuntime {
+                                    it.copy(memoryWorker = it.memoryWorker.copy(enabled = enabled))
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text("跟随压缩模型") },
+                    supportingContent = { Text("记忆提取默认使用压缩模型；关闭后回退到单独选择的记忆模型或聊天模型。") },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.agentRuntime.memoryWorker.followCompressModel,
+                            onCheckedChange = { enabled ->
+                                vm.updateAgentRuntime {
+                                    it.copy(memoryWorker = it.memoryWorker.copy(followCompressModel = enabled))
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text("Dream 整理") },
+                    supportingContent = { Text("低频整理重复、过期和可提升的记忆；默认只生成可审核建议。") },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.agentRuntime.memoryWorker.dreamEnabled,
+                            onCheckedChange = { enabled ->
+                                vm.updateAgentRuntime {
+                                    it.copy(memoryWorker = it.memoryWorker.copy(dreamEnabled = enabled))
+                                }
+                            },
+                        )
+                    },
+                )
             }
+
+            MemoryCandidatesSection(
+                candidates = pendingCandidates,
+                onAccept = vm::acceptCandidate,
+                onIgnore = vm::ignoreCandidate,
+            )
+
+            DreamReviewSection(
+                plan = dreamPlan,
+                running = memoryTaskRunning,
+                onPlan = vm::planDream,
+                onApply = vm::applyDreamPlan,
+                onDismiss = vm::dismissDreamPlan,
+            )
+
+            MemoryPortabilitySection(
+                running = memoryTaskRunning,
+                onExport = {
+                    val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                    vm.exportMemories(baseDir)
+                },
+                onImport = {
+                    val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                    vm.importMemories(File(baseDir, "AmberAgentMemory"))
+                },
+            )
 
             MemoryRecordsSection(
                 title = stringResource(R.string.setting_agent_memory_records_title),
@@ -396,6 +504,170 @@ private fun AgentSoulCard(
             dismissButton = {
                 TextButton(onClick = { showEditor = false }) {
                     Text(stringResource(R.string.assistant_page_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun MemoryCandidatesSection(
+    candidates: List<MemoryCandidate>,
+    onAccept: (String) -> Unit,
+    onIgnore: (String) -> Unit,
+) {
+    Text(
+        text = "候选记忆审核",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(horizontal = 8.dp),
+    )
+    if (candidates.isEmpty()) {
+        Text(
+            text = "暂无待审核候选。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        return
+    }
+    candidates.take(5).forEach { candidate ->
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CustomColors.cardColorsOnSurfaceContainer,
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "[${candidate.scope.wireName}/${candidate.kind.wireName}] confidence ${"%.2f".format(candidate.confidence)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = candidate.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (candidate.reason.isNotBlank()) {
+                    Text(
+                        text = candidate.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { onAccept(candidate.id) }) {
+                        Text("接受")
+                    }
+                    TextButton(onClick = { onIgnore(candidate.id) }) {
+                        Text("忽略")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DreamReviewSection(
+    plan: MemoryDreamPlan?,
+    running: Boolean,
+    onPlan: () -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Dream 整理审核", style = MaterialTheme.typography.titleMediumEmphasized)
+                    Text(
+                        "只生成可审核 diff，确认后才会合并、提升、归档或忽略候选。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (running) {
+                    CircularWavyProgressIndicator(modifier = Modifier.size(24.dp))
+                }
+            }
+
+            plan?.let { current ->
+                val summary = "合并 ${current.mergeSuggestions.size} 组 · 提升 ${current.promoteMemoryIds.size} 条 · " +
+                    "归档 ${current.archiveMemoryIds.size} 条 · 忽略候选 ${current.ignoreCandidateIds.size} 条"
+                Text(summary, style = MaterialTheme.typography.bodyMedium)
+                current.notes.take(4).forEach { note ->
+                    Text(
+                        text = "• $note",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } ?: Text(
+                text = "还没有整理建议。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    enabled = !running,
+                    onClick = onPlan,
+                ) {
+                    Text("生成建议")
+                }
+                TextButton(
+                    enabled = !running && plan?.hasChanges == true,
+                    onClick = onApply,
+                ) {
+                    Text("应用建议")
+                }
+                TextButton(
+                    enabled = !running && plan != null,
+                    onClick = onDismiss,
+                ) {
+                    Text("清除")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryPortabilitySection(
+    running: Boolean,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
+    CardGroup {
+        item(
+            headlineContent = { Text("Frontmatter 导出") },
+            supportingContent = { Text("导出到外部文件目录 AmberAgentMemory，包含 memories、archive、events 和 manifest。") },
+            trailingContent = {
+                TextButton(enabled = !running, onClick = onExport) {
+                    Text("导出")
+                }
+            },
+        )
+        item(
+            headlineContent = { Text("Frontmatter 导入") },
+            supportingContent = { Text("从 AmberAgentMemory 目录读取 .mem.md 文件并写回 Room 主存储。") },
+            trailingContent = {
+                TextButton(enabled = !running, onClick = onImport) {
+                    Text("导入")
                 }
             },
         )

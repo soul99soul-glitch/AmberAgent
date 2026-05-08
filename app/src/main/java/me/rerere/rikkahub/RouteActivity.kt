@@ -98,6 +98,7 @@ import me.rerere.rikkahub.ui.pages.extensions.SkillsPage
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
 import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
+import me.rerere.rikkahub.ui.pages.live.LiveCompanionPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
@@ -393,6 +394,10 @@ class RouteActivity : ComponentActivity() {
                                 TranslatorPage()
                             }
 
+                            entry<Screen.LiveCompanion> {
+                                LiveCompanionPage()
+                            }
+
                             entry<Screen.Setting> {
                                 SettingPage()
                             }
@@ -661,6 +666,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Translator : Screen
+
+    @Serializable
+    data object LiveCompanion : Screen
 
     @Serializable
     data object Setting : Screen

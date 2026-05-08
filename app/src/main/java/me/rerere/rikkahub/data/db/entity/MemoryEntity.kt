@@ -12,4 +12,26 @@ data class MemoryEntity(
     val assistantId: String,
     @ColumnInfo("content")
     val content: String = "",
+    @ColumnInfo("scope")
+    val scope: String = "long_term",
+    @ColumnInfo("kind")
+    val kind: String = "note",
+    @ColumnInfo("source_conversation_id")
+    val sourceConversationId: String? = null,
+    @ColumnInfo("source_message_ids_json")
+    val sourceMessageIdsJson: String = "[]",
+    @ColumnInfo("expires_at")
+    val expiresAt: Long? = null,
+    @ColumnInfo("confidence")
+    val confidence: Float = 1f,
+    @ColumnInfo("pinned")
+    val pinned: Boolean = false,
+    @ColumnInfo("archived")
+    val archived: Boolean = false,
+    @ColumnInfo("created_at")
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo("updated_at")
+    val updatedAt: Long = createdAt,
+    @ColumnInfo("last_used_at")
+    val lastUsedAt: Long? = null,
 )

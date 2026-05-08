@@ -107,6 +107,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -179,6 +180,7 @@ class ChatService(
     private val modelCouncilManager: ModelCouncilManager,
     private val agentTaskScheduler: AgentTaskScheduler,
     private val sessionAccessGrantStore: SessionAccessGrantStore,
+    private val memoryExtractor: MemoryExtractor,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -1069,6 +1071,11 @@ class ChatService(
             launchWithConversationReference(conversationId) {
                 generateSuggestion(conversationId, finalConversation)
             }
+            if (!finalConversation.hasPendingOrUnexecutedTools()) {
+                appScope.launch(Dispatchers.IO) {
+                    memoryExtractor.extractAfterConversation(finalConversation)
+                }
+            }
         }
     }
 
@@ -1908,8 +1915,33 @@ class ChatService(
                     else -> emptyList()
                 }
             },
-            onCreation = { scope, content ->
-                memoryRepository.addMemory(memoryBucket(scope), content)
+            onCreation = { request ->
+                val finalContent = if (request.source.isNullOrBlank()) {
+                    request.content
+                } else {
+                    "${request.content}\nSource: ${request.source}"
+                }
+                memoryRepository.addMemory(
+                    scope = request.scope,
+                    kind = request.kind,
+                    content = finalContent,
+                    assistantId = memoryBucket(request.scope.wireName),
+                    sourceConversationId = request.sourceConversationId,
+                    sourceMessageIds = request.sourceMessageIds,
+                    expiresAt = request.expiresAt,
+                    confidence = request.confidence,
+                ).let {
+                    me.rerere.rikkahub.data.model.AssistantMemory(
+                        id = it.id,
+                        content = it.content,
+                        scope = it.scope,
+                        kind = it.kind,
+                        expiresAt = it.expiresAt,
+                        confidence = it.confidence,
+                        pinned = it.pinned,
+                        archived = it.archived,
+                    )
+                }
             },
             onUpdate = { id, content ->
                 memoryRepository.updateContent(id, content)

@@ -362,7 +362,7 @@ object XiaomiSuperIsland {
                                             put("type", 1)
                                             if (usePic) put("picInfo", iconPicInfo())
                                             put(
-                                                "miui.focus.paramtextInfo",
+                                                "textInfo",
                                                 buildJsonObject {
                                                     put("frontTitle", conciseBrand)
                                                     put("title", conciseTitle)

@@ -12,7 +12,9 @@ import me.rerere.rikkahub.data.db.dao.ConversationContextEventDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
+import me.rerere.rikkahub.data.db.dao.MemoryCandidateDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
+import me.rerere.rikkahub.data.db.dao.MemoryEventDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
@@ -20,7 +22,9 @@ import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
+import me.rerere.rikkahub.data.db.entity.MemoryCandidateEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
+import me.rerere.rikkahub.data.db.entity.MemoryEventEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
@@ -36,8 +40,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         FavoriteEntity::class,
         ConversationCompactEntity::class,
         ConversationContextEventEntity::class,
+        MemoryCandidateEntity::class,
+        MemoryEventEntity::class,
     ],
-    version = 19,
+    version = 20,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -62,6 +68,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun conversationContextEventDao(): ConversationContextEventDAO
 
     abstract fun memoryDao(): MemoryDAO
+
+    abstract fun memoryCandidateDao(): MemoryCandidateDAO
+
+    abstract fun memoryEventDao(): MemoryEventDAO
 
     abstract fun genMediaDao(): GenMediaDAO
 

@@ -23,6 +23,9 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.Megaphone01
+import me.rerere.hugeicons.stroke.Refresh01
+import me.rerere.hugeicons.stroke.Sparkles
+import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
@@ -42,6 +45,8 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
     val toolLoopStepOptions = remember { listOf(64, 128, 256, 384, 512) }
     val retryCountOptions = remember { listOf(1, 2, 3, 5) }
     val operationPreviewModeOptions = remember { AgentOperationPreviewMode.entries }
+    val liveRefreshOptions = remember { listOf(1_000L, 1_500L, 2_000L, 3_000L) }
+    val liveMaxNodeOptions = remember { listOf(80, 120, 180, 240) }
 
     Scaffold(
         topBar = {
@@ -164,6 +169,125 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                         settings.copy(
                                             agentRuntime = settings.agentRuntime.copy(
                                                 hideSensitiveLiveStatus = checked
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                }
+            }
+
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_agent_execution_live_mode_section)) },
+                ) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.Sparkles, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.liveMode.enabled,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                liveMode = settings.agentRuntime.liveMode.copy(enabled = checked)
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Refresh01, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.liveMode.autoRefresh,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                liveMode = settings.agentRuntime.liveMode.copy(autoRefresh = checked)
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Refresh01, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_refresh_interval_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_refresh_interval)) },
+                        trailingContent = {
+                            Select(
+                                options = liveRefreshOptions,
+                                selectedOption = settings.agentRuntime.liveMode.refreshIntervalMs.coerceIn(
+                                    liveRefreshOptions.first(),
+                                    liveRefreshOptions.last(),
+                                ),
+                                onOptionSelected = { interval ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                liveMode = settings.agentRuntime.liveMode.copy(refreshIntervalMs = interval)
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = {
+                                    stringResource(R.string.setting_page_agent_live_mode_refresh_interval_value, it / 1_000f)
+                                },
+                                modifier = Modifier.width(104.dp),
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_max_nodes_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_max_nodes)) },
+                        trailingContent = {
+                            Select(
+                                options = liveMaxNodeOptions,
+                                selectedOption = settings.agentRuntime.liveMode.maxNodes.coerceIn(
+                                    liveMaxNodeOptions.first(),
+                                    liveMaxNodeOptions.last(),
+                                ),
+                                onOptionSelected = { maxNodes ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                liveMode = settings.agentRuntime.liveMode.copy(maxNodes = maxNodes)
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = {
+                                    stringResource(R.string.setting_page_agent_live_mode_max_nodes_value, it)
+                                },
+                                modifier = Modifier.width(104.dp),
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.VolumeHigh, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_voice_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_voice)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.liveMode.voiceInputEnabled,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                liveMode = settings.agentRuntime.liveMode.copy(voiceInputEnabled = checked)
                                             )
                                         )
                                     )

@@ -134,6 +134,8 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                     DefaultOcrModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
                     DefaultCompressModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
+                    DefaultMemoryWorkerModelSetting(settings = settings, vm = vm)
                 }
             }
 
@@ -363,6 +365,59 @@ private fun DefaultCompressModelSetting(
                 vm.updateSettings(settings.copy(compressPrompt = DEFAULT_COMPRESS_PROMPT))
             },
             onDismissRequest = { showModal = false },
+        )
+    }
+}
+
+@Composable
+private fun DefaultMemoryWorkerModelSetting(
+    settings: Settings,
+    vm: SettingVM,
+) {
+    val worker = settings.agentRuntime.memoryWorker
+    val followsCompress = worker.followCompressModel && settings.findModelById(worker.modelId) == null
+    val fallbackModel = settings.resolveTaskChatModel(settings.compressModelId)
+        ?: settings.resolveTaskChatModel(settings.chatModelId)
+    SettingModelRow(
+        title = "记忆模型",
+        description = "用于对话后提取候选记忆和 Dream 整理",
+        icon = HugeIcons.Settings03,
+    ) {
+        ModelPickerRow(
+            description = if (followsCompress) {
+                "当前跟随压缩模型：${fallbackModel?.displayName ?: "不可用"}"
+            } else {
+                null
+            },
+            modelId = worker.modelId,
+            providers = settings.providers,
+            allowClear = true,
+            emptyLabel = if (followsCompress) "跟随压缩模型" else null,
+            clearContentDescription = "恢复跟随压缩模型",
+            onClear = {
+                vm.updateSettings(
+                    settings.copy(
+                        agentRuntime = settings.agentRuntime.copy(
+                            memoryWorker = worker.copy(
+                                modelId = DEFAULT_AUTO_MODEL_ID,
+                                followCompressModel = true,
+                            )
+                        )
+                    )
+                )
+            },
+            onSelect = {
+                vm.updateSettings(
+                    settings.copy(
+                        agentRuntime = settings.agentRuntime.copy(
+                            memoryWorker = worker.copy(
+                                modelId = it.id,
+                                followCompressModel = false,
+                            )
+                        )
+                    )
+                )
+            },
         )
     }
 }

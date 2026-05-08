@@ -8,6 +8,8 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
+import me.rerere.rikkahub.data.memory.model.MemoryKind
+import me.rerere.rikkahub.data.memory.model.MemoryScope
 import kotlin.uuid.Uuid
 
 @Serializable
@@ -55,6 +57,12 @@ data class QuickMessage(
 data class AssistantMemory(
     val id: Int,
     val content: String = "",
+    val scope: MemoryScope = MemoryScope.LONG_TERM,
+    val kind: MemoryKind = MemoryKind.NOTE,
+    val expiresAt: Long? = null,
+    val confidence: Float = 1f,
+    val pinned: Boolean = false,
+    val archived: Boolean = false,
 )
 
 @Serializable

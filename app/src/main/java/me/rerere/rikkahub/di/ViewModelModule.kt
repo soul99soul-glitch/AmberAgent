@@ -16,6 +16,7 @@ import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
 import me.rerere.rikkahub.ui.pages.extensions.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.SkillsVM
+import me.rerere.rikkahub.ui.pages.live.LiveCompanionVM
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
@@ -54,6 +55,7 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::TranslatorVM)
+    viewModelOf(::LiveCompanionVM)
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(
             text = it.get(),

@@ -282,6 +282,14 @@ fun ChatDrawerContent(
                             }
                         )
                         DropdownMenuItem(
+                            text = { Text(stringResource(R.string.live_companion_title)) },
+                            leadingIcon = { Icon(HugeIcons.Sparkles, null) },
+                            onClick = {
+                                showMenuPopup = false
+                                navController.navigate(Screen.LiveCompanion)
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
                             leadingIcon = { Icon(HugeIcons.Image02, null) },
                             onClick = {
