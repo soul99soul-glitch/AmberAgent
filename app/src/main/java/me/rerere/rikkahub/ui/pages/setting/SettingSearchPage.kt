@@ -29,7 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -67,6 +66,7 @@ import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
 import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulseTextField
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
@@ -878,7 +878,7 @@ private fun TavilyOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -919,7 +919,7 @@ private fun ExaOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -944,7 +944,7 @@ fun ZhipuOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1013,7 +1013,7 @@ private fun SearXNGOptions(
             Text("API URL")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.url,
             onValueChange = {
                 onUpdateOptions(
@@ -1031,7 +1031,7 @@ private fun SearXNGOptions(
             Text("Engines")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.engines,
             onValueChange = {
                 onUpdateOptions(
@@ -1049,7 +1049,7 @@ private fun SearXNGOptions(
             Text("Language")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.language,
             onValueChange = {
                 onUpdateOptions(
@@ -1067,7 +1067,7 @@ private fun SearXNGOptions(
             Text("Username")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.username,
             onValueChange = {
                 onUpdateOptions(
@@ -1085,7 +1085,7 @@ private fun SearXNGOptions(
             Text("Password")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.password,
             onValueChange = {
                 onUpdateOptions(
@@ -1109,7 +1109,7 @@ private fun SearchLinkUpOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1150,7 +1150,7 @@ private fun BraveOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1174,7 +1174,7 @@ private fun SerperOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(options.copy(apiKey = it))
@@ -1194,7 +1194,7 @@ private fun SerpApiOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(options.copy(apiKey = it))
@@ -1215,7 +1215,7 @@ private fun MetasoOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1239,7 +1239,7 @@ private fun OllamaOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1263,7 +1263,7 @@ private fun PerplexityOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1281,7 +1281,7 @@ private fun PerplexityOptions(
             Text("Max Tokens")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.maxTokens?.takeIf { it > 0 }?.toString() ?: "",
             onValueChange = { value ->
                 onUpdateOptions(
@@ -1300,7 +1300,7 @@ private fun PerplexityOptions(
             Text("Max Tokens / Page")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.maxTokensPerPage?.takeIf { it > 0 }?.toString() ?: "",
             onValueChange = { value ->
                 onUpdateOptions(
@@ -1325,7 +1325,7 @@ private fun FirecrawlOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1349,7 +1349,7 @@ private fun JinaOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1367,7 +1367,7 @@ private fun JinaOptions(
             Text("Search URL")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.searchUrl,
             onValueChange = {
                 onUpdateOptions(
@@ -1388,7 +1388,7 @@ private fun JinaOptions(
             Text("Scrape URL")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.scrapeUrl,
             onValueChange = {
                 onUpdateOptions(
@@ -1415,7 +1415,7 @@ private fun BochaOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1460,7 +1460,7 @@ private fun RikkaHubOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1501,7 +1501,7 @@ private fun GrokOptions(
             Text("API Key")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.apiKey,
             onValueChange = {
                 onUpdateOptions(
@@ -1519,7 +1519,7 @@ private fun GrokOptions(
             Text("Model")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.model,
             onValueChange = {
                 onUpdateOptions(
@@ -1537,7 +1537,7 @@ private fun GrokOptions(
             Text("Custom URL")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.customUrl,
             onValueChange = {
                 onUpdateOptions(
@@ -1555,7 +1555,7 @@ private fun GrokOptions(
             Text("System Prompt")
         }
     ) {
-        OutlinedTextField(
+        PulseTextField(
             value = options.systemPrompt,
             onValueChange = {
                 onUpdateOptions(
