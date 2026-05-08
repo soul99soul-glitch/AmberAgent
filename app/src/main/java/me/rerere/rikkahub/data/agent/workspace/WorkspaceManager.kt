@@ -75,7 +75,7 @@ class WorkspaceManager(private val context: Context) {
     suspend fun writeText(relativePath: String, content: String, append: Boolean = false): WorkspaceEntry =
         withContext(Dispatchers.IO) {
             val normalized = requireFilePath(relativePath)
-            val file = requireOrCreateFile(relativePath, "text/plain")
+            val file = requireOrCreateFile(normalized, textMimeTypeForPath(normalized))
             val mode = if (append) "wa" else "wt"
             context.contentResolver.openOutputStream(file.uri, mode)?.bufferedWriter()?.use {
                 it.write(content)
@@ -284,8 +284,15 @@ class WorkspaceManager(private val context: Context) {
         val normalized = requireFilePath(relativePath)
         val parent = requireOrCreateParent(relativePath)
         val name = normalized.substringAfterLast("/")
-        return parent.findFile(name) ?: parent.createFile(mimeType, name)
-        ?: error("Unable to create $relativePath")
+        parent.findFile(name)?.let { return it }
+        val created = parent.createFile(mimeType, name) ?: error("Unable to create $relativePath")
+        if (created.name == name) return created
+
+        val renamed = runCatching { created.renameTo(name) }.getOrDefault(false)
+        if (renamed) {
+            parent.findFile(name)?.let { return it }
+        }
+        error("Workspace provider created '${created.name.orEmpty()}' instead of '$name'")
     }
 
     private fun requireOrCreateParent(relativePath: String): DocumentFile {
@@ -336,6 +343,19 @@ class WorkspaceManager(private val context: Context) {
     }
 
     private fun normalizePath(path: String): String = WorkspacePaths.normalize(path)
+
+    private fun textMimeTypeForPath(path: String): String =
+        when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
+            "md", "markdown" -> "text/markdown"
+            "json" -> "application/json"
+            "yaml", "yml" -> "application/yaml"
+            "html", "htm" -> "text/html"
+            "css" -> "text/css"
+            "csv" -> "text/csv"
+            "js", "mjs", "cjs" -> "text/javascript"
+            "sh" -> "application/x-sh"
+            else -> "text/plain"
+        }
 
     private fun joinPath(parent: String, child: String): String = WorkspacePaths.join(parent, child)
 

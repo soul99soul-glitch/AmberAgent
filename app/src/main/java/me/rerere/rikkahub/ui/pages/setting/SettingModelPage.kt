@@ -48,6 +48,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Earth
 import me.rerere.hugeicons.stroke.FileZip
 import me.rerere.hugeicons.stroke.Message01
@@ -136,6 +137,8 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                     DefaultCompressModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
                     DefaultMemoryWorkerModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
+                    DefaultDaydreamModelSetting(settings = settings, vm = vm)
                 }
             }
 
@@ -379,8 +382,8 @@ private fun DefaultMemoryWorkerModelSetting(
     val fallbackModel = settings.resolveTaskChatModel(settings.compressModelId)
         ?: settings.resolveTaskChatModel(settings.chatModelId)
     SettingModelRow(
-        title = "记忆模型",
-        description = "用于对话后提取候选记忆和 Dream 整理",
+        title = "记忆提取模型",
+        description = "用于对话结束后提取候选记忆，轻量稳定即可",
         icon = HugeIcons.Settings03,
     ) {
         ModelPickerRow(
@@ -413,6 +416,59 @@ private fun DefaultMemoryWorkerModelSetting(
                             memoryWorker = worker.copy(
                                 modelId = it.id,
                                 followCompressModel = false,
+                            )
+                        )
+                    )
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun DefaultDaydreamModelSetting(
+    settings: Settings,
+    vm: SettingVM,
+) {
+    val worker = settings.agentRuntime.memoryWorker
+    val followsCompress = worker.daydreamFollowCompressModel && settings.findModelById(worker.daydreamModelId) == null
+    val fallbackModel = settings.resolveTaskChatModel(settings.compressModelId)
+        ?: settings.resolveTaskChatModel(settings.chatModelId)
+    SettingModelRow(
+        title = "Daydream 模型",
+        description = "用于后台整理、合并和审查记忆，建议选择推理更强的模型",
+        icon = HugeIcons.Brain02,
+    ) {
+        ModelPickerRow(
+            description = if (followsCompress) {
+                "当前跟随压缩模型：${fallbackModel?.displayName ?: "不可用"}"
+            } else {
+                null
+            },
+            modelId = worker.daydreamModelId,
+            providers = settings.providers,
+            allowClear = true,
+            emptyLabel = if (followsCompress) "跟随压缩模型" else null,
+            clearContentDescription = "恢复跟随压缩模型",
+            onClear = {
+                vm.updateSettings(
+                    settings.copy(
+                        agentRuntime = settings.agentRuntime.copy(
+                            memoryWorker = worker.copy(
+                                daydreamModelId = DEFAULT_AUTO_MODEL_ID,
+                                daydreamFollowCompressModel = true,
+                            )
+                        )
+                    )
+                )
+            },
+            onSelect = {
+                vm.updateSettings(
+                    settings.copy(
+                        agentRuntime = settings.agentRuntime.copy(
+                            memoryWorker = worker.copy(
+                                daydreamModelId = it.id,
+                                daydreamFollowCompressModel = false,
                             )
                         )
                     )

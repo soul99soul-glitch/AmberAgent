@@ -600,8 +600,24 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
                 onClickSuggestion = { suggestion ->
-                    inputState.editingMessage = null
-                    inputState.setMessageText(suggestion)
+                    val text = suggestion.trim()
+                    if (text.isNotEmpty()) {
+                        if (currentChatModel == null) {
+                            toaster.show("请先选择模型", type = ToastType.Error)
+                        } else {
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll &&
+                                chatListState.isNearListEnd(bufferItems = 4)
+                            inputState.editingMessage = null
+                            vm.handleMessageSend(
+                                content = listOf(UIMessagePart.Text(text)),
+                                queueMode = PendingUserMessageMode.FOLLOWUP,
+                            )
+                            if (shouldFollowAfterSend) {
+                                sendFollowRequest += 1
+                            }
+                            inputState.clearInput()
+                        }
+                    }
                 },
                 onTranslate = { message, locale ->
                     vm.translateMessage(message, locale)

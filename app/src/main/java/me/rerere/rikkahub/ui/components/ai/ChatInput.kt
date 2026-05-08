@@ -157,6 +157,7 @@ import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewLink
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
+import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -1345,97 +1346,47 @@ private fun WebOperationPreviewThumbnail(
         webState.requestedUrl,
         webState.committedUrl,
         webState.url,
+        webState.lastGoodPreviewUrl,
     ) {
-        webState.toolCallId == toolCallId ||
-            sequenceOf(webState.requestedUrl, webState.committedUrl, webState.url)
-                .filter { it.isNotBlank() }
-                .map { it.normalizedWebPreviewUrl() }
-                .any { it == normalizedUrl }
+        webState.matchesPreview(toolCallId = toolCallId, normalizedUrl = normalizedUrl)
     }
-    val thumbnailFile = webState.thumbnailPath
-        .takeIf { isCurrentPreview && it.isNotBlank() }
-        ?.let(::File)
-        ?.takeIf { it.exists() && it.length() > 0L }
-    val showFrozenThumbnail = thumbnailFile != null &&
-        webState.status in setOf(WebViewLoadStatus.READY, WebViewLoadStatus.STALLED, WebViewLoadStatus.FAILED)
+    val thumbnailFile = webState.bestThumbnailFile(isCurrentPreview)
     LaunchedEffect(toolCallId, normalizedUrl, isCurrentPreview) {
         if (!isCurrentPreview) {
             webViewOperationStore.open(url, toolCallId = toolCallId)
         }
     }
     val loadId = webState.loadId.takeIf { isCurrentPreview }
-    val state = rememberWebViewState(
-        url = url,
-        settings = {
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            textZoom = 85
-            disablePreviewDarkening()
-        },
-    )
-    DisposableEffect(loadId) {
-        if (!loadId.isNullOrBlank()) {
-            webViewOperationStore.markRendererActive(loadId, true)
-        }
-        onDispose {
-            if (!loadId.isNullOrBlank()) {
-                webViewOperationStore.markRendererActive(loadId, false)
-            }
-        }
-    }
     val workspace = workspaceColors()
-    val frozenThumbnail = thumbnailFile.takeIf { showFrozenThumbnail }
     Box(modifier = Modifier.fillMaxSize()) {
-        if (frozenThumbnail != null) {
-            AsyncImage(
-                model = frozenThumbnail,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else if (!loadId.isNullOrBlank()) {
-            WebView(
-                state = state,
+        if (!loadId.isNullOrBlank()) {
+            HiddenWebOperationRenderer(
+                url = url,
+                loadId = loadId,
+                webViewOperationStore = webViewOperationStore,
                 modifier = Modifier
                     .requiredSize(width = 336.dp, height = 252.dp)
                     .graphicsLayer {
+                        alpha = 0f
                         scaleX = 0.35f
                         scaleY = 0.35f
                         transformOrigin = TransformOrigin(0f, 0f)
                     },
-                onCreated = { webView ->
-                    webView.isFocusable = false
-                    webView.isFocusableInTouchMode = false
-                    webView.setOnTouchListener { _, _ -> true }
-                    webViewOperationStore.markRendererActive(loadId, true)
-                },
-                onUpdated = { webView ->
-                    webView.setOnTouchListener { _, _ -> true }
-                },
-                onProgressChanged = { webView, progress ->
-                    webViewOperationStore.updateLoading(loadId, webView?.url ?: url, progress)
-                    if (progress >= 35) {
-                        webView?.let { extractReadablePage(it, webViewOperationStore, loadId) }
-                    }
-                },
-                onPageStarted = { webView, pageUrl ->
-                    webViewOperationStore.updateLoading(loadId, pageUrl ?: webView?.url ?: url, 1)
-                    webView?.let { scheduleReadableExtracts(it, webViewOperationStore, loadId) }
-                },
-                onPageFinished = { webView, pageUrl ->
-                    val resolvedUrl = pageUrl ?: webView?.url ?: url
-                    webViewOperationStore.markPageFinished(loadId, resolvedUrl)
-                    webView?.let {
-                        extractReadablePage(it, webViewOperationStore, loadId, force = true)
-                        captureWebViewThumbnail(it, webViewOperationStore, context = it.context, loadId = loadId)
-                    }
-                },
-                onReceivedError = { webView, pageUrl, error ->
-                    webViewOperationStore.markFailed(loadId, pageUrl ?: webView?.url ?: url, error.orEmpty())
-                },
+            )
+        }
+        if (thumbnailFile != null) {
+            AsyncImage(
+                model = thumbnailFile,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
             )
         } else {
-            WebOperationPreviewPlaceholder(url = url, workspace = workspace)
+            WebOperationPreviewPlaceholder(
+                url = url,
+                webState = webState.takeIf { isCurrentPreview },
+                workspace = workspace,
+            )
         }
         Box(
             modifier = Modifier
@@ -1446,10 +1397,76 @@ private fun WebOperationPreviewThumbnail(
 }
 
 @Composable
+private fun HiddenWebOperationRenderer(
+    url: String,
+    loadId: String,
+    webViewOperationStore: WebViewOperationStore,
+    modifier: Modifier = Modifier,
+) {
+    val state = rememberWebViewState(
+        url = url,
+        settings = {
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            textZoom = 85
+            disablePreviewDarkening()
+        },
+    )
+    DisposableEffect(loadId) {
+        webViewOperationStore.markRendererActive(loadId, true)
+        onDispose {
+            webViewOperationStore.markRendererActive(loadId, false)
+        }
+    }
+    WebView(
+        state = state,
+        modifier = modifier,
+        onCreated = { webView ->
+            webView.isFocusable = false
+            webView.isFocusableInTouchMode = false
+            webView.setOnTouchListener { _, _ -> true }
+            webViewOperationStore.markRendererActive(loadId, true)
+        },
+        onUpdated = { webView ->
+            webView.setOnTouchListener { _, _ -> true }
+        },
+        onProgressChanged = { webView, progress ->
+            webViewOperationStore.updateLoading(loadId, webView?.url ?: url, progress)
+            if (progress >= 35) {
+                webView?.let { extractReadablePage(it, webViewOperationStore, loadId) }
+            }
+        },
+        onPageStarted = { webView, pageUrl ->
+            webViewOperationStore.updateLoading(loadId, pageUrl ?: webView?.url ?: url, 1)
+            webView?.let { scheduleReadableExtracts(it, webViewOperationStore, loadId) }
+        },
+        onPageFinished = { webView, pageUrl ->
+            val resolvedUrl = pageUrl ?: webView?.url ?: url
+            webViewOperationStore.markPageFinished(loadId, resolvedUrl)
+            webView?.let {
+                extractReadablePage(it, webViewOperationStore, loadId, force = true)
+                scheduleThumbnailCaptures(it, webViewOperationStore, context = it.context, loadId = loadId)
+            }
+        },
+        onReceivedError = { webView, pageUrl, error ->
+            webViewOperationStore.markFailed(loadId, pageUrl ?: webView?.url ?: url, error.orEmpty())
+        },
+    )
+}
+
+@Composable
 private fun WebOperationPreviewPlaceholder(
     url: String,
+    webState: WebViewOperationState?,
     workspace: me.rerere.rikkahub.ui.components.ui.WorkspaceColors,
 ) {
+    val title = webState?.title.orEmpty().ifBlank { "网页预览" }
+    val detail = when {
+        webState?.lastError?.isNotBlank() == true -> webState.lastError
+        webState?.isLoading == true -> "正在加载 ${url.webHostPreview()}"
+        webState?.status == WebViewLoadStatus.STALLED -> "网页加载较慢"
+        else -> url
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1458,14 +1475,14 @@ private fun WebOperationPreviewPlaceholder(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "网页预览",
+            text = title,
             style = MaterialTheme.typography.labelMedium,
             color = workspace.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = url,
+            text = detail,
             style = MaterialTheme.typography.labelSmall,
             color = workspace.muted,
             maxLines = 2,
@@ -1487,6 +1504,25 @@ private fun String.normalizedWebPreviewUrl(): String {
             .trimEnd('/')
     }.getOrDefault(raw.trimEnd('/'))
 }
+
+private fun WebViewOperationState.matchesPreview(toolCallId: String, normalizedUrl: String): Boolean {
+    if (loadId.isBlank()) return false
+    if (toolCallId.isNotBlank() && this.toolCallId == toolCallId) return true
+    if (normalizedUrl.isBlank()) return false
+    return sequenceOf(requestedUrl, committedUrl, this.url, displayUrl, lastGoodPreviewUrl)
+        .filter { it.isNotBlank() }
+        .map { it.normalizedWebPreviewUrl() }
+        .any { it == normalizedUrl }
+}
+
+private fun WebViewOperationState.bestThumbnailFile(isCurrentPreview: Boolean): File? =
+    thumbnailPath.takeIf { isCurrentPreview }?.asValidThumbnailFile()
+        ?: lastGoodThumbnailPath.asValidThumbnailFile()
+
+private fun String.asValidThumbnailFile(): File? =
+    takeIf { it.isNotBlank() }
+        ?.let { path -> File(path) }
+        ?.takeIf { file -> file.exists() && file.length() > 0L }
 
 @Suppress("DEPRECATION")
 private fun WebSettings.disablePreviewDarkening() {
@@ -1811,19 +1847,24 @@ private fun OperationWebPreview(
     val context = LocalContext.current
     val webViewOperationStore: WebViewOperationStore = koinInject()
     val webState by webViewOperationStore.state.collectAsState()
-    val isCurrentPreview = webState.requestedUrl == url || webState.url == url
-    LaunchedEffect(url, isCurrentPreview) {
+    val normalizedUrl = remember(url) { url.normalizedWebPreviewUrl() }
+    val isCurrentPreview = remember(
+        normalizedUrl,
+        webState.toolCallId,
+        webState.requestedUrl,
+        webState.committedUrl,
+        webState.url,
+        webState.lastGoodPreviewUrl,
+    ) {
+        webState.matchesPreview(toolCallId = "", normalizedUrl = normalizedUrl)
+    }
+    LaunchedEffect(normalizedUrl, isCurrentPreview) {
         if (!isCurrentPreview) {
             webViewOperationStore.open(url)
         }
     }
     val loadId = webState.loadId.takeIf { isCurrentPreview }
     val state = rememberWebViewState(url = url)
-    LaunchedEffect(loadId, url) {
-        if (!loadId.isNullOrBlank()) {
-            state.loadUrl(url)
-        }
-    }
     DisposableEffect(loadId) {
         if (!loadId.isNullOrBlank()) {
             webViewOperationStore.markRendererActive(loadId, true)
@@ -1834,6 +1875,9 @@ private fun OperationWebPreview(
             }
         }
     }
+    val thumbnailFile = webState.bestThumbnailFile(isCurrentPreview)
+    val showLiveWebView = !loadId.isNullOrBlank() &&
+        webState.status in setOf(WebViewLoadStatus.INTERACTIVE, WebViewLoadStatus.READY)
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
@@ -1841,39 +1885,93 @@ private fun OperationWebPreview(
         contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        WebView(
-            state = state,
-            modifier = Modifier.fillMaxSize(),
-            onProgressChanged = { webView, progress ->
-                loadId?.let {
-                    webViewOperationStore.updateLoading(it, webView?.url ?: url, progress)
-                    if (progress >= 35) {
-                        webView?.let { view -> extractReadablePage(view, webViewOperationStore, it) }
-                    }
-                }
-            },
-            onPageStarted = { webView, pageUrl ->
-                loadId?.let {
-                    webViewOperationStore.updateLoading(it, pageUrl ?: webView?.url ?: url, 1)
-                    webView?.let { view -> scheduleReadableExtracts(view, webViewOperationStore, it) }
-                }
-            },
-            onPageFinished = { webView, pageUrl ->
-                val resolvedUrl = pageUrl ?: webView?.url ?: url
-                loadId?.let {
-                    webViewOperationStore.markPageFinished(it, resolvedUrl)
-                    webView?.let { view ->
-                        extractReadablePage(view, webViewOperationStore, it, force = true)
-                        captureWebViewThumbnail(view, webViewOperationStore, context, it)
-                    }
-                }
-            },
-            onReceivedError = { webView, pageUrl, error ->
-                loadId?.let {
-                    webViewOperationStore.markFailed(it, pageUrl ?: webView?.url ?: url, error.orEmpty())
-                }
-            },
-        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (!loadId.isNullOrBlank()) {
+                WebView(
+                    state = state,
+                    modifier = Modifier.fillMaxSize(),
+                    onProgressChanged = { webView, progress ->
+                        webViewOperationStore.updateLoading(loadId, webView?.url ?: url, progress)
+                        if (progress >= 35) {
+                            webView?.let { view -> extractReadablePage(view, webViewOperationStore, loadId) }
+                        }
+                    },
+                    onPageStarted = { webView, pageUrl ->
+                        webViewOperationStore.updateLoading(loadId, pageUrl ?: webView?.url ?: url, 1)
+                        webView?.let { view -> scheduleReadableExtracts(view, webViewOperationStore, loadId) }
+                    },
+                    onPageFinished = { webView, pageUrl ->
+                        val resolvedUrl = pageUrl ?: webView?.url ?: url
+                        webViewOperationStore.markPageFinished(loadId, resolvedUrl)
+                        webView?.let { view ->
+                            extractReadablePage(view, webViewOperationStore, loadId, force = true)
+                            scheduleThumbnailCaptures(view, webViewOperationStore, context, loadId)
+                        }
+                    },
+                    onReceivedError = { webView, pageUrl, error ->
+                        webViewOperationStore.markFailed(loadId, pageUrl ?: webView?.url ?: url, error.orEmpty())
+                    },
+                )
+            }
+            if (!showLiveWebView) {
+                WebOperationPreviewLoadingOverlay(
+                    url = url,
+                    webState = webState.takeIf { isCurrentPreview },
+                    thumbnailFile = thumbnailFile,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebOperationPreviewLoadingOverlay(
+    url: String,
+    webState: WebViewOperationState?,
+    thumbnailFile: File?,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        if (thumbnailFile != null) {
+            AsyncImage(
+                model = thumbnailFile,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = webState?.title?.takeIf { it.isNotBlank() } ?: "正在加载网页",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = when {
+                        webState?.lastError?.isNotBlank() == true -> webState.lastError
+                        webState?.readableText?.isNotBlank() == true -> webState.readableText.compactForSandbox(120)
+                        webState?.status == WebViewLoadStatus.STALLED -> "网页加载较慢，正在保留当前预览"
+                        else -> url.webHostPreview()
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -1945,13 +2043,26 @@ private fun scheduleReadableExtracts(
     webView.postDelayed({ extractReadablePage(webView, store, loadId) }, 3_000L)
 }
 
-private fun captureWebViewThumbnail(
+private fun scheduleThumbnailCaptures(
     webView: AndroidWebView,
     store: WebViewOperationStore,
     context: android.content.Context,
     loadId: String,
 ) {
-    if (!store.shouldCaptureThumbnail(loadId, webView.url)) return
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 0L, force = true)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 600L, force = true)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 1_500L, force = true)
+}
+
+private fun captureWebViewThumbnail(
+    webView: AndroidWebView,
+    store: WebViewOperationStore,
+    context: android.content.Context,
+    loadId: String,
+    delayMillis: Long = 500L,
+    force: Boolean = false,
+) {
+    if (!store.shouldCaptureThumbnail(loadId, webView.url, force = force)) return
     webView.postDelayed({
         runCatching {
             val width = webView.width
@@ -1969,6 +2080,10 @@ private fun captureWebViewThumbnail(
             if (cropped !== bitmap) {
                 bitmap.recycle()
             }
+            if (cropped.looksBlank()) {
+                cropped.recycle()
+                return@runCatching
+            }
 
             val dir = File(context.filesDir, "amberagent/artifacts/webview-thumbnails")
             dir.mkdirs()
@@ -1981,7 +2096,41 @@ private fun captureWebViewThumbnail(
         }.onFailure {
             Log.w("ChatInput", "Failed to capture WebView thumbnail", it)
         }
-    }, 500L)
+    }, delayMillis)
+}
+
+private fun Bitmap.looksBlank(): Boolean {
+    if (width <= 0 || height <= 0) return true
+    val xSamples = 12
+    val ySamples = 12
+    var opaqueSamples = 0
+    var minRed = 255
+    var minGreen = 255
+    var minBlue = 255
+    var maxRed = 0
+    var maxGreen = 0
+    var maxBlue = 0
+    for (yIndex in 0 until ySamples) {
+        val y = ((height - 1) * yIndex / (ySamples - 1).coerceAtLeast(1)).coerceIn(0, height - 1)
+        for (xIndex in 0 until xSamples) {
+            val x = ((width - 1) * xIndex / (xSamples - 1).coerceAtLeast(1)).coerceIn(0, width - 1)
+            val pixel = getPixel(x, y)
+            if (android.graphics.Color.alpha(pixel) <= 8) continue
+            opaqueSamples++
+            val red = android.graphics.Color.red(pixel)
+            val green = android.graphics.Color.green(pixel)
+            val blue = android.graphics.Color.blue(pixel)
+            minRed = minOf(minRed, red)
+            minGreen = minOf(minGreen, green)
+            minBlue = minOf(minBlue, blue)
+            maxRed = maxOf(maxRed, red)
+            maxGreen = maxOf(maxGreen, green)
+            maxBlue = maxOf(maxBlue, blue)
+        }
+    }
+    if (opaqueSamples == 0) return true
+    val channelRange = maxOf(maxRed - minRed, maxGreen - minGreen, maxBlue - minBlue)
+    return channelRange < 8 && minRed > 245 && minGreen > 245 && minBlue > 245
 }
 
 @Composable

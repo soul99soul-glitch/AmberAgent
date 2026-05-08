@@ -258,6 +258,9 @@ fun buildMemoryTools(
                     put("sourceMessageIds", buildJsonObject {
                         put("type", "array")
                         put("description", "Optional source message ids.")
+                        put("items", buildJsonObject {
+                            put("type", "string")
+                        })
                     })
                     put("expiresAt", buildJsonObject {
                         put("type", "integer")

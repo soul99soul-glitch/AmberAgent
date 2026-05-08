@@ -14,8 +14,10 @@ import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlan
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanSource
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
+import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
 import me.rerere.rikkahub.data.memory.export.MemoryImportExportManager
 import me.rerere.rikkahub.data.memory.model.MemoryCandidateStatus
 import me.rerere.rikkahub.data.model.AssistantMemory
@@ -27,11 +29,9 @@ class SettingAgentMemoryVM(
     private val memoryRepository: MemoryRepository,
     private val memoryDreamPlanner: MemoryDreamPlanner,
     private val memoryDreamApplier: MemoryDreamApplier,
+    private val memoryDreamPlanStore: MemoryDreamPlanStore,
     private val memoryImportExportManager: MemoryImportExportManager,
 ) : ViewModel() {
-    private val _dreamPlan = MutableStateFlow<MemoryDreamPlan?>(null)
-    val dreamPlan: StateFlow<MemoryDreamPlan?> = _dreamPlan.asStateFlow()
-
     private val _memoryTaskRunning = MutableStateFlow(false)
     val memoryTaskRunning: StateFlow<Boolean> = _memoryTaskRunning.asStateFlow()
 
@@ -55,6 +55,9 @@ class SettingAgentMemoryVM(
 
     val recentMemoryEvents = memoryRepository.getRecentEventsFlow()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val dreamPlan: StateFlow<PersistedMemoryDreamPlan?> = memoryDreamPlanStore.pendingPlanFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     fun updateAgentRuntime(update: (AgentRuntimeSetting) -> AgentRuntimeSetting) {
         viewModelScope.launch {
@@ -103,10 +106,13 @@ class SettingAgentMemoryVM(
             _memoryTaskRunning.value = true
             runCatching {
                 withContext(Dispatchers.IO) {
-                    memoryDreamPlanner.plan()
+                    val plan = memoryDreamPlanner.plan()
+                    if (plan.hasChanges) {
+                        memoryDreamPlanStore.savePending(plan, MemoryDreamPlanSource.MANUAL)
+                    }
+                    plan
                 }
             }.onSuccess { plan ->
-                _dreamPlan.value = plan
                 _operationMessage.value = if (plan.hasChanges) {
                     "已生成 Dream 整理建议"
                 } else {
@@ -120,16 +126,25 @@ class SettingAgentMemoryVM(
     }
 
     fun applyDreamPlan() {
-        val plan = _dreamPlan.value ?: return
+        val persistedPlan = dreamPlan.value ?: return
         viewModelScope.launch {
             _memoryTaskRunning.value = true
             runCatching {
                 withContext(Dispatchers.IO) {
-                    memoryDreamApplier.apply(plan)
+                    val appliedPlan = memoryDreamApplier.apply(persistedPlan.plan)
+                    if (appliedPlan.hasChanges) {
+                        memoryDreamPlanStore.markApplied(persistedPlan.id)
+                    } else {
+                        memoryDreamPlanStore.markDismissed(persistedPlan.id)
+                    }
+                    appliedPlan
                 }
-            }.onSuccess {
-                _dreamPlan.value = null
-                _operationMessage.value = "已应用 Dream 整理建议"
+            }.onSuccess { appliedPlan ->
+                _operationMessage.value = if (appliedPlan.hasChanges) {
+                    "已应用 Dream 整理建议"
+                } else {
+                    "没有可安全应用的 Dream 建议"
+                }
             }.onFailure { error ->
                 _operationMessage.value = "应用 Dream 建议失败：${error.message ?: error::class.java.simpleName}"
             }
@@ -138,7 +153,10 @@ class SettingAgentMemoryVM(
     }
 
     fun dismissDreamPlan() {
-        _dreamPlan.value = null
+        val persistedPlan = dreamPlan.value ?: return
+        viewModelScope.launch {
+            memoryDreamPlanStore.markDismissed(persistedPlan.id)
+        }
     }
 
     fun exportMemories(directory: File) {

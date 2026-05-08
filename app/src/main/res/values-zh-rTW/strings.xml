@@ -421,6 +421,7 @@
   <string name="notification_channel_chat_completed">聊天完成</string>
   <string name="notification_channel_chat_live_update">聊天生成進度</string>
   <string name="notification_channel_web_server">網頁伺服器</string>
+  <string name="notification_channel_memory_tasks">記憶後台任務</string>
   <string name="notification_live_update_chip_thinking">思考中</string>
   <string name="notification_live_update_chip_tool">工具</string>
   <string name="notification_live_update_chip_writing">正在書寫</string>

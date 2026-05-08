@@ -24,7 +24,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.di.appModule
 import me.rerere.rikkahub.di.dataSourceModule
@@ -34,6 +36,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -50,6 +53,7 @@ const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update_v3"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
+const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -91,6 +95,9 @@ class RikkaHubApp : Application() {
 
         // Reschedule persisted mobile cron tasks after app startup.
         rescheduleCronTasks()
+
+        // Keep Daydream background review aligned with memory settings.
+        syncMemoryDreamTasks()
 
         // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
         registerChatServiceCleanup()
@@ -196,6 +203,23 @@ class RikkaHubApp : Application() {
         }
     }
 
+    private fun syncMemoryDreamTasks() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            val scheduler = get<MemoryDreamScheduler>()
+            val settingsStore = get<SettingsStore>()
+            settingsStore.settingsFlow
+                .map { it.agentRuntime.memoryWorker }
+                .distinctUntilChanged()
+                .collect {
+                    runCatching {
+                        scheduler.sync()
+                    }.onFailure { error ->
+                        Log.e(TAG, "syncMemoryDreamTasks failed", error)
+                    }
+                }
+        }
+    }
+
     private fun createNotificationChannel() {
         val notificationManager = NotificationManagerCompat.from(this)
         val chatCompletedChannel = NotificationChannelCompat
@@ -233,6 +257,14 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(screenCaptureChannel)
+
+        val memoryChannel = NotificationChannelCompat
+            .Builder(MEMORY_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(getString(R.string.notification_channel_memory_tasks))
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(memoryChannel)
     }
 
     override fun onTerminate() {

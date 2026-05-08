@@ -48,17 +48,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlan
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
 import me.rerere.rikkahub.data.memory.model.MemoryCandidate
+import me.rerere.rikkahub.data.memory.model.MemoryEvent
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -67,8 +74,11 @@ import org.koin.androidx.compose.koinViewModel
 import java.io.File
 
 @Composable
-fun SettingAgentMemoryPage() {
+fun SettingAgentMemoryPage(
+    subpage: MemorySettingsSubpage = MemorySettingsSubpage.Overview,
+) {
     val vm = koinViewModel<SettingAgentMemoryVM>()
+    val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     val memories by vm.memories.collectAsStateWithLifecycle()
     val shortTermMemories by vm.shortTermMemories.collectAsStateWithLifecycle()
@@ -90,6 +100,13 @@ fun SettingAgentMemoryPage() {
     }
     var pendingDeleteMemory by remember { mutableStateOf<AssistantMemory?>(null) }
     var memoryInfoDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val pageTitle = when (subpage) {
+        MemorySettingsSubpage.Overview -> stringResource(R.string.setting_agent_memory_title)
+        MemorySettingsSubpage.Recall -> "记忆开关"
+        MemorySettingsSubpage.Worker -> "自动整理"
+        MemorySettingsSubpage.Compaction -> "上下文管理"
+        MemorySettingsSubpage.Library -> "记忆库"
+    }
 
     LaunchedEffect(operationMessage) {
         operationMessage?.let { message ->
@@ -127,7 +144,7 @@ fun SettingAgentMemoryPage() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.setting_agent_memory_title)) },
+                title = { Text(pageTitle) },
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
@@ -145,235 +162,69 @@ fun SettingAgentMemoryPage() {
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            AgentSoulCard(
-                value = settings.agentRuntime.agentSoulMarkdown,
-                onSave = { value ->
-                    vm.updateAgentRuntime { it.copy(agentSoulMarkdown = value) }
-                },
-            )
+            when (subpage) {
+                MemorySettingsSubpage.Overview -> {
+                    AgentSoulCard(
+                        value = settings.agentRuntime.agentSoulMarkdown,
+                        onSave = { value ->
+                            vm.updateAgentRuntime { it.copy(agentSoulMarkdown = value) }
+                        },
+                    )
+                    MemoryOverviewEntries(
+                        pendingCandidateCount = pendingCandidates.size,
+                        coreCount = memories.size,
+                        shortCount = shortTermMemories.size,
+                        longCount = longTermMemories.size,
+                        hasPendingDreamPlan = dreamPlan != null,
+                        onOpen = { target -> navController.navigate(target.toScreen()) },
+                    )
+                }
 
-            CardGroup {
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_core_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_core_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.enableCoreMemory,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime { it.copy(enableCoreMemory = enabled) }
-                            },
-                        )
-                    },
+                MemorySettingsSubpage.Recall -> MemoryRecallSubpage(
+                    settings = settings,
+                    onUpdate = vm::updateAgentRuntime,
                 )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_short_term_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_short_term_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.enableShortTermMemory,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime { it.copy(enableShortTermMemory = enabled) }
-                            },
-                        )
-                    },
+
+                MemorySettingsSubpage.Worker -> MemoryWorkerSubpage(
+                    settings = settings,
+                    pendingCandidateCount = pendingCandidates.size,
+                    eventCount = recentMemoryEvents.size,
+                    dreamPlan = dreamPlan,
+                    running = memoryTaskRunning,
+                    onUpdate = vm::updateAgentRuntime,
+                    onPlan = vm::planDream,
+                    onApply = vm::applyDreamPlan,
+                    onDismiss = vm::dismissDreamPlan,
                 )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_long_term_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_long_term_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.enableLongTermMemory,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime { it.copy(enableLongTermMemory = enabled) }
-                            },
-                        )
-                    },
+
+                MemorySettingsSubpage.Compaction -> MemoryCompactionSubpage(
+                    settings = settings,
+                    onUpdate = vm::updateAgentRuntime,
                 )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_recent_chats_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_recent_chats_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.enableRecentChatsReference,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime { it.copy(enableRecentChatsReference = enabled) }
-                            },
-                        )
+
+                MemorySettingsSubpage.Library -> MemoryLibrarySubpage(
+                    memories = memories,
+                    shortTermMemories = shortTermMemories,
+                    longTermMemories = longTermMemories,
+                    pendingCandidates = pendingCandidates,
+                    recentMemoryEvents = recentMemoryEvents,
+                    running = memoryTaskRunning,
+                    onAcceptCandidate = vm::acceptCandidate,
+                    onIgnoreCandidate = vm::ignoreCandidate,
+                    onExport = {
+                        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                        vm.exportMemories(baseDir)
                     },
-                )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_time_reminder_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_time_reminder_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.enableTimeReminder,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime { it.copy(enableTimeReminder = enabled) }
-                            },
-                        )
+                    onImport = {
+                        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                        vm.importMemories(File(baseDir, "AmberAgentMemory"))
                     },
-                )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_title)) },
-                    supportingContent = {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(stringResource(R.string.setting_agent_memory_context_compaction_desc))
-                            Text(
-                                text = stringResource(R.string.setting_agent_memory_context_compaction_defaults),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.contextCompaction.enabled,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime {
-                                    it.copy(
-                                        contextCompaction = it.contextCompaction.copy(enabled = enabled)
-                                    )
-                                }
-                            },
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.contextCompaction.notifyOnly,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime {
-                                    it.copy(
-                                        contextCompaction = it.contextCompaction.copy(notifyOnly = enabled)
-                                    )
-                                }
-                            },
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text("选择性召回") },
-                    supportingContent = {
-                        Text("每轮最多 ${settings.agentRuntime.memoryRecall.maxItems} 条、${settings.agentRuntime.memoryRecall.maxPromptChars} 字符，不再全量注入。")
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.memoryRecall.debug,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime {
-                                    it.copy(memoryRecall = it.memoryRecall.copy(debug = enabled))
-                                }
-                            },
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text("记忆后台提取") },
-                    supportingContent = {
-                        Text("生成结束后提取候选记忆，待审核 ${pendingCandidates.size} 条，最近事件 ${recentMemoryEvents.size} 条。")
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.memoryWorker.enabled,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime {
-                                    it.copy(memoryWorker = it.memoryWorker.copy(enabled = enabled))
-                                }
-                            },
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text("跟随压缩模型") },
-                    supportingContent = { Text("记忆提取默认使用压缩模型；关闭后回退到单独选择的记忆模型或聊天模型。") },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.memoryWorker.followCompressModel,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime {
-                                    it.copy(memoryWorker = it.memoryWorker.copy(followCompressModel = enabled))
-                                }
-                            },
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text("Dream 整理") },
-                    supportingContent = { Text("低频整理重复、过期和可提升的记忆；默认只生成可审核建议。") },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.agentRuntime.memoryWorker.dreamEnabled,
-                            onCheckedChange = { enabled ->
-                                vm.updateAgentRuntime {
-                                    it.copy(memoryWorker = it.memoryWorker.copy(dreamEnabled = enabled))
-                                }
-                            },
-                        )
-                    },
+                    onAddMemory = { memoryDialogState.open(AssistantMemory(0, "")) },
+                    onEditMemory = { memoryDialogState.open(it) },
+                    onDeleteMemory = { pendingDeleteMemory = it },
+                    onInfoClick = { title, text -> memoryInfoDialog = title to text },
                 )
             }
-
-            MemoryCandidatesSection(
-                candidates = pendingCandidates,
-                onAccept = vm::acceptCandidate,
-                onIgnore = vm::ignoreCandidate,
-            )
-
-            DreamReviewSection(
-                plan = dreamPlan,
-                running = memoryTaskRunning,
-                onPlan = vm::planDream,
-                onApply = vm::applyDreamPlan,
-                onDismiss = vm::dismissDreamPlan,
-            )
-
-            MemoryPortabilitySection(
-                running = memoryTaskRunning,
-                onExport = {
-                    val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
-                    vm.exportMemories(baseDir)
-                },
-                onImport = {
-                    val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
-                    vm.importMemories(File(baseDir, "AmberAgentMemory"))
-                },
-            )
-
-            MemoryRecordsSection(
-                title = stringResource(R.string.setting_agent_memory_records_title),
-                emptyText = stringResource(R.string.setting_agent_memory_empty),
-                memories = memories,
-                onAddMemory = { memoryDialogState.open(AssistantMemory(0, "")) },
-                onEditMemory = { memoryDialogState.open(it) },
-                onDeleteMemory = { pendingDeleteMemory = it },
-            )
-
-            MemoryRecordsSection(
-                title = stringResource(R.string.setting_agent_memory_short_records_title),
-                emptyText = stringResource(R.string.setting_agent_memory_short_empty),
-                memories = shortTermMemories,
-                infoTitle = stringResource(R.string.setting_agent_memory_short_info_title),
-                infoText = stringResource(R.string.setting_agent_memory_short_info_body),
-                onInfoClick = { title, text -> memoryInfoDialog = title to text },
-                onAddMemory = null,
-                onEditMemory = { memoryDialogState.open(it) },
-                onDeleteMemory = { pendingDeleteMemory = it },
-            )
-
-            MemoryRecordsSection(
-                title = stringResource(R.string.setting_agent_memory_long_records_title),
-                emptyText = stringResource(R.string.setting_agent_memory_long_empty),
-                memories = longTermMemories,
-                infoTitle = stringResource(R.string.setting_agent_memory_long_info_title),
-                infoText = stringResource(R.string.setting_agent_memory_long_info_body),
-                onInfoClick = { title, text -> memoryInfoDialog = title to text },
-                onAddMemory = null,
-                onEditMemory = { memoryDialogState.open(it) },
-                onDeleteMemory = { pendingDeleteMemory = it },
-            )
         }
     }
 
@@ -403,6 +254,406 @@ fun SettingAgentMemoryPage() {
             text = { Text(text) },
             confirmButton = {
                 TextButton(onClick = { memoryInfoDialog = null }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+        )
+    }
+}
+
+enum class MemorySettingsSubpage {
+    Overview,
+    Recall,
+    Worker,
+    Compaction,
+    Library,
+}
+
+@Composable
+fun SettingAgentMemoryRecallPage() {
+    SettingAgentMemoryPage(subpage = MemorySettingsSubpage.Recall)
+}
+
+@Composable
+fun SettingAgentMemoryWorkerPage() {
+    SettingAgentMemoryPage(subpage = MemorySettingsSubpage.Worker)
+}
+
+@Composable
+fun SettingAgentMemoryCompactionPage() {
+    SettingAgentMemoryPage(subpage = MemorySettingsSubpage.Compaction)
+}
+
+@Composable
+fun SettingAgentMemoryLibraryPage() {
+    SettingAgentMemoryPage(subpage = MemorySettingsSubpage.Library)
+}
+
+private fun MemorySettingsSubpage.toScreen(): Screen = when (this) {
+    MemorySettingsSubpage.Overview -> Screen.SettingAgentMemory
+    MemorySettingsSubpage.Recall -> Screen.SettingAgentMemoryRecall
+    MemorySettingsSubpage.Worker -> Screen.SettingAgentMemoryWorker
+    MemorySettingsSubpage.Compaction -> Screen.SettingAgentMemoryCompaction
+    MemorySettingsSubpage.Library -> Screen.SettingAgentMemoryLibrary
+}
+
+@Composable
+private fun MemoryOverviewEntries(
+    pendingCandidateCount: Int,
+    coreCount: Int,
+    shortCount: Int,
+    longCount: Int,
+    hasPendingDreamPlan: Boolean,
+    onOpen: (MemorySettingsSubpage) -> Unit,
+) {
+    CardGroup {
+        item(
+            onClick = { onOpen(MemorySettingsSubpage.Recall) },
+            headlineContent = { Text("记忆开关") },
+            supportingContent = { Text("核心、短期、长期、最近会话、时间提醒、选择性召回。") },
+        )
+        item(
+            onClick = { onOpen(MemorySettingsSubpage.Worker) },
+            headlineContent = { Text("自动整理") },
+            supportingContent = {
+                Text("后台提取、Daydream 自动管理、空闲和充电条件" + if (hasPendingDreamPlan) " · 有手动建议" else " · 待审核 $pendingCandidateCount 条")
+            },
+        )
+        item(
+            onClick = { onOpen(MemorySettingsSubpage.Compaction) },
+            headlineContent = { Text("上下文管理") },
+            supportingContent = { Text("压缩策略、提醒模式、默认阈值。") },
+        )
+        item(
+            onClick = { onOpen(MemorySettingsSubpage.Library) },
+            headlineContent = { Text("记忆库") },
+            supportingContent = { Text("核心 $coreCount · 短期 $shortCount · 长期 $longCount · 候选 $pendingCandidateCount") },
+        )
+    }
+}
+
+@Composable
+private fun MemoryRecallSubpage(
+    settings: Settings,
+    onUpdate: ((AgentRuntimeSetting) -> AgentRuntimeSetting) -> Unit,
+) {
+    CardGroup {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_core_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_agent_memory_core_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.enableCoreMemory,
+                    onCheckedChange = { enabled -> onUpdate { it.copy(enableCoreMemory = enabled) } },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_short_term_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_agent_memory_short_term_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.enableShortTermMemory,
+                    onCheckedChange = { enabled -> onUpdate { it.copy(enableShortTermMemory = enabled) } },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_long_term_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_agent_memory_long_term_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.enableLongTermMemory,
+                    onCheckedChange = { enabled -> onUpdate { it.copy(enableLongTermMemory = enabled) } },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_recent_chats_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_agent_memory_recent_chats_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.enableRecentChatsReference,
+                    onCheckedChange = { enabled -> onUpdate { it.copy(enableRecentChatsReference = enabled) } },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_time_reminder_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_agent_memory_time_reminder_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.enableTimeReminder,
+                    onCheckedChange = { enabled -> onUpdate { it.copy(enableTimeReminder = enabled) } },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("选择性召回") },
+            supportingContent = {
+                Text("每轮最多 ${settings.agentRuntime.memoryRecall.maxItems} 条、${settings.agentRuntime.memoryRecall.maxPromptChars} 字符，不再全量注入。")
+            },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryRecall.debug,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryRecall = it.memoryRecall.copy(debug = enabled)) }
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun MemoryWorkerSubpage(
+    settings: Settings,
+    pendingCandidateCount: Int,
+    eventCount: Int,
+    dreamPlan: PersistedMemoryDreamPlan?,
+    running: Boolean,
+    onUpdate: ((AgentRuntimeSetting) -> AgentRuntimeSetting) -> Unit,
+    onPlan: () -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    CardGroup {
+        item(
+            headlineContent = { Text("记忆后台任务") },
+            supportingContent = { Text("生成结束后提取候选记忆，待审核 $pendingCandidateCount 条，最近事件 $eventCount 条。") },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryWorker.enabled,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(enabled = enabled)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("对话结束后提取") },
+            supportingContent = { Text("高置信短期项目可自动写入短期记忆，其它进入候选审核。") },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryWorker.extractionEnabled,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(extractionEnabled = enabled)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("跟随压缩模型") },
+            supportingContent = { Text("只控制对话结束后的记忆提取；Daydream 可在模型页单独指定更强模型。") },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryWorker.followCompressModel,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(followCompressModel = enabled)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("Daydream 自动整理") },
+            supportingContent = { Text("后台自动合并、提升、归档短期/长期记忆；核心记忆不会自动修改。") },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryWorker.dreamEnabled,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(dreamEnabled = enabled)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("Daydream 推理强度") },
+            supportingContent = {
+                Text(
+                    "当前 ${settings.agentRuntime.memoryWorker.daydreamReasoningLevel.memoryReasoningLabel()}；建议用较高强度处理合并、提升和归档判断。"
+                )
+            },
+            trailingContent = {
+                ReasoningButton(
+                    onlyIcon = true,
+                    reasoningLevel = settings.agentRuntime.memoryWorker.daydreamReasoningLevel,
+                    onUpdateReasoningLevel = { level ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(daydreamReasoningLevel = level)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("只在充电时运行") },
+            supportingContent = { Text("自动 Daydream 默认需要联网、电量不低、正在充电；每天最多 ${settings.agentRuntime.memoryWorker.dreamMaxDailyRuns} 次。") },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryWorker.runOnlyOnCharging,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnCharging = enabled)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text("只在设备空闲时运行") },
+            supportingContent = { Text("Android 6.0+ 交给系统 idle 约束决定运行时机，不是松手几秒后的即时触发。") },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.memoryWorker.runOnlyOnIdle,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnIdle = enabled)) }
+                    },
+                )
+            },
+        )
+    }
+
+    DreamReviewSection(
+        plan = dreamPlan,
+        running = running,
+        onPlan = onPlan,
+        onApply = onApply,
+        onDismiss = onDismiss,
+    )
+}
+
+@Composable
+private fun MemoryCompactionSubpage(
+    settings: Settings,
+    onUpdate: ((AgentRuntimeSetting) -> AgentRuntimeSetting) -> Unit,
+) {
+    CardGroup {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_title)) },
+            supportingContent = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.setting_agent_memory_context_compaction_desc))
+                    Text(
+                        text = stringResource(R.string.setting_agent_memory_context_compaction_defaults),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.contextCompaction.enabled,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(contextCompaction = it.contextCompaction.copy(enabled = enabled)) }
+                    },
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = settings.agentRuntime.contextCompaction.notifyOnly,
+                    onCheckedChange = { enabled ->
+                        onUpdate { it.copy(contextCompaction = it.contextCompaction.copy(notifyOnly = enabled)) }
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun MemoryLibrarySubpage(
+    memories: List<AssistantMemory>,
+    shortTermMemories: List<AssistantMemory>,
+    longTermMemories: List<AssistantMemory>,
+    pendingCandidates: List<MemoryCandidate>,
+    recentMemoryEvents: List<MemoryEvent>,
+    running: Boolean,
+    onAcceptCandidate: (String) -> Unit,
+    onIgnoreCandidate: (String) -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onAddMemory: () -> Unit,
+    onEditMemory: (AssistantMemory) -> Unit,
+    onDeleteMemory: (AssistantMemory) -> Unit,
+    onInfoClick: (String, String) -> Unit,
+) {
+    var showPortabilityDialog by remember { mutableStateOf(false) }
+    var showEventsDialog by remember { mutableStateOf(false) }
+
+    MemoryCandidatesSection(
+        candidates = pendingCandidates,
+        onAccept = onAcceptCandidate,
+        onIgnore = onIgnoreCandidate,
+    )
+
+    MemoryRecordsSection(
+        title = "核心记忆",
+        emptyText = stringResource(R.string.setting_agent_memory_empty),
+        memories = memories,
+        infoTitle = "核心记忆是什么？",
+        infoText = "核心记忆、短期记忆和长期记忆是并列的三类记忆。核心记忆优先级最高，适合手动维护稳定偏好、身份设定和长期规则。",
+        onInfoClick = onInfoClick,
+        onAddMemory = onAddMemory,
+        onEditMemory = onEditMemory,
+        onDeleteMemory = onDeleteMemory,
+    )
+
+    MemoryRecordsSection(
+        title = "短期记忆",
+        emptyText = stringResource(R.string.setting_agent_memory_short_empty),
+        memories = shortTermMemories,
+        infoTitle = stringResource(R.string.setting_agent_memory_short_info_title),
+        infoText = stringResource(R.string.setting_agent_memory_short_info_body),
+        onInfoClick = onInfoClick,
+        onAddMemory = null,
+        onEditMemory = onEditMemory,
+        onDeleteMemory = onDeleteMemory,
+    )
+
+    MemoryRecordsSection(
+        title = "长期记忆",
+        emptyText = stringResource(R.string.setting_agent_memory_long_empty),
+        memories = longTermMemories,
+        infoTitle = stringResource(R.string.setting_agent_memory_long_info_title),
+        infoText = stringResource(R.string.setting_agent_memory_long_info_body),
+        onInfoClick = onInfoClick,
+        onAddMemory = null,
+        onEditMemory = onEditMemory,
+        onDeleteMemory = onDeleteMemory,
+    )
+
+    MemoryMaintenanceSection(
+        eventCount = recentMemoryEvents.size,
+        onOpenPortability = { showPortabilityDialog = true },
+        onOpenEvents = { showEventsDialog = true },
+    )
+
+    if (showPortabilityDialog) {
+        AlertDialog(
+            onDismissRequest = { showPortabilityDialog = false },
+            title = { Text("导入导出") },
+            text = {
+                MemoryPortabilitySection(
+                    running = running,
+                    onExport = onExport,
+                    onImport = onImport,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showPortabilityDialog = false }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+        )
+    }
+
+    if (showEventsDialog) {
+        AlertDialog(
+            onDismissRequest = { showEventsDialog = false },
+            title = { Text("事件日志") },
+            text = { MemoryEventsSection(events = recentMemoryEvents, showTitle = false) },
+            confirmButton = {
+                TextButton(onClick = { showEventsDialog = false }) {
                     Text(stringResource(R.string.confirm))
                 }
             },
@@ -573,7 +824,7 @@ private fun MemoryCandidatesSection(
 
 @Composable
 private fun DreamReviewSection(
-    plan: MemoryDreamPlan?,
+    plan: PersistedMemoryDreamPlan?,
     running: Boolean,
     onPlan: () -> Unit,
     onApply: () -> Unit,
@@ -593,9 +844,9 @@ private fun DreamReviewSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Dream 整理审核", style = MaterialTheme.typography.titleMediumEmphasized)
+                    Text("手动整理审核", style = MaterialTheme.typography.titleMediumEmphasized)
                     Text(
-                        "只生成可审核 diff，确认后才会合并、提升、归档或忽略候选。",
+                        "手动生成的 diff 仍需确认；后台 Daydream 会自动应用短期/长期整理。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -605,10 +856,16 @@ private fun DreamReviewSection(
                 }
             }
 
-            plan?.let { current ->
+            plan?.let { persisted ->
+                val current = persisted.plan
                 val summary = "合并 ${current.mergeSuggestions.size} 组 · 提升 ${current.promoteMemoryIds.size} 条 · " +
                     "归档 ${current.archiveMemoryIds.size} 条 · 忽略候选 ${current.ignoreCandidateIds.size} 条"
                 Text(summary, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "来源：${if (persisted.source.name == "AUTO") "自动 Daydream" else "手动生成"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 current.notes.take(4).forEach { note ->
                     Text(
                         text = "• $note",
@@ -617,7 +874,7 @@ private fun DreamReviewSection(
                     )
                 }
             } ?: Text(
-                text = "还没有整理建议。",
+                text = "还没有手动整理建议。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -630,7 +887,7 @@ private fun DreamReviewSection(
                     Text("生成建议")
                 }
                 TextButton(
-                    enabled = !running && plan?.hasChanges == true,
+                    enabled = !running && plan?.plan?.hasChanges == true,
                     onClick = onApply,
                 ) {
                     Text("应用建议")
@@ -643,6 +900,64 @@ private fun DreamReviewSection(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MemoryEventsSection(events: List<MemoryEvent>) {
+    MemoryEventsSection(events = events, showTitle = true)
+}
+
+@Composable
+private fun MemoryEventsSection(
+    events: List<MemoryEvent>,
+    showTitle: Boolean,
+) {
+    if (showTitle) {
+        Text(
+            text = "记忆事件日志",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+    }
+    if (events.isEmpty()) {
+        Text(
+            text = "暂无记忆事件。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        return
+    }
+    CardGroup {
+        events.take(6).forEach { event ->
+            item(
+                headlineContent = { Text(event.type.wireName) },
+                supportingContent = {
+                    val message = event.message.ifBlank { "memory=${event.memoryId ?: "-"} candidate=${event.candidateId ?: "-"}" }
+                    Text(message, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemoryMaintenanceSection(
+    eventCount: Int,
+    onOpenPortability: () -> Unit,
+    onOpenEvents: () -> Unit,
+) {
+    CardGroup(title = { Text("维护工具") }) {
+        item(
+            onClick = onOpenPortability,
+            headlineContent = { Text("导入导出") },
+            supportingContent = { Text("Frontmatter 备份与恢复。") },
+        )
+        item(
+            onClick = onOpenEvents,
+            headlineContent = { Text("事件日志") },
+            supportingContent = { Text("查看最近 $eventCount 条记忆后台事件。") },
+        )
     }
 }
 
@@ -750,6 +1065,17 @@ private fun MemoryRecordsSection(
             )
         }
     }
+}
+
+@Composable
+private fun ReasoningLevel.memoryReasoningLabel(): String = when (this) {
+    ReasoningLevel.OFF -> stringResource(R.string.reasoning_off)
+    ReasoningLevel.AUTO -> stringResource(R.string.reasoning_auto)
+    ReasoningLevel.LOW -> stringResource(R.string.reasoning_light)
+    ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
+    ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
+    ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
+    ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
 }
 
 @Composable

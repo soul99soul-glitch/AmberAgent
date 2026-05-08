@@ -289,7 +289,7 @@ private suspend fun collectWorkspaceSkillFiles(workspaceManager: WorkspaceManage
         if (normalized.endsWith(".zip", ignoreCase = true)) {
             return unzipSkillFiles(bytes)
         }
-        val relativeName = normalized.substringAfterLast('/').ifBlank { "SKILL.md" }
+        val relativeName = normalized.substringAfterLast('/').ifBlank { "SKILL.md" }.canonicalSkillFileName()
         return mapOf(relativeName to bytes.decodeToString())
     }
 
@@ -300,7 +300,8 @@ private suspend fun collectWorkspaceSkillFiles(workspaceManager: WorkspaceManage
             if (entry.directory) {
                 walk(entry.path, root)
             } else if (isLikelyTextSkillFile(entry.name)) {
-                files[relative.ifBlank { entry.name }] = workspaceManager.readBytes(entry.path).decodeToString()
+                files[relative.ifBlank { entry.name }.canonicalSkillFileName()] =
+                    workspaceManager.readBytes(entry.path).decodeToString()
             }
         }
     }
@@ -315,7 +316,7 @@ private fun unzipSkillFiles(bytes: ByteArray): Map<String, String> {
             val entry = zip.nextEntry ?: break
             if (entry.isDirectory) continue
             val clean = entry.name.trim('/').substringAfter('/')
-            val name = clean.ifBlank { entry.name.substringAfterLast('/') }
+            val name = clean.ifBlank { entry.name.substringAfterLast('/') }.canonicalSkillFileName()
             if (name.isBlank() || name.contains("..") || !isLikelyTextSkillFile(name)) continue
             files[name] = zip.readBytes().decodeToString()
         }
@@ -326,8 +327,10 @@ private fun unzipSkillFiles(bytes: ByteArray): Map<String, String> {
 private fun isLikelyTextSkillFile(name: String): Boolean {
     val lower = name.lowercase()
     return lower == "skill.md" ||
+        lower == "skill.txt" ||
         lower == "mcp.json" ||
         lower.endsWith(".md") ||
+        lower.endsWith(".md.txt") ||
         lower.endsWith(".json") ||
         lower.endsWith(".txt") ||
         lower.endsWith(".yaml") ||
@@ -336,4 +339,22 @@ private fun isLikelyTextSkillFile(name: String): Boolean {
         lower.endsWith(".ts") ||
         lower.endsWith(".py") ||
         lower.endsWith(".sh")
+}
+
+private fun String.canonicalSkillFileName(): String {
+    val normalized = trim('/').replace('\\', '/')
+    val lower = normalized.lowercase()
+    return when {
+        lower == "skill.txt" || lower.endsWith("/skill.txt") ->
+            normalized.substringBeforeLast('/', missingDelimiterValue = "")
+                .let { parent -> if (parent.isBlank()) "SKILL.md" else "$parent/SKILL.md" }
+
+        lower == "skill.md.txt" || lower.endsWith("/skill.md.txt") ->
+            normalized.dropLast(4)
+
+        lower.endsWith(".md.txt") ->
+            normalized.dropLast(4)
+
+        else -> normalized
+    }
 }

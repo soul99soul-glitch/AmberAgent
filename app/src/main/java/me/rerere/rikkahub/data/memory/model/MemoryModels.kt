@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.memory.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 @Serializable
@@ -100,7 +101,10 @@ enum class MemoryEventType(val wireName: String) {
     DREAM_PLANNED("dream_planned"),
 
     @SerialName("dream_applied")
-    DREAM_APPLIED("dream_applied");
+    DREAM_APPLIED("dream_applied"),
+
+    @SerialName("dream_failed")
+    DREAM_FAILED("dream_failed");
 }
 
 @Serializable
@@ -164,9 +168,14 @@ data class MemoryWorkerSetting(
     val enabled: Boolean = true,
     val modelId: Uuid = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08"),
     val followCompressModel: Boolean = true,
+    val daydreamModelId: Uuid = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08"),
+    val daydreamFollowCompressModel: Boolean = true,
+    val daydreamReasoningLevel: ReasoningLevel = ReasoningLevel.HIGH,
     val extractionEnabled: Boolean = true,
     val dreamEnabled: Boolean = false,
     val runOnlyOnIdle: Boolean = true,
+    val runOnlyOnCharging: Boolean = true,
     val maxDailyRuns: Int = 8,
+    val dreamMaxDailyRuns: Int = 1,
     val timeoutMs: Long = 120_000L,
 )

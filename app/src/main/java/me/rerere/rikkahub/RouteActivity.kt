@@ -65,6 +65,7 @@ import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
 import me.rerere.rikkahub.ui.activity.SafeModeActivity
 import me.rerere.rikkahub.ui.components.ui.TTSController
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -105,6 +106,10 @@ import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentExecutionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryCompactionPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryLibraryPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryRecallPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentMemoryWorkerPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentPermissionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentRuntimeTasksPage
 import me.rerere.rikkahub.ui.pages.setting.SettingCronTasksPage
@@ -235,6 +240,9 @@ class RouteActivity : ComponentActivity() {
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
         }
+        if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
+            navStack?.add(Screen.SettingAgentMemory)
+        }
         newIntentHandler?.invoke(intent)
     }
 
@@ -254,6 +262,9 @@ class RouteActivity : ComponentActivity() {
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
         val startScreen = remember {
+            if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
+                return@remember Screen.SettingAgentMemory
+            }
             val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
                 readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
             } else {
@@ -437,6 +448,22 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingAgentMemory> {
                                 SettingAgentMemoryPage()
+                            }
+
+                            entry<Screen.SettingAgentMemoryRecall> {
+                                SettingAgentMemoryRecallPage()
+                            }
+
+                            entry<Screen.SettingAgentMemoryWorker> {
+                                SettingAgentMemoryWorkerPage()
+                            }
+
+                            entry<Screen.SettingAgentMemoryCompaction> {
+                                SettingAgentMemoryCompactionPage()
+                            }
+
+                            entry<Screen.SettingAgentMemoryLibrary> {
+                                SettingAgentMemoryLibraryPage()
                             }
 
                             entry<Screen.SettingAgentExtensions> {
@@ -699,6 +726,18 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingAgentMemory : Screen
+
+    @Serializable
+    data object SettingAgentMemoryRecall : Screen
+
+    @Serializable
+    data object SettingAgentMemoryWorker : Screen
+
+    @Serializable
+    data object SettingAgentMemoryCompaction : Screen
+
+    @Serializable
+    data object SettingAgentMemoryLibrary : Screen
 
     @Serializable
     data object SettingAgentExtensions : Screen

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.memory.dream
 
 import me.rerere.rikkahub.data.memory.model.MemoryEventType
 import me.rerere.rikkahub.data.memory.model.MemoryCandidateStatus
+import me.rerere.rikkahub.data.memory.model.MemoryRecord
 import me.rerere.rikkahub.data.memory.model.MemoryScope
 import me.rerere.rikkahub.data.memory.store.MemoryRepository
 import me.rerere.rikkahub.data.memory.telemetry.MemoryEventLogger
@@ -10,10 +11,12 @@ class MemoryDreamApplier(
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
 ) {
-    suspend fun apply(plan: MemoryDreamPlan) {
+    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan {
         val records = memoryRepository.getAllRecords().associateBy { it.id }
+        val applicablePlan = plan.onlyApplicableToManagedMemories(records)
+        if (!applicablePlan.hasChanges) return applicablePlan
 
-        plan.mergeSuggestions.forEach { suggestion ->
+        applicablePlan.mergeSuggestions.forEach { suggestion ->
             val target = records[suggestion.targetMemoryId] ?: return@forEach
             val mergedContent = suggestion.mergedContent
                 ?.trim()
@@ -36,7 +39,7 @@ class MemoryDreamApplier(
             }
         }
 
-        plan.promoteMemoryIds.forEach { id ->
+        applicablePlan.promoteMemoryIds.forEach { id ->
             val record = records[id] ?: return@forEach
             if (record.scope == MemoryScope.SHORT_TERM) {
                 memoryRepository.upsertRecord(
@@ -54,7 +57,7 @@ class MemoryDreamApplier(
             }
         }
 
-        plan.archiveMemoryIds.forEach { id ->
+        applicablePlan.archiveMemoryIds.forEach { id ->
             val record = records[id] ?: return@forEach
             memoryRepository.upsertRecord(record.copy(archived = true))
             eventLogger.log(
@@ -65,14 +68,64 @@ class MemoryDreamApplier(
         }
 
         val candidates = memoryRepository.getAllCandidates().associateBy { it.id }
-        plan.ignoreCandidateIds.forEach { id ->
+        applicablePlan.ignoreCandidateIds.forEach { id ->
             val candidate = candidates[id] ?: return@forEach
             memoryRepository.updateCandidate(candidate.copy(status = MemoryCandidateStatus.IGNORED))
         }
 
         eventLogger.log(
             type = MemoryEventType.DREAM_APPLIED,
-            message = "Applied dream diff.",
+            message = applicablePlan.summaryText("Applied dream diff"),
+        )
+        return applicablePlan
+    }
+
+    private fun MemoryDreamPlan.onlyApplicableToManagedMemories(
+        records: Map<Int, MemoryRecord>,
+    ): MemoryDreamPlan {
+        val mergeSuggestions = mergeSuggestions.mapNotNull { suggestion ->
+            val candidates = (listOf(suggestion.targetMemoryId) + suggestion.duplicateMemoryIds)
+                .mapNotNull { records[it] }
+                .filter { it.isManagedByDream() }
+                .distinctBy { it.id }
+            if (candidates.size < 2) return@mapNotNull null
+
+            val target = candidates.sortedWith(managedMemoryComparator).first()
+            val duplicateIds = candidates
+                .filterNot { it.id == target.id }
+                .map { it.id }
+            if (duplicateIds.isEmpty()) return@mapNotNull null
+            suggestion.copy(
+                targetMemoryId = target.id,
+                duplicateMemoryIds = duplicateIds,
+            )
+        }
+        val mergeIds = mergeSuggestions.flatMap { listOf(it.targetMemoryId) + it.duplicateMemoryIds }.toSet()
+        return copy(
+            mergeSuggestions = mergeSuggestions,
+            promoteMemoryIds = promoteMemoryIds
+                .mapNotNull { records[it] }
+                .filter { it.scope == MemoryScope.SHORT_TERM && !it.archived }
+                .map { it.id }
+                .distinct(),
+            archiveMemoryIds = archiveMemoryIds
+                .mapNotNull { records[it] }
+                .filter { it.scope == MemoryScope.SHORT_TERM && !it.archived && !it.pinned && it.id !in mergeIds }
+                .map { it.id }
+                .distinct(),
+            ignoreCandidateIds = ignoreCandidateIds.distinct(),
         )
     }
+
+    private fun MemoryRecord.isManagedByDream(): Boolean =
+        !archived && scope != MemoryScope.CORE
+
+    private fun MemoryDreamPlan.summaryText(prefix: String): String =
+        "$prefix: merge=${mergeSuggestions.size}, promote=${promoteMemoryIds.size}, " +
+            "archive=${archiveMemoryIds.size}, ignore=${ignoreCandidateIds.size}"
+
+    private val managedMemoryComparator = compareByDescending<MemoryRecord> { it.scope == MemoryScope.LONG_TERM }
+        .thenByDescending { it.pinned }
+        .thenByDescending { it.confidence }
+        .thenByDescending { it.updatedAt }
 }

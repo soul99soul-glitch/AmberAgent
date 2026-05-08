@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 
 data class WebViewLink(
@@ -33,6 +34,8 @@ data class WebViewOperationState(
     val readableText: String = "",
     val links: List<WebViewLink> = emptyList(),
     val thumbnailPath: String = "",
+    val lastGoodThumbnailPath: String = "",
+    val lastGoodPreviewUrl: String = "",
     val openedAtEpochMillis: Long = 0L,
     val lastProgressAtEpochMillis: Long = 0L,
     val lastExtractAtEpochMillis: Long = 0L,
@@ -41,6 +44,7 @@ data class WebViewOperationState(
     val updatedAtEpochMillis: Long = 0L,
 ) {
     val displayUrl: String get() = committedUrl.ifBlank { url.ifBlank { requestedUrl } }
+    val normalizedDisplayUrl: String get() = displayUrl.normalizedPreviewUrl()
     val hasPage: Boolean get() = requestedUrl.isNotBlank() || url.isNotBlank()
     val hasReadableContent: Boolean get() = readableText.isNotBlank() || title.isNotBlank() || links.isNotEmpty()
     val isLoading: Boolean get() = status == WebViewLoadStatus.REQUESTED || status == WebViewLoadStatus.LOADING
@@ -56,14 +60,34 @@ class WebViewOperationStore {
     private var lastThumbnailCaptureKey: String = ""
     private var lastThumbnailCaptureAtMillis: Long = 0L
 
-    fun open(url: String, toolCallId: String = "webview_${System.currentTimeMillis()}"): String {
+    fun open(url: String, toolCallId: String = ""): String {
         val now = System.currentTimeMillis()
+        val current = _state.value
+        if (current.matches(toolCallId = toolCallId, url = url)) {
+            _state.update {
+                it.copy(
+                    requestedUrl = it.requestedUrl.ifBlank { url },
+                    url = it.url.ifBlank { url },
+                    updatedAtEpochMillis = now,
+                )
+            }
+            return current.loadId
+        }
         val loadId = "webview_load_${now}_${loadSequence.incrementAndGet()}"
+        val lastGoodThumbnailPath = current.thumbnailPath
+            .takeIf { it.isValidThumbnailFile() }
+            ?: current.lastGoodThumbnailPath.takeIf { it.isValidThumbnailFile() }
+            ?: ""
+        val lastGoodPreviewUrl = current.displayUrl
+            .takeIf { lastGoodThumbnailPath.isNotBlank() }
+            ?: current.lastGoodPreviewUrl
         _state.value = WebViewOperationState(
             loadId = loadId,
             toolCallId = toolCallId,
             requestedUrl = url,
             url = url,
+            lastGoodThumbnailPath = lastGoodThumbnailPath,
+            lastGoodPreviewUrl = lastGoodPreviewUrl,
             status = WebViewLoadStatus.REQUESTED,
             loadingProgress = 1,
             openedAtEpochMillis = now,
@@ -84,12 +108,14 @@ class WebViewOperationStore {
         return true
     }
 
-    fun shouldCaptureThumbnail(loadId: String, url: String?, now: Long = System.currentTimeMillis()): Boolean {
+    fun shouldCaptureThumbnail(
+        loadId: String,
+        url: String?,
+        now: Long = System.currentTimeMillis(),
+        force: Boolean = false,
+    ): Boolean {
         if (url.isNullOrBlank()) return false
-        val current = _state.value
-        if (current.loadId == loadId && current.thumbnailPath.isNotBlank()) {
-            return false
-        }
+        if (force) return true
         val key = "$loadId|$url"
         if (key == lastThumbnailCaptureKey && now - lastThumbnailCaptureAtMillis < THUMBNAIL_CAPTURE_INTERVAL_MS) {
             return false
@@ -209,13 +235,16 @@ class WebViewOperationStore {
     }
 
     fun updateThumbnail(loadId: String, url: String?, thumbnailPath: String) {
-        if (url.isNullOrBlank() || thumbnailPath.isBlank()) return
+        if (url.isNullOrBlank() || !thumbnailPath.isValidThumbnailFile()) return
         _state.update { current ->
             if (current.loadId != loadId) return@update current
+            val resolvedUrl = url.takeIf { it.isNotBlank() } ?: current.displayUrl
             current.copy(
-                url = url,
-                committedUrl = url,
+                url = resolvedUrl,
+                committedUrl = resolvedUrl,
                 thumbnailPath = thumbnailPath,
+                lastGoodThumbnailPath = thumbnailPath,
+                lastGoodPreviewUrl = resolvedUrl,
                 updatedAtEpochMillis = System.currentTimeMillis(),
             )
         }
@@ -234,3 +263,26 @@ class WebViewOperationStore {
         private const val STALLED_AFTER_MS = 12_000L
     }
 }
+
+private fun WebViewOperationState.matches(toolCallId: String, url: String): Boolean {
+    if (loadId.isBlank()) return false
+    if (toolCallId.isNotBlank() && this.toolCallId.isNotBlank() && this.toolCallId == toolCallId) return true
+    val normalizedUrl = url.normalizedPreviewUrl()
+    if (normalizedUrl.isBlank()) return false
+    return sequenceOf(requestedUrl, committedUrl, this.url, displayUrl, lastGoodPreviewUrl)
+        .filter { it.isNotBlank() }
+        .map { it.normalizedPreviewUrl() }
+        .any { it == normalizedUrl }
+}
+
+private fun String.normalizedPreviewUrl(): String {
+    val raw = trim()
+    if (raw.isBlank()) return raw
+    return raw.substringBefore('#').trimEnd('/')
+}
+
+private fun String.isValidThumbnailFile(): Boolean =
+    isNotBlank() && runCatching {
+        val file = File(this)
+        file.exists() && file.length() > 0L
+    }.getOrDefault(false)

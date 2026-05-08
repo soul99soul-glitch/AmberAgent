@@ -57,7 +57,7 @@ class MemoryDreamPlanner(
     ): MemoryDreamPlan? {
         val worker = settings.agentRuntime.memoryWorker
         if (!worker.enabled || !worker.dreamEnabled) return null
-        val model = resolveMemoryModel(settings) ?: return null
+        val model = resolveDaydreamModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
         val response = providerManager.getProviderByType(provider).generateText(
             providerSetting = provider,
@@ -69,22 +69,34 @@ class MemoryDreamPlanner(
                     )
                 )
             ),
-            params = TextGenerationParams(model = model),
+            params = TextGenerationParams(
+                model = model,
+                reasoningLevel = worker.daydreamReasoningLevel,
+            ),
         )
         val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
         return parseModelPlan(text, records, candidates)
     }
 
-    private fun resolveMemoryModel(settings: Settings) =
-        when {
-            settings.agentRuntime.memoryWorker.modelId != DEFAULT_AUTO_MODEL_ID ->
-                settings.resolveTaskChatModel(settings.agentRuntime.memoryWorker.modelId)
+    private fun resolveDaydreamModel(settings: Settings) =
+        settings.agentRuntime.memoryWorker.let { worker ->
+            when {
+                worker.daydreamModelId != DEFAULT_AUTO_MODEL_ID ->
+                    settings.resolveTaskChatModel(worker.daydreamModelId)
 
-            settings.agentRuntime.memoryWorker.followCompressModel ->
-                settings.resolveTaskChatModel(settings.compressModelId)
+                worker.daydreamFollowCompressModel ->
+                    settings.resolveTaskChatModel(settings.compressModelId)
 
-            else -> settings.resolveTaskChatModel(settings.chatModelId)
-        } ?: settings.resolveTaskChatModel(settings.chatModelId)
+                worker.modelId != DEFAULT_AUTO_MODEL_ID ->
+                    settings.resolveTaskChatModel(worker.modelId)
+
+                worker.followCompressModel ->
+                    settings.resolveTaskChatModel(settings.compressModelId)
+
+                else -> settings.resolveTaskChatModel(settings.chatModelId)
+            }
+        } ?: settings.resolveTaskChatModel(settings.compressModelId)
+            ?: settings.resolveTaskChatModel(settings.chatModelId)
 
     private fun parseModelPlan(
         raw: String,

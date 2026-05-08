@@ -44,7 +44,10 @@ import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.memory.extraction.MemoryCandidateFilter
 import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
 import me.rerere.rikkahub.data.memory.export.MemoryFrontmatterCodec
@@ -251,6 +254,18 @@ val appModule = module {
 
     single {
         MemoryDreamApplier(get(), get())
+    }
+
+    single {
+        MemoryDreamPlanStore(get(), get())
+    }
+
+    single {
+        MemoryDreamNotifier(get())
+    }
+
+    single {
+        MemoryDreamScheduler(get(), get())
     }
 
     single {

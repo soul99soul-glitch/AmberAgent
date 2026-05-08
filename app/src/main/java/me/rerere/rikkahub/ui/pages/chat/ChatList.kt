@@ -153,6 +153,31 @@ private const val UserScrollAutoFollowResumeDelayMs = 2_000L
 private const val MarkdownPrewarmBeforeItems = 4
 private const val MarkdownPrewarmAfterItems = 8
 private const val MarkdownPrewarmMaxTexts = 32
+private val ActionOptionLineRegex = Regex(
+    """^\s*(?:[-*+•·]|[0-9]{1,2}[.)、]|[（(]?[一二三四五六七八九十]{1,3}[）).、])\s+(.+?)\s*$"""
+)
+private val ActionOptionCuePhrases = listOf(
+    "你想让我",
+    "你想让",
+    "你要我",
+    "要不要我",
+    "你想要",
+    "我可以帮你",
+    "我可以继续",
+    "你可以选择",
+    "请选择",
+    "哪一种",
+    "哪种",
+    "哪一个",
+    "做哪",
+    "选项",
+    "choose",
+    "option",
+    "which one",
+    "do next",
+    "next step",
+    "would you like",
+)
 
 private fun Conversation.latestRenderToken(): String {
     val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
@@ -478,12 +503,12 @@ private fun ChatListNormal(
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
+    val activeGenerationState by rememberUpdatedState(loading || pendingUserMessages.isNotEmpty())
     var isRecentScroll by remember { mutableStateOf(false) }
     var touchAutoScrollHold by remember { mutableStateOf(false) }
     var scrollAutoScrollHold by remember { mutableStateOf(false) }
     var autoScrollCooldown by remember { mutableStateOf(false) }
     var resumeFollowAfterPause by remember { mutableStateOf(false) }
-    var showResumeFollowButton by remember { mutableStateOf(false) }
     var generationFollowActive by remember(conversation.id) { mutableStateOf(false) }
     var autoScrollCooldownGeneration by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
@@ -511,7 +536,6 @@ private fun ChatListNormal(
     fun startAutoScrollCooldown() {
         autoScrollCooldown = true
         resumeFollowAfterPause = false
-        showResumeFollowButton = false
         autoScrollCooldownGeneration += 1
     }
 
@@ -519,10 +543,8 @@ private fun ChatListNormal(
         if (autoScrollCooldownGeneration > 0) {
             delay(UserScrollAutoFollowResumeDelayMs)
             autoScrollCooldown = false
-            if (state.distanceToListEnd() <= 20) {
+            if (activeGenerationState) {
                 resumeFollowAfterPause = true
-            } else {
-                showResumeFollowButton = true
             }
         }
     }
@@ -544,7 +566,7 @@ private fun ChatListNormal(
         derivedStateOf {
             val shouldFollow = generationFollowActive || state.isNearListEnd() || resumeFollowAfterPause
             settings.displaySetting.enableAutoScroll &&
-                (loadingState || pendingUserMessages.isNotEmpty()) &&
+                activeGenerationState &&
                 !state.isScrollInProgress &&
                 !touchAutoScrollHold &&
                 !scrollAutoScrollHold &&
@@ -582,12 +604,14 @@ private fun ChatListNormal(
     ImeLazyListAutoScroller(lazyListState = state)
 
     LaunchedEffect(loading, pendingUserMessages.size, conversation.id) {
-        if (loading || pendingUserMessages.isNotEmpty()) {
-            if (!touchAutoScrollHold && !scrollAutoScrollHold && state.isNearListEnd(bufferItems = 4)) {
+        if (loadingState || pendingUserMessages.isNotEmpty()) {
+            if (!touchAutoScrollHold && !scrollAutoScrollHold && !autoScrollCooldown) {
                 generationFollowActive = true
             }
         } else {
             generationFollowActive = false
+            resumeFollowAfterPause = false
+            autoScrollCooldown = false
         }
     }
 
@@ -684,11 +708,11 @@ private fun ChatListNormal(
                     if (lastIndex >= 0) {
                         if (resumeFollowAfterPause) {
                             state.animateScrollToItem(lastIndex)
+                            generationFollowActive = true
                         } else {
                             state.scrollToItem(lastIndex)
                         }
                         resumeFollowAfterPause = false
-                        showResumeFollowButton = false
                     }
                 }
             }
@@ -701,14 +725,15 @@ private fun ChatListNormal(
                     scrollAutoScrollHold = true
                     autoScrollCooldown = false
                     resumeFollowAfterPause = false
-                    showResumeFollowButton = false
                     generationFollowActive = false
                 }
                 isRecentScroll = true
             } else {
                 if (scrollAutoScrollHold) {
                     scrollAutoScrollHold = false
-                    startAutoScrollCooldown()
+                    if (!autoScrollCooldown) {
+                        startAutoScrollCooldown()
+                    }
                 }
                 delay(1500)
                 isRecentScroll = false
@@ -737,7 +762,6 @@ private fun ChatListNormal(
                         touchAutoScrollHold = true
                         autoScrollCooldown = false
                         resumeFollowAfterPause = false
-                        showResumeFollowButton = false
                         try {
                             waitForUpOrCancellation()
                         } finally {
@@ -1091,39 +1115,13 @@ private fun ChatListNormal(
                 state = state
             )
 
-            AnimatedVisibility(
-                visible = showResumeFollowButton && !captureProgress,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = 20.dp,
-                        bottom = innerPadding.calculateBottomPadding() + 80.dp,
-                    ),
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-            ) {
-                FilledIconButton(
-                    onClick = {
-                        scope.launch {
-                            showResumeFollowButton = false
-                            autoScrollCooldown = false
-                            resumeFollowAfterPause = false
-                            generationFollowActive = true
-                            val lastIndex = state.layoutInfo.totalItemsCount - 1
-                            if (lastIndex >= 0) {
-                                state.animateScrollToItem(lastIndex)
-                            }
-                        }
-                    },
-                ) {
-                    Icon(HugeIcons.ArrowDownDouble, contentDescription = "回到底部")
-                }
-            }
-
             // Suggestion
-            if (conversation.chatSuggestions.isNotEmpty() && !captureProgress) {
+            val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
+                conversation.actionSuggestionTexts()
+            }
+            if (actionSuggestions.isNotEmpty() && !captureProgress) {
                 ChatSuggestionsRow(
-                    conversation = conversation,
+                    suggestions = actionSuggestions,
                     onClickSuggestion = onClickSuggestion,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -1164,13 +1162,6 @@ internal fun LazyListState.isNearListEnd(bufferItems: Int = 2): Boolean {
     if (totalItems == 0) return true
     val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
     return lastVisibleIndex >= totalItems - 1 - bufferItems
-}
-
-private fun LazyListState.distanceToListEnd(): Int {
-    val totalItems = layoutInfo.totalItemsCount
-    if (totalItems == 0) return 0
-    val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return 0
-    return (totalItems - 1 - lastVisibleIndex).coerceAtLeast(0)
 }
 
 private fun LazyListState.markdownPrewarmTexts(
@@ -1286,6 +1277,83 @@ private fun MessageNode.markdownPrewarmTexts(assistant: Assistant?): List<String
                 )
                 .takeIf { it.isNotBlank() }
         }
+}
+
+private fun Conversation.actionSuggestionTexts(): List<String> {
+    val lastMessage = messageNodes.lastOrNull()?.currentMessage
+    if (lastMessage?.role != MessageRole.ASSISTANT) return emptyList()
+
+    val explicitOptions = lastMessage.parts
+        .filterIsInstance<UIMessagePart.Text>()
+        .joinToString("\n") { it.text }
+        .extractAssistantActionOptions()
+
+    return (explicitOptions + chatSuggestions)
+        .mapNotNull { it.normalizedActionSuggestionOrNull() }
+        .distinctBy { it.compactSuggestionKey() }
+        .take(10)
+}
+
+private fun String.extractAssistantActionOptions(): List<String> {
+    val lines = lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .toList()
+    val cueIndex = lines.indexOfLast { it.isActionOptionCueLine() }
+    if (cueIndex < 0) return emptyList()
+
+    val options = mutableListOf<String>()
+    for (line in lines.drop(cueIndex + 1).take(12)) {
+        val option = ActionOptionLineRegex.matchEntire(line)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.normalizedActionSuggestionOrNull()
+        if (option == null) {
+            if (options.isNotEmpty()) break
+            continue
+        }
+        options += option
+        if (options.size >= 8) break
+    }
+    return options
+}
+
+private fun String.isActionOptionCueLine(): Boolean {
+    if (ActionOptionCuePhrases.any { phrase -> contains(phrase, ignoreCase = true) }) {
+        return true
+    }
+    val asksForNextAction = contains("接下来") || contains("下一步")
+    val hasChoiceSignal = contains("?") ||
+        contains("？") ||
+        contains("哪") ||
+        contains("选") ||
+        contains("想") ||
+        contains("要")
+    return asksForNextAction && hasChoiceSignal
+}
+
+private fun String.normalizedActionSuggestionOrNull(): String? {
+    val rawText = trim()
+    val text = (ActionOptionLineRegex.matchEntire(rawText)?.groupValues?.getOrNull(1) ?: rawText)
+        .removePrefix("[ ]")
+        .removePrefix("[x]")
+        .removePrefix("[X]")
+        .replace("**", "")
+        .replace("__", "")
+        .replace("`", "")
+        .trim()
+        .trim('：', ':', '。', '，', ',', '；', ';')
+        .replace(Regex("""\s+"""), " ")
+        .takeIf { it.length in 2..80 }
+        ?: return null
+    if (text.startsWith("http://", ignoreCase = true) || text.startsWith("https://", ignoreCase = true)) {
+        return null
+    }
+    return text
+}
+
+private fun String.compactSuggestionKey(): String {
+    return replace(Regex("""\s+"""), "").lowercase()
 }
 
 private fun buildHighlightedText(
@@ -1449,7 +1517,7 @@ private fun ChatListPreview(
 @Composable
 private fun ChatSuggestionsRow(
     modifier: Modifier = Modifier,
-    conversation: Conversation,
+    suggestions: List<String>,
     onClickSuggestion: (String) -> Unit
 ) {
     LazyRow(
@@ -1459,19 +1527,28 @@ private fun ChatSuggestionsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(conversation.chatSuggestions) { suggestion ->
-            Box(
+        items(
+            items = suggestions,
+            key = { it },
+        ) { suggestion ->
+            Surface(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .clickable {
-                        onClickSuggestion(suggestion)
-                    }
-                    .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
-                    .padding(vertical = 4.dp, horizontal = 8.dp),
+                    .clip(RoundedCornerShape(50)),
+                onClick = {
+                    onClickSuggestion(suggestion)
+                },
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                ),
             ) {
                 Text(
                     text = suggestion,
-                    style = MaterialTheme.typography.bodySmall
+                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 10.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
