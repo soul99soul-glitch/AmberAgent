@@ -684,6 +684,9 @@
   <string name="setting_mcp_page_add_header">Add Header</string>
   <string name="setting_mcp_page_add_one_to_get_started">Add one to get started</string>
   <string name="setting_mcp_page_basic_settings">Basic Settings</string>
+  <string name="setting_mcp_page_stat_connected">Connected</string>
+  <string name="setting_mcp_page_stat_servers">Servers</string>
+  <string name="setting_mcp_page_stat_tools">Tools</string>
   <string name="setting_mcp_page_custom_headers">Custom Headers</string>
   <string name="setting_mcp_page_custom_headers_desc">Add custom HTTP headers for MCP server requests</string>
   <string name="setting_mcp_page_delete_header">Delete Header</string>

@@ -44,7 +44,6 @@ import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
 import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
-import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import org.koin.compose.koinInject
 
@@ -235,10 +234,13 @@ private fun TestResultItem(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
+                // Pulse pJ1: extendColors.green6 → colorScheme.primary
+                // (chartreuse) so the success indicator tracks the
+                // Pulse theme instead of the legacy palette.
                 Text(
                     text = "✓",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.extendColors.green6
+                    color = MaterialTheme.colorScheme.primary
                 )
                 if (resultText.isNotBlank()) {
                     Text(
@@ -253,7 +255,7 @@ private fun TestResultItem(
             is UiState.Error -> Text(
                 text = state.error.message ?: "Error",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.extendColors.red6,
+                color = MaterialTheme.colorScheme.secondary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -287,7 +289,7 @@ private fun TestResultItem(
                 Text(
                     text = state.error.message ?: "Error",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.extendColors.red6
+                    color = MaterialTheme.colorScheme.secondary
                 )
                 Text(
                     text = stackTrace,

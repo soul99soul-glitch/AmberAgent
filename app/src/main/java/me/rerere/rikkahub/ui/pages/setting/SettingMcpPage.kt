@@ -33,6 +33,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,7 +88,6 @@ import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
-import me.rerere.rikkahub.ui.theme.extendColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
@@ -168,12 +170,29 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             state = state,
             modifier = Modifier.padding(innerPadding)
         ) {
+            // Pulse pJ1 stat hero counts. Connected = servers whose
+            // current McpStatus is Connected. Servers = total configured.
+            // Tools = sum of enabled tools across all servers.
+            val connectedCount = mcpConfigs.count { cfg ->
+                status[cfg.id] == McpStatus.Connected
+            }
+            val toolCount = mcpConfigs.sumOf { cfg ->
+                cfg.commonOptions.tools.count { it.enable }
+            }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
             ) {
+                item("mcp_stat_hero") {
+                    McpStatHero(
+                        connected = connectedCount,
+                        servers = mcpConfigs.size,
+                        tools = toolCount,
+                    )
+                }
+
                 items(mcpConfigs, key = { it.id }) { mcpConfig ->
                     McpServerItem(
                         item = mcpConfig,
@@ -322,8 +341,14 @@ private fun McpServerItem(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
+                        // Pulse pJ1: extendColors.green6/red6 (separate
+                        // palette) → colorScheme.primary/secondary so the
+                        // dot tracks the Pulse theme instead of an
+                        // external palette. Enabled = chartreuse,
+                        // disabled = sport-orange.
                         val dotColor =
-                            if (item.commonOptions.enable) MaterialTheme.extendColors.green6 else MaterialTheme.extendColors.red6
+                            if (item.commonOptions.enable) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.secondary
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
@@ -993,5 +1018,85 @@ private fun McpImportModal(
                 )
             }
         }
+    }
+}
+
+/**
+ * Pulse pJ1 — ink-grounded 3-tile stat hero for the MCP page. Same
+ * recipe as the SettingAgentMemoryPage hero (commit 9f4de056): three
+ * KPI slots on a dark canvas, each digit in a distinct accent.
+ *
+ * - CONNECTED → chartreuse digit (active brand accent — successful
+ *               handshakes).
+ * - SERVERS   → cream digit (neutral aggregate count).
+ * - TOOLS     → sport-orange digit (the "feature surface" expressed
+ *               by the connected servers).
+ */
+@Composable
+private fun McpStatHero(
+    connected: Int,
+    servers: Int,
+    tools: Int,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.tertiary,
+        contentColor = MaterialTheme.colorScheme.onTertiary,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            McpStatSlot(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.setting_mcp_page_stat_connected),
+                value = connected.toString().padStart(2, '0'),
+                valueColor = MaterialTheme.colorScheme.primary,
+            )
+            McpStatSlot(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.setting_mcp_page_stat_servers),
+                value = servers.toString().padStart(2, '0'),
+                valueColor = MaterialTheme.colorScheme.onTertiary,
+            )
+            McpStatSlot(
+                modifier = Modifier.weight(1f),
+                label = stringResource(R.string.setting_mcp_page_stat_tools),
+                value = tools.toString().padStart(2, '0'),
+                valueColor = MaterialTheme.colorScheme.secondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun McpStatSlot(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = label.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.1.em,
+            ),
+            color = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.65f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Black,
+            color = valueColor,
+        )
     }
 }
