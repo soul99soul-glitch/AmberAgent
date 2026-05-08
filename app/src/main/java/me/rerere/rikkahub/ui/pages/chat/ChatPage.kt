@@ -141,8 +141,20 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val windowAdaptiveInfo = currentWindowDpSize()
+    val compactTwoPane =
+        windowAdaptiveInfo.width >= 720.dp &&
+            windowAdaptiveInfo.height >= 450.dp
+    val comfortableTwoPane =
+        windowAdaptiveInfo.width >= 840.dp &&
+            windowAdaptiveInfo.height >= 600.dp
     val isBigScreen =
-        windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
+        compactTwoPane || windowAdaptiveInfo.width >= 1100.dp
+    val drawerWidth = when {
+        compactTwoPane && !comfortableTwoPane -> 240.dp
+        comfortableTwoPane && windowAdaptiveInfo.width < 1100.dp -> 252.dp
+        isBigScreen -> 304.dp
+        else -> 336.dp
+    }
 
     val inputState = vm.inputState
 
@@ -245,6 +257,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         vm = vm,
                         settings = setting,
                         drawerState = drawerState,
+                        drawerWidth = drawerWidth,
                     )
                 }
             ) {
@@ -282,6 +295,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         vm = vm,
                         settings = setting,
                         drawerState = drawerState,
+                        drawerWidth = drawerWidth,
                     )
                 }
             ) {

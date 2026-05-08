@@ -467,7 +467,7 @@
   <string name="notification_live_status_chip_done">Done</string>
   <string name="notification_live_status_chip_failed">Fail</string>
   <string name="notification_live_status_chip_cancelled">Stop</string>
-  <string name="notification_live_status_action_stop">Stop task</string>
+  <string name="notification_live_status_action_stop">Stop</string>
   <string name="generation_retry_status">Connection interrupted. Retrying in %1$d s (%2$d/%3$d): %4$s</string>
   <string name="generation_keepalive_title">Amber is generating</string>
   <string name="generation_keepalive_content">Keeping this reply running in the background.</string>

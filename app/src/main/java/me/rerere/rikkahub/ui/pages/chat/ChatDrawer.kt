@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -84,6 +85,7 @@ fun ChatDrawerContent(
     settings: Settings,
     current: Conversation,
     drawerState: DrawerState,
+    drawerWidth: Dp = 336.dp,
 ) {
     val context = LocalContext.current
 
@@ -128,7 +130,7 @@ fun ChatDrawerContent(
     val workspace = workspaceColors()
 
     ModalDrawerSheet(
-        modifier = Modifier.width(326.dp),
+        modifier = Modifier.width(drawerWidth),
         drawerShape = RoundedCornerShape(0.dp),
         drawerContainerColor = workspace.paper,
         drawerContentColor = workspace.ink,
