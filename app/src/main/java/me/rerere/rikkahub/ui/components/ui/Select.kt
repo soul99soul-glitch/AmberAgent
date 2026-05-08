@@ -43,19 +43,26 @@ fun <T> Select(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
 
     ExposedDropdownMenuBox(
         modifier = modifier,
         expanded = expanded,
         onExpandedChange = { expanded = it }
     ) {
+        // Pulse hotfix: was `workspace.blueContainer @ 0.72` BG with
+        // `workspace.blue` content — chartreuse text on chartreuse-tinted
+        // fill, ~3:1 contrast (fails WCAG AA). Pair primaryContainer with
+        // onPrimaryContainer (ink in light, chartreuse in dark) so the
+        // selected option label is readable in both schemes. Border alpha
+        // also derived from onPrimaryContainer for a quiet hairline.
         Surface(
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             shape = RoundedCornerShape(6.dp),
-            color = workspace.blueContainer.copy(alpha = 0.72f),
-            contentColor = workspace.blue,
-            border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.12f)),
+            color = scheme.primaryContainer,
+            contentColor = scheme.onPrimaryContainer,
+            border = BorderStroke(1.dp, scheme.onPrimaryContainer.copy(alpha = 0.18f)),
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 .heightIn(min = 32.dp)

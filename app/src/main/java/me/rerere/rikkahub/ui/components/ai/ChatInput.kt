@@ -2506,7 +2506,7 @@ private fun SlashUsageCommandRow(
                 shape = RoundedCornerShape(6.dp),
                 color = workspace.blueContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.14f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.14f)),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(

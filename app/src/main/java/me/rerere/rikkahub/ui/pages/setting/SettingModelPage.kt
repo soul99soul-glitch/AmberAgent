@@ -806,15 +806,20 @@ private fun NotionReasoningChip(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // Pulse hotfix: selected state was workspace.blueContainer +
+    // workspace.blue (chartreuse-on-chartreuse-tint, invisible label).
+    // Pair primaryContainer with onPrimaryContainer for the active
+    // chip; unselected stays plain paper + ink hairline.
     Surface(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(7.dp),
-        color = if (selected) workspace.blueContainer else workspace.paper,
-        contentColor = if (selected) workspace.blue else workspace.ink,
+        color = if (selected) scheme.primaryContainer else workspace.paper,
+        contentColor = if (selected) scheme.onPrimaryContainer else workspace.ink,
         border = BorderStroke(
             width = 1.dp,
-            color = if (selected) workspace.blue.copy(alpha = 0.22f) else workspace.hairline,
+            color = if (selected) scheme.onPrimaryContainer.copy(alpha = 0.22f) else workspace.hairline,
         ),
     ) {
         Box(
