@@ -41,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
@@ -80,6 +79,7 @@ import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
 import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.PulseTextField
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
@@ -553,7 +553,7 @@ private fun McpCommonOptionsConfigure(
                 Text(stringResource(R.string.setting_mcp_page_name_desc))
             }
         ) {
-            OutlinedTextField(
+            PulseTextField(
                 value = config.commonOptions.name,
                 onValueChange = { name ->
                     update(
@@ -642,7 +642,7 @@ private fun McpCommonOptionsConfigure(
                 )
             }
         ) {
-            OutlinedTextField(
+            PulseTextField(
                 value = when (config) {
                     is McpServerConfig.SseTransportServer -> config.url
                     is McpServerConfig.StreamableHTTPServer -> config.url
@@ -691,7 +691,7 @@ private fun McpCommonOptionsConfigure(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            OutlinedTextField(
+                            PulseTextField(
                                 value = headerName,
                                 onValueChange = {
                                     headerName = it
@@ -716,7 +716,7 @@ private fun McpCommonOptionsConfigure(
                                 placeholder = { Text(stringResource(R.string.setting_mcp_page_header_name_placeholder)) }
                             )
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
+                            PulseTextField(
                                 value = headerValue,
                                 onValueChange = {
                                     headerValue = it
@@ -848,8 +848,11 @@ private fun McpToolCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val workspace = workspaceColors()
+    // Pulse pJ2: explicit 12dp corner for consistency with the rest
+    // of the Pulse modular tan card vocabulary (Phase 19 / I1 hero
+    // tiles use 18dp; row cards use 12dp).
     Surface(
-        shape = MaterialTheme.shapes.medium,
+        shape = RoundedCornerShape(12.dp),
         color = workspace.paper,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
@@ -978,7 +981,7 @@ private fun McpImportModal(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OutlinedTextField(
+            PulseTextField(
                 value = jsonText,
                 onValueChange = {
                     jsonText = it
