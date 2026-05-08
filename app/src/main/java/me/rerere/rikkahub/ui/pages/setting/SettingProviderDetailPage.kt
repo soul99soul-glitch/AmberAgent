@@ -11,6 +11,7 @@ import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
@@ -45,7 +46,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
@@ -100,6 +100,7 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
 import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.PulseTextField
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.ShareSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
@@ -574,7 +575,7 @@ private fun ModelSettingsForm(
                             .padding(vertical = 16.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        OutlinedTextField(
+                        PulseTextField(
                             value = model.modelId,
                             onValueChange = {
                                 if (!isEdit) {
@@ -591,7 +592,7 @@ private fun ModelSettingsForm(
                             enabled = !isEdit
                         )
 
-                        OutlinedTextField(
+                        PulseTextField(
                             value = model.displayName,
                             onValueChange = {
                                 onModelChange(model.copy(displayName = it.trim()))
@@ -606,7 +607,7 @@ private fun ModelSettingsForm(
                         )
 
                         if (model.type == ModelType.CHAT) {
-                            OutlinedTextField(
+                            PulseTextField(
                                 value = model.contextWindowTokens?.formatContextWindowInput().orEmpty(),
                                 onValueChange = {
                                     onModelChange(model.copy(contextWindowTokens = parseContextWindowInput(it)))
@@ -922,10 +923,14 @@ private fun ModelPicker(
                     contentPadding = PaddingValues(8.dp),
                 ) {
                     items(filteredModels) {
+                        // Pulse pH2: hairline border on each picker row
+                        // matches the modular tan card vocabulary used
+                        // throughout the rest of the settings.
                         Surface(
-                            shape = MaterialTheme.shapes.medium,
-                            color = workspace.row,
+                            shape = RoundedCornerShape(12.dp),
+                            color = workspace.paper,
                             contentColor = workspace.ink,
+                            border = BorderStroke(1.dp, workspace.hairline),
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -992,7 +997,7 @@ private fun ModelPicker(
                         }
                     }
                 }
-                OutlinedTextField(
+                PulseTextField(
                     value = filterText,
                     onValueChange = {
                         filterText = it

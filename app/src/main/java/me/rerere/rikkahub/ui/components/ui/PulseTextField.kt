@@ -120,7 +120,12 @@ fun pulseTextFieldColors(): TextFieldColors {
         unfocusedBorderColor = scheme.outlineVariant,
         disabledBorderColor = scheme.outlineVariant.copy(alpha = 0.38f),
         errorBorderColor = scheme.error,
-        focusedLabelColor = scheme.primary,
+        // WCAG note: chartreuse on cream is ~3:1 — fails AA for small
+        // text. Focused label uses onSurface (ink, ~12:1) so the label
+        // stays legible; the chartreuse focus signal is carried by the
+        // focusedBorderColor alone. The unfocused label uses warm-grey
+        // onSurfaceVariant which clears AA on cream comfortably.
+        focusedLabelColor = scheme.onSurface,
         unfocusedLabelColor = scheme.onSurfaceVariant,
         disabledLabelColor = scheme.onSurfaceVariant.copy(alpha = 0.38f),
         errorLabelColor = scheme.error,
