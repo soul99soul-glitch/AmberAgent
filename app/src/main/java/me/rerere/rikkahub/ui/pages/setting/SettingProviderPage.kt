@@ -65,7 +65,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -468,12 +470,28 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        dialogState.dismiss()
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(stringResource(R.string.cancel))
+                    TextButton(
+                        onClick = {
+                            dialogState.currentState = ProviderSetting.OpenAI(
+                                name = "OpenAI Codex OAuth",
+                                baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
+                                useResponseApi = true,
+                                authMode = OpenAIAuthMode.CODEX_OAUTH,
+                            )
+                        }
+                    ) {
+                        Text(stringResource(R.string.setting_provider_page_add_codex_oauth))
+                    }
+                    TextButton(
+                        onClick = {
+                            dialogState.dismiss()
+                        }
+                    ) {
+                        Text(stringResource(R.string.cancel))
+                    }
                 }
             },
         )

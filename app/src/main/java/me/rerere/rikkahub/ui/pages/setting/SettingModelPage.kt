@@ -61,8 +61,11 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
+import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
 import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
@@ -190,8 +193,13 @@ private fun DefaultTitleModelSetting(
         modelId = settings.titleModelId,
         providers = settings.providers,
         allowClear = true,
+        followsChatModel = settings.findModelById(settings.titleModelId) == null,
+        fallbackModel = settings.resolveTaskChatModel(settings.titleModelId),
         onSelect = {
             vm.updateSettings(settings.copy(titleModelId = it.id))
+        },
+        onClear = {
+            vm.updateSettings(settings.copy(titleModelId = DEFAULT_AUTO_MODEL_ID))
         },
         onOpenParams = { showModal = true },
     )
@@ -224,8 +232,13 @@ private fun DefaultSuggestionModelSetting(
         modelId = settings.suggestionModelId,
         providers = settings.providers,
         allowClear = true,
+        followsChatModel = settings.findModelById(settings.suggestionModelId) == null,
+        fallbackModel = settings.resolveTaskChatModel(settings.suggestionModelId),
         onSelect = {
             vm.updateSettings(settings.copy(suggestionModelId = it.id))
+        },
+        onClear = {
+            vm.updateSettings(settings.copy(suggestionModelId = DEFAULT_AUTO_MODEL_ID))
         },
         onOpenParams = { showModal = true },
     )
@@ -327,8 +340,14 @@ private fun DefaultCompressModelSetting(
         icon = HugeIcons.FileZip,
         modelId = settings.compressModelId,
         providers = settings.providers,
+        allowClear = true,
+        followsChatModel = settings.findModelById(settings.compressModelId) == null,
+        fallbackModel = settings.resolveTaskChatModel(settings.compressModelId),
         onSelect = {
             vm.updateSettings(settings.copy(compressModelId = it.id))
+        },
+        onClear = {
+            vm.updateSettings(settings.copy(compressModelId = DEFAULT_AUTO_MODEL_ID))
         },
         onOpenParams = { showModal = true },
     )
@@ -356,19 +375,35 @@ private fun ModelTaskSetting(
     modelId: Uuid?,
     providers: List<ProviderSetting>,
     allowClear: Boolean = false,
+    followsChatModel: Boolean = false,
+    fallbackModel: Model? = null,
     onSelect: (Model) -> Unit,
+    onClear: (() -> Unit)? = null,
     onOpenParams: () -> Unit,
 ) {
+    val fallbackModelName = fallbackModel?.displayName
+        ?: stringResource(R.string.setting_model_page_follow_chat_model_unavailable)
     SettingModelRow(
         title = title,
         description = description,
         icon = icon,
     ) {
         ModelPickerRow(
-            description = null,
+            description = if (followsChatModel) {
+                stringResource(R.string.setting_model_page_follow_chat_model_desc, fallbackModelName)
+            } else {
+                null
+            },
             modelId = modelId,
             providers = providers,
             allowClear = allowClear,
+            emptyLabel = if (followsChatModel) {
+                stringResource(R.string.setting_model_page_follow_chat_model)
+            } else {
+                null
+            },
+            clearContentDescription = stringResource(R.string.setting_model_page_restore_follow_chat_model),
+            onClear = onClear,
             onSelect = onSelect,
             trailingContent = {
                 WorkspaceTextButton(
@@ -426,7 +461,10 @@ private fun ModelPickerRow(
     modelId: Uuid?,
     providers: List<ProviderSetting>,
     allowClear: Boolean = false,
+    emptyLabel: String? = null,
+    clearContentDescription: String? = null,
     onSelect: (Model) -> Unit,
+    onClear: (() -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Column(
@@ -452,6 +490,9 @@ private fun ModelPickerRow(
                     onSelect = onSelect,
                     providers = providers,
                     allowClear = allowClear,
+                    emptyLabel = emptyLabel,
+                    clearContentDescription = clearContentDescription,
+                    onClear = onClear,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

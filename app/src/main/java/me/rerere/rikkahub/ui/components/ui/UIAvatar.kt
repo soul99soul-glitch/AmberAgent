@@ -93,6 +93,22 @@ fun UIAvatar(
     onUpdate: ((Avatar) -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
+    if (onUpdate == null) {
+        UIAvatarFrame(
+            name = name,
+            value = value,
+            modifier = modifier,
+            size = size,
+            loading = loading,
+            containerColor = containerColor,
+            editContainerColor = editContainerColor,
+            editContentColor = editContentColor,
+            showEditIcon = false,
+            onClick = onClick,
+        )
+        return
+    }
+
     val filesManager: FilesManager = koinInject()
     var showPickOption by remember { mutableStateOf(false) }
     var showEmojiPicker by remember { mutableStateOf(false) }
@@ -105,84 +121,26 @@ fun UIAvatar(
         uri?.let {
             val localUris = filesManager.createChatFilesByContents(listOf(it))
             localUris.firstOrNull()?.let { localUri ->
-                onUpdate?.invoke(Avatar.Image(localUri.toString()))
+                onUpdate(Avatar.Image(localUri.toString()))
             }
         }
     }
 
-    Box(modifier = modifier.size(size)) {
-        Surface(
-            shape = rememberAvatarShape(loading),
-            modifier = Modifier.fillMaxSize(),
-            onClick = {
-                onClick?.invoke()
-                if (onUpdate != null) showPickOption = true
-            },
-            tonalElevation = 4.dp,
-            color = containerColor,
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                when (value) {
-                    is Avatar.Image -> {
-                        AsyncImage(
-                            model = value.url,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
-                    }
-
-                    is Avatar.Emoji -> {
-                        Text(
-                            text = value.content,
-                            autoSize = TextAutoSize.StepBased(
-                                minFontSize = 15.sp,
-                                maxFontSize = 30.sp,
-                            ),
-                            lineHeight = 0.8.em,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(5.dp)
-                        )
-                    }
-
-                    is Avatar.Dummy -> {
-                        Text(
-                            text = name
-                                .ifBlank { stringResource(R.string.user_default_name) }
-                                .takeIf { it.isNotEmpty() }
-                                ?.firstOrNull()?.toString()?.uppercase() ?: "A",
-                            fontSize = (size.value * 0.62f).sp,
-                            lineHeight = 1.em
-                        )
-                    }
-                }
-            }
-        }
-
-        // Show edit icon when editable
-        if (onUpdate != null) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(size * 0.44f)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(editContainerColor),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Edit03,
-                    contentDescription = "Edit",
-                    modifier = Modifier
-                        .size(size * 0.31f)
-                        .padding(1.dp),
-                    tint = editContentColor
-                )
-            }
-        }
-    }
+    UIAvatarFrame(
+        name = name,
+        value = value,
+        modifier = modifier,
+        size = size,
+        loading = loading,
+        containerColor = containerColor,
+        editContainerColor = editContainerColor,
+        editContentColor = editContentColor,
+        showEditIcon = true,
+        onClick = {
+            onClick?.invoke()
+            showPickOption = true
+        },
+    )
 
     if (showPickOption) {
         AlertDialog(
@@ -227,7 +185,7 @@ fun UIAvatar(
                     Button(
                         onClick = {
                             showPickOption = false
-                            onUpdate?.invoke(Avatar.Dummy)
+                            onUpdate(Avatar.Dummy)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -256,7 +214,7 @@ fun UIAvatar(
         ) {
             EmojiPicker(
                 onEmojiSelected = { emoji ->
-                    onUpdate?.invoke(Avatar.Emoji(content = emoji.emoji))
+                    onUpdate(Avatar.Emoji(content = emoji.emoji))
                     showEmojiPicker = false
                 },
                 modifier = Modifier
@@ -288,7 +246,7 @@ fun UIAvatar(
                 TextButton(
                     onClick = {
                         if (urlInput.isNotBlank()) {
-                            onUpdate?.invoke(Avatar.Image(urlInput.trim()))
+                            onUpdate(Avatar.Image(urlInput.trim()))
                             showUrlInput = false
                         }
                     }
@@ -306,6 +264,110 @@ fun UIAvatar(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun UIAvatarFrame(
+    name: String,
+    value: Avatar,
+    modifier: Modifier,
+    size: Dp,
+    loading: Boolean,
+    containerColor: Color,
+    editContainerColor: Color,
+    editContentColor: Color,
+    showEditIcon: Boolean,
+    onClick: (() -> Unit)?,
+) {
+    Box(modifier = modifier.size(size)) {
+        if (onClick != null) {
+            Surface(
+                shape = rememberAvatarShape(loading),
+                modifier = Modifier.fillMaxSize(),
+                onClick = onClick,
+                tonalElevation = 4.dp,
+                color = containerColor,
+            ) {
+                UIAvatarContent(name = name, value = value, size = size)
+            }
+        } else {
+            Surface(
+                shape = rememberAvatarShape(loading),
+                modifier = Modifier.fillMaxSize(),
+                tonalElevation = 4.dp,
+                color = containerColor,
+            ) {
+                UIAvatarContent(name = name, value = value, size = size)
+            }
+        }
+
+        if (showEditIcon) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(size * 0.44f)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(editContainerColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Edit03,
+                    contentDescription = "Edit",
+                    modifier = Modifier
+                        .size(size * 0.31f)
+                        .padding(1.dp),
+                    tint = editContentColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UIAvatarContent(
+    name: String,
+    value: Avatar,
+    size: Dp,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        when (value) {
+            is Avatar.Image -> {
+                AsyncImage(
+                    model = value.url,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+
+            is Avatar.Emoji -> {
+                Text(
+                    text = value.content,
+                    autoSize = TextAutoSize.StepBased(
+                        minFontSize = 15.sp,
+                        maxFontSize = 30.sp,
+                    ),
+                    lineHeight = 0.8.em,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(5.dp)
+                )
+            }
+
+            is Avatar.Dummy -> {
+                Text(
+                    text = name
+                        .ifBlank { stringResource(R.string.user_default_name) }
+                        .takeIf { it.isNotEmpty() }
+                        ?.firstOrNull()?.toString()?.uppercase() ?: "A",
+                    fontSize = (size.value * 0.62f).sp,
+                    lineHeight = 1.em
+                )
+            }
+        }
     }
 }
 

@@ -19,9 +19,8 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.datastore.toCompactPolicy
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.utils.applyPlaceholders
@@ -67,13 +66,16 @@ class ConversationContextEngine(
         val shouldForce = plan.reason == "force_threshold"
         if (plan.shouldCompact && !policy.notifyOnly) {
             if (shouldForce) {
-                compactConversation(
+                val result = compactConversation(
                     conversation = conversation,
                     settings = settings,
                     policy = policy,
                     model = model,
                     reason = "auto_force",
                 )
+                if (result.status == "failed") {
+                    error("Context compression failed: ${result.error ?: result.status}")
+                }
             } else {
                 appScope.launch(Dispatchers.IO) {
                     compactConversation(
@@ -87,26 +89,80 @@ class ConversationContextEngine(
             }
         }
 
-        val latestCompacts = contextRepository.getCompacts(conversation.id)
-        val compactedMessages = ConversationContextPlanner.prepareMessages(
+        var latestCompacts = contextRepository.getCompacts(conversation.id)
+        var preparedMessages = prepareMessagesWithCompacts(
             messages = messages,
             activeCompacts = latestCompacts,
             policy = policy,
             contextMessageSize = contextMessageSize,
+            tools = tools,
         )
-        val hasCompletedCompact = latestCompacts.any { it.status == "completed" }
-        val preparedMessages = if (hasCompletedCompact) {
+        val contextWindow = ConversationContextPlanner.estimateContextWindow(model.contextWindowTokens)
+        val softTotalBudget = (contextWindow * policy.forceRatio).toInt().coerceAtLeast(4_000)
+        val targetMessageBudget = (softTotalBudget - overheadEstimate)
+            .coerceAtLeast(1_000)
+        var estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+        if (
+            policy.enabled &&
+            !policy.notifyOnly &&
+            estimate > (contextWindow * policy.forceRatio).toInt()
+        ) {
+            val fitPolicy = policy.copy(keepRecentTurns = (policy.keepRecentTurns / 2).coerceAtLeast(2))
+            val result = compactConversation(
+                conversation = conversation,
+                settings = settings,
+                policy = fitPolicy,
+                model = model,
+                reason = "auto_fit_model_window",
+                force = true,
+            )
+            if (result.status == "failed") {
+                error("Context compression failed: ${result.error ?: result.status}")
+            }
+            latestCompacts = contextRepository.getCompacts(conversation.id)
+            preparedMessages = prepareMessagesWithCompacts(
+                messages = messages,
+                activeCompacts = latestCompacts,
+                policy = fitPolicy,
+                contextMessageSize = contextMessageSize,
+                tools = tools,
+            )
+            estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+        }
+        if (estimate > (contextWindow * policy.forceRatio).toInt()) {
+            preparedMessages = ConversationContextPlanner.fitMessagesToTokenBudget(
+                messages = preparedMessages,
+                maxTokens = targetMessageBudget,
+            )
+            estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+        }
+        return PreparedContext(
+            messages = preparedMessages,
+            tokenEstimate = estimate,
+            compressionApplied = latestCompacts.any { it.status == "completed" },
+            summaryIds = latestCompacts.filter { it.status == "completed" }.map { it.id },
+        )
+    }
+
+    private fun prepareMessagesWithCompacts(
+        messages: List<UIMessage>,
+        activeCompacts: List<ConversationCompact>,
+        policy: CompactPolicy,
+        contextMessageSize: Int,
+        tools: List<Tool>,
+    ): List<UIMessage> {
+        val compactedMessages = ConversationContextPlanner.prepareMessages(
+            messages = messages,
+            activeCompacts = activeCompacts,
+            policy = policy,
+            contextMessageSize = contextMessageSize,
+        )
+        val hasCompletedCompact = activeCompacts.any { it.status == "completed" }
+        return if (hasCompletedCompact) {
             compactedMessages + capabilitySnapshotBuilder.build(tools)
         } else {
             compactedMessages
         }
-        val estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
-        return PreparedContext(
-            messages = preparedMessages,
-            tokenEstimate = estimate,
-            compressionApplied = hasCompletedCompact,
-            summaryIds = latestCompacts.filter { it.status == "completed" }.map { it.id },
-        )
     }
 
     suspend fun compactConversation(
@@ -121,8 +177,7 @@ class ConversationContextEngine(
         compactMutex.withLock {
             runCatching {
                 val compressionModel = model
-                    ?: settings.findModelById(settings.compressModelId)
-                    ?: settings.getCurrentChatModel()
+                    ?: settings.resolveTaskChatModel(settings.compressModelId)
                     ?: error("No model available for compression")
                 val provider = compressionModel.findProvider(settings.providers)
                     ?: error("Provider not found")

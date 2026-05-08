@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.Intent
+import android.os.Trace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,9 +73,11 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.ui.utils.amberTraceMeasure
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
@@ -85,6 +88,7 @@ import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
+import java.util.LinkedHashMap
 
 private val flavour by lazy {
     GFMFlavourDescriptor(
@@ -103,6 +107,9 @@ private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.D
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
 private val BARE_WEB_URL_REGEX = Regex(
     """(?<![\w/@:\[(])((?:[A-Za-z0-9-]+\.)+(?:com|net|org|io|ai|cn|co|dev|app|me|info|xyz|news)(?:/[^\s<>()\[\]{}"']*)?)"""
+)
+private val TABLE_CELL_MARKDOWN_HINT_REGEX = Regex(
+    """[`*_~\[\]()!#$<>\\]|https?://|(?:[A-Za-z0-9-]+\.)+(?:com|net|org|io|ai|cn|co|dev|app|me|info|xyz|news)|\n"""
 )
 
 // 预处理markdown内容
@@ -210,21 +217,149 @@ private fun MarkdownPreview() {
     }
 }
 
-private data class MarkdownParseResult(
+internal data class MarkdownParseResult(
     val preprocessed: String,
     val astTree: ASTNode,
     val hasHtmlBlocks: Boolean,
 )
+
+private const val MARKDOWN_PARSE_CACHE_VERSION = 1
+private const val MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 128
+private const val MARKDOWN_PARSE_CACHE_MAX_CHARS = 1_200_000
+
+private data class MarkdownParseCacheKey(
+    val content: String,
+    val contentHash: Int,
+    val version: Int,
+)
+
+private object MarkdownParseCache {
+    private val lock = Any()
+    private var totalChars = 0
+    private val entries = object : LinkedHashMap<MarkdownParseCacheKey, MarkdownParseResult>(
+        MARKDOWN_PARSE_CACHE_MAX_ENTRIES,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MarkdownParseCacheKey, MarkdownParseResult>): Boolean {
+            val shouldRemove = size > MARKDOWN_PARSE_CACHE_MAX_ENTRIES ||
+                totalChars > MARKDOWN_PARSE_CACHE_MAX_CHARS
+            if (shouldRemove) {
+                totalChars -= eldest.key.content.length
+            }
+            return shouldRemove
+        }
+    }
+
+    fun get(content: String): MarkdownParseResult? = synchronized(lock) {
+        entries[key(content)]
+    }
+
+    fun getOrParse(content: String): MarkdownParseResult {
+        get(content)?.let { return it }
+        val parsed = traceMarkdown("Amber Markdown parse") {
+            parseMarkdownUncached(content)
+        }
+        synchronized(lock) {
+            val cacheKey = key(content)
+            entries[cacheKey]?.let { return it }
+            entries[cacheKey] = parsed
+            totalChars += content.length
+        }
+        return parsed
+    }
+
+    private fun key(content: String) = MarkdownParseCacheKey(
+        content = content,
+        contentHash = content.hashCode(),
+        version = MARKDOWN_PARSE_CACHE_VERSION,
+    )
+}
+
+private inline fun <T> traceMarkdown(section: String, block: () -> T): T {
+    if (BuildConfig.DEBUG) {
+        Trace.beginSection(section)
+    }
+    return try {
+        block()
+    } finally {
+        if (BuildConfig.DEBUG) {
+            Trace.endSection()
+        }
+    }
+}
+
+@Composable
+private fun TraceMarkdownComposable(section: String, content: @Composable () -> Unit) {
+    if (BuildConfig.DEBUG) {
+        Trace.beginSection(section)
+    }
+    content()
+    if (BuildConfig.DEBUG) {
+        Trace.endSection()
+    }
+}
 
 private fun ASTNode.containsHtmlBlocks(): Boolean {
     if (type == MarkdownElementTypes.HTML_BLOCK) return true
     return children.any { it.containsHtmlBlocks() }
 }
 
-private fun parseMarkdown(content: String): MarkdownParseResult {
+private fun parseMarkdownUncached(content: String): MarkdownParseResult {
     val preprocessed = preProcess(content)
     val astTree = parser.buildMarkdownTreeFromString(preprocessed)
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
+}
+
+internal fun prewarmMarkdownContent(content: String) {
+    if (content.isNotBlank()) {
+        MarkdownParseCache.getOrParse(content)
+    }
+}
+
+internal fun cachedMarkdownParseResult(content: String): MarkdownParseResult? {
+    return MarkdownParseCache.get(content)
+}
+
+internal fun parseMarkdownContent(content: String): MarkdownParseResult {
+    return MarkdownParseCache.getOrParse(content)
+}
+
+internal fun MarkdownParseResult.canRenderByTopLevelBlocks(): Boolean {
+    return !hasHtmlBlocks && astTree.children.size > 1
+}
+
+internal fun MarkdownParseResult.topLevelBlockCount(): Int {
+    return astTree.children.size
+}
+
+internal fun MarkdownParseResult.topLevelBlockKey(index: Int): String {
+    val child = astTree.children.getOrNull(index) ?: return "missing-$index"
+    return "${child.type}:${child.startOffset}:${child.endOffset}"
+}
+
+@Composable
+internal fun MarkdownTopLevelBlock(
+    data: MarkdownParseResult,
+    blockIndex: Int,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    onClickCitation: (String) -> Unit = {}
+) {
+    val child = data.astTree.children.getOrNull(blockIndex) ?: return
+    ProvideTextStyle(style) {
+        Column(
+            modifier = modifier
+                .padding(start = 4.dp)
+                .amberTraceMeasure("Amber MarkdownBlock child measure")
+        ) {
+            MarkdownNode(
+                node = child,
+                content = data.preprocessed,
+                onClickCitation = onClickCitation,
+            )
+        }
+    }
 }
 
 @Composable
@@ -234,7 +369,7 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {}
 ) {
-    var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
+    var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
@@ -242,28 +377,32 @@ fun MarkdownBlock(
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .mapLatest { parseMarkdown(it) }
+            .mapLatest { MarkdownParseCache.getOrParse(it) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)
             .collect { setData(it) }
     }
 
-    if (data.hasHtmlBlocks) {
-        MarkdownNew(
-            content = content,
-            modifier = modifier,
-            style = style,
-            onClickCitation = onClickCitation,
-        )
-    } else {
-        ProvideTextStyle(style) {
-            Column(
-                modifier = modifier.padding(start = 4.dp)
-            ) {
-                data.astTree.children.fastForEach { child ->
-                    MarkdownNode(
-                        node = child, content = data.preprocessed, onClickCitation = onClickCitation
-                    )
+    TraceMarkdownComposable("Amber MarkdownBlock render") {
+        if (data.hasHtmlBlocks) {
+            MarkdownNew(
+                content = content,
+                modifier = modifier.amberTraceMeasure("Amber MarkdownBlock html measure"),
+                style = style,
+                onClickCitation = onClickCitation,
+            )
+        } else {
+            ProvideTextStyle(style) {
+                Column(
+                    modifier = modifier
+                        .padding(start = 4.dp)
+                        .amberTraceMeasure("Amber MarkdownBlock measure")
+                ) {
+                    data.astTree.children.fastForEach { child ->
+                        MarkdownNode(
+                            node = child, content = data.preprocessed, onClickCitation = onClickCitation
+                        )
+                    }
                 }
             }
         }
@@ -807,14 +946,16 @@ private fun Paragraph(
 
 @Composable
 private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier) {
-    val tableData = extractMarkdownTableData(node = node, content = content) ?: return
+    val tableData = remember(node, content) {
+        traceMarkdown("Amber Markdown table extract") {
+            extractMarkdownTableData(node = node, content = content)
+        }
+    } ?: return
 
     // 创建表头composable列表
     val headers = List(tableData.columnCount) { columnIndex ->
         @Composable {
-            MarkdownBlock(
-                content = tableData.headers.getOrElse(columnIndex) { "" },
-            )
+            TableCellContent(tableData.headers.getOrElse(columnIndex) { "" })
         }
     }
 
@@ -822,21 +963,37 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
     val rowComposables = tableData.rows.map { rowData ->
         List(tableData.columnCount) { columnIndex ->
             @Composable {
-                MarkdownBlock(
-                    content = rowData.getOrElse(columnIndex) { "" },
-                )
+                TableCellContent(rowData.getOrElse(columnIndex) { "" })
             }
         }
     }
 
-    // 渲染表格
-    DataTable(
-        headers = headers,
-        rows = rowComposables,
-        modifier = modifier.padding(vertical = 8.dp),
-        columnMinWidths = List(tableData.columnCount) { 80.dp },
-        columnMaxWidths = List(tableData.columnCount) { 200.dp },
-    )
+    TraceMarkdownComposable("Amber DataTable render") {
+        DataTable(
+            headers = headers,
+            rows = rowComposables,
+            modifier = modifier
+                .padding(vertical = 8.dp)
+                .amberTraceMeasure("Amber DataTable measure"),
+            columnMinWidths = List(tableData.columnCount) { 80.dp },
+            columnMaxWidths = List(tableData.columnCount) { 200.dp },
+        )
+    }
+}
+
+@Composable
+private fun TableCellContent(content: String) {
+    if (TABLE_CELL_MARKDOWN_HINT_REGEX.containsMatchIn(content)) {
+        MarkdownBlock(content = content)
+    } else {
+        Text(
+            text = content,
+            modifier = Modifier.padding(start = 4.dp),
+            softWrap = true,
+            overflow = TextOverflow.Visible,
+            style = LocalTextStyle.current,
+        )
+    }
 }
 
 internal data class MarkdownTableData(

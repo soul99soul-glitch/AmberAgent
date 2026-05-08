@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
@@ -25,6 +26,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.PartGroup
@@ -60,7 +62,10 @@ private const val TAG = "ResponseAPI"
 
 class ResponseAPI(
     private val client: OkHttpClient,
-    private val keyRoulette: KeyRoulette = KeyRoulette.default()
+    private val keyRoulette: KeyRoulette = KeyRoulette.default(),
+    private val bearerResolver: suspend (ProviderSetting.OpenAI, Boolean) -> String = { providerSetting, _ ->
+        keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+    },
 ) : OpenAIImpl {
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
@@ -79,7 +84,7 @@ class ResponseAPI(
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
                 "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+                "Bearer ${bearerResolver(providerSetting, false)}"
             )
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
@@ -87,7 +92,14 @@ class ResponseAPI(
 
         Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
-        val response = client.newCall(request).await()
+        var response = client.newCall(request).await()
+        if (response.code == 401) {
+            response.close()
+            val retryRequest = request.newBuilder()
+                .header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
+                .build()
+            response = client.newCall(retryRequest).await()
+        }
         if (!response.isSuccessful) {
             throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
         }
@@ -105,6 +117,14 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<MessageChunk> = callbackFlow {
+        if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+            streamCodexText(providerSetting, messages, params).collect { chunk ->
+                trySend(chunk)
+            }
+            close()
+            return@callbackFlow
+        }
+
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
@@ -117,7 +137,7 @@ class ResponseAPI(
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
                 "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+                "Bearer ${bearerResolver(providerSetting, false)}"
             )
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
@@ -179,6 +199,79 @@ class ResponseAPI(
         awaitClose {
             println("[awaitClose] 关闭eventSource ")
             eventSource.cancel()
+        }
+    }
+
+    private fun streamCodexText(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): Flow<MessageChunk> = flow {
+        val requestBody = buildRequestBody(
+            providerSetting = providerSetting,
+            messages = messages,
+            params = params,
+            stream = true,
+        )
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/responses")
+            .headers(params.customHeaders.toHeaders())
+            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .addHeader("Authorization", "Bearer ${bearerResolver(providerSetting, false)}")
+            .addHeader("Accept", "text/event-stream")
+            .addHeader("Content-Type", "application/json")
+            .configureReferHeaders(providerSetting.baseUrl)
+            .build()
+
+        Log.i(TAG, "streamCodexText: ${json.encodeToString(requestBody)}")
+
+        var response = client.newCall(request).await()
+        if (response.code == 401) {
+            response.close()
+            val retryRequest = request.newBuilder()
+                .header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
+                .build()
+            response = client.newCall(retryRequest).await()
+        }
+        if (!response.isSuccessful) {
+            throw Exception("Failed to get response: ${response.code} ${response.body.stringSafe()}")
+        }
+
+        response.use { activeResponse ->
+            val source = activeResponse.body.source()
+            var eventType: String? = null
+            val dataLines = mutableListOf<String>()
+
+            fun drainEvent(): MessageChunk? {
+                if (dataLines.isEmpty()) return null
+                val data = dataLines.joinToString("\n")
+                dataLines.clear()
+                if (data == "[DONE]") return null
+                val eventJson = Json.parseToJsonElement(data).jsonObject
+                return parseResponseDelta(eventJson)
+            }
+
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                when {
+                    line.isEmpty() -> {
+                        drainEvent()?.let { emit(it) }
+                        if (eventType == "response.completed") {
+                            return@use
+                        }
+                        eventType = null
+                    }
+
+                    line.startsWith("event:") -> {
+                        eventType = line.removePrefix("event:").trim()
+                    }
+
+                    line.startsWith("data:") -> {
+                        dataLines += line.removePrefix("data:").trimStart()
+                    }
+                }
+            }
+            drainEvent()?.let { emit(it) }
         }
     }
 
@@ -776,4 +869,3 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
         else -> ResponseProviderCapabilities()
     }
 }
-

@@ -14,6 +14,15 @@ data class BalanceOption(
 )
 
 @Serializable
+enum class OpenAIAuthMode {
+    @SerialName("api_key")
+    API_KEY,
+
+    @SerialName("codex_oauth")
+    CODEX_OAUTH
+}
+
+@Serializable
 sealed class ProviderSetting {
     abstract val id: Uuid
     abstract val enabled: Boolean
@@ -55,6 +64,7 @@ sealed class ProviderSetting {
         var baseUrl: String = "https://api.openai.com/v1",
         var chatCompletionsPath: String = "/chat/completions",
         var useResponseApi: Boolean = false,
+        var authMode: OpenAIAuthMode = OpenAIAuthMode.API_KEY,
     ) : ProviderSetting() {
         override fun addModel(model: Model): ProviderSetting {
             return copy(models = models + model)

@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AmberAgent — Pulse Design System Mockups</title>
+<style>
+  :root {
+    --cream: #F5F1EA;
+    --tan: #EDE5D8;
+    --tan-2: #E5DCD0;
+    --tan-3: #D9CDBC;
+    --ink: #1A1A1A;
+    --ink-2: #2A2A2A;
+    --grey: #7A716A;
+    --grey-2: #A89F95;
+    --chartreuse: #D6FF3F;
+    --chartreuse-2: #BFEC2E;
+    --orange: #E85D2F;
+    --orange-2: #D14C24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--cream);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-image: radial-gradient(circle at 1px 1px, rgba(122,113,106,0.10) 1px, transparent 0);
+    background-size: 22px 22px;
+    padding: 56px 48px 96px;
+    min-height: 100vh;
+  }
+  header {
+    max-width: 1400px;
+    margin: 0 auto 56px;
+  }
+  header .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--orange);
+    margin-bottom: 16px;
+  }
+  header h1 {
+    font-size: 56px;
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    margin-bottom: 12px;
+  }
+  header h1 em { font-style: normal; color: var(--orange); }
+  header p {
+    font-size: 17px;
+    color: var(--grey);
+    max-width: 720px;
+    line-height: 1.5;
+  }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    margin-top: 28px;
+  }
+  .swatch {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--tan); padding: 8px 14px;
+    border-radius: 999px; font-size: 12px; font-weight: 600;
+    color: var(--ink);
+  }
+  .swatch i {
+    display: inline-block; width: 14px; height: 14px;
+    border-radius: 50%; border: 1px solid rgba(0,0,0,0.08);
+  }
+  .row {
+    max-width: 1400px;
+    margin: 0 auto 64px;
+  }
+  .row-label {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--grey);
+    margin-bottom: 24px;
+  }
+  .phones {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 36px;
+    align-items: start;
+  }
+  .phone-frame {
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .phone-label {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; font-weight: 600;
+  }
+  .phone-label::before {
+    content: ":::"; color: var(--grey-2); letter-spacing: -2px;
+    font-family: ui-monospace, monospace; font-size: 16px;
+  }
+
+  /* Phone frame */
+  .phone {
+    position: relative;
+    width: 280px; height: 600px;
+    background: var(--cream);
+    border-radius: 38px;
+    border: 8px solid var(--ink);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.4) inset,
+      0 28px 50px -16px rgba(26,26,26,0.22),
+      0 8px 20px -8px rgba(26,26,26,0.16);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .phone .notch {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 80px; height: 18px; background: var(--ink);
+    border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
+    z-index: 9;
+  }
+  .screen {
+    position: absolute;
+    top: 22px; left: 14px; right: 14px; bottom: 78px;
+    display: flex; flex-direction: column; gap: 12px;
+    overflow: hidden;
+  }
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 4px 4px;
+  }
+  .topbar h2 {
+    font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
+  }
+  .icon-btn {
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+    color: var(--ink);
+  }
+  .icon-btn.solid { background: var(--ink); color: var(--cream); border: 0; }
+  .icon-btn.cream { background: var(--cream); border: 1.5px solid var(--ink); }
+  .icon-btn svg { width: 14px; height: 14px; }
+  .row-icons { display: flex; gap: 8px; align-items: center; }
+
+  /* Cards */
+  .card {
+    background: var(--tan);
+    border-radius: 18px;
+    padding: 14px 16px;
+  }
+  .card.dark { background: var(--ink); color: var(--cream); }
+  .card.cream { background: var(--cream); border: 1.5px solid var(--tan-3); }
+  .card.bright { background: var(--chartreuse); color: var(--ink); }
+  .card.spotlight { background: var(--orange); color: var(--cream); }
+  .card-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+  }
+  .card-row + .card-row { margin-top: 10px; }
+  .stack { display: flex; flex-direction: column; gap: 8px; }
+  .label-tiny {
+    text-transform: uppercase; letter-spacing: 0.10em;
+    font-size: 9px; font-weight: 700; color: var(--grey);
+  }
+  .label-tiny.on-dark { color: var(--grey-2); }
+  .h-orange {
+    font-size: 56px; line-height: 0.95; font-weight: 800;
+    color: var(--orange); letter-spacing: -0.04em; font-feature-settings: "tnum";
+  }
+  .h-orange.smaller { font-size: 32px; }
+  .h-orange.tiny { font-size: 22px; }
+  .h-ink { font-size: 28px; font-weight: 800; letter-spacing: -0.025em; }
+
+  /* Bottom nav */
+  .bottom-nav {
+    position: absolute;
+    bottom: 14px; left: 14px; right: 14px; height: 52px;
+    background: var(--ink); color: var(--cream);
+    border-radius: 26px;
+    display: flex; align-items: center; justify-content: space-around;
+    padding: 0 8px;
+    box-shadow: 0 12px 22px -8px rgba(26,26,26,0.40);
+    z-index: 5;
+  }
+  .nav-pill {
+    color: rgba(245,241,234,0.55);
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+  }
+  .nav-pill.active {
+    background: var(--chartreuse);
+    color: var(--ink);
+    width: auto; padding: 0 12px; height: 34px;
+    border-radius: 17px;
+    gap: 6px; font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center;
+  }
+  .nav-pill.center {
+    background: var(--cream); color: var(--ink);
+    width: 38px; height: 38px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  }
+  .nav-pill svg { width: 15px; height: 15px; }
+
+  /* Chips */
+  .chip {
+    padding: 6px 12px; border-radius: 999px;
+    font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--cream); color: var(--ink);
+    border: 1.5px solid var(--tan-3);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .chip.active { background: var(--ink); color: var(--chartreuse); border-color: var(--ink); }
+  .chip.warn { background: var(--orange); color: var(--cream); border-color: var(--orange); }
+  .chip.ok { background: var(--chartreuse); color: var(--ink); border-color: var(--chartreuse-2); }
+  .chips { display: flex; gap: 6px; flex-wrap: nowrap; overflow: hidden; }
+
+  /* List rows */
+  .row-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 14px;
+    background: var(--tan);
+    border-radius: 14px;
+  }
+  .row-item .lead {
+    width: 30px; height: 30px;
+    background: var(--ink); color: var(--chartreuse);
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .row-item .lead svg { width: 14px; height: 14px; }
+  .row-item .body { flex: 1; min-width: 0; }
+  .row-item .body .title { font-size: 13px; font-weight: 700; }
+  .row-item .body .sub { font-size: 11px; color: var(--grey); margin-top: 2px; line-height: 1.3; }
+  .row-item .trail { font-size: 10px; color: var(--grey); text-transform: uppercase; letter-spacing: 0.05em; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+  .dot.ok { background: var(--chartreuse); }
+  .dot.warn { background: var(--orange); }
+
+  /* Bars / charts */
+  .bars {
+    display: flex; align-items: flex-end; gap: 8px;
+    height: 90px; padding-top: 8px;
+  }
+  .bar {
+    flex: 1; background: var(--tan-3);
+    border-radius: 6px 6px 2px 2px;
+    min-height: 12px;
+  }
+  .bar.active { background: var(--chartreuse); }
+  .bar.ink { background: var(--ink); }
+
+  /* Streak grid */
+  .streak {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+  .streak div {
+    height: 22px; background: rgba(245,241,234,0.10);
+    border-radius: 3px;
+  }
+  .streak div.lit { background: var(--chartreuse); }
+  .streak div.partial { background: rgba(214,255,63,0.45); }
+
+  /* Pulse track */
+  .pulse {
+    display: inline-flex; align-items: end; gap: 3px;
+    height: 14px;
+  }
+  .pulse i {
+    display: block; width: 3px; background: var(--chartreuse);
+    border-radius: 2px;
+  }
+
+  /* Composer */
+  .composer {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--cream); border: 1.5px solid var(--tan-3);
+    border-radius: 24px; padding: 8px 8px 8px 16px;
+  }
+  .composer .placeholder { color: var(--grey-2); font-size: 13px; flex: 1; }
+  .send-btn {
+    width: 40px; height: 40px; flex-shrink: 0;
+    background: var(--chartreuse); color: var(--ink);
+    border-radius: 14px 6px 14px 6px; /* asymmetric squircle */
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 10px rgba(214,255,63,0.45);
+  }
+
+  /* Modal sheet */
+  .scrim {
+    position: absolute; inset: 0; background: rgba(26,26,26,0.55);
+    z-index: 4;
+  }
+  .sheet {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: var(--cream);
+    border-top-left-radius: 28px; border-top-right-radius: 28px;
+    padding: 16px 16px 20px;
+    z-index: 6;
+  }
+  .sheet-handle {
+    width: 36px; height: 4px; background: var(--tan-3);
+    border-radius: 2px; margin: 0 auto 12px;
+  }
+
+  /* Buttons */
+  .btn {
+    border-radius: 24px; padding: 12px 18px;
+    font-weight: 700; font-size: 13px;
+    text-align: center; display: inline-block;
+    cursor: pointer;
+  }
+  .btn.primary { background: var(--chartreuse); color: var(--ink); }
+  .btn.cta { background: var(--orange); color: var(--cream); }
+  .btn.dark { background: var(--ink); color: var(--cream); }
+  .btn.ghost { background: var(--cream); color: var(--ink); border: 1.5px solid var(--ink); }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+
+  footer {
+    max-width: 1400px; margin: 80px auto 0;
+    padding-top: 40px;
+    border-top: 1.5px dashed var(--tan-3);
+    color: var(--grey); font-size: 13px;
+    line-height: 1.7;
+  }
+  footer h4 { font-size: 16px; color: var(--ink); margin-bottom: 6px; font-weight: 700; }
+  footer .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 32px; }
+  footer code { background: var(--tan); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Visual System · 2026.05.07</div>
+  <h1>AmberAgent ×<br>Pulse <em>Performance</em></h1>
+  <p>A complete UI design pass for AmberAgent inspired by Sleek's <em>Pulse Performance</em> aesthetic — warm cream surfaces, neon-chartreuse primary actions, sport-orange emphasis numerals, floating black pill nav. Fitness-tech confidence applied to a chat-first AI agent.</p>
+  <div class="legend">
+    <span class="swatch"><i style="background:#F5F1EA"></i> #F5F1EA Cream</span>
+    <span class="swatch"><i style="background:#EDE5D8"></i> #EDE5D8 Tan</span>
+    <span class="swatch"><i style="background:#1A1A1A"></i> #1A1A1A Ink</span>
+    <span class="swatch"><i style="background:#D6FF3F"></i> #D6FF3F Chartreuse</span>
+    <span class="swatch"><i style="background:#E85D2F"></i> #E85D2F Sport-Orange</span>
+    <span class="swatch"><i style="background:#7A716A"></i> #7A716A Warm Grey</span>
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<!-- ROW 1: DISCOVERY -->
+<!-- ============================================================ -->
+<section class="row">
+  <div class="row-label">— Row 01 · Discovery / Surface</div>
+  <div class="phones">
+
+    <!-- 1. Conversation List -->
+    <div class="phone-frame">
+      <div class="phone-label">Conversation List</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <h2>AmberAgent</h2>
+            <div class="row-icons">
+              <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
+              <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button>
+            </div>
+          </div>
+          <div style="padding:4px 4px 0">
+            <div class="label-tiny" style="margin-bottom:6px;">ACTIVE THREADS · READY</div>
+            <div class="h-orange smaller">04</div>
+          </div>
+          <div class="stack" style="margin-top:8px; gap:8px;">
+            <div class="row-item">
+              <div class="body">
+                <div class="title" style="display:flex; align-items:center; gap:6px;">Performance Metrics <span class="dot ok"></span></div>
+                <div class="sub">I've compiled the running stats. Your VO2 max…</div>
+              </div>
+              <div class="trail">10:42</div>
+            </div>
+            <div class="row-item">
+              <div class="body">
+                <div class="title">Nutrition Plan Update</div>
+                <div class="sub">Let's adjust the macronutrient ratio…</div>
+              </div>
+              <div class="trail">YDA</div>
+            </div>
+            <div class="row-item">
+              <div class="body">
+                <div class="title">Recovery Protocol</div>
+                <div class="sub">Active recovery session parameters…</div>
+              </div>
+              <div class="trail">TUE</div>
+            </div>
+            <div class="row-item">
+              <div class="body">
+                <div class="title">Equipment Recommendations</div>
+                <div class="sub">The carbon-plated shoes you asked about…</div>
+              </div>
+              <div class="trail">MON</div>
+            </div>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <div class="nav-pill active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z"/></svg>Chats</div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="nav-pill center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Empty / New Chat State -->
+    <div class="phone-frame">
+      <div class="phone-label">New Conversation</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2 style="font-size:14px; font-weight:600;">New thread</h2>
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
+          </div>
+          <div style="flex:1; display:flex; flex-direction:column; justify-content:center; padding:0 4px;">
+            <div class="label-tiny" style="margin-bottom:8px;">READY · GPT-4o PERFORMANCE</div>
+            <div class="h-orange" style="font-size:72px;">Hi.</div>
+            <div style="margin-top:10px; font-size:14px; color:var(--grey); line-height:1.4;">What are we training today, Mara? Pick a thread or start fresh.</div>
+            <div class="stack" style="margin-top:18px;">
+              <div class="card cream" style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:18px;">⚡</span>
+                <span style="font-size:13px; font-weight:600;">Analyze last week's runs</span>
+              </div>
+              <div class="card cream" style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:18px;">📊</span>
+                <span style="font-size:13px; font-weight:600;">Plot HRV vs sleep</span>
+              </div>
+              <div class="card cream" style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:18px;">🍃</span>
+                <span style="font-size:13px; font-weight:600;">Build recovery week</span>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <span class="placeholder">Train smarter…</span>
+            <button class="send-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="nav-pill center active" style="background:var(--chartreuse); width:auto; padding:0 14px; height:38px; border-radius:19px; font-size:11px; font-weight:700; gap:5px;">+ NEW</div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Search / History Drawer -->
+    <div class="phone-frame">
+      <div class="phone-label">Search & History</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <h2>Search</h2>
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
+          <div class="card cream" style="display:flex; align-items:center; gap:10px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            <span class="placeholder" style="color:var(--ink); font-size:13px;">VO2 max</span>
+            <span class="chip" style="font-size:9px; padding:3px 8px;">12 HITS</span>
+          </div>
+          <div class="label-tiny" style="margin-top:8px;">PINNED · 2</div>
+          <div class="row-item" style="background:var(--ink); color:var(--cream);">
+            <div class="body">
+              <div class="title" style="color:var(--chartreuse); display:flex; align-items:center; gap:6px;">★ Performance Metrics</div>
+              <div class="sub" style="color:var(--grey-2);">VO2 max trend over 30 days, training adjustments…</div>
+            </div>
+          </div>
+          <div class="row-item" style="background:var(--ink); color:var(--cream);">
+            <div class="body">
+              <div class="title" style="color:var(--chartreuse);">★ Long Run Plan</div>
+              <div class="sub" style="color:var(--grey-2);">22-week Boston build, target 3:15 finish…</div>
+            </div>
+          </div>
+          <div class="label-tiny" style="margin-top:6px;">RECENT · 7 DAYS</div>
+          <div class="stack" style="gap:6px;">
+            <div class="row-item" style="padding:9px 12px;">
+              <div class="body"><div class="title" style="font-size:12px;">Nutrition macro split</div><div class="sub">42P · 38C · 20F</div></div>
+              <div class="trail">YDA</div>
+            </div>
+            <div class="row-item" style="padding:9px 12px;">
+              <div class="body"><div class="title" style="font-size:12px;">Strava export parser</div><div class="sub">Built CSV pipeline</div></div>
+              <div class="trail">MON</div>
+            </div>
+            <div class="row-item" style="padding:9px 12px;">
+              <div class="body"><div class="title" style="font-size:12px;">Cadence drill set</div><div class="sub">90 spm at threshold</div></div>
+              <div class="trail">SUN</div>
+            </div>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6z"/></svg></div>
+          <div class="nav-pill active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>Search</div>
+          <div class="nav-pill center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Onboarding -->
+    <div class="phone-frame">
+      <div class="phone-label">Onboarding</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen" style="background:var(--cream); justify-content:space-between; padding:8px 4px;">
+          <div></div>
+          <div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px;">
+            <div class="label-tiny">AMBERAGENT v0.5</div>
+            <div class="h-orange" style="font-size:60px; line-height:0.95;">Train<br>your<br>agent.</div>
+            <div style="font-size:13px; color:var(--grey); margin-top:8px; line-height:1.5;">Local-first. Multi-model. Skill-driven. Brings GPT, Claude and Gemini into one floor — your floor.</div>
+          </div>
+          <div class="stack" style="gap:8px;">
+            <div class="card" style="display:flex; gap:10px; align-items:center;">
+              <div style="width:30px; height:30px; background:var(--ink); color:var(--chartreuse); border-radius:8px; display:inline-flex; align-items:center; justify-content:center;">⚡</div>
+              <div><div style="font-size:12px; font-weight:700;">Bring your keys</div><div class="sub" style="color:var(--grey); font-size:10px;">OpenAI, Claude, Gemini, custom OpenRouter</div></div>
+            </div>
+            <div class="card" style="display:flex; gap:10px; align-items:center;">
+              <div style="width:30px; height:30px; background:var(--ink); color:var(--chartreuse); border-radius:8px; display:inline-flex; align-items:center; justify-content:center;">🧠</div>
+              <div><div style="font-size:12px; font-weight:700;">Persistent memory</div><div class="sub" style="color:var(--grey); font-size:10px;">Core, short, long-term — yours, locally</div></div>
+            </div>
+            <div class="card" style="display:flex; gap:10px; align-items:center;">
+              <div style="width:30px; height:30px; background:var(--ink); color:var(--chartreuse); border-radius:8px; display:inline-flex; align-items:center; justify-content:center;">🛠️</div>
+              <div><div style="font-size:12px; font-weight:700;">Tools that ship</div><div class="sub" style="color:var(--grey); font-size:10px;">Terminal, files, web, screen automation</div></div>
+            </div>
+            <div class="btn cta" style="margin-top:6px;">Get Started →</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- ROW 2: CONVERSATION -->
+<!-- ============================================================ -->
+<section class="row">
+  <div class="row-label">— Row 02 · Conversation Surfaces</div>
+  <div class="phones">
+
+    <!-- 5. Chat Screen Streaming -->
+    <div class="phone-frame">
+      <div class="phone-label">Chat · Streaming</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2 style="font-size:14px; font-weight:700;">Performance Metrics</h2>
+            <div class="row-icons">
+              <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+              <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></button>
+            </div>
+          </div>
+          <div class="chips" style="gap:6px;">
+            <span class="chip active">GPT-4O · PERF</span>
+            <span class="chip">CLAUDE</span>
+            <span class="chip">GEMINI</span>
+          </div>
+          <div style="display:flex; justify-content:flex-end;">
+            <div class="card cream" style="max-width:200px; border-radius:18px 6px 18px 18px;">
+              <div style="font-size:12px; line-height:1.4;">Can you analyze my VO2 max trend over the last 30 days and suggest training adjustments?</div>
+              <div class="label-tiny" style="margin-top:6px; font-size:8px;">SENT 10:42</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:flex-start;">
+            <div style="width:24px; height:24px; background:var(--ink); border-radius:50%; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; color:var(--chartreuse); font-size:11px; font-weight:800;">A</div>
+            <div style="flex:1; font-size:12px; line-height:1.5;">Analyzing your training logs now. Your average VO2 max has seen a <strong>2.4% increase</strong> since the start of the month. Checking correlation with HIIT sessions…</div>
+          </div>
+          <div class="card" style="background:var(--tan); border-left:4px solid var(--chartreuse); padding:10px 12px;">
+            <div class="label-tiny" style="margin-bottom:4px;">RUNNING TOOL</div>
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <div style="font-size:11px; font-family:ui-monospace,monospace; font-weight:700;">calculate_vo2_correlation</div>
+              <span class="dot ok"></span>
+            </div>
+          </div>
+          <div style="display:inline-flex; align-items:center; gap:8px; background:var(--ink); padding:6px 10px; border-radius:14px; align-self:flex-start;">
+            <div class="pulse">
+              <i style="height:60%"></i><i style="height:90%"></i><i style="height:40%"></i><i style="height:80%"></i><i style="height:30%"></i><i style="height:70%"></i><i style="height:50%"></i>
+            </div>
+            <span style="color:var(--chartreuse); font-size:9px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;">PULSE ACTIVE</span>
+          </div>
+          <div style="flex:1;"></div>
+          <div class="composer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--grey)" stroke-width="2"><path d="M21 11.5l-9-9-9 9 9 9 9-9z" /></svg>
+            <span class="placeholder">Train smarter…</span>
+            <button class="send-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <div class="nav-pill active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6z"/></svg>Chats</div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></div>
+          <div class="nav-pill center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Tool Approval Sheet -->
+    <div class="phone-frame">
+      <div class="phone-label">Tool Approval</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen" style="filter:brightness(0.6);">
+          <div class="topbar"><h2 style="font-size:14px;">Performance Metrics</h2></div>
+          <div style="font-size:12px; color:var(--grey); padding:0 4px;">Background context dimmed…</div>
+        </div>
+        <div class="scrim"></div>
+        <div class="sheet" style="z-index:6;">
+          <div class="sheet-handle"></div>
+          <div class="topbar" style="padding:0;">
+            <span class="chip warn">HIGH RISK</span>
+            <button class="icon-btn cream" style="width:28px; height:28px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
+          <div style="margin-top:12px;">
+            <div class="label-tiny">REQUESTED TOOL</div>
+            <h3 style="font-size:18px; font-weight:800; margin-top:4px; letter-spacing:-0.02em;">terminal_execute</h3>
+            <div style="font-size:12px; color:var(--grey); margin-top:4px;">AmberAgent wants to run a shell command.</div>
+          </div>
+          <div class="card dark" style="margin-top:14px; font-family:ui-monospace,monospace; font-size:10px; line-height:1.5;">
+            <div style="color:var(--grey-2);">$</div>
+            <div style="color:var(--chartreuse);">curl -s api.strava.com/v3/athletes/me/stats</div>
+            <div style="color:var(--cream);"> | jq '.recent_run_totals'</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:11px; color:var(--grey);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            Network access · 3.2s estimated
+          </div>
+          <div class="btn-row" style="margin-top:14px;">
+            <div class="btn ghost">Deny</div>
+            <div class="btn primary">Allow Once</div>
+          </div>
+          <div class="btn dark" style="margin-top:8px;">Always Allow For This Tool</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Tool Detail Expanded -->
+    <div class="phone-frame">
+      <div class="phone-label">Tool Result</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2 style="font-size:14px; font-weight:700;">Tool Detail</h2>
+            <span class="chip ok">DONE 1.2s</span>
+          </div>
+          <div class="card">
+            <div class="label-tiny">EXECUTED</div>
+            <div style="font-size:14px; font-weight:800; font-family:ui-monospace,monospace; margin-top:4px;">calculate_vo2_correlation</div>
+            <div style="font-size:11px; color:var(--grey); margin-top:2px;">Runtime · sandbox · 1.24s</div>
+          </div>
+          <div class="chips">
+            <span class="chip active">OUTPUT</span>
+            <span class="chip">INPUT</span>
+            <span class="chip">LOGS</span>
+          </div>
+          <div class="card dark" style="font-family:ui-monospace,monospace; font-size:9px; line-height:1.55; flex:1; overflow:hidden;">
+            <div style="color:var(--grey-2);">{</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"trend"</span>: <span style="color:var(--orange);">"+2.4%"</span>,</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"baseline"</span>: <span style="color:var(--orange);">52.1</span>,</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"current"</span>: <span style="color:var(--orange);">53.4</span>,</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"correlated_factor"</span>:</div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--orange);">"hiit_frequency"</span>,</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"r_squared"</span>: <span style="color:var(--orange);">0.78</span>,</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"sessions_analyzed"</span>: <span style="color:var(--orange);">12</span>,</div>
+            <div>&nbsp;&nbsp;<span style="color:var(--chartreuse);">"recommendation"</span>:</div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--orange);">"maintain_2x_weekly"</span></div>
+            <div style="color:var(--grey-2);">}</div>
+          </div>
+          <div class="card-row" style="margin-top:auto;">
+            <div class="btn ghost" style="flex:1;">Share</div>
+            <div class="btn dark" style="flex:1;">Copy JSON</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. Image / File Attachment Composer -->
+    <div class="phone-frame">
+      <div class="phone-label">Composer · Attached</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2 style="font-size:14px; font-weight:700;">Performance Metrics</h2>
+            <span class="chip">3 ATTACHED</span>
+          </div>
+          <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; gap:8px;">
+            <div style="display:flex; justify-content:flex-end;">
+              <div class="card cream" style="max-width:200px; border-radius:18px 6px 18px 18px;">
+                <div style="font-size:11px; line-height:1.4;">Look at these run files and tell me where I'm leaving time on the table.</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; padding:0 4px;">
+              <div class="card" style="flex:1; padding:8px; display:flex; flex-direction:column; gap:2px; min-width:0;">
+                <div style="background:var(--ink); border-radius:6px; height:50px; display:flex; align-items:center; justify-content:center; color:var(--chartreuse); font-size:9px; font-weight:700; font-family:ui-monospace,monospace;">.GPX</div>
+                <div style="font-size:9px; font-weight:700; truncate;">long_run_22k</div>
+                <div class="label-tiny" style="font-size:8px;">2.4 MB</div>
+              </div>
+              <div class="card" style="flex:1; padding:8px; display:flex; flex-direction:column; gap:2px; min-width:0;">
+                <div style="background:var(--orange); border-radius:6px; height:50px; display:flex; align-items:center; justify-content:center; color:var(--cream); font-size:9px; font-weight:700; font-family:ui-monospace,monospace;">.CSV</div>
+                <div style="font-size:9px; font-weight:700;">strava_yr</div>
+                <div class="label-tiny" style="font-size:8px;">88 KB</div>
+              </div>
+              <div class="card" style="flex:1; padding:8px; display:flex; flex-direction:column; gap:2px; min-width:0;">
+                <div style="background:var(--chartreuse); border-radius:6px; height:50px; display:flex; align-items:center; justify-content:center; color:var(--ink); font-size:9px; font-weight:700; font-family:ui-monospace,monospace;">.PNG</div>
+                <div style="font-size:9px; font-weight:700;">heart_zones</div>
+                <div class="label-tiny" style="font-size:8px;">512 KB</div>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="2.5"><path d="M21.4 11l-9.6 9.6a5.5 5.5 0 0 1-7.8-7.8l9.6-9.6a3.7 3.7 0 0 1 5.2 5.2L9.2 18a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/></svg>
+            <span class="placeholder">3 files attached…</span>
+            <button class="send-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <div class="nav-pill active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6z"/></svg>Chats</div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/></svg></div>
+          <div class="nav-pill center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/></svg></div>
+          <div class="nav-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- ROW 3: CONFIGURATION -->
+<!-- ============================================================ -->
+<section class="row">
+  <div class="row-label">— Row 03 · Configuration & Power</div>
+  <div class="phones">
+
+    <!-- 9. Model Picker -->
+    <div class="phone-frame">
+      <div class="phone-label">Model Picker</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+            <h2>Choose Model</h2>
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/></svg></button>
+          </div>
+          <div class="chips">
+            <span class="chip active">ALL · 17</span>
+            <span class="chip">FAST</span>
+            <span class="chip">REASON</span>
+            <span class="chip">VISION</span>
+          </div>
+          <div class="card spotlight">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+              <div>
+                <div class="label-tiny on-dark" style="color:rgba(255,255,255,0.7);">CURRENTLY ACTIVE</div>
+                <div style="font-size:18px; font-weight:800; margin-top:4px;">Claude Sonnet 4.5</div>
+                <div style="font-size:11px; opacity:0.85;">Anthropic · 200K context</div>
+              </div>
+              <span class="chip" style="background:var(--cream); color:var(--orange); border-color:var(--cream);">ACTIVE</span>
+            </div>
+            <div style="display:flex; gap:14px; margin-top:10px; font-size:10px;">
+              <div><span class="label-tiny on-dark" style="color:rgba(255,255,255,0.7);">IN</span> $3/M</div>
+              <div><span class="label-tiny on-dark" style="color:rgba(255,255,255,0.7);">OUT</span> $15/M</div>
+              <div><span class="label-tiny on-dark" style="color:rgba(255,255,255,0.7);">CACHE</span> ✓</div>
+            </div>
+          </div>
+          <div class="stack" style="gap:8px;">
+            <div class="row-item">
+              <div class="lead" style="background:var(--orange); color:var(--cream);">G</div>
+              <div class="body">
+                <div class="title">GPT-4o Performance</div>
+                <div class="sub">128K · vision · fast</div>
+              </div>
+              <div class="trail">$2.5/$10</div>
+            </div>
+            <div class="row-item">
+              <div class="lead" style="background:var(--chartreuse); color:var(--ink);">G</div>
+              <div class="body">
+                <div class="title">Gemini 2.0 Flash</div>
+                <div class="sub">1M · vision · ultra-fast</div>
+              </div>
+              <div class="trail">$0.1/$0.4</div>
+            </div>
+            <div class="row-item">
+              <div class="lead">o</div>
+              <div class="body">
+                <div class="title">o1 Reasoning</div>
+                <div class="sub">128K · slow · thinking</div>
+              </div>
+              <div class="trail">$15/$60</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. Provider Settings -->
+    <div class="phone-frame">
+      <div class="phone-label">Providers</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2>Providers</h2>
+            <button class="icon-btn solid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+          <div class="card-row" style="margin:0;">
+            <div class="card" style="flex:1;">
+              <div class="label-tiny">CONFIGURED</div>
+              <div class="h-orange tiny">04</div>
+            </div>
+            <div class="card bright" style="flex:1;">
+              <div class="label-tiny" style="color:rgba(0,0,0,0.6);">MODELS</div>
+              <div class="h-ink" style="font-size:24px;">17</div>
+            </div>
+          </div>
+          <div class="label-tiny" style="margin-top:6px;">ACTIVE</div>
+          <div class="stack" style="gap:6px;">
+            <div class="row-item">
+              <div class="lead" style="background:var(--orange);">A</div>
+              <div class="body">
+                <div class="title" style="display:flex; align-items:center; gap:6px;">Anthropic <span class="dot ok"></span></div>
+                <div class="sub">3 models · Claude Sonnet 4.5</div>
+              </div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--grey)" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+            <div class="row-item">
+              <div class="lead">O</div>
+              <div class="body">
+                <div class="title" style="display:flex; align-items:center; gap:6px;">OpenAI <span class="dot ok"></span></div>
+                <div class="sub">5 models · GPT-4o, o1</div>
+              </div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--grey)" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+            <div class="row-item">
+              <div class="lead">G</div>
+              <div class="body">
+                <div class="title" style="display:flex; align-items:center; gap:6px;">Google <span class="dot ok"></span></div>
+                <div class="sub">2 models · Gemini 2.0</div>
+              </div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--grey)" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+          </div>
+          <div class="label-tiny" style="margin-top:6px;">NOT CONFIGURED</div>
+          <div class="row-item" style="background:var(--cream); border:1.5px dashed var(--tan-3);">
+            <div class="lead" style="background:var(--tan-3); color:var(--grey);">M</div>
+            <div class="body">
+              <div class="title" style="color:var(--grey);">Mistral</div>
+              <div class="sub">Add API key to enable →</div>
+            </div>
+          </div>
+          <div class="btn primary" style="margin-top:6px;">+ Add Provider</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 11. Display / Theme Settings -->
+    <div class="phone-frame">
+      <div class="phone-label">Display</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2>Display</h2>
+            <div></div>
+          </div>
+          <div class="label-tiny" style="color:var(--orange);">— THEME · 6 PRESETS</div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px;">
+            <div style="aspect-ratio:1; background:var(--cream); border:2px solid var(--orange); border-radius:10px; padding:6px; display:flex; flex-direction:column; gap:3px; justify-content:flex-end;">
+              <div style="display:flex; gap:2px;"><i style="width:8px; height:8px; background:var(--orange); border-radius:50%;"></i><i style="width:8px; height:8px; background:var(--chartreuse); border-radius:50%;"></i></div>
+              <div style="font-size:7px; font-weight:700;">PULSE</div>
+            </div>
+            <div style="aspect-ratio:1; background:#FAFAFA; border:1.5px solid var(--tan-3); border-radius:10px; padding:6px; display:flex; flex-direction:column; gap:3px; justify-content:flex-end;">
+              <div style="display:flex; gap:2px;"><i style="width:8px; height:8px; background:#3B82F6; border-radius:50%;"></i><i style="width:8px; height:8px; background:#94A3B8; border-radius:50%;"></i></div>
+              <div style="font-size:7px; font-weight:700;">CLEAN</div>
+            </div>
+            <div style="aspect-ratio:1; background:var(--ink); border-radius:10px; padding:6px; display:flex; flex-direction:column; gap:3px; justify-content:flex-end;">
+              <div style="display:flex; gap:2px;"><i style="width:8px; height:8px; background:var(--chartreuse); border-radius:50%;"></i><i style="width:8px; height:8px; background:#444; border-radius:50%;"></i></div>
+              <div style="font-size:7px; font-weight:700; color:var(--cream);">NIGHT</div>
+            </div>
+            <div style="aspect-ratio:1; background:#1F2937; border-radius:10px; padding:6px; display:flex; flex-direction:column; gap:3px; justify-content:flex-end;">
+              <div style="display:flex; gap:2px;"><i style="width:8px; height:8px; background:#10B981; border-radius:50%;"></i><i style="width:8px; height:8px; background:#34D399; border-radius:50%;"></i></div>
+              <div style="font-size:7px; font-weight:700; color:#fff;">FOREST</div>
+            </div>
+            <div style="aspect-ratio:1; background:#FFF5F1; border:1.5px solid var(--tan-3); border-radius:10px; padding:6px; display:flex; flex-direction:column; gap:3px; justify-content:flex-end;">
+              <div style="display:flex; gap:2px;"><i style="width:8px; height:8px; background:#F97316; border-radius:50%;"></i><i style="width:8px; height:8px; background:#FBA574; border-radius:50%;"></i></div>
+              <div style="font-size:7px; font-weight:700;">DAWN</div>
+            </div>
+            <div style="aspect-ratio:1; background:#0A0A0A; border-radius:10px; padding:6px; display:flex; flex-direction:column; gap:3px; justify-content:flex-end;">
+              <div style="display:flex; gap:2px;"><i style="width:8px; height:8px; background:#fff; border-radius:50%;"></i></div>
+              <div style="font-size:7px; font-weight:700; color:#fff;">AMOLED</div>
+            </div>
+          </div>
+          <div class="label-tiny" style="margin-top:6px;">— TYPOGRAPHY</div>
+          <div class="card">
+            <div class="card-row">
+              <div>
+                <div style="font-size:11px; font-weight:600;">Body size</div>
+                <div class="sub" style="font-size:10px; color:var(--grey);">Comfortable</div>
+              </div>
+              <div style="display:flex; gap:4px;">
+                <span class="chip" style="font-size:9px; padding:3px 8px;">S</span>
+                <span class="chip active" style="font-size:9px; padding:3px 8px;">M</span>
+                <span class="chip" style="font-size:9px; padding:3px 8px;">L</span>
+              </div>
+            </div>
+          </div>
+          <div class="row-item" style="background:var(--tan);">
+            <div class="lead">A</div>
+            <div class="body">
+              <div class="title" style="font-size:12px;">Font family</div>
+              <div class="sub">Inter Variable · default</div>
+            </div>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--grey)" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="row-item">
+            <div class="lead">M</div>
+            <div class="body">
+              <div class="title" style="font-size:12px;">Reduce motion</div>
+              <div class="sub">Off</div>
+            </div>
+            <div style="width:30px; height:18px; background:var(--tan-3); border-radius:9px; position:relative;">
+              <div style="position:absolute; left:2px; top:2px; width:14px; height:14px; background:var(--cream); border-radius:50%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 12. Memory Page -->
+    <div class="phone-frame">
+      <div class="phone-label">Memory</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2>Memory</h2>
+            <button class="icon-btn solid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+          <div class="card dark">
+            <div class="label-tiny on-dark">CORE · ACTIVE</div>
+            <div class="card-row" style="margin-top:6px;">
+              <div>
+                <div class="h-orange tiny" style="color:var(--chartreuse); font-size:32px;">47</div>
+                <div class="label-tiny on-dark">ENTRIES</div>
+              </div>
+              <div>
+                <div class="h-orange tiny" style="font-size:24px;">12.4K</div>
+                <div class="label-tiny on-dark">TOKENS</div>
+              </div>
+              <div>
+                <div class="h-orange tiny" style="font-size:24px; color:var(--chartreuse);">3.1%</div>
+                <div class="label-tiny on-dark">CTX USED</div>
+              </div>
+            </div>
+          </div>
+          <div class="chips">
+            <span class="chip active">ALL</span>
+            <span class="chip">PERSON</span>
+            <span class="chip">WORK</span>
+            <span class="chip">CODE</span>
+          </div>
+          <div class="stack" style="gap:6px;">
+            <div class="card">
+              <div class="card-row">
+                <div class="label-tiny">PERSON · MAR 22</div>
+                <span class="dot ok"></span>
+              </div>
+              <div style="font-size:11px; line-height:1.4; margin-top:4px;">Mara prefers metric units (km, kg) and 24h time format. Marathon target: Boston 2027 sub-3:15.</div>
+            </div>
+            <div class="card">
+              <div class="card-row">
+                <div class="label-tiny">WORK · APR 04</div>
+                <span class="dot ok"></span>
+              </div>
+              <div style="font-size:11px; line-height:1.4; margin-top:4px;">Coaches at Pulse Run Club, two HIIT sessions weekly on Tue/Thu evenings.</div>
+            </div>
+            <div class="card">
+              <div class="card-row">
+                <div class="label-tiny">CODE · APR 18</div>
+                <span class="dot ok"></span>
+              </div>
+              <div style="font-size:11px; line-height:1.4; margin-top:4px;">Strava data exports go to ~/data/strava/ as raw .gpx, parser is Python 3.12.</div>
+            </div>
+          </div>
+          <div class="btn ghost" style="margin-top:auto;">+ Add Memory</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- ROW 4: INSIGHTS & SPECIAL STATES -->
+<!-- ============================================================ -->
+<section class="row">
+  <div class="row-label">— Row 04 · Insights & Edge States</div>
+  <div class="phones">
+
+    <!-- 13. Token Usage Dashboard (the unblurred locked one) -->
+    <div class="phone-frame">
+      <div class="phone-label">Token Usage</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2>Usage</h2>
+            <span class="chip">PRO</span>
+          </div>
+          <div style="position:relative; display:flex; flex-direction:column; align-items:center; padding:6px 0;">
+            <svg viewBox="0 0 200 200" style="width:170px; height:170px;">
+              <!-- outer ring track -->
+              <circle cx="100" cy="100" r="82" stroke="#EDE5D8" stroke-width="14" fill="none"/>
+              <!-- outer chartreuse arc -->
+              <circle cx="100" cy="100" r="82" stroke="#D6FF3F" stroke-width="14" fill="none"
+                      stroke-dasharray="360 515" stroke-linecap="round"
+                      transform="rotate(-90 100 100)"/>
+              <!-- inner ring track -->
+              <circle cx="100" cy="100" r="58" stroke="#EDE5D8" stroke-width="14" fill="none"/>
+              <!-- inner orange arc -->
+              <circle cx="100" cy="100" r="58" stroke="#E85D2F" stroke-width="14" fill="none"
+                      stroke-dasharray="240 365" stroke-linecap="round"
+                      transform="rotate(-90 100 100)"/>
+            </svg>
+            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center;">
+              <div class="label-tiny" style="font-size:8px;">REMAINING</div>
+              <div style="font-size:32px; font-weight:800; color:var(--orange); letter-spacing:-0.04em; line-height:1;">47.2K</div>
+              <div class="label-tiny" style="font-size:8px;">OF 200K</div>
+            </div>
+          </div>
+          <div class="card-row" style="margin:0;">
+            <div class="card bright" style="flex:1; padding:10px;">
+              <div class="label-tiny" style="color:rgba(0,0,0,0.55); font-size:8px;">TODAY</div>
+              <div class="h-ink" style="font-size:20px;">2.4K</div>
+              <div style="font-size:8px; color:var(--ink-2);">+18% vs avg</div>
+            </div>
+            <div class="card" style="flex:1; padding:10px;">
+              <div class="label-tiny" style="font-size:8px;">WEEK</div>
+              <div class="h-ink" style="font-size:20px;">12K</div>
+              <div style="font-size:8px; color:var(--grey);">7 days</div>
+            </div>
+            <div class="card" style="flex:1; padding:10px;">
+              <div class="label-tiny" style="font-size:8px;">MONTH</div>
+              <div class="h-ink" style="font-size:20px;">52K</div>
+              <div style="font-size:8px; color:var(--grey);">26%</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="label-tiny" style="margin-bottom:6px;">DAILY · 7 DAYS</div>
+            <div class="bars" style="height:60px;">
+              <div class="bar" style="height:30%"></div>
+              <div class="bar" style="height:50%"></div>
+              <div class="bar" style="height:25%"></div>
+              <div class="bar" style="height:65%"></div>
+              <div class="bar active" style="height:85%"></div>
+              <div class="bar" style="height:42%"></div>
+              <div class="bar" style="height:38%"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--grey); margin-top:4px;">
+              <span>M</span><span>T</span><span>W</span><span>T</span><span style="color:var(--ink); font-weight:800;">F</span><span>S</span><span>S</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 14. Skills / Extensions -->
+    <div class="phone-frame">
+      <div class="phone-label">Skills</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2>Skills</h2>
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/></svg></button>
+          </div>
+          <div class="card spotlight">
+            <div class="label-tiny on-dark" style="color:rgba(255,255,255,0.7);">MOST USED</div>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+              <div style="width:34px; height:34px; background:var(--cream); color:var(--orange); border-radius:10px; display:inline-flex; align-items:center; justify-content:center; font-size:18px;">⌘</div>
+              <div style="flex:1;">
+                <div style="font-size:14px; font-weight:800;">Code Review</div>
+                <div style="font-size:10px; opacity:0.85;">Triggered 47× this week</div>
+              </div>
+              <span class="chip ok" style="font-size:9px;">ON</span>
+            </div>
+          </div>
+          <div class="chips">
+            <span class="chip active">ALL · 23</span>
+            <span class="chip">ACTIVE · 12</span>
+            <span class="chip">CUSTOM</span>
+          </div>
+          <div class="stack" style="gap:6px;">
+            <div class="row-item">
+              <div class="lead">📊</div>
+              <div class="body">
+                <div class="title">Data Analysis</div>
+                <div class="sub">pandas + matplotlib</div>
+              </div>
+              <span class="chip ok" style="font-size:9px; padding:3px 6px;">ON</span>
+            </div>
+            <div class="row-item">
+              <div class="lead">🌐</div>
+              <div class="body">
+                <div class="title">Web Research</div>
+                <div class="sub">Tavily search · scraping</div>
+              </div>
+              <span class="chip ok" style="font-size:9px; padding:3px 6px;">ON</span>
+            </div>
+            <div class="row-item">
+              <div class="lead" style="background:var(--tan-3); color:var(--grey);">📷</div>
+              <div class="body">
+                <div class="title" style="color:var(--grey);">Image OCR</div>
+                <div class="sub">tesseract · 12 langs</div>
+              </div>
+              <span class="chip" style="font-size:9px; padding:3px 6px;">OFF</span>
+            </div>
+            <div class="row-item">
+              <div class="lead">🎙</div>
+              <div class="body">
+                <div class="title">Voice Notes</div>
+                <div class="sub">Whisper · transcribe</div>
+              </div>
+              <span class="chip ok" style="font-size:9px; padding:3px 6px;">ON</span>
+            </div>
+          </div>
+          <div class="btn primary" style="margin-top:auto;">Browse Marketplace →</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 15. Permissions / System Access -->
+    <div class="phone-frame">
+      <div class="phone-label">System Access</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2>Permissions</h2>
+            <span class="chip ok">7/10</span>
+          </div>
+          <div class="card">
+            <div class="label-tiny" style="color:var(--orange);">— TRUST LEVEL</div>
+            <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+              <div class="streak" style="grid-template-columns:repeat(10,1fr); gap:3px; flex:1;">
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="partial"></div>
+                <div></div>
+                <div></div>
+              </div>
+              <div style="font-size:18px; font-weight:800; color:var(--orange); font-feature-settings:'tnum';">7/10</div>
+            </div>
+          </div>
+          <div class="label-tiny" style="margin-top:4px;">GRANTED</div>
+          <div class="stack" style="gap:6px;">
+            <div class="row-item">
+              <div class="lead">📁</div>
+              <div class="body">
+                <div class="title" style="font-size:12px;">File system</div>
+                <div class="sub">~/Documents · read+write</div>
+              </div>
+              <span class="dot ok"></span>
+            </div>
+            <div class="row-item">
+              <div class="lead">🌐</div>
+              <div class="body">
+                <div class="title" style="font-size:12px;">Network access</div>
+                <div class="sub">Outbound HTTP · all hosts</div>
+              </div>
+              <span class="dot ok"></span>
+            </div>
+            <div class="row-item">
+              <div class="lead">⌨</div>
+              <div class="body">
+                <div class="title" style="font-size:12px;">Terminal</div>
+                <div class="sub">Sandboxed · alpine-proot</div>
+              </div>
+              <span class="dot ok"></span>
+            </div>
+          </div>
+          <div class="label-tiny">DENIED</div>
+          <div class="row-item" style="background:var(--cream); border:1.5px solid var(--orange);">
+            <div class="lead" style="background:var(--orange);">🔔</div>
+            <div class="body">
+              <div class="title" style="font-size:12px; color:var(--orange);">Notifications</div>
+              <div class="sub">Tap to grant →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 16. Rate Limit / Edge State -->
+    <div class="phone-frame">
+      <div class="phone-label">Rate Limit</div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen" style="justify-content:space-between;">
+          <div class="topbar">
+            <button class="icon-btn cream"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2 style="font-size:14px;">Cooldown</h2>
+            <span class="chip warn">PAUSED</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; padding:0 4px;">
+            <div class="label-tiny" style="color:var(--orange);">RATE LIMIT · CLAUDE</div>
+            <div class="h-orange" style="font-size:60px; line-height:0.95;">Take<br>five.</div>
+            <div style="font-size:13px; color:var(--grey); line-height:1.5; margin-top:6px;">You've hit Anthropic's hourly cap. Switch model or wait — your draft is preserved.</div>
+          </div>
+          <div class="card dark">
+            <div class="card-row">
+              <div>
+                <div class="label-tiny on-dark">RESETS IN</div>
+                <div style="font-size:32px; font-weight:800; color:var(--chartreuse); font-feature-settings:'tnum'; letter-spacing:-0.03em;">47:23</div>
+              </div>
+              <div class="streak" style="grid-template-columns:repeat(5,1fr); width:80px;">
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="lit"></div>
+                <div class="partial"></div>
+                <div></div>
+              </div>
+            </div>
+          </div>
+          <div class="stack" style="gap:8px;">
+            <div class="btn primary">Switch to GPT-4o</div>
+            <div class="btn ghost">Wait it out</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="grid">
+    <div>
+      <h4>Color rules</h4>
+      <p>Cream <code>#F5F1EA</code> + Ink <code>#1A1A1A</code> + ONE of (Chartreuse <code>#D6FF3F</code> | Sport-Orange <code>#E85D2F</code>) per surface. Reserve orange for hero numerals & critical CTAs. Reserve chartreuse for active / in-progress / primary actions.</p>
+    </div>
+    <div>
+      <h4>Typography</h4>
+      <p>Geometric sans (Inter / Geist). Hero numerals ~3× body, sport-orange. ALL-CAPS labels at ~9–11px, letter-spaced 0.10–0.18em, warm grey. Body medium-weight, line-height 1.5.</p>
+    </div>
+    <div>
+      <h4>Layout</h4>
+      <p>Card-modular. Corner radius 14–24dp. Outer 16dp, inner padding 14–20dp. No drop shadows on regular cards — only on the floating bottom-nav pill and the chartreuse send button.</p>
+    </div>
+    <div>
+      <h4>Motion</h4>
+      <p>Streaming = horizontal pulse-track of 7 chartreuse bars on a black mini-card. Tool running = chartreuse left-edge stripe on tan card. State changes = 220ms spring. No lottie.</p>
+    </div>
+  </div>
+  <p style="margin-top:32px; font-size:11px; color:var(--grey-2);">AmberAgent visual system · 16 mockups · 2026.05.07 · designed via prompt-driven iteration, not paywall.</p>
+</footer>
+
+</body>
+</html>
