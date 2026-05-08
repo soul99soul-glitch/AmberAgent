@@ -1,17 +1,29 @@
 package me.rerere.rikkahub.data.agent
 
 import android.util.Log
+import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 
 class AgentToolActivityStore {
     private val _sandboxActivity = MutableStateFlow<SandboxActivityUiState?>(null)
     val sandboxActivity: StateFlow<SandboxActivityUiState?> = _sandboxActivity.asStateFlow()
+    private val conversationScope = ThreadLocal<String?>()
 
     fun start(activity: SandboxActivityUiState) {
-        _sandboxActivity.value = activity
+        _sandboxActivity.value = activity.withCurrentConversation()
+    }
+
+    suspend fun <T> withConversation(conversationId: String?, block: suspend () -> T): T {
+        if (conversationId.isNullOrBlank()) {
+            return block()
+        }
+        return withContext(conversationScope.asContextElement(conversationId)) {
+            block()
+        }
     }
 
     fun appendOutput(toolCallId: String, line: String) {
@@ -31,6 +43,7 @@ class AgentToolActivityStore {
         runtime: String = "",
         workspace: String = "",
         canCancel: Boolean = false,
+        conversationId: String? = null,
     ): String {
         val toolCallId = "${toolName}_${System.currentTimeMillis()}"
         start(
@@ -44,6 +57,7 @@ class AgentToolActivityStore {
                 workspace = workspace,
                 startedAtEpochMillis = System.currentTimeMillis(),
                 canCancel = canCancel,
+                conversationId = conversationId ?: conversationScope.get(),
             )
         )
         return toolCallId
@@ -124,6 +138,14 @@ class AgentToolActivityStore {
             }
             append(line)
         }.takeLast(MAX_OUTPUT_TAIL_CHARS)
+
+    private fun SandboxActivityUiState.withCurrentConversation(): SandboxActivityUiState {
+        return if (conversationId != null) {
+            this
+        } else {
+            copy(conversationId = conversationScope.get())
+        }
+    }
 
     companion object {
         private const val TAG = "AgentToolActivityStore"

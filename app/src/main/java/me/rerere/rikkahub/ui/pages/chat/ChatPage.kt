@@ -360,6 +360,7 @@ private fun ChatPageContent(
     val hazeState = rememberHazeState()
     val activityStore: AgentToolActivityStore = koinInject()
     val liveSandboxActivity by activityStore.sandboxActivity.collectAsStateWithLifecycle()
+    val conversationIdText = conversation.id.toString()
     val messageSandboxActivities = remember(conversation.messageNodes, loadingJob, processingStatus) {
         conversation.deriveSandboxActivities(
             loading = loadingJob != null,
@@ -367,7 +368,8 @@ private fun ChatPageContent(
         )
     }
     val scopedLiveSandboxActivity = liveSandboxActivity?.takeIf { live ->
-        loadingJob != null || messageSandboxActivities.any { it.toolCallId == live.toolCallId }
+        live.conversationId == conversationIdText ||
+            (live.conversationId == null && messageSandboxActivities.any { it.toolCallId == live.toolCallId })
     }
     val rawSandboxTimeline = mergeSandboxTimeline(
         messageActivities = messageSandboxActivities,
@@ -851,6 +853,7 @@ private fun Conversation.deriveSandboxActivities(
                     toolName = "agent_processing",
                     title = it,
                     status = ToolActivityStatus.RUNNING,
+                    conversationId = id.toString(),
                     runtime = "agent-run",
                     canCancel = true,
                     stepIndex = 1,
@@ -868,6 +871,7 @@ private fun Conversation.deriveSandboxActivities(
             toolName = tool.toolName,
             title = tool.sandboxTitle(),
             status = status,
+            conversationId = id.toString(),
             inputPreview = tool.inputPreview(),
             outputTail = tool.outputTail(outputJson),
             runtime = outputJson.getStringContent("runtime") ?: tool.defaultRuntime(),

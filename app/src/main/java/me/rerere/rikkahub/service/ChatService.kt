@@ -1329,7 +1329,8 @@ class ChatService(
             conversationId = conversationId,
             senderName = senderName,
             messages = messages,
-            activity = activityStore.sandboxActivity.value,
+            activity = activityStore.sandboxActivity.value
+                ?.takeIf { it.conversationId == conversationId.toString() },
             hideSensitive = settings.agentRuntime.hideSensitiveLiveStatus,
             launchIntent = getPendingIntent(context, conversationId),
         )
@@ -1892,9 +1893,23 @@ class ChatService(
             subAgentRawTools
         }
         val registry = ToolRegistry.from(finalRawTools)
-        return registry.tools() +
+        val tools = registry.tools() +
             localTools.createToolsListTool(registry) +
             localTools.createToolPolicyExplainTool(registry)
+        return tools.scopedToConversation(conversationId)
+    }
+
+    private fun List<Tool>.scopedToConversation(conversationId: Uuid?): List<Tool> {
+        val scopeId = conversationId?.toString() ?: return this
+        return map { tool ->
+            tool.copy(
+                execute = { input ->
+                    activityStore.withConversation(scopeId) {
+                        tool.execute(input)
+                    }
+                }
+            )
+        }
     }
 
     private fun createMemoryTools(settings: Settings): List<Tool> {

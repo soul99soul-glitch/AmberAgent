@@ -97,6 +97,7 @@ data class SandboxActivityUiState(
     val toolName: String,
     val title: String,
     val status: ToolActivityStatus,
+    val conversationId: String? = null,
     val inputPreview: String = "",
     val outputTail: String = "",
     val runtime: String = "",
