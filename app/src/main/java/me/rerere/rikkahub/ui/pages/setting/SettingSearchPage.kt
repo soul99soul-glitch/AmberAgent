@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,7 +50,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -138,6 +143,20 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
         }
         val haptic = LocalHapticFeedback.current
 
+        // Pulse pI1: stat hero. ENABLED = chartreuse-filled (brand
+        // active accent); BUILT-IN + EXTERNAL are plain tan tiles with
+        // hairline border.
+        val builtInEnabled = listOf(
+            settings.searchBuiltinJinaEnabled,
+            settings.searchBuiltinDuckDuckGoEnabled,
+            settings.searchBuiltinBingEnabled,
+            settings.searchBuiltinWikipediaEnabled,
+            settings.searchBuiltinHackerNewsEnabled,
+        ).count { it }
+        val externalEnabled = settings.searchServices.count { svc ->
+            svc.id in settings.searchEnabledServiceIds
+        }
+        val totalEnabled = builtInEnabled + externalEnabled
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -146,6 +165,14 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             state = lazyListState
         ) {
+            item("search_stat_hero") {
+                SearchStatHero(
+                    enabled = totalEnabled,
+                    builtIn = builtInEnabled,
+                    external = externalEnabled,
+                )
+            }
+
             item("agent_search_enable") {
                 AgentSearchEnableCard(
                     enabled = settings.enableWebSearch,
@@ -1540,5 +1567,93 @@ private fun GrokOptions(
             minLines = 3,
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+/**
+ * Pulse pI1 — 3-tile stat hero for the Web Search page. Mirrors the
+ * SettingProviderPage hero (Configured / Models) treatment: ENABLED
+ * goes chartreuse-filled (brand active accent), BUILT-IN + EXTERNAL
+ * are plain tan tiles with a hairline border.
+ *
+ * Counts pad to two digits and use 36sp Black weight; ALL-CAPS labels
+ * are 0.1em-tracked. Same recipe as the Provider / Skills heros so
+ * they read as a cohesive family.
+ */
+@Composable
+private fun SearchStatHero(
+    enabled: Int,
+    builtIn: Int,
+    external: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SearchStatTile(
+            modifier = Modifier.weight(1f),
+            label = stringResource(R.string.setting_search_page_stat_enabled),
+            value = enabled.toString().padStart(2, '0'),
+            container = MaterialTheme.colorScheme.primary,
+            content = MaterialTheme.colorScheme.onPrimary,
+            border = null,
+        )
+        SearchStatTile(
+            modifier = Modifier.weight(1f),
+            label = stringResource(R.string.setting_search_page_stat_builtin),
+            value = builtIn.toString().padStart(2, '0'),
+            container = MaterialTheme.colorScheme.surfaceVariant,
+            content = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        )
+        SearchStatTile(
+            modifier = Modifier.weight(1f),
+            label = stringResource(R.string.setting_search_page_stat_external),
+            value = external.toString().padStart(2, '0'),
+            container = MaterialTheme.colorScheme.surfaceVariant,
+            content = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        )
+    }
+}
+
+@Composable
+private fun SearchStatTile(
+    label: String,
+    value: String,
+    container: androidx.compose.ui.graphics.Color,
+    content: androidx.compose.ui.graphics.Color,
+    border: BorderStroke?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = container,
+        contentColor = content,
+        border = border,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.1.em,
+                ),
+                color = content.copy(alpha = 0.78f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = value,
+                fontSize = 36.sp,
+                fontWeight = FontWeight.Black,
+                color = content,
+            )
+        }
     }
 }

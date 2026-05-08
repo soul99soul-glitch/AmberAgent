@@ -989,6 +989,9 @@
   <string name="setting_provider_page_tool">Tool</string>
   <string name="setting_provider_page_vertex_ai">Vertex AI</string>
   <string name="setting_provider_page_use_service_account">Use Service Account</string>
+  <string name="setting_search_page_stat_enabled">Enabled</string>
+  <string name="setting_search_page_stat_builtin">Built-in</string>
+  <string name="setting_search_page_stat_external">External</string>
   <string name="setting_tts_page_add">Add</string>
   <string name="setting_tts_page_add_provider">Add TTS Provider</string>
   <string name="setting_tts_page_add_provider_content_description">Add TTS Provider</string>
