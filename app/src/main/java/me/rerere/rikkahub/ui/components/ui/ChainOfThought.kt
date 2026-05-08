@@ -13,15 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardColors
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -59,7 +57,6 @@ private val LocalCardColor = staticCompositionLocalOf { Color.White }
  * - 通过 [collapsedAdaptiveWidth] 控制折叠态是否保持自适应宽度
  *
  * @param modifier 外层卡片的修饰符
- * @param cardColors 卡片配色
  * @param steps 需要渲染的步骤数据列表
  * @param collapsedVisibleCount 折叠时保留可见的尾部步骤数
  * @param collapsedAdaptiveWidth 是否在折叠态下使用内容自适应宽度
@@ -68,9 +65,6 @@ private val LocalCardColor = staticCompositionLocalOf { Color.White }
 @Composable
 fun <T> ChainOfThought(
     modifier: Modifier = Modifier,
-    cardColors: CardColors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
-    ),
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
     collapsedAdaptiveWidth: Boolean = false,
@@ -80,13 +74,16 @@ fun <T> ChainOfThought(
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
+    val workspace = workspaceColors()
 
     CompositionLocalProvider(
-        LocalCardColor provides cardColors.containerColor
+        LocalCardColor provides workspace.paper
     ) {
-        Card(
+        Surface(
             modifier = modifier,
-            colors = cardColors,
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             Column(
                 modifier = Modifier

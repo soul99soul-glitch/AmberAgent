@@ -22,11 +22,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -34,9 +31,9 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -82,7 +79,10 @@ import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tag
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.TextArea
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.UiState
@@ -139,6 +139,7 @@ private fun AssistantPromptContent(
 ) {
     val context = LocalContext.current
     val templateTransformer = koinInject<TemplateTransformer>()
+    val workspace = workspaceColors()
 
     Column(
         modifier = modifier
@@ -148,8 +149,10 @@ private fun AssistantPromptContent(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
@@ -199,8 +202,10 @@ private fun AssistantPromptContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -317,8 +322,10 @@ private fun AssistantPromptContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -419,8 +426,10 @@ private fun AssistantPromptContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -472,8 +481,12 @@ private fun AssistantRegexCard(
     var expanded by remember {
         mutableStateOf(false)
     }
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth()
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier
@@ -651,7 +664,8 @@ private fun AssistantRegexCard(
                     )
                 }
 
-                TextButton(
+                PulseDialogButton(
+                    text = stringResource(R.string.delete),
                     onClick = {
                         onUpdate(
                             assistant.copy(
@@ -660,16 +674,9 @@ private fun AssistantRegexCard(
                                 }
                             )
                         )
-                    }
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(HugeIcons.Delete01, null)
-                        Text(stringResource(R.string.delete))
-                    }
-                }
+                    },
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         }
     }

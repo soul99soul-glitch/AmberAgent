@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,11 +104,16 @@ fun TagsInput(
         // 获取未选择的标签
         val unselectedTags = tags.filter { tag -> !value.contains(tag.id) }
 
+        val workspace = workspaceColors()
+
         AlertDialog(onDismissRequest = {
             showAddDialog = false
             tagName = ""
             showError = false
-        }, title = {
+        }, containerColor = workspace.paper,
+        titleContentColor = workspace.ink,
+        textContentColor = workspace.ink,
+        title = {
             Text(stringResource(R.string.tag_input_dialog_title))
         }, text = {
             Column {
@@ -176,7 +180,7 @@ fun TagsInput(
                 }
             }
         }, confirmButton = {
-            TextButton(
+            PulseDialogButton(
                 onClick = {
                     if (tagName.isNotBlank()) {
                         val trimmedName = tagName.trim()
@@ -195,19 +199,21 @@ fun TagsInput(
                             showError = false
                         }
                     }
-                }, enabled = tagName.isNotBlank()
-            ) {
-                Text(stringResource(R.string.confirm))
-            }
+                },
+                text = stringResource(R.string.confirm),
+                variant = PulseDialogVariant.Primary,
+                enabled = tagName.isNotBlank(),
+            )
         }, dismissButton = {
-            TextButton(
+            PulseDialogButton(
                 onClick = {
                     showAddDialog = false
                     tagName = ""
                     showError = false
-                }) {
-                Text(stringResource(R.string.cancel))
-            }
+                },
+                text = stringResource(R.string.cancel),
+                variant = PulseDialogVariant.Ghost,
+            )
         })
     }
 }

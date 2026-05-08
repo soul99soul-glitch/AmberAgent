@@ -10,7 +10,9 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
@@ -279,6 +281,22 @@ class ConversationRepository(
             )
         }
         filesManager.deleteChatFiles(fullConversation.files)
+    }
+
+    suspend fun getLastMessagePreview(conversationId: Uuid): String? {
+        val entity = messageNodeDAO.getLastNodeOfConversation(conversationId.toString()) ?: return null
+        return try {
+            val messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages)
+            val lastAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+            lastAssistant?.parts
+                ?.filterIsInstance<UIMessagePart.Text>()
+                ?.firstOrNull()
+                ?.text
+                ?.take(100)
+                ?.replace('\n', ' ')
+        } catch (_: Exception) {
+            null
+        }
     }
 
     suspend fun searchMessages(keyword: String) = messageFtsManager.search(keyword)

@@ -13,13 +13,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -50,6 +49,8 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.pages.setting.SearchAbilityTagLine
@@ -106,7 +107,7 @@ fun SearchPickerButton(
     }
 
     if (showSearchPicker) {
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = { showSearchPicker = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
@@ -186,7 +187,12 @@ private fun AppSearchSettings(
     settings: Settings,
     onUpdateSearchService: (Int) -> Unit
 ) {
-    Card {
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
         Row(
             modifier = Modifier
                 .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -249,15 +255,14 @@ private fun AppSearchSettings(
                     MaterialTheme.colorScheme.onSurface
                 }
             )
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = containerColor.value,
-                    contentColor = textColor.value,
-                ),
+            Surface(
                 onClick = {
                     onUpdateSearchService(index)
                 },
-                shape = MaterialTheme.shapes.large
+                shape = MaterialTheme.shapes.large,
+                color = containerColor.value,
+                contentColor = textColor.value,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Row(
                     modifier = Modifier
@@ -292,7 +297,12 @@ private fun AppSearchSettings(
 private fun BuiltInSearchSetting(model: Model) {
     val settingsStore = koinInject<SettingsStore>()
     val scope = rememberCoroutineScope()
-    Card {
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
         Row(
             modifier = Modifier
                 .padding(horizontal = 16.dp, vertical = 12.dp)

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.log
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -13,14 +14,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -39,6 +39,8 @@ import me.rerere.common.android.LogEntry
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.JsonTree
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.JsonInstantPretty
@@ -110,7 +112,7 @@ private fun UnifiedLogList(logs: List<LogEntry>, modifier: Modifier = Modifier) 
     }
 
     selectedLog?.let { log ->
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = { selectedLog = null },
             sheetState = sheetState
         ) {
@@ -122,12 +124,15 @@ private fun UnifiedLogList(logs: List<LogEntry>, modifier: Modifier = Modifier) 
 @Composable
 private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
     val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val workspace = workspaceColors()
 
-    Card(
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -339,10 +344,13 @@ private fun HeaderItem(key: String, value: String) {
 @Composable
 private fun TextLogCard(log: LogEntry.TextLog) {
     val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val workspace = workspaceColors()
 
-    Card(
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         SelectionContainer {
             Column(modifier = Modifier.padding(12.dp)) {

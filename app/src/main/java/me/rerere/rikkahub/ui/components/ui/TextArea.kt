@@ -23,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -219,14 +218,14 @@ private fun FullScreenTextEditor(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row {
-                        TextButton(
+                        PulseDialogButton(
                             onClick = {
                                 state.setTextAndPlaceCursorAtEnd(editingText)
                                 onDismiss()
-                            }
-                        ) {
-                            Text(stringResource(R.string.text_area_save))
-                        }
+                            },
+                            text = stringResource(R.string.text_area_save),
+                            variant = PulseDialogVariant.Primary,
+                        )
                     }
                     TextField(
                         value = editingText,

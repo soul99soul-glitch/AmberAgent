@@ -23,8 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -122,8 +121,9 @@ fun EmojiPicker(
                     items(data.categories.size) { index ->
                         val category = data.categories[index]
                         val isSelected = selectedCategoryIndex == index
+                        val workspace = workspaceColors()
 
-                        Card(
+                        Surface(
                             modifier = Modifier
                                 .clickable {
                                     selectedCategoryIndex = index
@@ -132,13 +132,13 @@ fun EmojiPicker(
                                     }
                                 }
                                 .clip(RoundedCornerShape(20.dp)),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                }
-                            )
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                workspace.paper
+                            },
+                            border = BorderStroke(1.dp, workspace.hairline),
                         ) {
                             Text(
                                 text = when (category.name) {

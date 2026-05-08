@@ -20,9 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,12 +29,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -65,6 +61,11 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
@@ -323,7 +324,7 @@ private fun AssistantCreationSheet(
     state: EditState<Assistant>,
 ) {
     state.EditStateContent { assistant, update ->
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = {
                 state.dismiss()
             },
@@ -370,18 +371,20 @@ private fun AssistantCreationSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
-                    TextButton(
+                    PulseDialogButton(
                         onClick = {
                             state.dismiss()
-                        }) {
-                        Text(stringResource(R.string.assistant_page_cancel))
-                    }
-                    TextButton(
+                        },
+                        text = stringResource(R.string.assistant_page_cancel),
+                        variant = PulseDialogVariant.Ghost,
+                    )
+                    PulseDialogButton(
                         onClick = {
                             state.confirm()
-                        }) {
-                        Text(stringResource(R.string.assistant_page_save))
-                    }
+                        },
+                        text = stringResource(R.string.assistant_page_save),
+                        variant = PulseDialogVariant.Primary,
+                    )
                 }
             }
         }
@@ -397,12 +400,13 @@ private fun AssistantItem(
     onEdit: () -> Unit,
     onShowActions: () -> Unit,
 ) {
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = modifier.fillMaxWidth(),
         onClick = onEdit,
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier
@@ -488,7 +492,7 @@ private fun AssistantActionSheet(
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismiss
     ) {
         Column(
@@ -554,25 +558,18 @@ private fun AssistantActionSheet(
         }
     }
 
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text(stringResource(R.string.assistant_page_delete)) },
-            text = { Text(stringResource(R.string.assistant_page_delete_dialog_text)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDelete()
-                    }) {
-                    Text(stringResource(R.string.confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
+    RikkaConfirmDialog(
+        show = showDeleteDialog,
+        title = stringResource(R.string.assistant_page_delete),
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            showDeleteDialog = false
+            onDelete()
+        },
+        onDismiss = { showDeleteDialog = false },
+        destructive = true,
+    ) {
+        Text(stringResource(R.string.assistant_page_delete_dialog_text))
     }
 }

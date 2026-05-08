@@ -69,6 +69,23 @@ fun LocalDate.toLocalString(includeYear: Boolean): String {
     return formatter.format(this)
 }
 
+fun Instant.toRelativeTime(): String {
+    val now = Instant.now()
+    val diff = java.time.Duration.between(this, now)
+    val seconds = diff.seconds
+    return when {
+        seconds < 60 -> "just now"
+        seconds < 3600 -> "${seconds / 60}m"
+        seconds < 86400 -> "${seconds / 3600}h"
+        seconds < 604800 -> "${seconds / 86400}d"
+        else -> {
+            val zoneId = ZoneId.systemDefault()
+            val localDate = this.atZone(zoneId).toLocalDate()
+            localDate.toLocalString(includeYear = true)
+        }
+    }
+}
+
 private fun isMonthFirstLocale(locale: Locale): Boolean {
     val monthFirstCountries = setOf(
         "US", // 美国

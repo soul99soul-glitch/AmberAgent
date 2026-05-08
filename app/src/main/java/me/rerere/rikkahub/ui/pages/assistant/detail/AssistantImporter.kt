@@ -9,8 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -124,25 +123,21 @@ private fun SillyTavernImporter(
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedButton(
+        PulseGhostButton(
             onClick = {
                 pngPickerLauncher.launch(arrayOf("image/png"))
             },
-            enabled = !isLoading
-        ) {
-            AutoAIIcon(name = "tavern", modifier = Modifier.padding(end = 8.dp))
-            Text(text = if (isLoading) stringResource(R.string.assistant_importer_importing) else stringResource(R.string.assistant_importer_import_tavern_png))
-        }
+            enabled = !isLoading,
+            text = if (isLoading) stringResource(R.string.assistant_importer_importing) else stringResource(R.string.assistant_importer_import_tavern_png),
+        )
 
-        OutlinedButton(
+        PulseGhostButton(
             onClick = {
                 jsonPickerLauncher.launch(arrayOf("application/json"))
             },
-            enabled = !isLoading
-        ) {
-            AutoAIIcon(name = "tavern", modifier = Modifier.padding(end = 8.dp))
-            Text(text = if (isLoading) stringResource(R.string.assistant_importer_importing) else stringResource(R.string.assistant_importer_import_tavern_json))
-        }
+            enabled = !isLoading,
+            text = if (isLoading) stringResource(R.string.assistant_importer_importing) else stringResource(R.string.assistant_importer_import_tavern_json),
+        )
     }
 }
 

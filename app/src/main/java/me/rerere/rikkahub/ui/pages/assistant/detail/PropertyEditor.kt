@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -33,6 +31,7 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.highlight.LocalHighlighter
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeVisualTransformation
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -105,18 +104,16 @@ fun CustomHeaders(headers: List<CustomHeader>, onUpdate: (List<CustomHeader>) ->
             }
         }
 
-        Button(
+        PulsePrimaryButton(
             onClick = {
                 val updatedHeaders = headers.toMutableList()
                 updatedHeaders.add(CustomHeader("", ""))
                 onUpdate(updatedHeaders)
             },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.assistant_page_add_header))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.assistant_page_add_header))
-        }
+            modifier = Modifier.fillMaxWidth(),
+            text = stringResource(R.string.assistant_page_add_header),
+            leadingIcon = HugeIcons.Add01,
+        )
     }
 }
 
@@ -210,17 +207,15 @@ fun CustomBodies(customBodies: List<CustomBody>, onUpdate: (List<CustomBody>) ->
             }
         }
 
-        Button(
+        PulsePrimaryButton(
             onClick = {
                 val updatedBodies = customBodies.toMutableList()
                 updatedBodies.add(CustomBody("", JsonPrimitive("")))
                 onUpdate(updatedBodies)
             },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.assistant_page_add_body))
-            Spacer(Modifier.width(4.dp))
-            Text(stringResource(R.string.assistant_page_add_body))
-        }
+            modifier = Modifier.fillMaxWidth(),
+            text = stringResource(R.string.assistant_page_add_body),
+            leadingIcon = HugeIcons.Add01,
+        )
     }
 }

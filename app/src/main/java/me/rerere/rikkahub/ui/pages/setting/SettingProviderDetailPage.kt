@@ -10,8 +10,9 @@ import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -35,12 +36,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
 import androidx.compose.material3.HorizontalFloatingToolbar
@@ -48,23 +45,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -108,11 +97,19 @@ import me.rerere.rikkahub.ui.components.ai.ModelTypeTag
 import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.ShareSheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.SiliconFlowPowerByIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -123,7 +120,6 @@ import me.rerere.rikkahub.ui.pages.setting.components.ProviderConnectionTester
 import me.rerere.rikkahub.ui.pages.setting.components.SettingProviderBalanceOption
 import me.rerere.rikkahub.ui.pages.setting.components.isUsingDefaultBaseUrl
 import me.rerere.rikkahub.ui.pages.setting.components.resetBaseUrlToDefault
-import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -187,40 +183,37 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                     ) {
                         Icon(HugeIcons.Share01, null)
                     }
-                }
+                },
+                colors = CustomColors.topBarColors,
             )
         },
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = pager.currentPage == 0,
-                    label = { Text(stringResource(id = R.string.setting_provider_page_configuration)) },
-                    icon = { Icon(HugeIcons.Tools, null) },
-                    onClick = {
-                        scope.launch {
-                            pager.animateScrollToPage(0)
-                        }
-                    }
-                )
-                NavigationBarItem(
-                    selected = pager.currentPage == 1,
-                    label = { Text(stringResource(id = R.string.setting_provider_page_models)) },
-                    icon = { Icon(HugeIcons.Package01, null) },
-                    onClick = {
-                        scope.launch {
-                            pager.animateScrollToPage(1)
-                        }
-                    }
-                )
-            }
-        }
+        containerColor = CustomColors.topBarColors.containerColor,
     ) {
-        HorizontalPager(
-            state = pager,
+        Column(
             modifier = Modifier
                 .padding(it)
                 .consumeWindowInsets(it)
-        ) { page ->
+        ) {
+            WorkspaceSegmentedChoice(
+                options = listOf(0, 1),
+                selected = pager.currentPage,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                onSelected = { page -> scope.launch { pager.animateScrollToPage(page) } },
+                label = { page ->
+                    Text(
+                        when (page) {
+                            0 -> stringResource(R.string.setting_provider_page_configuration)
+                            else -> stringResource(R.string.setting_provider_page_models)
+                        }
+                    )
+                },
+            )
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.weight(1f),
+            ) { page ->
             when (page) {
                 0 -> {
                     SettingProviderConfigPage(
@@ -245,6 +238,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                     )
                 }
             }
+        }
         }
     }
 }
@@ -343,13 +337,12 @@ private fun SettingProviderConfigPage(
                 )
             }
 
-            Button(
+            PulsePrimaryButton(
                 onClick = {
                     onEdit(internalProvider)
-                }
-            ) {
-                Text(stringResource(R.string.setting_provider_page_save))
-            }
+                },
+                text = stringResource(R.string.setting_provider_page_save),
+            )
         }
 
         // 硅基流动图标
@@ -362,32 +355,19 @@ private fun SettingProviderConfigPage(
         }
     }
 
-    // Delete confirmation dialog
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = {
-                Text(stringResource(R.string.confirm_delete))
-            },
-            text = {
-                Text(stringResource(R.string.setting_provider_page_delete_dialog_text))
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDelete()
-                    }
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
-            }
-        )
+    RikkaConfirmDialog(
+        show = showDeleteDialog,
+        title = stringResource(R.string.confirm_delete),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            showDeleteDialog = false
+            onDelete()
+        },
+        onDismiss = { showDeleteDialog = false },
+        destructive = true,
+    ) {
+        Text(stringResource(R.string.setting_provider_page_delete_dialog_text))
     }
 }
 
@@ -543,38 +523,23 @@ private fun ModelSettingsForm(
     }
 
     Column {
-        SecondaryTabRow(
-            selectedTabIndex = pagerState.currentPage,
-            containerColor = Color.Transparent,
-        ) {
-            Tab(
-                selected = pagerState.currentPage == 0,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(0)
+        WorkspaceSegmentedChoice(
+            options = listOf(0, 1, 2),
+            selected = pagerState.currentPage,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            onSelected = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+            label = { page ->
+                Text(
+                    when (page) {
+                        0 -> stringResource(R.string.setting_provider_page_basic_settings)
+                        1 -> stringResource(R.string.setting_provider_page_advanced_settings)
+                        else -> stringResource(R.string.setting_page_built_in_tools)
                     }
-                },
-                text = { Text(stringResource(R.string.setting_provider_page_basic_settings)) }
-            )
-            Tab(
-                selected = pagerState.currentPage == 1,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(1)
-                    }
-                },
-                text = { Text(stringResource(R.string.setting_provider_page_advanced_settings)) }
-            )
-            Tab(
-                selected = pagerState.currentPage == 2,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(2)
-                    }
-                },
-                text = { Text(stringResource(R.string.setting_page_built_in_tools)) }
-            )
-        }
+                )
+            },
+        )
 
         HorizontalPager(
             state = pagerState,
@@ -778,35 +743,17 @@ private fun AddModelButton(
             }
         )
 
-        Button(
-            onClick = {
-                dialogState.open(Model())
-            }
-        ) {
-            Row(
-                modifier = Modifier,
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    HugeIcons.Add01,
-                    contentDescription = stringResource(R.string.setting_provider_page_add_model)
-                )
-                AnimatedVisibility(expanded) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text(
-                        stringResource(R.string.setting_provider_page_add_new_model),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-            }
-        }
+        PulsePrimaryButton(
+            onClick = { dialogState.open(Model()) },
+            text = if (expanded) stringResource(R.string.setting_provider_page_add_new_model) else "+",
+            leadingIcon = if (expanded) HugeIcons.Add01 else null,
+        )
     }
 
     if (dialogState.isEditing) {
         dialogState.currentState?.let { modelState ->
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
+            WorkspaceBottomSheet(
                 onDismissRequest = {
                     dialogState.dismiss()
                 },
@@ -855,22 +802,19 @@ private fun AddModelButton(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     ) {
-                        TextButton(
-                            onClick = {
-                                dialogState.dismiss()
-                            },
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(
+                        PulseDialogButton(
+                            onClick = { dialogState.dismiss() },
+                            text = stringResource(R.string.cancel),
+                            variant = PulseDialogVariant.Ghost,
+                        )
+                        PulseDialogButton(
                             onClick = {
                                 if (modelState.modelId.isNotBlank() && modelState.displayName.isNotBlank()) {
                                     dialogState.confirm()
                                 }
                             },
-                        ) {
-                            Text(stringResource(R.string.setting_provider_page_add))
-                        }
+                            text = stringResource(R.string.setting_provider_page_add),
+                        )
                     }
                 }
             }
@@ -888,8 +832,9 @@ private fun ModelPicker(
     onAllModelDeselected: (List<Model>) -> Unit
 ) {
     var showModal by remember { mutableStateOf(false) }
+    val workspace = workspaceColors()
     if (showModal) {
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = { showModal = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
@@ -930,7 +875,7 @@ private fun ModelPicker(
                         selectedModels.none { it.modelId == model.modelId }
                     }
 
-                    TextButton(
+                    PulseDialogButton(
                         onClick = {
                             if (unselectedCount > 0) {
                                 onAllModelSelected(filteredModels)
@@ -938,14 +883,12 @@ private fun ModelPicker(
                                 onAllModelDeselected(filteredModels)
                             }
                         },
-                    ) {
-                        Text(
-                            if (unselectedCount > 0) stringResource(
-                                R.string.setting_provider_page_select_all,
-                                unselectedCount
-                            ) else stringResource(R.string.setting_provider_page_deselect_models)
-                        )
-                    }
+                        text = if (unselectedCount > 0) stringResource(
+                            R.string.setting_provider_page_select_all,
+                            unselectedCount
+                        ) else stringResource(R.string.setting_provider_page_deselect_models),
+                        variant = PulseDialogVariant.Ghost,
+                    )
                 }
 
                 LazyColumn(
@@ -956,7 +899,11 @@ private fun ModelPicker(
                     contentPadding = PaddingValues(8.dp),
                 ) {
                     items(filteredModels) {
-                        Card {
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            color = workspace.row,
+                            contentColor = workspace.ink,
+                        ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(
@@ -1064,28 +1011,23 @@ private fun ModelTypeSelector(
         stringResource(R.string.setting_provider_page_model_type),
         style = MaterialTheme.typography.titleSmall
     )
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        ModelType.entries.forEachIndexed { index, type ->
-            SegmentedButton(
-                shape = SegmentedButtonDefaults.itemShape(index, ModelType.entries.size),
-                label = {
-                    Text(
-                        text = stringResource(
-                            when (type) {
-                                ModelType.CHAT -> R.string.setting_provider_page_chat_model
-                                ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
-                                ModelType.IMAGE -> R.string.setting_provider_page_image_model
-                            }
-                        )
-                    )
-                },
-                selected = selectedType == type,
-                onClick = { onTypeSelected(type) }
+    WorkspaceSegmentedChoice(
+        options = ModelType.entries,
+        selected = selectedType,
+        modifier = Modifier.fillMaxWidth(),
+        onSelected = onTypeSelected,
+        label = { type ->
+            Text(
+                stringResource(
+                    when (type) {
+                        ModelType.CHAT -> R.string.setting_provider_page_chat_model
+                        ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
+                        ModelType.IMAGE -> R.string.setting_provider_page_image_model
+                    }
+                )
             )
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -1214,10 +1156,11 @@ private fun ModelCard(
     val scope = rememberCoroutineScope()
 
 
+    val workspace = workspaceColors()
     if (dialogState.isEditing) {
         dialogState.currentState?.let { editingModel ->
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
+            WorkspaceBottomSheet(
                 onDismissRequest = {
                     dialogState.dismiss()
                 },
@@ -1271,22 +1214,19 @@ private fun ModelCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     ) {
-                        TextButton(
-                            onClick = {
-                                dialogState.dismiss()
-                            },
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(
+                        PulseDialogButton(
+                            onClick = { dialogState.dismiss() },
+                            text = stringResource(R.string.cancel),
+                            variant = PulseDialogVariant.Ghost,
+                        )
+                        PulseDialogButton(
                             onClick = {
                                 if (editingModel.displayName.isNotBlank()) {
                                     dialogState.confirm()
                                 }
                             },
-                        ) {
-                            Text(stringResource(R.string.confirm))
-                        }
+                            text = stringResource(R.string.confirm),
+                        )
                     }
                 }
             }
@@ -1312,17 +1252,21 @@ private fun ModelCard(
                 ) {
                     Icon(HugeIcons.Cancel01, null)
                 }
-                FilledIconButton(
+                Surface(
                     onClick = {
                         scope.launch {
                             onDelete()
                             swipeToDismissBoxState.reset()
                         }
-                    }
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
                 ) {
                     Icon(
                         HugeIcons.Delete01,
-                        contentDescription = stringResource(R.string.chat_page_delete)
+                        contentDescription = stringResource(R.string.chat_page_delete),
+                        modifier = Modifier.padding(8.dp),
                     )
                 }
             }
@@ -1331,7 +1275,12 @@ private fun ModelCard(
         gesturesEnabled = true,
         modifier = modifier
     ) {
-        OutlinedCard {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            contentColor = workspace.ink,
+            border = BorderStroke(1.dp, workspace.hairline),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1429,8 +1378,10 @@ private fun BuiltInToolsSettings(
 
         availableTools.forEach { (tool, info) ->
             val (title, description) = info
-            Card(
-                modifier = Modifier.fillMaxWidth()
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
                 Row(
                     modifier = Modifier
@@ -1493,8 +1444,11 @@ private fun ProviderOverrideSettings(
         )
 
         if (providerOverride != null) {
-            OutlinedCard(
-                modifier = Modifier.fillMaxWidth()
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column(
                     modifier = Modifier
@@ -1534,32 +1488,30 @@ private fun ProviderOverrideSettings(
                 }
             }
         } else {
-            Button(
+            PulsePrimaryButton(
                 onClick = {
                     editingProvider = parentProvider?.copyProvider(
                         id = Uuid.random(),
                         builtIn = false,
-                        models = emptyList(), // 这里必须设置为空，不然会导致循环依赖JSON
+                        models = emptyList(),
                         description = {},
                     )
                     showProviderConfig = true
                 },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(HugeIcons.Add01, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(stringResource(R.string.setting_provider_page_add_provider_override))
-            }
+                text = stringResource(R.string.setting_provider_page_add_provider_override),
+                leadingIcon = HugeIcons.Add01,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         // Provider configuration modal
         if (showProviderConfig && editingProvider != null) {
-            ModalBottomSheet(
+            WorkspaceBottomSheet(
                 onDismissRequest = {
                     showProviderConfig = false
                     editingProvider = null
                 },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             ) {
                 var internalProvider by remember(editingProvider) { mutableStateOf(editingProvider!!) }
 
@@ -1591,23 +1543,22 @@ private fun ProviderOverrideSettings(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     ) {
-                        TextButton(
+                        PulseDialogButton(
                             onClick = {
                                 showProviderConfig = false
                                 editingProvider = null
                             },
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(
+                            text = stringResource(R.string.cancel),
+                            variant = PulseDialogVariant.Ghost,
+                        )
+                        PulseDialogButton(
                             onClick = {
                                 onUpdateProviderOverride(internalProvider)
                                 showProviderConfig = false
                                 editingProvider = null
                             },
-                        ) {
-                            Text(stringResource(R.string.setting_provider_page_save))
-                        }
+                            text = stringResource(R.string.setting_provider_page_save),
+                        )
                     }
                 }
             }

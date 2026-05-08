@@ -370,6 +370,9 @@
   <string name="history_page_title">聊天歷史</string>
   <string name="history_page_undo">撤銷</string>
   <string name="history_page_unpin">取消置頂</string>
+  <string name="history_page_empty_title">還沒有活躍的對話</string>
+  <string name="history_page_empty_desc">開始一段對話，它會顯示在這裡</string>
+  <string name="history_page_empty_cta">開始對話</string>
   <string name="imggen_page_aspect_ratio">圖片比例</string>
   <string name="imggen_page_aspect_ratio_desc">選擇生成圖片的寬高比</string>
   <string name="imggen_page_aspect_ratio_landscape">16:9 橫屏</string>
@@ -977,4 +980,49 @@
   <string name="reasoning_picker_hint">並非所有模型都支援深度調整。請參閱模型與提供者文件。</string>
   <string name="setting_page_built_in_tools_image_generation">圖像生成</string>
   <string name="setting_page_built_in_tools_image_generation_desc">啟用圖片生成功能</string>
+
+  <!-- ChatList -->
+  <string name="chat_list_prefetching">正在預取較早訊息 %1$d/%2$d</string>
+  <string name="chat_list_preparing">較早訊息準備中 %1$d/%2$d</string>
+  <string name="chat_list_cancel_queued">取消排隊訊息</string>
+  <string name="chat_list_queued_count">已排隊 %1$d 則</string>
+  <string name="chat_list_clear_selection">清除選擇</string>
+  <string name="chat_list_select_all">全選</string>
+  <string name="chat_list_confirm">確認</string>
+
+  <!-- ChatPage -->
+  <string name="chat_page_select_model_first">請先選擇模型</string>
+  <string name="chat_page_queued_messages">排隊訊息</string>
+  <string name="chat_page_no_queued_messages">目前沒有排隊訊息。</string>
+  <string name="chat_page_close">關閉</string>
+  <string name="chat_page_clear">清空</string>
+  <string name="chat_page_mode_followup">排隊下一輪</string>
+  <string name="chat_page_mode_steer">等待插話點</string>
+  <string name="chat_page_mode_collect">收集多則</string>
+  <string name="chat_page_move_up">上移</string>
+  <string name="chat_page_move_down">下移</string>
+
+  <!-- HistoryPage -->
+  <string name="history_page_active_threads">活躍執行緒 · 就緒</string>
+
+  <!-- PulseBottomBar -->
+  <string name="bottom_bar_chats">聊天</string>
+  <string name="bottom_bar_search">搜尋</string>
+  <string name="bottom_bar_skills">技能</string>
+  <string name="bottom_bar_settings">設定</string>
+  <string name="bottom_bar_new_chat">新聊天</string>
+
+  <!-- Accessibility: ChatList MessageJumper -->
+  <string name="chat_jumper_scroll_to_top">捲動至頂部</string>
+  <string name="chat_jumper_previous_message">上一則訊息</string>
+  <string name="chat_jumper_next_message">下一則訊息</string>
+  <!-- Accessibility: TTS controls -->
+  <string name="tts_stop">停止播放</string>
+  <string name="tts_pause">暫停播放</string>
+  <string name="tts_resume">繼續播放</string>
+  <string name="tts_fast_forward">快轉</string>
+  <string name="tts_expand_controls">展開更多控制</string>
+  <string name="tts_collapse_controls">收合控制</string>
+  <!-- Accessibility: ErrorCard -->
+  <string name="error_copy_message">複製錯誤訊息</string>
 </resources>

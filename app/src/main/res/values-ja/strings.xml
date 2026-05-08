@@ -370,6 +370,9 @@
   <string name="history_page_title">チャット履歴</string>
   <string name="history_page_undo">元に戻す</string>
   <string name="history_page_unpin">ピン留め解除</string>
+  <string name="history_page_empty_title">アクティブなスレッドはまだありません</string>
+  <string name="history_page_empty_desc">会話を始めるとここに表示されます</string>
+  <string name="history_page_empty_cta">スレッドを開始</string>
   <string name="imggen_page_aspect_ratio">画像のアスペクト比</string>
   <string name="imggen_page_aspect_ratio_desc">生成する画像のアスペクト比を選択</string>
   <string name="imggen_page_aspect_ratio_landscape">16:9 横向き</string>
@@ -979,4 +982,49 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="reasoning_picker_hint">すべてのモデルが深さ調整に対応しているわけではありません。モデルおよびプロバイダーのドキュメントを参照してください。</string>
   <string name="setting_page_built_in_tools_image_generation">画像生成</string>
   <string name="setting_page_built_in_tools_image_generation_desc">画像生成機能を有効にする</string>
+
+  <!-- ChatList -->
+  <string name="chat_list_prefetching">以前のメッセージを先読み中 %1$d/%2$d</string>
+  <string name="chat_list_preparing">以前のメッセージを準備中 %1$d/%2$d</string>
+  <string name="chat_list_cancel_queued">キュー中のメッセージをキャンセル</string>
+  <string name="chat_list_queued_count">%1$d 件キュー中</string>
+  <string name="chat_list_clear_selection">選択を解除</string>
+  <string name="chat_list_select_all">すべて選択</string>
+  <string name="chat_list_confirm">確認</string>
+
+  <!-- ChatPage -->
+  <string name="chat_page_select_model_first">先にモデルを選択してください</string>
+  <string name="chat_page_queued_messages">キュー中のメッセージ</string>
+  <string name="chat_page_no_queued_messages">キュー中のメッセージはありません。</string>
+  <string name="chat_page_close">閉じる</string>
+  <string name="chat_page_clear">クリア</string>
+  <string name="chat_page_mode_followup">次のラウンドをキュー</string>
+  <string name="chat_page_mode_steer">割り込みポイント待ち</string>
+  <string name="chat_page_mode_collect">複数を収集</string>
+  <string name="chat_page_move_up">上へ</string>
+  <string name="chat_page_move_down">下へ</string>
+
+  <!-- HistoryPage -->
+  <string name="history_page_active_threads">アクティブスレッド · 準備完了</string>
+
+  <!-- PulseBottomBar -->
+  <string name="bottom_bar_chats">チャット</string>
+  <string name="bottom_bar_search">検索</string>
+  <string name="bottom_bar_skills">スキル</string>
+  <string name="bottom_bar_settings">設定</string>
+  <string name="bottom_bar_new_chat">新規チャット</string>
+
+  <!-- Accessibility: ChatList MessageJumper -->
+  <string name="chat_jumper_scroll_to_top">一番上へスクロール</string>
+  <string name="chat_jumper_previous_message">前のメッセージ</string>
+  <string name="chat_jumper_next_message">次のメッセージ</string>
+  <!-- Accessibility: TTS controls -->
+  <string name="tts_stop">再生を停止</string>
+  <string name="tts_pause">再生を一時停止</string>
+  <string name="tts_resume">再生を再開</string>
+  <string name="tts_fast_forward">早送り</string>
+  <string name="tts_expand_controls">コントロールを展開</string>
+  <string name="tts_collapse_controls">コントロールを折りたたむ</string>
+  <!-- Accessibility: ErrorCard -->
+  <string name="error_copy_message">エラーメッセージをコピー</string>
 </resources>

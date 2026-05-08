@@ -10,11 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -42,6 +41,7 @@ import me.rerere.rikkahub.data.agent.terminal.TermuxRuntimeStatus
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -119,28 +119,18 @@ fun SettingSandboxPage(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Button(
+                                    PulsePrimaryButton(
                                         onClick = { workspaceLauncher.launch(null) },
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.setting_files_page_workspace_choose),
-                                            maxLines = 1,
-                                        )
-                                    }
-                                    OutlinedButton(
+                                        text = stringResource(R.string.setting_files_page_workspace_choose),
+                                    )
+                                    PulseGhostButton(
                                         onClick = {
                                             workspaceManager.clearWorkspace()
                                             toaster.show(workspaceClearedToast)
                                         },
                                         enabled = workspaceState.configured,
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.setting_files_page_workspace_clear),
-                                            maxLines = 1,
-                                        )
-                                    }
+                                        text = stringResource(R.string.setting_files_page_workspace_clear),
+                                    )
                                 }
                             }
                         },
@@ -293,9 +283,10 @@ fun SettingSandboxPage(
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(termuxStatus?.message ?: stringResource(R.string.calculating))
-                                OutlinedButton(onClick = { termuxProbeKey++ }) {
-                                    Text(stringResource(R.string.setting_sandbox_termux_probe))
-                                }
+                                PulseGhostButton(
+                                    onClick = { termuxProbeKey++ },
+                                    text = stringResource(R.string.setting_sandbox_termux_probe),
+                                )
                             }
                         },
                     )

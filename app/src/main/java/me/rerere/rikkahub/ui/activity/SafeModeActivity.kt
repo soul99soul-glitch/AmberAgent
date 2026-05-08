@@ -20,7 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
 import org.koin.android.ext.android.inject
@@ -56,8 +57,12 @@ class SafeModeActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
-                        TopAppBar(title = { Text(stringResource(R.string.safe_mode_title)) })
-                    }
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.safe_mode_title)) },
+                            colors = CustomColors.topBarColors,
+                        )
+                    },
+                    containerColor = MaterialTheme.colorScheme.background,
                 ) { innerPadding ->
                     Column(
                         modifier = Modifier
@@ -88,14 +93,13 @@ class SafeModeActivity : ComponentActivity() {
                                     text = stringResource(R.string.safe_mode_crash_report),
                                     style = MaterialTheme.typography.titleSmall,
                                 )
-                                OutlinedButton(
+                                PulseGhostButton(
                                     onClick = {
                                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         cm.setPrimaryClip(ClipData.newPlainText("crash", stackTrace))
-                                    }
-                                ) {
-                                    Text(stringResource(R.string.safe_mode_copy))
-                                }
+                                    },
+                                    text = stringResource(R.string.safe_mode_copy),
+                                )
                             }
                             Card(
                                 modifier = Modifier

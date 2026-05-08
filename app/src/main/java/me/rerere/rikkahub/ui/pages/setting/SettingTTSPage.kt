@@ -23,9 +23,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -33,12 +32,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -60,8 +58,12 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DEFAULT_SYSTEM_TTS_ID
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.pages.setting.components.TTSProviderConfigure
@@ -179,7 +181,7 @@ fun SettingTTSPage(vm: SettingVM = koinViewModel()) {
         val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var currentProvider by remember(provider) { mutableStateOf(provider) }
 
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = {
                 editingProvider = null
             },
@@ -212,16 +214,14 @@ fun SettingTTSPage(vm: SettingVM = koinViewModel()) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    TextButton(
-                        onClick = {
-                            editingProvider = null
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(stringResource(R.string.cancel))
-                    }
-
-                    TextButton(
+                    PulseDialogButton(
+                        text = stringResource(R.string.cancel),
+                        onClick = { editingProvider = null },
+                        variant = PulseDialogVariant.Ghost,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PulseDialogButton(
+                        text = stringResource(R.string.chat_page_save),
                         onClick = {
                             val newProviders = settings.ttsProviders.map {
                                 if (it.id == provider.id) currentProvider else it
@@ -229,10 +229,9 @@ fun SettingTTSPage(vm: SettingVM = koinViewModel()) {
                             vm.updateSettings(settings.copy(ttsProviders = newProviders))
                             editingProvider = null
                         },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(stringResource(R.string.chat_page_save))
-                    }
+                        variant = PulseDialogVariant.Primary,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -255,7 +254,7 @@ private fun AddTTSProviderButton(onAdd: (TTSProviderSetting) -> Unit) {
 
     if (showBottomSheet) {
         val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = {
                 showBottomSheet = false
             },
@@ -288,24 +287,21 @@ private fun AddTTSProviderButton(onAdd: (TTSProviderSetting) -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    TextButton(
-                        onClick = {
-                            showBottomSheet = false
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(stringResource(R.string.cancel))
-                    }
-
-                    TextButton(
+                    PulseDialogButton(
+                        text = stringResource(R.string.cancel),
+                        onClick = { showBottomSheet = false },
+                        variant = PulseDialogVariant.Ghost,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PulseDialogButton(
+                        text = stringResource(R.string.setting_tts_page_add),
                         onClick = {
                             onAdd(currentProvider)
                             showBottomSheet = false
                         },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(stringResource(R.string.setting_tts_page_add))
-                    }
+                        variant = PulseDialogVariant.Primary,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -327,15 +323,13 @@ private fun TTSProviderItem(
     val isSpeaking by tts.isSpeaking.collectAsState()
     val isAvailable by tts.isAvailable.collectAsState()
 
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                CustomColors.listItemColors.containerColor
-            }
-        )
+        shape = MaterialTheme.shapes.medium,
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else workspace.paper,
+        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else workspace.ink,
+        border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else workspace.hairline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),

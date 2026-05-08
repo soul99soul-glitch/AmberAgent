@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,22 +59,13 @@ fun ReminderTab(vm: BackupVM) {
                     headlineContent = { Text(stringResource(R.string.backup_page_reminder_interval)) },
                     supportingContent = {
                         val intervals = listOf(1, 3, 7, 14, 30)
-                        SingleChoiceSegmentedButtonRow(
+                        WorkspaceSegmentedChoice(
+                            options = intervals,
+                            selected = config.intervalDays,
+                            onSelected = { days -> updateConfig(config.copy(intervalDays = days)) },
+                            label = { days -> Text(stringResource(R.string.backup_page_reminder_interval_days, days)) },
                             modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            intervals.forEachIndexed { index, days ->
-                                SegmentedButton(
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = intervals.size,
-                                    ),
-                                    onClick = { updateConfig(config.copy(intervalDays = days)) },
-                                    selected = config.intervalDays == days,
-                                ) {
-                                    Text(stringResource(R.string.backup_page_reminder_interval_days, days))
-                                }
-                            }
-                        }
+                        )
                     },
                 )
 

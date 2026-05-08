@@ -14,7 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -61,7 +60,7 @@ fun JsonTree(
     }
 
     selectedString?.let { content ->
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = { selectedString = null },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {

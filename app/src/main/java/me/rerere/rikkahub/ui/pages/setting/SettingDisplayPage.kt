@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import android.os.Build
-import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,9 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -25,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +51,7 @@ import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
@@ -72,45 +69,6 @@ private fun LaunchStartMode.launchStartModeLabel(): String = when (this) {
     LaunchStartMode.HOME -> stringResource(R.string.setting_display_page_launch_start_mode_home)
 }
 
-@Composable
-private fun <T> WorkspaceSegmentedChoice(
-    options: List<T>,
-    selected: T,
-    modifier: Modifier = Modifier,
-    onSelected: (T) -> Unit,
-    label: @Composable (T) -> Unit,
-) {
-    val workspace = workspaceColors()
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .border(1.dp, workspace.hairline, RoundedCornerShape(6.dp))
-            .padding(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        options.forEach { option ->
-            val isSelected = option == selected
-            Surface(
-                onClick = { onSelected(option) },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(4.dp),
-                color = if (isSelected) workspace.row else Color.Transparent,
-                contentColor = if (isSelected) workspace.ink else workspace.muted,
-            ) {
-                CompositionLocalProvider(LocalContentColor provides LocalContentColor.current) {
-                    ProvideTextStyle(MaterialTheme.typography.labelMedium) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            label(option)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {

@@ -24,15 +24,11 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -89,6 +85,9 @@ import me.rerere.rikkahub.ui.components.message.MessagePartBlock
 import me.rerere.rikkahub.ui.components.message.ThinkingStep
 import me.rerere.rikkahub.ui.components.message.groupMessageParts
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.BitmapComposer
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
@@ -124,7 +123,7 @@ fun ChatExportSheet(
     var imageExportOptions by remember { mutableStateOf(ImageExportOptions()) }
 
     if (visible) {
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = onDismissRequest,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
@@ -139,7 +138,8 @@ fun ChatExportSheet(
 
                 val markdownSuccessMessage =
                     stringResource(id = R.string.chat_page_export_success, "Markdown")
-                OutlinedCard(
+                val workspace = workspaceColors()
+                Surface(
                     onClick = {
                         exportToMarkdown(context, conversation, selectedMessages)
                         toaster.show(
@@ -148,7 +148,10 @@ fun ChatExportSheet(
                         )
                         onDismissRequest()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     ListItem(
                         headlineContent = {
@@ -165,8 +168,11 @@ fun ChatExportSheet(
 
                 val imageSuccessMessage =
                     stringResource(id = R.string.chat_page_export_success, "Image")
-                OutlinedCard(
-                    modifier = Modifier.fillMaxWidth()
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Column {
                         ListItem(
@@ -201,7 +207,8 @@ fun ChatExportSheet(
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.End
                         ) {
-                            Button(
+                            PulsePrimaryButton(
+                                text = stringResource(R.string.mermaid_export),
                                 onClick = {
                                     scope.launch {
                                         runCatching {
@@ -227,10 +234,8 @@ fun ChatExportSheet(
                                         type = ToastType.Success
                                     )
                                     onDismissRequest()
-                                }
-                            ) {
-                                Text(stringResource(R.string.mermaid_export))
-                            }
+                                },
+                            )
                         }
                     }
                 }
@@ -581,8 +586,9 @@ private fun ExportedChatMessage(
                                 if (part.text.isNotBlank()) {
                                     ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
                                         if (message.role == MessageRole.USER) {
-                                            Card(
+                                            Surface(
                                                 shape = MaterialTheme.shapes.medium,
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
                                             ) {
                                                 MarkdownBlock(
                                                     content = part.text,
@@ -591,11 +597,9 @@ private fun ExportedChatMessage(
                                             }
                                         } else {
                                             if (settings.displaySetting.showAssistantBubble) {
-                                                Card(
+                                                Surface(
                                                     shape = MaterialTheme.shapes.medium,
-                                                    colors = CardDefaults.cardColors(
-                                                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                                    )
+                                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                                                 ) {
                                                     MarkdownBlock(
                                                         content = part.text,

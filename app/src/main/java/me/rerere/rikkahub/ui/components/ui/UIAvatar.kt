@@ -14,15 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -184,11 +181,16 @@ fun UIAvatar(
         }
     }
 
+    val workspace = workspaceColors()
+
     if (showPickOption) {
         AlertDialog(
             onDismissRequest = {
                 showPickOption = false
             },
+            containerColor = workspace.paper,
+            titleContentColor = workspace.ink,
+            textContentColor = workspace.ink,
             title = {
                 Text(text = stringResource(id = R.string.avatar_change_avatar))
             },
@@ -196,59 +198,55 @@ fun UIAvatar(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
+                    PulsePrimaryButton(
                         onClick = {
                             showPickOption = false
                             imagePickerLauncher.launch("image/*")
                         },
+                        text = stringResource(id = R.string.avatar_pick_image),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(text = stringResource(id = R.string.avatar_pick_image))
-                    }
-                    Button(
+                    )
+                    PulsePrimaryButton(
                         onClick = {
                             showPickOption = false
                             showEmojiPicker = true
                         },
+                        text = stringResource(id = R.string.avatar_pick_emoji),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(text = stringResource(id = R.string.avatar_pick_emoji))
-                    }
-                    Button(
+                    )
+                    PulsePrimaryButton(
                         onClick = {
                             showPickOption = false
                             urlInput = ""
                             showUrlInput = true
                         },
+                        text = stringResource(id = R.string.avatar_input_url),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(text = stringResource(id = R.string.avatar_input_url))
-                    }
-                    Button(
+                    )
+                    PulsePrimaryButton(
                         onClick = {
                             showPickOption = false
                             onUpdate?.invoke(Avatar.Dummy)
                         },
+                        text = stringResource(id = R.string.avatar_reset),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(text = stringResource(id = R.string.avatar_reset))
-                    }
+                    )
                 }
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         showPickOption = false
-                    }
-                ) {
-                    Text(stringResource(id = R.string.avatar_cancel))
-                }
+                    },
+                    text = stringResource(id = R.string.avatar_cancel),
+                    variant = PulseDialogVariant.Ghost
+                )
             }
         )
     }
 
     if (showEmojiPicker) {
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = {
                 showEmojiPicker = false
             },
@@ -268,44 +266,29 @@ fun UIAvatar(
     }
 
     if (showUrlInput) {
-        AlertDialog(
-            onDismissRequest = {
+        RikkaConfirmDialog(
+            show = showUrlInput,
+            title = stringResource(id = R.string.avatar_url_dialog_title),
+            confirmText = stringResource(id = R.string.avatar_url_confirm),
+            dismissText = stringResource(id = R.string.avatar_cancel),
+            onConfirm = {
+                if (urlInput.isNotBlank()) {
+                    onUpdate?.invoke(Avatar.Image(urlInput.trim()))
+                    showUrlInput = false
+                }
+            },
+            onDismiss = {
                 showUrlInput = false
             },
-            title = {
-                Text(text = stringResource(id = R.string.avatar_url_dialog_title))
-            },
-            text = {
-                OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text(stringResource(id = R.string.avatar_url_hint)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (urlInput.isNotBlank()) {
-                            onUpdate?.invoke(Avatar.Image(urlInput.trim()))
-                            showUrlInput = false
-                        }
-                    }
-                ) {
-                    Text(stringResource(id = R.string.avatar_url_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showUrlInput = false
-                    }
-                ) {
-                    Text(stringResource(id = R.string.avatar_cancel))
-                }
-            }
-        )
+        ) {
+            OutlinedTextField(
+                value = urlInput,
+                onValueChange = { urlInput = it },
+                label = { Text(stringResource(id = R.string.avatar_url_hint)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
     }
 }
 
@@ -329,12 +312,11 @@ private fun PreviewUIAvatar() {
             loading = loading,
         )
 
-        Button(
+        PulsePrimaryButton(
             onClick = {
                 loading = !loading
-            }
-        ) {
-            Text("Toggle Loading")
-        }
+            },
+            text = "Toggle Loading"
+        )
     }
 }

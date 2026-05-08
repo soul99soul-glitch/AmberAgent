@@ -15,9 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +41,9 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import org.koin.compose.koinInject
@@ -111,14 +112,16 @@ fun ProviderConnectionTester(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showTestDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
+                PulseDialogButton(
+                    onClick = { showTestDialog = false },
+                    text = stringResource(R.string.cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
-                        if (model == null) return@TextButton
+                        if (model == null) return@PulseDialogButton
                         val provider = providerManager.getProviderByType(internalProvider)
                         resetStates()
                         scope.launch {
@@ -194,10 +197,10 @@ fun ProviderConnectionTester(
                                 }.onFailure { toolsState = UiState.Error(it) }
                             }
                         }
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_test))
-                }
+                    },
+                    text = stringResource(R.string.setting_provider_page_test),
+                    variant = PulseDialogVariant.Primary,
+                )
             }
         )
     }
@@ -265,7 +268,7 @@ private fun TestResultItem(
         val stackTrace = remember(state.error) {
             state.error.stackTraceToString()
         }
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = { showErrorSheet = false },
             sheetState = sheetState,
         ) {

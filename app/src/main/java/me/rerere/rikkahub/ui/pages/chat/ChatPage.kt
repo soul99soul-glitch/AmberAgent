@@ -25,7 +25,6 @@ import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
@@ -242,6 +241,7 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val selectModelFirstMsg = stringResource(R.string.chat_page_select_model_first)
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
     var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
@@ -372,7 +372,7 @@ private fun ChatPageContent(
                     },
                     onSendClick = { queueMode ->
                         if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                            toaster.show(selectModelFirstMsg, type = ToastType.Error)
                             return@ChatInput
                         }
                         if (inputState.isEditing()) {
@@ -567,12 +567,12 @@ private fun PendingUserMessageQueueDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("排队消息")
+            Text(stringResource(R.string.chat_page_queued_messages))
         },
         text = {
             if (messages.isEmpty()) {
                 Text(
-                    text = "当前没有排队消息。",
+                    text = stringResource(R.string.chat_page_no_queued_messages),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspace.muted,
                 )
@@ -597,15 +597,19 @@ private fun PendingUserMessageQueueDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
-            }
+            PulseDialogButton(
+                onClick = onDismiss,
+                text = stringResource(R.string.chat_page_close),
+                variant = PulseDialogVariant.Primary,
+            )
         },
         dismissButton = {
             if (messages.isNotEmpty()) {
-                TextButton(onClick = onClear) {
-                    Text("清空")
-                }
+                PulseDialogButton(
+                    onClick = onClear,
+                    text = stringResource(R.string.chat_page_clear),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         },
     )
@@ -622,9 +626,9 @@ private fun PendingUserMessageQueueRow(
 ) {
     val workspace = workspaceColors()
     val modeLabel = when (message.mode) {
-        PendingUserMessageMode.FOLLOWUP -> "排队下一轮"
-        PendingUserMessageMode.STEER -> "等待插话点"
-        PendingUserMessageMode.COLLECT -> "收集多条"
+        PendingUserMessageMode.FOLLOWUP -> stringResource(R.string.chat_page_mode_followup)
+        PendingUserMessageMode.STEER -> stringResource(R.string.chat_page_mode_steer)
+        PendingUserMessageMode.COLLECT -> stringResource(R.string.chat_page_mode_collect)
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -649,21 +653,23 @@ private fun PendingUserMessageQueueRow(
                     color = workspace.muted,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
+                    PulseDialogButton(
                         onClick = onMoveUp,
+                        text = stringResource(R.string.chat_page_move_up),
+                        variant = PulseDialogVariant.Ghost,
                         enabled = index > 0,
-                    ) {
-                        Text("上移")
-                    }
-                    TextButton(
+                    )
+                    PulseDialogButton(
                         onClick = onMoveDown,
+                        text = stringResource(R.string.chat_page_move_down),
+                        variant = PulseDialogVariant.Ghost,
                         enabled = index < total - 1,
-                    ) {
-                        Text("下移")
-                    }
-                    TextButton(onClick = onCancel) {
-                        Text("取消")
-                    }
+                    )
+                    PulseDialogButton(
+                        onClick = onCancel,
+                        text = stringResource(R.string.chat_page_cancel),
+                        variant = PulseDialogVariant.Ghost,
+                    )
                 }
             }
             Text(

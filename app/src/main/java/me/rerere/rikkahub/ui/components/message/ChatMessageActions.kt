@@ -8,12 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -53,7 +51,9 @@ import me.rerere.hugeicons.stroke.WebDesign01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.utils.copyMessageToClipboard
@@ -216,7 +216,8 @@ fun ChatMessageActionsSheet(
     onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
-    ModalBottomSheet(
+    val workspace = workspaceColors()
+    WorkspaceBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
@@ -228,12 +229,14 @@ fun ChatMessageActionsSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Select and Copy
-            Card(
+            Surface(
                 onClick = {
                     onDismissRequest()
                     onSelectAndCopy()
                 },
-                shape = MaterialTheme.shapes.medium
+                shape = MaterialTheme.shapes.medium,
+                color = workspace.paper,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -259,12 +262,14 @@ fun ChatMessageActionsSheet(
                 .any { it.text.isNotBlank() }
 
             if (hasTextContent) {
-                Card(
+                Surface(
                     onClick = {
                         onDismissRequest()
                         onWebViewPreview()
                     },
-                    shape = MaterialTheme.shapes.medium
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -287,12 +292,14 @@ fun ChatMessageActionsSheet(
             }
 
             // Edit
-            Card(
+            Surface(
                 onClick = {
                     onDismissRequest()
                     onEdit()
                 },
-                shape = MaterialTheme.shapes.medium
+                shape = MaterialTheme.shapes.medium,
+                color = workspace.paper,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -314,12 +321,14 @@ fun ChatMessageActionsSheet(
             }
 
             // Share
-            Card(
+            Surface(
                 onClick = {
                     onDismissRequest()
                     onShare()
                 },
                 shape = MaterialTheme.shapes.medium,
+                color = workspace.paper,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -341,12 +350,14 @@ fun ChatMessageActionsSheet(
             }
 
             // Create a Fork
-            Card(
+            Surface(
                 onClick = {
                     onDismissRequest()
                     onFork()
                 },
                 shape = MaterialTheme.shapes.medium,
+                color = workspace.paper,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -368,12 +379,14 @@ fun ChatMessageActionsSheet(
             }
 
             if (onToggleFavorite != null) {
-                Card(
+                Surface(
                     onClick = {
                         onDismissRequest()
                         onToggleFavorite()
                     },
                     shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -399,15 +412,14 @@ fun ChatMessageActionsSheet(
             }
 
             // Delete
-            Card(
+            Surface(
                 onClick = {
                     onDismissRequest()
                     onDelete()
                 },
                 shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
+                color = MaterialTheme.colorScheme.errorContainer,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

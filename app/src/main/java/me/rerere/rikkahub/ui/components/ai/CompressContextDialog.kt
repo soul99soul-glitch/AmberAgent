@@ -10,11 +10,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,7 +24,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 
 @Composable
 fun CompressContextDialog(
@@ -52,12 +51,17 @@ fun CompressContextDialog(
         currentJob = null
     }
 
+    val workspace = workspaceColors()
+
     AlertDialog(
         onDismissRequest = {
             if (!isLoading) {
                 onDismiss()
             }
         },
+        containerColor = workspace.paper,
+        titleContentColor = workspace.ink,
+        textContentColor = workspace.ink,
         title = {
             Text(stringResource(R.string.chat_page_compress_context_title))
         },
@@ -72,7 +76,7 @@ fun CompressContextDialog(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        PigLoadingIndicator(
+                        PulseActivityIndicator(
                             modifier = Modifier.size(32.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -86,44 +90,24 @@ fun CompressContextDialog(
                         text = stringResource(R.string.chat_page_compress_target_tokens),
                         style = MaterialTheme.typography.labelMedium
                     )
-                    SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        tokenOptions.forEachIndexed { index, tokens ->
-                            SegmentedButton(
-                                selected = selectedTokens == tokens,
-                                onClick = { selectedTokens = tokens },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = tokenOptions.size
-                                )
-                            ) {
-                                Text("$tokens")
-                            }
-                        }
-                    }
+                    WorkspaceSegmentedChoice(
+                        options = tokenOptions,
+                        selected = selectedTokens,
+                        onSelected = { selectedTokens = it },
+                        label = { Text("$it") },
+                    )
 
                     // Keep recent messages selector
                     Text(
                         text = stringResource(R.string.chat_page_compress_keep_recent),
                         style = MaterialTheme.typography.labelMedium
                     )
-                    SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        keepRecentOptions.forEachIndexed { index, count ->
-                            SegmentedButton(
-                                selected = keepRecentMessages == count,
-                                onClick = { keepRecentMessages = count },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = keepRecentOptions.size
-                                )
-                            ) {
-                                Text("$count")
-                            }
-                        }
-                    }
+                    WorkspaceSegmentedChoice(
+                        options = keepRecentOptions,
+                        selected = keepRecentMessages,
+                        onSelected = { keepRecentMessages = it },
+                        label = { Text("$it") },
+                    )
 
                     // Additional context input
                     OutlinedTextField(
@@ -150,25 +134,31 @@ fun CompressContextDialog(
         },
         confirmButton = {
             if (isLoading) {
-                TextButton(onClick = {
-                    currentJob?.cancel()
-                    currentJob = null
-                }) {
-                    Text(stringResource(R.string.cancel))
-                }
+                PulseDialogButton(
+                    onClick = {
+                        currentJob?.cancel()
+                        currentJob = null
+                    },
+                    text = stringResource(R.string.cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             } else {
-                TextButton(onClick = {
-                    currentJob = onConfirm(additionalPrompt, selectedTokens, keepRecentMessages)
-                }) {
-                    Text(stringResource(R.string.confirm))
-                }
+                PulseDialogButton(
+                    onClick = {
+                        currentJob = onConfirm(additionalPrompt, selectedTokens, keepRecentMessages)
+                    },
+                    text = stringResource(R.string.confirm),
+                    variant = PulseDialogVariant.Primary,
+                )
             }
         },
         dismissButton = {
             if (!isLoading) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.cancel))
-                }
+                PulseDialogButton(
+                    onClick = onDismiss,
+                    text = stringResource(R.string.cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         }
     )

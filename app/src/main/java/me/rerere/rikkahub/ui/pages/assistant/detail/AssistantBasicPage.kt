@@ -10,14 +10,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -41,6 +41,7 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.TagsInput
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.heroAnimation
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.toFixed
@@ -97,6 +98,7 @@ internal fun AssistantBasicContent(
     onUpdate: (Assistant) -> Unit,
     vm: AssistantDetailVM
 ) {
+    val workspace = workspaceColors()
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -128,8 +130,10 @@ internal fun AssistantBasicContent(
             )
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             FormItem(
                 label = {
@@ -193,8 +197,10 @@ internal fun AssistantBasicContent(
             )
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             FormItem(
                 modifier = Modifier.padding(8.dp),
@@ -449,8 +455,10 @@ internal fun AssistantBasicContent(
             }
         }
 
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             BackgroundPicker(
                 modifier = Modifier.padding(8.dp),

@@ -18,18 +18,15 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -52,6 +49,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.compose.koinInject
@@ -75,36 +74,29 @@ fun SettingFilesPage(
     var pendingDelete by remember { mutableStateOf<ManagedFileEntity?>(null) }
     val files by filesManager.observe(selectedFolder).collectAsState(initial = emptyList())
 
-    if (pendingDelete != null) {
-        val target = pendingDelete!!
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(stringResource(R.string.setting_files_page_delete_file_title)) },
-            text = { Text(target.displayName) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            val ok = filesManager.delete(target.id, deleteFromDisk = true)
-                            if (ok) {
-                                toaster.show(deletedToast)
-                            } else {
-                                toaster.show(deleteFailedToast)
-                            }
-                            pendingDelete = null
-                        }
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_files_page_delete_action))
+    RikkaConfirmDialog(
+        show = pendingDelete != null,
+        title = stringResource(R.string.setting_files_page_delete_file_title),
+        confirmText = stringResource(R.string.setting_files_page_delete_action),
+        dismissText = stringResource(R.string.setting_files_page_cancel_action),
+        onConfirm = {
+            val target = pendingDelete ?: return@RikkaConfirmDialog
+            scope.launch {
+                val ok = filesManager.delete(target.id, deleteFromDisk = true)
+                if (ok) {
+                    toaster.show(deletedToast)
+                } else {
+                    toaster.show(deleteFailedToast)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text(stringResource(R.string.setting_files_page_cancel_action))
-                }
+                pendingDelete = null
             }
-        )
-    }
+        },
+        onDismiss = { pendingDelete = null },
+        destructive = true,
+        text = {
+            Text(pendingDelete?.displayName.orEmpty())
+        },
+    )
 
     Scaffold(
         topBar = {
@@ -194,9 +186,12 @@ private fun FileItem(
     fileOnDisk: File,
     onDelete: () -> Unit,
 ) {
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = CustomColors.listItemColors.containerColor)
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column {
             Box(

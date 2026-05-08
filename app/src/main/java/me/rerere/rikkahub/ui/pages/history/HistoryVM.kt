@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +32,17 @@ class HistoryVM(
     }.catch {
         Log.e(TAG, "Error: ${it.message}")
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val previews = conversations.flatMapLatest { convs ->
+        flow {
+            val map = convs.associate { conv ->
+                conv.id to (conversationRepo.getLastMessagePreview(conv.id) ?: "")
+            }
+            emit(map)
+        }
+    }.catch {
+        Log.e(TAG, "Preview error: ${it.message}")
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {

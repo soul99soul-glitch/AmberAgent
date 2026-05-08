@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,9 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -27,17 +27,25 @@ fun <T> ExportDialog(
     title: String? = null,
     onDismiss: () -> Unit
 ) {
+    val workspace = workspaceColors()
+
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        titleContentColor = workspace.ink,
+        textContentColor = workspace.ink,
         title = { Text(title ?: stringResource(R.string.export_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedCard(
+                Surface(
                     onClick = {
                         exporter.exportToFile()
                         onDismiss()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Row(
                         modifier = Modifier
@@ -60,12 +68,15 @@ fun <T> ExportDialog(
                         }
                     }
                 }
-                OutlinedCard(
+                Surface(
                     onClick = {
                         exporter.exportAndShare()
                         onDismiss()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Row(
                         modifier = Modifier
@@ -91,9 +102,11 @@ fun <T> ExportDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.export_cancel))
-            }
+            PulseDialogButton(
+                onClick = onDismiss,
+                text = stringResource(R.string.export_cancel),
+                variant = PulseDialogVariant.Ghost,
+            )
         }
     )
 }

@@ -33,8 +33,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -77,6 +75,7 @@ import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.PulseSecondaryButton
 import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -587,18 +586,14 @@ private fun ProviderItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val enabled = provider.enabled
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        ),
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant,
-        ),
-        shape = RoundedCornerShape(20.dp),
         onClick = onEdit,
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier

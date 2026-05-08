@@ -22,14 +22,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -50,6 +49,8 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import java.util.Locale
 
 @Composable
@@ -90,7 +91,7 @@ fun LanguageSelectionDialog(
         }
     }
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
@@ -108,16 +109,19 @@ fun LanguageSelectionDialog(
             )
 
             // 语言列表
+            val workspace = workspaceColors()
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(languages) { language ->
-                    Card(
+                    Surface(
                         onClick = {
                             onLanguageSelected(language)
                         },
-                        shape = MaterialTheme.shapes.medium
+                        shape = MaterialTheme.shapes.medium,
+                        color = workspace.paper,
+                        border = BorderStroke(1.dp, workspace.hairline),
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -140,11 +144,13 @@ fun LanguageSelectionDialog(
                 }
 
                 item {
-                    Card(
+                    Surface(
                         onClick = {
                             onClearTranslation()
                         },
-                        shape = MaterialTheme.shapes.medium
+                        shape = MaterialTheme.shapes.medium,
+                        color = workspace.paper,
+                        border = BorderStroke(1.dp, workspace.hairline),
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -198,12 +204,12 @@ fun CollapsibleTranslationText(
                     imageVector = HugeIcons.LanguageCircle,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = stringResource(R.string.translation_text),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -225,19 +231,19 @@ fun CollapsibleTranslationText(
         }
 
         // Translation content (collapsible)
+        val workspace = workspaceColors()
         AnimatedVisibility(
             visible = !isCollapsed,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
-            Card(
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                ),
-                shape = MaterialTheme.shapes.medium
+                shape = MaterialTheme.shapes.medium,
+                color = workspace.paper,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 // Check if it's loading state
                 val isTranslating = content == stringResource(R.string.translating)

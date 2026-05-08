@@ -6,20 +6,15 @@ import android.os.Build
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
-import me.rerere.hugeicons.stroke.Play
-import me.rerere.hugeicons.stroke.StopCircle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -50,11 +45,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
@@ -131,9 +126,14 @@ fun SettingWebPage() {
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
+            PulsePrimaryButton(
+                text = if (serverState.isRunning) {
+                    stringResource(R.string.setting_page_web_server_stop)
+                } else {
+                    stringResource(R.string.setting_page_web_server_start)
+                },
+                enabled = !serverState.isLoading,
                 onClick = {
-                    if (serverState.isLoading) return@ExtendedFloatingActionButton
                     if (!serverState.isRunning) {
                         if (permissionState.allPermissionsGranted) {
                             startWebServer()
@@ -150,33 +150,6 @@ fun SettingWebPage() {
                             settingsStore.update { it.copy(webServerEnabled = false) }
                         }
                     }
-                },
-                icon = {
-                    if (serverState.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 3.dp,
-                        )
-                    } else {
-                        Icon(
-                            imageVector = if (serverState.isRunning) HugeIcons.Stop else HugeIcons.Play,
-                            contentDescription = null,
-                        )
-                    }
-                },
-                text = {
-                    Text(
-                        if (serverState.isRunning) {
-                            stringResource(R.string.setting_page_web_server_stop)
-                        } else {
-                            stringResource(R.string.setting_page_web_server_start)
-                        }
-                    )
-                },
-                containerColor = if (serverState.isRunning) {
-                    MaterialTheme.colorScheme.errorContainer
-                } else {
-                    MaterialTheme.colorScheme.primaryContainer
                 },
             )
         },

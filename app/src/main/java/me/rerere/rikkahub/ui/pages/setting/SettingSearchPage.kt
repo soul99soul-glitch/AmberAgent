@@ -22,23 +22,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -65,8 +60,13 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.Select
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import me.rerere.search.SearchCommonOptions
@@ -336,10 +336,11 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
 
 @Composable
 private fun SearchRecommendationCard() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier
@@ -375,10 +376,11 @@ private fun BuiltinFreeSearchCard(
     onHackerNewsEnabledChange: (Boolean) -> Unit,
     onGoogleWebViewFallbackEnabledChange: (Boolean) -> Unit,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier
@@ -493,10 +495,11 @@ private fun AgentSearchEnableCard(
     serviceCount: Int,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier
@@ -547,11 +550,12 @@ private fun SearchProviderCard(
     modifier: Modifier = Modifier,
     dragHandle: @Composable () -> Unit = {}
 ) {
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier
@@ -629,15 +633,11 @@ private fun SearchProviderCard(
 
                 Spacer(Modifier.weight(1f))
 
-                TextButton(onClick = onEditService) {
-                    Icon(
-                        imageVector = HugeIcons.PencilEdit01,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text(stringResource(R.string.edit))
-                }
+                PulseDialogButton(
+                    text = stringResource(R.string.edit),
+                    onClick = onEditService,
+                    variant = PulseDialogVariant.Ghost,
+                )
 
                 IconButton(
                     onClick = {}
@@ -660,7 +660,7 @@ private fun SearchServiceEditorSheet(
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var options by remember(initialService) { mutableStateOf(initialService) }
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = bottomSheetState,
         dragHandle = {
@@ -725,21 +725,18 @@ private fun SearchServiceEditorSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(
+                PulseDialogButton(
+                    text = stringResource(R.string.cancel),
                     onClick = onDismiss,
+                    variant = PulseDialogVariant.Ghost,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.cancel))
-                }
-
-                TextButton(
-                    onClick = {
-                        onConfirm(options)
-                    },
+                )
+                PulseDialogButton(
+                    text = confirmText,
+                    onClick = { onConfirm(options) },
+                    variant = PulseDialogVariant.Primary,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(confirmText)
-                }
+                )
             }
         }
     }
@@ -873,25 +870,15 @@ private fun TavilyOptions(
         }
     ) {
         val depthOptions = listOf("basic", "advanced")
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            depthOptions.forEachIndexed { index, depth ->
-                SegmentedButton(
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
-                    onClick = {
-                        onUpdateOptions(
-                            options.copy(
-                                depth = depth
-                            )
-                        )
-                    },
-                    selected = options.depth == depth
-                ) {
-                    Text(depth.replaceFirstChar { it.uppercase() })
-                }
-            }
-        }
+        WorkspaceSegmentedChoice(
+            options = depthOptions,
+            selected = options.depth,
+            modifier = Modifier.fillMaxWidth(),
+            onSelected = { depth ->
+                onUpdateOptions(options.copy(depth = depth))
+            },
+            label = { Text(it.replaceFirstChar { c -> c.uppercase() }) },
+        )
     }
 }
 
@@ -952,10 +939,11 @@ private fun CommonOptions(
     var commonOptions by remember(settings.searchCommonOptions) {
         mutableStateOf(settings.searchCommonOptions)
     }
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier
@@ -1113,25 +1101,15 @@ private fun SearchLinkUpOptions(
         }
     ) {
         val depthOptions = listOf("standard", "deep")
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            depthOptions.forEachIndexed { index, depth ->
-                SegmentedButton(
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
-                    onClick = {
-                        onUpdateOptions(
-                            options.copy(
-                                depth = depth
-                            )
-                        )
-                    },
-                    selected = options.depth == depth
-                ) {
-                    Text(depth.replaceFirstChar { it.uppercase() })
-                }
-            }
-        }
+        WorkspaceSegmentedChoice(
+            options = depthOptions,
+            selected = options.depth,
+            modifier = Modifier.fillMaxWidth(),
+            onSelected = { depth ->
+                onUpdateOptions(options.copy(depth = depth))
+            },
+            label = { Text(it.replaceFirstChar { c -> c.uppercase() }) },
+        )
     }
 }
 
@@ -1474,25 +1452,15 @@ private fun RikkaHubOptions(
         }
     ) {
         val depthOptions = listOf("standard", "deep")
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            depthOptions.forEachIndexed { index, depth ->
-                SegmentedButton(
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
-                    onClick = {
-                        onUpdateOptions(
-                            options.copy(
-                                depth = depth
-                            )
-                        )
-                    },
-                    selected = options.depth == depth
-                ) {
-                    Text(depth.replaceFirstChar { it.uppercase() })
-                }
-            }
-        }
+        WorkspaceSegmentedChoice(
+            options = depthOptions,
+            selected = options.depth,
+            modifier = Modifier.fillMaxWidth(),
+            onSelected = { depth ->
+                onUpdateOptions(options.copy(depth = depth))
+            },
+            label = { Text(it.replaceFirstChar { c -> c.uppercase() }) },
+        )
     }
 }
 

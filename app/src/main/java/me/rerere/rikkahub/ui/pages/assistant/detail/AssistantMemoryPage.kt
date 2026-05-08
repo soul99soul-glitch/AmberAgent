@@ -15,16 +15,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,7 +45,10 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -134,22 +136,22 @@ private fun AssistantMemoryContent(
                 )
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         memoryDialogState.confirm()
-                    }
-                ) {
-                    Text(stringResource(R.string.assistant_page_save))
-                }
+                    },
+                    text = stringResource(R.string.assistant_page_save),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
             dismissButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         memoryDialogState.dismiss()
-                    }
-                ) {
-                    Text(stringResource(R.string.assistant_page_cancel))
-                }
+                    },
+                    text = stringResource(R.string.assistant_page_cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         )
     }
@@ -314,9 +316,12 @@ private fun MemoryItem(
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit
 ) {
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier

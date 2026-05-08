@@ -32,29 +32,19 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.SwitchSize
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -69,7 +59,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,13 +74,17 @@ import me.rerere.rikkahub.data.ai.mcp.McpTool
 import me.rerere.rikkahub.data.ai.mcp.parseMcpServersFromJson
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
-import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.extendColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -254,19 +247,31 @@ private fun McpServerItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                FilledTonalIconButton(
-                    onClick = {
-                        scope.launch { dismissBoxState.reset() }
-                    }
+                Surface(
+                    onClick = { scope.launch { dismissBoxState.reset() } },
+                    shape = CircleShape,
+                    color = workspace.row,
+                    contentColor = workspace.ink,
                 ) {
-                    Icon(HugeIcons.Cancel01, null)
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(HugeIcons.Cancel01, null, modifier = Modifier.size(20.dp))
+                    }
                 }
-                FilledTonalIconButton(
-                    onClick = {
-                        onDelete()
-                    }
+                Surface(
+                    onClick = { onDelete() },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ) {
-                    Icon(HugeIcons.Delete01, null)
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(HugeIcons.Delete01, null, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         },
@@ -390,14 +395,15 @@ private fun McpStatus.statusLabel(): String = when (this) {
 
 @Composable
 private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
+    val workspace = workspaceColors()
     state.EditStateContent { config, updateValue ->
         val pagerState = rememberPagerState { 2 }
         val scope = rememberCoroutineScope()
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = {
                 state.dismiss()
             },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             Column(
                 modifier = Modifier
@@ -406,33 +412,22 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                SecondaryTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    containerColor = Color.Transparent
-                ) {
-                    Tab(
-                        selected = pagerState.currentPage == 0,
-                        onClick = {
-                            scope.launch {
-                                pagerState.animateScrollToPage(0)
+                WorkspaceSegmentedChoice(
+                    options = listOf(0, 1),
+                    selected = pagerState.currentPage,
+                    modifier = Modifier.fillMaxWidth(),
+                    onSelected = { page ->
+                        scope.launch { pagerState.animateScrollToPage(page) }
+                    },
+                    label = {
+                        Text(
+                            when (it) {
+                                0 -> stringResource(R.string.setting_mcp_page_basic_settings)
+                                else -> stringResource(R.string.setting_mcp_page_tools)
                             }
-                        },
-                        text = {
-                            Text(stringResource(R.string.setting_mcp_page_basic_settings))
-                        }
-                    )
-                    Tab(
-                        selected = pagerState.currentPage == 1,
-                        onClick = {
-                            scope.launch {
-                                pagerState.animateScrollToPage(1)
-                            }
-                        },
-                        text = {
-                            Text(stringResource(R.string.setting_mcp_page_tools))
-                        }
-                    )
-                }
+                        )
+                    },
+                )
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier
@@ -459,15 +454,15 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
-                    TextButton(
+                    PulseDialogButton(
+                        text = stringResource(R.string.setting_mcp_page_save),
                         onClick = {
                             if (config.commonOptions.name.isNotBlank()) {
                                 state.confirm()
                             }
-                        }
-                    ) {
-                        Text(stringResource(R.string.setting_mcp_page_save))
-                    }
+                        },
+                        variant = PulseDialogVariant.Primary,
+                    )
                 }
             }
         }
@@ -574,44 +569,36 @@ private fun McpCommonOptionsConfigure(
                 is McpServerConfig.SseTransportServer -> 1
             }
 
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                transportTypes.forEachIndexed { index, type ->
-                    SegmentedButton(
-                        shape = SegmentedButtonDefaults.itemShape(index, transportTypes.size),
-                        onClick = {
-                            if (index != currentTypeIndex) {
-                                val newConfig = when (index) {
-                                    0 -> McpServerConfig.StreamableHTTPServer(
-                                        id = config.id,
-                                        commonOptions = config.commonOptions,
-                                        url = when (config) {
-                                            is McpServerConfig.SseTransportServer -> config.url
-                                            is McpServerConfig.StreamableHTTPServer -> config.url
-                                        }
-                                    )
-
-                                    1 -> McpServerConfig.SseTransportServer(
-                                        id = config.id,
-                                        commonOptions = config.commonOptions,
-                                        url = when (config) {
-                                            is McpServerConfig.SseTransportServer -> config.url
-                                            is McpServerConfig.StreamableHTTPServer -> config.url
-                                        }
-                                    )
-
-                                    else -> config
+            WorkspaceSegmentedChoice(
+                options = transportTypes.indices.toList(),
+                selected = currentTypeIndex,
+                modifier = Modifier.fillMaxWidth(),
+                onSelected = { index ->
+                    if (index != currentTypeIndex) {
+                        val newConfig = when (index) {
+                            0 -> McpServerConfig.StreamableHTTPServer(
+                                id = config.id,
+                                commonOptions = config.commonOptions,
+                                url = when (config) {
+                                    is McpServerConfig.SseTransportServer -> config.url
+                                    is McpServerConfig.StreamableHTTPServer -> config.url
                                 }
-                                update(newConfig)
-                            }
-                        },
-                        selected = index == currentTypeIndex
-                    ) {
-                        Text(type)
+                            )
+                            1 -> McpServerConfig.SseTransportServer(
+                                id = config.id,
+                                commonOptions = config.commonOptions,
+                                url = when (config) {
+                                    is McpServerConfig.SseTransportServer -> config.url
+                                    is McpServerConfig.StreamableHTTPServer -> config.url
+                                }
+                            )
+                            else -> config
+                        }
+                        update(newConfig)
                     }
-                }
-            }
+                },
+                label = { Text(transportTypes[it]) },
+            )
         }
 
         HorizontalDivider()
@@ -751,7 +738,8 @@ private fun McpCommonOptionsConfigure(
                     }
                 }
 
-                Button(
+                PulsePrimaryButton(
+                    text = stringResource(R.string.setting_mcp_page_add_header),
                     onClick = {
                         val updatedHeaders = config.commonOptions.headers.toMutableList()
                         updatedHeaders.add("" to "")
@@ -760,22 +748,14 @@ private fun McpCommonOptionsConfigure(
                                 is McpServerConfig.SseTransportServer -> config.copy(
                                     commonOptions = config.commonOptions.copy(headers = updatedHeaders)
                                 )
-
                                 is McpServerConfig.StreamableHTTPServer -> config.copy(
                                     commonOptions = config.commonOptions.copy(headers = updatedHeaders)
                                 )
                             }
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        HugeIcons.Add01,
-                        contentDescription = stringResource(R.string.setting_mcp_page_add_header)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.setting_mcp_page_add_header))
-                }
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -842,10 +822,11 @@ private fun McpToolCard(
     onNeedsApprovalChange: (Boolean) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier
@@ -954,9 +935,9 @@ private fun McpImportModal(
     val noValidConfigMsg = stringResource(R.string.setting_mcp_page_import_no_valid_config)
     val parseErrorMsg = stringResource(R.string.setting_mcp_page_import_parse_error)
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
         Column(
             modifier = Modifier
@@ -989,10 +970,13 @@ private fun McpImportModal(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.cancel))
-                }
-                Button(
+                PulseDialogButton(
+                    text = stringResource(R.string.cancel),
+                    onClick = onDismiss,
+                    variant = PulseDialogVariant.Ghost,
+                )
+                PulseDialogButton(
+                    text = stringResource(R.string.setting_mcp_page_import_confirm),
                     onClick = {
                         try {
                             val configs = parseMcpServersFromJson(jsonText.trim())
@@ -1004,10 +988,9 @@ private fun McpImportModal(
                         } catch (e: Exception) {
                             errorMessage = parseErrorMsg.format(e.message ?: "")
                         }
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_mcp_page_import_confirm))
-                }
+                    },
+                    variant = PulseDialogVariant.Primary,
+                )
             }
         }
     }

@@ -336,6 +336,7 @@ class RouteActivity : ComponentActivity() {
                                         PulseNavDestination.Settings -> Screen.Setting
                                     }
                                     if (backStack.lastOrNull() != target) {
+                                        backStack.clear()
                                         backStack.add(target)
                                     }
                                 },
@@ -376,10 +377,7 @@ class RouteActivity : ComponentActivity() {
                                 slideOutHorizontally { it }
                         },
                         entryProvider = entryProvider {
-                            entry<Screen.Chat>(
-                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
-                                        + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
-                            ) { key ->
+                            entry<Screen.Chat> { key ->
                                 ChatPage(
                                     id = Uuid.parse(key.id),
                                     text = key.text,

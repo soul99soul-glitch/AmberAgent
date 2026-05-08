@@ -6,14 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -33,6 +31,8 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Forward02
 import me.rerere.hugeicons.stroke.Pause
 import me.rerere.hugeicons.stroke.Play
+import androidx.compose.ui.res.stringResource
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.CustomTtsState
 import me.rerere.tts.model.PlaybackState
@@ -81,7 +81,7 @@ fun TTSController() {
                 ) {
                     Icon(
                         imageVector = HugeIcons.Cancel01,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.tts_stop),
                     )
                 }
 
@@ -103,7 +103,9 @@ fun TTSController() {
                 ) {
                     Icon(
                         imageVector = if (expand) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
-                        contentDescription = null,
+                        contentDescription = stringResource(
+                            if (expand) R.string.tts_collapse_controls else R.string.tts_expand_controls
+                        ),
                     )
                 }
             }
@@ -120,7 +122,7 @@ private fun FastForwardButton(ttsState: CustomTtsState) {
     ) {
         Icon(
             imageVector = HugeIcons.Forward02,
-            contentDescription = null,
+            contentDescription = stringResource(R.string.tts_fast_forward),
         )
     }
 }
@@ -130,7 +132,7 @@ private fun PlayPauseButton(
     playbackState: PlaybackState,
     ttsState: CustomTtsState
 ) {
-    FilledTonalIconButton(
+    IconButton(
         onClick = {
             when (playbackState.status) {
                 PlaybackStatus.Playing -> {
@@ -142,14 +144,16 @@ private fun PlayPauseButton(
                 }
             }
         },
-        colors = IconButtonDefaults.filledTonalIconButtonColors(
+        colors = IconButtonDefaults.iconButtonColors(
             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
             contentColor = MaterialTheme.colorScheme.onTertiaryContainer
         )
     ) {
         Icon(
             imageVector = if (playbackState.status == PlaybackStatus.Playing) HugeIcons.Pause else HugeIcons.Play,
-            contentDescription = null,
+            contentDescription = stringResource(
+                if (playbackState.status == PlaybackStatus.Playing) R.string.tts_pause else R.string.tts_resume
+            ),
         )
         if (playbackState.status == PlaybackStatus.Playing || playbackState.status == PlaybackStatus.Buffering || playbackState.status == PlaybackStatus.Paused) {
             CircularProgressIndicator(
@@ -186,7 +190,7 @@ private fun SpeedButton(
     playbackState: PlaybackState,
     ttsState: CustomTtsState
 ) {
-    TextButton(
+    PulseDialogButton(
         onClick = {
             when (playbackState.speed) {
                 0.8f -> {
@@ -209,8 +213,8 @@ private fun SpeedButton(
                     ttsState.setSpeed(1.0f)
                 }
             }
-        }
-    ) {
-        Text(text = "x${"%.1f".format(playbackState.speed)}")
-    }
+        },
+        text = "x${"%.1f".format(playbackState.speed)}",
+        variant = PulseDialogVariant.Ghost,
+    )
 }

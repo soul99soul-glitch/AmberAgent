@@ -377,6 +377,9 @@
   <string name="history_page_title">Chat History</string>
   <string name="history_page_undo">Undo</string>
   <string name="history_page_unpin">Unpin</string>
+  <string name="history_page_empty_title">No active threads yet</string>
+  <string name="history_page_empty_desc">Start a conversation to see it here</string>
+  <string name="history_page_empty_cta">Start a thread</string>
   <string name="imggen_page_aspect_ratio">Image Aspect Ratio</string>
   <string name="imggen_page_aspect_ratio_desc">Select aspect ratio for generated images</string>
   <string name="imggen_page_aspect_ratio_landscape">16:9 Landscape</string>
@@ -1367,4 +1370,49 @@
   <string name="setting_page_agent_high_risk_auto_approve_desc">Allow SMS, calls, contacts and other sensitive actions.</string>
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">Enable high-risk auto approve?</string>
   <string name="setting_page_agent_high_risk_auto_approve_confirm_desc">AmberAgent will be allowed to automatically approve tools that can send messages, place direct calls, write contacts or calendars, and record audio. Keep this off unless you fully trust this device, model, and session context.</string>
+
+  <!-- ChatList -->
+  <string name="chat_list_prefetching">Prefetching earlier messages %1$d/%2$d</string>
+  <string name="chat_list_preparing">Preparing earlier messages %1$d/%2$d</string>
+  <string name="chat_list_cancel_queued">Cancel queued message</string>
+  <string name="chat_list_queued_count">%1$d queued</string>
+  <string name="chat_list_clear_selection">Clear selection</string>
+  <string name="chat_list_select_all">Select all</string>
+  <string name="chat_list_confirm">Confirm</string>
+
+  <!-- ChatPage -->
+  <string name="chat_page_select_model_first">Please select a model first</string>
+  <string name="chat_page_queued_messages">Queued messages</string>
+  <string name="chat_page_no_queued_messages">No queued messages.</string>
+  <string name="chat_page_close">Close</string>
+  <string name="chat_page_clear">Clear</string>
+  <string name="chat_page_mode_followup">Queue next round</string>
+  <string name="chat_page_mode_steer">Wait for steering point</string>
+  <string name="chat_page_mode_collect">Collect multiple</string>
+  <string name="chat_page_move_up">Move up</string>
+  <string name="chat_page_move_down">Move down</string>
+
+  <!-- HistoryPage -->
+  <string name="history_page_active_threads">ACTIVE THREADS · READY</string>
+
+  <!-- PulseBottomBar -->
+  <string name="bottom_bar_chats">Chats</string>
+  <string name="bottom_bar_search">Search</string>
+  <string name="bottom_bar_skills">Skills</string>
+  <string name="bottom_bar_settings">Settings</string>
+  <string name="bottom_bar_new_chat">New chat</string>
+
+  <!-- Accessibility: ChatList MessageJumper -->
+  <string name="chat_jumper_scroll_to_top">Scroll to top</string>
+  <string name="chat_jumper_previous_message">Previous message</string>
+  <string name="chat_jumper_next_message">Next message</string>
+  <!-- Accessibility: TTS controls -->
+  <string name="tts_stop">Stop playback</string>
+  <string name="tts_pause">Pause playback</string>
+  <string name="tts_resume">Resume playback</string>
+  <string name="tts_fast_forward">Fast forward</string>
+  <string name="tts_expand_controls">Show more controls</string>
+  <string name="tts_collapse_controls">Hide controls</string>
+  <!-- Accessibility: ErrorCard -->
+  <string name="error_copy_message">Copy error message</string>
 </resources>

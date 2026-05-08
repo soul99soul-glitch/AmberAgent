@@ -9,11 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -46,25 +44,13 @@ fun ProviderConfigure(
     ) {
         // Type
         if (!provider.builtIn) {
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                ProviderSetting.Types.forEachIndexed { index, type ->
-                    SegmentedButton(
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = ProviderSetting.Types.size
-                        ),
-                        label = {
-                            Text(type.simpleName ?: "")
-                        },
-                        selected = provider::class == type,
-                        onClick = {
-                            onEdit(provider.convertTo(type))
-                        }
-                    )
-                }
-            }
+            WorkspaceSegmentedChoice(
+                options = ProviderSetting.Types,
+                selected = provider::class,
+                onSelected = { type -> onEdit(provider.convertTo(type)) },
+                label = { Text(it.simpleName ?: "") },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         // [!] just for debugging
@@ -523,12 +509,11 @@ private fun ColumnScope.ProviderConfigureGoogle(
         }
 
         if (provider.useServiceAccount) {
-            OutlinedButton(
+            PulseGhostButton(
                 onClick = { serviceAccountJsonLauncher.launch(arrayOf("application/json", "*/*")) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.setting_provider_page_import_service_account_json))
-            }
+                modifier = Modifier.fillMaxWidth(),
+                text = stringResource(R.string.setting_provider_page_import_service_account_json),
+            )
             OutlinedTextField(
                 value = provider.serviceAccountEmail,
                 onValueChange = {

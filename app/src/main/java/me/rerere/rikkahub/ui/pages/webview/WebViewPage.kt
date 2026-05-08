@@ -19,7 +19,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -35,8 +34,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.base64Decode
 
@@ -128,9 +129,11 @@ fun WebViewPage(url: String, content: String) {
                             )
                         }
                     }
-                }
+                },
+                colors = CustomColors.topBarColors,
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
     ) {
         WebView(
             state = state,
@@ -141,7 +144,7 @@ fun WebViewPage(url: String, content: String) {
     }
 
     if (showConsoleSheet) {
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = { showConsoleSheet = false },
             sheetState = sheetState
         ) {

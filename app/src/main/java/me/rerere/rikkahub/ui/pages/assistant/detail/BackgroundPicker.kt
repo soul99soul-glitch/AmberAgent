@@ -9,12 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +26,10 @@ import coil3.compose.AsyncImage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import org.koin.compose.koinInject
 
 @Composable
@@ -65,20 +66,17 @@ fun BackgroundPicker(
             Text(stringResource(R.string.assistant_page_chat_background_desc))
         }
     ) {
-        Button(
+        PulsePrimaryButton(
             onClick = {
                 showPickOption = true
             },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = if (background != null) {
-                    stringResource(R.string.assistant_page_change_background)
-                } else {
-                    stringResource(R.string.assistant_page_select_background)
-                }
-            )
-        }
+            modifier = Modifier.fillMaxWidth(),
+            text = if (background != null) {
+                stringResource(R.string.assistant_page_change_background)
+            } else {
+                stringResource(R.string.assistant_page_select_background)
+            },
+        )
 
         if (background != null) {
             Row(
@@ -96,13 +94,13 @@ fun BackgroundPicker(
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         onUpdate(null)
-                    }
-                ) {
-                    Text(stringResource(R.string.assistant_page_remove))
-                }
+                    },
+                    text = stringResource(R.string.assistant_page_remove),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
 
             AsyncImage(
@@ -115,11 +113,16 @@ fun BackgroundPicker(
         }
     }
 
+    val workspace = workspaceColors()
+
     if (showPickOption) {
         AlertDialog(
             onDismissRequest = {
                 showPickOption = false
             },
+            containerColor = workspace.paper,
+            titleContentColor = workspace.ink,
+            textContentColor = workspace.ink,
             title = {
                 Text(stringResource(R.string.assistant_page_select_background))
             },
@@ -127,46 +130,43 @@ fun BackgroundPicker(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Button(
+                    PulsePrimaryButton(
                         onClick = {
                             showPickOption = false
                             imagePickerLauncher.launch("image/*")
                         },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(stringResource(R.string.assistant_page_select_from_gallery))
-                    }
-                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(R.string.assistant_page_select_from_gallery),
+                    )
+                    PulsePrimaryButton(
                         onClick = {
                             showPickOption = false
                             urlInput = ""
                             showUrlInput = true
                         },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(stringResource(R.string.assistant_page_enter_image_url))
-                    }
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(R.string.assistant_page_enter_image_url),
+                    )
                     if (background != null) {
-                        Button(
+                        PulsePrimaryButton(
                             onClick = {
                                 showPickOption = false
                                 onUpdate(null)
                             },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(stringResource(R.string.assistant_page_remove_background))
-                        }
+                            modifier = Modifier.fillMaxWidth(),
+                            text = stringResource(R.string.assistant_page_remove_background),
+                        )
                     }
                 }
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         showPickOption = false
-                    }
-                ) {
-                    Text(stringResource(R.string.assistant_page_cancel))
-                }
+                    },
+                    text = stringResource(R.string.assistant_page_cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         )
     }
@@ -176,6 +176,9 @@ fun BackgroundPicker(
             onDismissRequest = {
                 showUrlInput = false
             },
+            containerColor = workspace.paper,
+            titleContentColor = workspace.ink,
+            textContentColor = workspace.ink,
             title = {
                 Text(stringResource(R.string.assistant_page_enter_image_url))
             },
@@ -190,25 +193,25 @@ fun BackgroundPicker(
                 )
             },
             confirmButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         if (urlInput.isNotBlank()) {
                             onUpdate(urlInput.trim())
                             showUrlInput = false
                         }
-                    }
-                ) {
-                    Text(stringResource(R.string.assistant_page_confirm))
-                }
+                    },
+                    text = stringResource(R.string.assistant_page_confirm),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
             dismissButton = {
-                TextButton(
+                PulseDialogButton(
                     onClick = {
                         showUrlInput = false
-                    }
-                ) {
-                    Text(stringResource(R.string.assistant_page_cancel))
-                }
+                    },
+                    text = stringResource(R.string.assistant_page_cancel),
+                    variant = PulseDialogVariant.Ghost,
+                )
             }
         )
     }

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ui.permission
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,13 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,6 +29,9 @@ import androidx.compose.ui.window.Dialog
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 
 /**
  * 权限请求说明对话框
@@ -44,17 +45,17 @@ internal fun PermissionRationaleDialog(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val workspace = workspaceColors()
     Dialog(
         onDismissRequest = onCancel,
     ) {
-        Card(
+        Surface(
             modifier = modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline)
         ) {
             Column(
                 modifier = Modifier
@@ -120,19 +121,17 @@ internal fun PermissionRationaleDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        OutlinedButton(
+                        PulseGhostButton(
                             onClick = onCancel,
+                            text = stringResource(R.string.cancel),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
+                        )
 
-                        Button(
+                        PulsePrimaryButton(
                             onClick = onProceed, // 这里会跳转到设置
+                            text = stringResource(R.string.permission_go_to_settings),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Text(stringResource(R.string.permission_go_to_settings))
-                        }
+                        )
                     }
                 } else {
                     // 没有永久拒绝的权限，显示正常的授权按钮
@@ -140,19 +139,17 @@ internal fun PermissionRationaleDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        OutlinedButton(
+                        PulseGhostButton(
                             onClick = onCancel,
+                            text = stringResource(R.string.cancel),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Text(stringResource(R.string.cancel))
-                        }
+                        )
 
-                        Button(
+                        PulsePrimaryButton(
                             onClick = onProceed,
+                            text = stringResource(R.string.confirm),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Text(stringResource(R.string.confirm))
-                        }
+                        )
                     }
                 }
             }
@@ -169,12 +166,12 @@ private fun PermissionItem(
     modifier: Modifier = Modifier,
     isPermanentlyDenied: Boolean = false,
 ) {
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        ),
-        shape = RoundedCornerShape(8.dp)
+        color = workspace.paper,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, workspace.hairline)
     ) {
         Column(
             modifier = Modifier
@@ -195,10 +192,8 @@ private fun PermissionItem(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (permissionInfo.required) {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            ),
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
@@ -211,10 +206,8 @@ private fun PermissionItem(
                     }
 
                     if (isPermanentlyDenied) {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                            ),
+                        Surface(
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(

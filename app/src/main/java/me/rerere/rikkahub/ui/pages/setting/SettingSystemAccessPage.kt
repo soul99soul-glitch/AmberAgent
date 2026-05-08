@@ -13,11 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -53,6 +52,7 @@ import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.CardGroupScope
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -138,23 +138,19 @@ fun SettingSystemAccessPage(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Button(
+                                    PulsePrimaryButton(
                                         onClick = {
                                             val permissions = permissionBroker.runtimePermissionsForCoreBatch()
                                             if (permissions.isNotEmpty()) {
                                                 runtimePermissionLauncher.launch(permissions.toTypedArray())
                                             }
                                         },
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                                    ) {
-                                        Text("申请核心权限", maxLines = 1)
-                                    }
-                                    OutlinedButton(
+                                        text = "申请核心权限",
+                                    )
+                                    PulseGhostButton(
                                         onClick = { refreshToken++ },
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                                    ) {
-                                        Text("刷新", maxLines = 1)
-                                    }
+                                        text = "刷新",
+                                    )
                                 }
                             }
                         },
@@ -240,7 +236,7 @@ fun SettingSystemAccessPage(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Button(
+                                    PulsePrimaryButton(
                                         onClick = {
                                             val root = externalRootInput.trim()
                                             scope.launch {
@@ -259,11 +255,10 @@ fun SettingSystemAccessPage(
                                                 }
                                             }
                                         },
+                                        text = "加入并启用",
                                         enabled = externalRootInput.isNotBlank(),
-                                    ) {
-                                        Text("加入并启用", maxLines = 1)
-                                    }
-                                    OutlinedButton(
+                                    )
+                                    PulseGhostButton(
                                         onClick = {
                                             scope.launch {
                                                 settingsStore.update { current ->
@@ -278,9 +273,8 @@ fun SettingSystemAccessPage(
                                                 }
                                             }
                                         },
-                                    ) {
-                                        Text("清空", maxLines = 1)
-                                    }
+                                        text = "清空",
+                                    )
                                 }
                                 if (externalAccess.roots.isNotEmpty()) {
                                     Text(externalAccess.roots.joinToString("\n"))
@@ -377,9 +371,7 @@ private fun PermissionAction(
         AgentPermissionStatus.Unsupported -> Text("不支持", color = MaterialTheme.colorScheme.outline)
         AgentPermissionStatus.Denied,
         AgentPermissionStatus.SpecialNeeded -> {
-            OutlinedButton(onClick = onClick) {
-                Text("授权")
-            }
+            PulseGhostButton(onClick = onClick, text = "授权")
         }
     }
 }

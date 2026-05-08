@@ -4,21 +4,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.TextButton
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
@@ -30,6 +27,9 @@ import me.rerere.rikkahub.ui.components.ai.ModeInjectionsContent
 import me.rerere.rikkahub.ui.components.ai.QuickMessagesContent
 import me.rerere.rikkahub.ui.components.ai.SkillsContent
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
@@ -63,31 +63,22 @@ fun AssistantExtensionsPage(id: String) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            SecondaryTabRow(
-                selectedTabIndex = pagerState.currentPage,
-                containerColor = Color.Transparent,
-            ) {
-                Tab(
-                    selected = pagerState.currentPage == 0,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_quick_messages)) }
-                )
-                Tab(
-                    selected = pagerState.currentPage == 1,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_mode_injections)) }
-                )
-                Tab(
-                    selected = pagerState.currentPage == 2,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_lorebooks)) }
-                )
-                Tab(
-                    selected = pagerState.currentPage == 3,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(3) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_skills)) }
-                )
-            }
+            WorkspaceSegmentedChoice(
+                options = listOf(0, 1, 2, 3),
+                selected = pagerState.currentPage,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                onSelected = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+                label = {
+                    Text(
+                        when (it) {
+                            0 -> stringResource(R.string.assistant_extensions_page_tab_quick_messages)
+                            1 -> stringResource(R.string.assistant_extensions_page_tab_mode_injections)
+                            2 -> stringResource(R.string.assistant_extensions_page_tab_lorebooks)
+                            else -> stringResource(R.string.assistant_extensions_page_tab_skills)
+                        }
+                    )
+                },
+            )
 
             HorizontalPager(
                 state = pagerState,
@@ -115,12 +106,12 @@ fun AssistantExtensionsPage(id: String) {
                                         vm.update(assistant.copy(quickMessageIds = newIds))
                                     },
                                 )
-                                TextButton(
+                                PulseDialogButton(
+                                    text = stringResource(R.string.assistant_extensions_page_goto_extensions),
                                     onClick = { navController.navigate(Screen.QuickMessages) },
+                                    variant = PulseDialogVariant.Ghost,
                                     modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.assistant_extensions_page_goto_extensions))
-                                }
+                                )
                             }
                         }
                     }
@@ -144,12 +135,12 @@ fun AssistantExtensionsPage(id: String) {
                                         vm.update(assistant.copy(modeInjectionIds = newIds))
                                     },
                                 )
-                                TextButton(
+                                PulseDialogButton(
+                                    text = stringResource(R.string.assistant_extensions_page_goto_prompts),
                                     onClick = { navController.navigate(Screen.Prompts) },
+                                    variant = PulseDialogVariant.Ghost,
                                     modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.assistant_extensions_page_goto_prompts))
-                                }
+                                )
                             }
                         }
                     }
@@ -173,12 +164,12 @@ fun AssistantExtensionsPage(id: String) {
                                         vm.update(assistant.copy(lorebookIds = newIds))
                                     },
                                 )
-                                TextButton(
+                                PulseDialogButton(
+                                    text = stringResource(R.string.assistant_extensions_page_goto_prompts),
                                     onClick = { navController.navigate(Screen.Prompts) },
+                                    variant = PulseDialogVariant.Ghost,
                                     modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.assistant_extensions_page_goto_prompts))
-                                }
+                                )
                             }
                         }
                     }
@@ -202,12 +193,12 @@ fun AssistantExtensionsPage(id: String) {
                                         vm.update(assistant.copy(enabledSkills = newSkills))
                                     },
                                 )
-                                TextButton(
+                                PulseDialogButton(
+                                    text = stringResource(R.string.assistant_extensions_page_goto_extensions),
                                     onClick = { navController.navigate(Screen.Skills) },
+                                    variant = PulseDialogVariant.Ghost,
                                     modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.assistant_extensions_page_goto_extensions))
-                                }
+                                )
                             }
                         }
                     }

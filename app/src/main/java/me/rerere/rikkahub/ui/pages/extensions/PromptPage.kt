@@ -1,16 +1,12 @@
 package me.rerere.rikkahub.ui.pages.extensions
 
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.FileDownload
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +16,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,11 +32,9 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
 import androidx.compose.material3.HorizontalFloatingToolbar
@@ -50,18 +43,21 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -119,45 +115,46 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                 colors = CustomColors.topBarColors,
             )
         },
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 0,
-                    label = { Text(stringResource(R.string.prompt_page_mode_injection_tab)) },
-                    icon = { Icon(HugeIcons.MagicWand01, null) },
-                    onClick = {
-                        scope.launch { pagerState.animateScrollToPage(0) }
-                    }
-                )
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 1,
-                    label = { Text(stringResource(R.string.prompt_page_lorebook_tab)) },
-                    icon = { Icon(HugeIcons.Book01, null) },
-                    onClick = {
-                        scope.launch { pagerState.animateScrollToPage(1) }
-                    }
-                )
-            }
-        },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
-        HorizontalPager(
-            state = pagerState,
+        Column(
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
-        ) { page ->
-            when (page) {
-                0 -> ModeInjectionTab(
-                    modeInjections = settings.modeInjections,
-                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
-                )
+        ) {
+            WorkspaceSegmentedChoice(
+                options = listOf(0, 1),
+                selected = pagerState.currentPage,
+                onSelected = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                label = { index ->
+                    Text(
+                        when (index) {
+                            0 -> stringResource(R.string.prompt_page_mode_injection_tab)
+                            else -> stringResource(R.string.prompt_page_lorebook_tab)
+                        }
+                    )
+                }
+            )
 
-                1 -> LorebookTab(
-                    lorebooks = settings.lorebooks,
-                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
-                )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                when (page) {
+                    0 -> ModeInjectionTab(
+                        modeInjections = settings.modeInjections,
+                        onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
+                    )
+
+                    1 -> LorebookTab(
+                        lorebooks = settings.lorebooks,
+                        onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
+                    )
+                }
             }
         }
     }
@@ -266,20 +263,10 @@ private fun ModeInjectionTab(
                 }
             },
         ) {
-            Button(onClick = { editState.open(PromptInjection.ModeInjection()) }) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(HugeIcons.Add01, null)
-                    AnimatedVisibility(expanded) {
-                        Row {
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_add_mode_injection))
-                        }
-                    }
-                }
-            }
+            PulsePrimaryButton(
+                text = stringResource(R.string.prompt_page_add_mode_injection),
+                onClick = { editState.open(PromptInjection.ModeInjection()) }
+            )
         }
     }
 
@@ -320,23 +307,31 @@ private fun ModeInjectionCard(
                 IconButton(onClick = { scope.launch { swipeState.reset() } }) {
                     Icon(HugeIcons.Cancel01, null)
                 }
-                FilledIconButton(onClick = {
-                    scope.launch {
-                        onDelete()
-                        swipeState.reset()
+                Surface(
+                    onClick = {
+                        scope.launch {
+                            onDelete()
+                            swipeState.reset()
+                        }
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ) {
+                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                        Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
                     }
-                }) {
-                    Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
                 }
             }
         },
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        val workspace = workspaceColors()
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline)
         ) {
             Row(
                 modifier = Modifier
@@ -399,7 +394,7 @@ private fun ModeInjectionEditSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
@@ -505,12 +500,16 @@ private fun ModeInjectionEditSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.prompt_page_cancel))
-                }
-                TextButton(onClick = onConfirm) {
-                    Text(stringResource(R.string.prompt_page_confirm))
-                }
+                PulseDialogButton(
+                    text = stringResource(R.string.prompt_page_cancel),
+                    onClick = onDismiss,
+                    variant = PulseDialogVariant.Ghost
+                )
+                PulseDialogButton(
+                    text = stringResource(R.string.prompt_page_confirm),
+                    onClick = onConfirm,
+                    variant = PulseDialogVariant.Primary
+                )
             }
         }
     }
@@ -665,20 +664,10 @@ private fun LorebookTab(
                 }
             },
         ) {
-            Button(onClick = { editState.open(Lorebook()) }) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(HugeIcons.Add01, null)
-                    AnimatedVisibility(expanded) {
-                        Row {
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_add_lorebook))
-                        }
-                    }
-                }
-            }
+            PulsePrimaryButton(
+                text = stringResource(R.string.prompt_page_add_lorebook),
+                onClick = { editState.open(Lorebook()) }
+            )
         }
     }
 
@@ -719,23 +708,31 @@ private fun LorebookCard(
                 IconButton(onClick = { scope.launch { swipeState.reset() } }) {
                     Icon(HugeIcons.Cancel01, null)
                 }
-                FilledIconButton(onClick = {
-                    scope.launch {
-                        onDelete()
-                        swipeState.reset()
+                Surface(
+                    onClick = {
+                        scope.launch {
+                            onDelete()
+                            swipeState.reset()
+                        }
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ) {
+                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                        Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
                     }
-                }) {
-                    Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
                 }
             }
         },
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        val workspace = workspaceColors()
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline)
         ) {
             Row(
                 modifier = Modifier
@@ -817,7 +814,7 @@ private fun LorebookEditSheet(
         }
     }
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
@@ -907,12 +904,16 @@ private fun LorebookEditSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.prompt_page_cancel))
-                }
-                TextButton(onClick = onConfirm) {
-                    Text(stringResource(R.string.prompt_page_confirm))
-                }
+                PulseDialogButton(
+                    text = stringResource(R.string.prompt_page_cancel),
+                    onClick = onDismiss,
+                    variant = PulseDialogVariant.Ghost
+                )
+                PulseDialogButton(
+                    text = stringResource(R.string.prompt_page_confirm),
+                    onClick = onConfirm,
+                    variant = PulseDialogVariant.Primary
+                )
             }
         }
     }
@@ -935,7 +936,13 @@ private fun RegexInjectionEntryCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val workspace = workspaceColors()
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1160,17 +1167,19 @@ private fun RegexInjectionEditDialog(
         },
         confirmButton = {
             val canSave = entry.keywords.isNotEmpty() || entry.constantActive
-            TextButton(
+            PulseDialogButton(
+                text = stringResource(R.string.prompt_page_confirm),
                 onClick = onConfirm,
+                variant = PulseDialogVariant.Primary,
                 enabled = canSave
-            ) {
-                Text(stringResource(R.string.prompt_page_confirm))
-            }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.prompt_page_cancel))
-            }
+            PulseDialogButton(
+                text = stringResource(R.string.prompt_page_cancel),
+                onClick = onDismiss,
+                variant = PulseDialogVariant.Ghost
+            )
         }
     )
 }

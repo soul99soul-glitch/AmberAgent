@@ -3,7 +3,6 @@ package me.rerere.rikkahub.ui.components.ui
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-
 /**
  * Shared confirmation dialog wrapper — historically routed through this
  * composable so all confirm/cancel decisions read consistently. After
@@ -27,8 +26,13 @@ fun RikkaConfirmDialog(
         return
     }
 
+    val workspace = workspaceColors()
+
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        titleContentColor = workspace.ink,
+        textContentColor = workspace.ink,
         title = { Text(title) },
         text = text,
         confirmButton = {

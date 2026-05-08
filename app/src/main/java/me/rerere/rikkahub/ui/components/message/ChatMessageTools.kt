@@ -28,21 +28,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -110,6 +108,7 @@ import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
@@ -765,7 +764,7 @@ private fun ToolCallPreviewSheet(
         memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT)
     val memoryId = (content as? JsonObject)?.get("id")?.jsonPrimitiveOrNull?.intOrNull
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismissRequest,
         content = {
@@ -824,10 +823,11 @@ private fun SearchWebPreview(
 
         if (answer != null) {
             item {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
+                val workspace = workspaceColors()
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     MarkdownBlock(
                         content = answer,
@@ -846,11 +846,12 @@ private fun SearchWebPreview(
                 val title = item.getStringContent("title") ?: return@items
                 val text = item.getStringContent("text") ?: return@items
 
-                Card(
+                val workspace = workspaceColors()
+                Surface(
                     onClick = { context.openUrl(url) },
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    )
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Row(
                         modifier = Modifier
@@ -924,7 +925,12 @@ private fun ScrapeWebPreview(content: JsonElement) {
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Card {
+                val workspace = workspaceColors()
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = workspace.paper,
+                    border = BorderStroke(1.dp, workspace.hairline),
+                ) {
                     MarkdownBlock(
                         content = urlObject["content"]?.jsonPrimitive?.content ?: "",
                         modifier = Modifier
@@ -1223,7 +1229,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                             Text(
                                 text = answerText,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -1231,7 +1237,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
 
                 // Submit button
                 if (isPending && onToolAnswer != null) {
-                    FilledTonalButton(
+                    PulsePrimaryButton(
                         onClick = {
                             val answerPayload = buildJsonObject {
                                 put("answers", buildJsonObject {
@@ -1252,17 +1258,9 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                             }
                         },
                         modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.chat_message_tool_submit),
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                    }
+                        text = stringResource(R.string.chat_message_tool_submit),
+                        leadingIcon = HugeIcons.Tick01,
+                    )
                 }
             }
         },
@@ -1283,31 +1281,23 @@ private fun ToolDenyReasonDialog(
 ) {
     var reason by remember { mutableStateOf("") }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(stringResource(R.string.chat_message_tool_deny_dialog_title))
-        },
-        text = {
-            OutlinedTextField(
-                value = reason,
-                onValueChange = { reason = it },
-                label = { Text(stringResource(R.string.chat_message_tool_deny_dialog_hint)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = false,
-                minLines = 2,
-                maxLines = 4
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(reason) }) {
-                Text(stringResource(R.string.chat_message_tool_deny))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.cancel))
-            }
-        }
-    )
+    RikkaConfirmDialog(
+        show = true,
+        title = stringResource(R.string.chat_message_tool_deny_dialog_title),
+        confirmText = stringResource(R.string.chat_message_tool_deny),
+        dismissText = stringResource(android.R.string.cancel),
+        onConfirm = { onConfirm(reason) },
+        onDismiss = onDismiss,
+        destructive = true,
+    ) {
+        OutlinedTextField(
+            value = reason,
+            onValueChange = { reason = it },
+            label = { Text(stringResource(R.string.chat_message_tool_deny_dialog_hint)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = false,
+            minLines = 2,
+            maxLines = 4
+        )
+    }
 }

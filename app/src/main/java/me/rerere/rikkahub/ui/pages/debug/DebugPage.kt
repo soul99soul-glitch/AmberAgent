@@ -15,13 +15,10 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -40,13 +37,16 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.MathBlock
 import me.rerere.rikkahub.ui.components.richtext.Mermaid
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import org.koin.androidx.compose.koinViewModel
 import kotlin.random.Random
@@ -65,9 +65,11 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
                 },
                 navigationIcon = {
                     BackButton()
-                }
+                },
+                colors = CustomColors.topBarColors,
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
     ) { contentPadding ->
         val state = rememberPagerState { 2 }
         Column(
@@ -75,32 +77,18 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
-            SecondaryTabRow(
-                selectedTabIndex = state.currentPage,
-            ) {
-                Tab(
-                    selected = state.currentPage == 0,
-                    onClick = {
-                        scope.launch {
-                            state.animateScrollToPage(0)
-                        }
-                    },
-                    text = {
-                        Text("Main")
+            WorkspaceSegmentedChoice(
+                options = listOf(0, 1),
+                selected = state.currentPage,
+                onSelected = { page ->
+                    scope.launch {
+                        state.animateScrollToPage(page)
                     }
-                )
-                Tab(
-                    selected = state.currentPage == 1,
-                    onClick = {
-                        scope.launch {
-                            state.animateScrollToPage(1)
-                        }
-                    },
-                    text = {
-                        Text("Logging")
-                    }
-                )
-            }
+                },
+                label = { page ->
+                    Text(if (page == 0) "Main" else "Logging")
+                },
+            )
             HorizontalPager(
                 state = state,
                 modifier = Modifier
@@ -162,16 +150,16 @@ private fun MainPage(vm: DebugVM) {
             mutableIntStateOf(0)
         }
         val toaster = LocalToaster.current
-        Button(
+        PulsePrimaryButton(
+            text = "toast",
             onClick = {
                 toaster.show("测试 ${counter++}")
                 toaster.show("测试 ${counter++}", type = ToastType.Info)
                 toaster.show("测试 ${counter++}", type = ToastType.Error)
             }
-        ) {
-            Text("toast")
-        }
-        Button(
+        )
+        PulsePrimaryButton(
+            text = "重置Chat模型",
             onClick = {
                 vm.updateSettings(
                     settings.copy(
@@ -179,35 +167,30 @@ private fun MainPage(vm: DebugVM) {
                     )
                 )
             }
-        ) {
-            Text("重置Chat模型")
-        }
+        )
 
-        Button(
+        PulsePrimaryButton(
+            text = "崩溃",
             onClick = {
                 error("测试崩溃 ${Random.nextInt(0..1000)}")
             }
-        ) {
-            Text("崩溃")
-        }
+        )
 
-        Button(
+        PulsePrimaryButton(
+            text = "创建超大对话 (30MB)",
             onClick = {
                 vm.createOversizedConversation(30)
                 toaster.show("正在创建 30MB 超大对话...")
             }
-        ) {
-            Text("创建超大对话 (30MB)")
-        }
+        )
 
-        Button(
+        PulsePrimaryButton(
+            text = "创建 1024 个消息的聊天",
             onClick = {
                 vm.createConversationWithMessages(1024)
                 toaster.show("正在创建 1024 条消息对话...")
             }
-        ) {
-            Text("创建 1024 个消息的聊天")
-        }
+        )
 
         HorizontalDivider()
 
@@ -227,13 +210,14 @@ private fun MainPage(vm: DebugVM) {
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
-            Button(onClick = {
-                launchCountInput.toIntOrNull()?.let {
-                    vm.updateSettings(settings.copy(launchCount = it))
+            PulsePrimaryButton(
+                text = "Set",
+                onClick = {
+                    launchCountInput.toIntOrNull()?.let {
+                        vm.updateSettings(settings.copy(launchCount = it))
+                    }
                 }
-            }) {
-                Text("Set")
-            }
+            )
         }
 
         var dismissedAtInput by remember(settings.sponsorAlertDismissedAt) {
@@ -250,13 +234,14 @@ private fun MainPage(vm: DebugVM) {
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
-            Button(onClick = {
-                dismissedAtInput.toIntOrNull()?.let {
-                    vm.updateSettings(settings.copy(sponsorAlertDismissedAt = it))
+            PulsePrimaryButton(
+                text = "Set",
+                onClick = {
+                    dismissedAtInput.toIntOrNull()?.let {
+                        vm.updateSettings(settings.copy(sponsorAlertDismissedAt = it))
+                    }
                 }
-            }) {
-                Text("Set")
-            }
+            )
         }
 
         var markdown by remember { mutableStateOf("") }

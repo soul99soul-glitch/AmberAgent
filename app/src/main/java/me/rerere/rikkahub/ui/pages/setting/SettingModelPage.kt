@@ -17,13 +17,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -67,11 +65,14 @@ import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.utils.plus
@@ -496,11 +497,9 @@ private fun ModelPromptSheet(
     onReasoningChange: ((ReasoningLevel) -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = workspace.paper,
-        contentColor = workspace.ink,
     ) {
         Column(
             modifier = Modifier
@@ -568,12 +567,12 @@ private fun ModelPromptSheet(
                     unfocusedLabelColor = workspace.muted,
                 ),
             )
-            TextButton(
+            PulseDialogButton(
                 onClick = onReset,
+                text = stringResource(R.string.setting_model_page_reset_to_default),
+                variant = PulseDialogVariant.Ghost,
                 modifier = Modifier.align(Alignment.End),
-            ) {
-                Text(stringResource(R.string.setting_model_page_reset_to_default))
-            }
+            )
         }
     }
 }
@@ -598,11 +597,9 @@ private fun ModelGroupSessionDefaultsSheet(
         )
     }
 
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = workspace.paper,
-        contentColor = workspace.ink,
     ) {
         Column(
             modifier = Modifier

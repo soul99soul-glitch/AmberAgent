@@ -21,8 +21,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -47,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.fts.MessageSearchResult
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.navigateToChatPage
@@ -68,27 +67,18 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
         focusRequester.requestFocus()
     }
 
-    if (showRebuildDialog) {
-        AlertDialog(
-            onDismissRequest = { showRebuildDialog = false },
-            title = { Text(stringResource(R.string.search_page_rebuild_index)) },
-            text = { Text(stringResource(R.string.search_page_rebuild_index_desc)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showRebuildDialog = false
-                        vm.rebuildIndex()
-                    }
-                ) {
-                    Text(stringResource(R.string.confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRebuildDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
-        )
+    RikkaConfirmDialog(
+        show = showRebuildDialog,
+        title = stringResource(R.string.search_page_rebuild_index),
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            showRebuildDialog = false
+            vm.rebuildIndex()
+        },
+        onDismiss = { showRebuildDialog = false },
+    ) {
+        Text(stringResource(R.string.search_page_rebuild_index_desc))
     }
 
     Scaffold(

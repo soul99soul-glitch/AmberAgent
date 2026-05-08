@@ -69,7 +69,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -168,6 +167,9 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
@@ -945,7 +947,7 @@ private fun ComposerUsageSheet(
     onDismissRequest: () -> Unit,
 ) {
     val workspace = workspaceColors()
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
@@ -2290,7 +2292,7 @@ private fun TextInputRow(
                         modifier = Modifier.size(24.dp),
                         shape = RoundedCornerShape(5.dp),
                         color = workspace.blueContainer,
-                        contentColor = workspace.blue,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         border = BorderStroke(1.dp, workspace.hairline),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -2385,7 +2387,7 @@ private fun SlashUsageCommandRow(
                 modifier = Modifier.size(30.dp),
                 shape = RoundedCornerShape(6.dp),
                 color = workspace.blueContainer,
-                contentColor = workspace.blue,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.14f)),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -2800,12 +2802,13 @@ private fun FullScreenEditor(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row {
-                        TextButton(
+                        PulseDialogButton(
                             onClick = {
                                 onDone()
-                            }) {
-                            Text(stringResource(R.string.chat_page_save))
-                        }
+                            },
+                            text = stringResource(R.string.chat_page_save),
+                            variant = PulseDialogVariant.Primary
+                        )
                     }
                     TextField(
                         state = state.textContent,

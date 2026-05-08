@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -23,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -62,6 +58,9 @@ import me.rerere.rikkahub.data.datastore.isNotConfigured
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
@@ -99,19 +98,23 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             title = { Text(stringResource(R.string.setting_page_sponsor_alert_title)) },
             text = { Text(stringResource(R.string.setting_page_sponsor_alert_desc)) },
             confirmButton = {
-                Button(onClick = {
-                    vm.updateSettings(settings.copy(sponsorAlertDismissedAt = settings.launchCount))
-                    navController.navigate(Screen.SettingDonate)
-                }) {
-                    Text(stringResource(R.string.setting_page_sponsor_alert_confirm))
-                }
+                PulseDialogButton(
+                    onClick = {
+                        vm.updateSettings(settings.copy(sponsorAlertDismissedAt = settings.launchCount))
+                        navController.navigate(Screen.SettingDonate)
+                    },
+                    text = stringResource(R.string.setting_page_sponsor_alert_confirm),
+                    variant = PulseDialogVariant.Primary,
+                )
             },
             dismissButton = {
-                TextButton(onClick = {
-                    vm.updateSettings(settings.copy(sponsorAlertDismissedAt = settings.launchCount))
-                }) {
-                    Text(stringResource(R.string.setting_page_sponsor_alert_dismiss))
-                }
+                PulseDialogButton(
+                    onClick = {
+                        vm.updateSettings(settings.copy(sponsorAlertDismissedAt = settings.launchCount))
+                    },
+                    text = stringResource(R.string.setting_page_sponsor_alert_dismiss),
+                    variant = PulseDialogVariant.Ghost,
+                )
             },
         )
     }
@@ -347,12 +350,10 @@ private fun SettingLeadingIcon(
 @Composable
 private fun ProviderConfigWarningCard(navController: Navigator) {
     val workspace = workspaceColors()
-    Card(
+    Surface(
         modifier = Modifier.padding(2.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = workspace.amberContainer
-        ),
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.amberContainer,
         border = BorderStroke(1.dp, workspace.amber.copy(alpha = 0.18f)),
     ) {
         Column(
@@ -378,13 +379,12 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
                 )
             )
 
-            TextButton(
+            PulsePrimaryButton(
                 onClick = {
                     navController.navigate(Screen.SettingProvider)
-                }
-            ) {
-                Text(stringResource(R.string.setting_page_config))
-            }
+                },
+                text = stringResource(R.string.setting_page_config),
+            )
         }
     }
 }

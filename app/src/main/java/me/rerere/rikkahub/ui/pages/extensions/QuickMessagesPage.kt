@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,18 +13,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,7 +46,11 @@ import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -68,11 +71,6 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(HugeIcons.Add01, contentDescription = null)
-            }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
@@ -116,6 +114,14 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
                     quickMessage = quickMessage,
                     onEdit = { editTarget = quickMessage },
                     onDelete = { deleteTarget = quickMessage },
+                )
+            }
+
+            item {
+                PulsePrimaryButton(
+                    text = stringResource(R.string.quick_messages_page_add_title),
+                    onClick = { showAddDialog = true },
+                    leadingIcon = HugeIcons.Add01,
                 )
             }
         }
@@ -174,9 +180,13 @@ private fun QuickMessageCard(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Card(
+    val workspace = workspaceColors()
+
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier
@@ -291,17 +301,19 @@ private fun EditQuickMessageDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            PulseDialogButton(
                 onClick = { onConfirm(quickMessageTitle.trim(), quickMessageContent.trim()) },
+                text = stringResource(R.string.assistant_page_save),
+                variant = PulseDialogVariant.Primary,
                 enabled = quickMessageTitle.isNotBlank() && quickMessageContent.isNotBlank(),
-            ) {
-                Text(stringResource(R.string.assistant_page_save))
-            }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel))
-            }
+            PulseDialogButton(
+                onClick = onDismiss,
+                text = stringResource(R.string.cancel),
+                variant = PulseDialogVariant.Ghost,
+            )
         },
     )
 }

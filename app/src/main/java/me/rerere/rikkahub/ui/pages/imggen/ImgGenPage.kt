@@ -9,6 +9,7 @@ import me.rerere.hugeicons.stroke.SendToMobile
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Delete01
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,23 +37,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -93,7 +88,12 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.io.File
@@ -111,15 +111,14 @@ fun ImageGenPage(
     BackHandler(isGenerating) {
         showCancelDialog = true
     }
-    if (showCancelDialog) {
-        CancelDialog(
-            onDismiss = { showCancelDialog = false },
-            onConfirm = {
-                showCancelDialog = false
-                vm.cancelGeneration()
-            }
-        )
-    }
+    CancelDialog(
+        show = showCancelDialog,
+        onDismiss = { showCancelDialog = false },
+        onConfirm = {
+            showCancelDialog = false
+            vm.cancelGeneration()
+        }
+    )
 
     Scaffold(
         topBar = {
@@ -129,9 +128,11 @@ fun ImageGenPage(
                 },
                 navigationIcon = {
                     BackButton()
-                }
+                },
+                colors = CustomColors.topBarColors,
             )
         },
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             BottomBar(pagerState, scope)
         },
@@ -152,23 +153,19 @@ fun ImageGenPage(
 
 @Composable
 private fun CancelDialog(
+    show: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.imggen_page_cancel_generation_title)) },
+    RikkaConfirmDialog(
+        show = show,
+        title = stringResource(R.string.imggen_page_cancel_generation_title),
+        confirmText = stringResource(R.string.imggen_page_confirm),
+        dismissText = stringResource(R.string.imggen_page_cancel),
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+        destructive = true,
         text = { Text(stringResource(R.string.imggen_page_cancel_generation_message)) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.imggen_page_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.imggen_page_cancel))
-            }
-        }
     )
 }
 
@@ -177,35 +174,36 @@ private fun BottomBar(
     pagerState: PagerState,
     scope: CoroutineScope
 ) {
-    NavigationBar {
-        NavigationBarItem(
-            selected = 0 == pagerState.currentPage,
-            label = {
-                Text(stringResource(R.string.imggen_page_title))
-            },
-            icon = {
-                Icon(HugeIcons.Colors, null)
-            },
-            onClick = {
+    Surface(tonalElevation = 3.dp) {
+        WorkspaceSegmentedChoice(
+            options = listOf(0, 1),
+            selected = pagerState.currentPage,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            onSelected = { page ->
                 scope.launch {
-                    pagerState.animateScrollToPage(0)
+                    pagerState.animateScrollToPage(page)
                 }
-            }
-        )
-
-        NavigationBarItem(
-            selected = 1 == pagerState.currentPage,
-            label = {
-                Text(stringResource(R.string.imggen_page_gallery))
             },
-            icon = {
-                Icon(HugeIcons.Image03, null)
-            },
-            onClick = {
-                scope.launch {
-                    pagerState.animateScrollToPage(1)
+            label = { page ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = if (page == 0) HugeIcons.Colors else HugeIcons.Image03,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = stringResource(
+                            if (page == 0) R.string.imggen_page_title
+                            else R.string.imggen_page_gallery
+                        ),
+                    )
                 }
-            }
+            },
         )
     }
 }
@@ -321,7 +319,8 @@ private fun InputBar(
             textStyle = MaterialTheme.typography.bodySmall,
         )
 
-        FilledTonalIconButton(
+        val workspace = workspaceColors()
+        Surface(
             onClick = {
                 if (!isGenerating) {
                     vm.generateImage()
@@ -329,17 +328,25 @@ private fun InputBar(
                     vm.cancelGeneration()
                 }
             },
+            shape = CircleShape,
+            color = workspace.row,
+            contentColor = workspace.ink,
         ) {
-            if (isGenerating) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Icon(
-                    imageVector = HugeIcons.SendToMobile,
-                    contentDescription = stringResource(R.string.imggen_page_generate_image)
-                )
+            Box(
+                modifier = Modifier.size(40.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        imageVector = HugeIcons.SendToMobile,
+                        contentDescription = stringResource(R.string.imggen_page_generate_image),
+                    )
+                }
             }
         }
     }
@@ -401,9 +408,13 @@ private fun ImageGalleryScreen(
                     val image = generatedImages[index]
                     image?.let {
                         var showPreview by remember { mutableStateOf(false) }
+                        val workspace = workspaceColors()
 
-                        Card(
-                            modifier = Modifier.fillMaxWidth()
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            color = workspace.paper,
+                            border = BorderStroke(1.dp, workspace.hairline),
                         ) {
                             Column {
                                 AsyncImage(
@@ -527,7 +538,7 @@ private fun SettingsBottomSheet(
     sheetState: SheetState,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(
+    WorkspaceBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         dragHandle = { BottomSheetDefaults.DragHandle() }

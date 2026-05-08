@@ -27,18 +27,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -90,8 +86,11 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.WorkspaceBottomSheet
 import me.rerere.rikkahub.ui.components.ui.icons.HeartIcon
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -152,27 +151,22 @@ fun ModelSelector(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
+                model?.modelId?.let {
+                    AutoAIIcon(
+                        it, Modifier
+                            .padding(end = 4.dp)
+                            .size(36.dp),
+                        color = Color.Transparent
+                    )
+                }
+                PulseDialogButton(
                     onClick = {
                         popup = true
                     },
-                    modifier = modifier
-                ) {
-                    model?.modelId?.let {
-                        AutoAIIcon(
-                            it, Modifier
-                                .padding(end = 4.dp)
-                                .size(36.dp),
-                            color = Color.Transparent
-                        )
-                    }
-                    Text(
-                        text = model?.displayName ?: stringResource(R.string.model_list_select_model),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                    text = model?.displayName ?: stringResource(R.string.model_list_select_model),
+                    variant = PulseDialogVariant.Ghost,
+                    modifier = modifier,
+                )
                 if (allowClear && model != null) {
                     IconButton(
                         onClick = {
@@ -211,7 +205,7 @@ fun ModelSelector(
 
     if (popup) {
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
+        WorkspaceBottomSheet(
             onDismissRequest = {
                 popup = false
             },
@@ -670,12 +664,13 @@ private fun ModelItem(
 ) {
     val navController = LocalNavController.current
     val interactionSource = remember { MutableInteractionSource() }
-    Card(
+    val workspace = workspaceColors()
+    Surface(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = if (select) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            contentColor = if (select) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-        )
+        shape = MaterialTheme.shapes.medium,
+        color = if (select) MaterialTheme.colorScheme.primaryContainer else workspace.paper,
+        contentColor = if (select) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

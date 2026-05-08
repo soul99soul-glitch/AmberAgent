@@ -14,8 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -24,7 +22,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,7 +50,11 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
+import me.rerere.rikkahub.ui.components.ui.PulsePrimaryButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -83,11 +84,6 @@ fun SkillDetailPage(skillName: String) {
                 colors = CustomColors.topBarColors,
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Lucide.Plus, contentDescription = null)
-            }
-        },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
@@ -97,6 +93,12 @@ fun SkillDetailPage(skillName: String) {
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding + PaddingValues(8.dp)),
         ) {
+            PulsePrimaryButton(
+                text = stringResource(R.string.skill_detail_page_new_file),
+                onClick = { showAddDialog = true },
+                leadingIcon = Lucide.Plus,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
             mcpConfig?.let { state ->
                 SkillMcpConfigCard(
                     state = state,
@@ -204,12 +206,11 @@ private fun SkillMcpConfigCard(
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
             }
-            Button(
+            PulsePrimaryButton(
+                text = stringResource(R.string.skill_detail_page_mcp_config_import),
                 onClick = onImport,
                 enabled = state.error == null && state.serverCount > 0,
-            ) {
-                Text(stringResource(R.string.skill_detail_page_mcp_config_import))
-            }
+            )
         }
     }
 }
@@ -361,9 +362,13 @@ private fun EditFileDialog(
     onConfirm: (content: String) -> Unit,
 ) {
     var content by rememberSaveable(skillFile.relativePath) { mutableStateOf(initialContent) }
+    val workspace = workspaceColors()
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        titleContentColor = workspace.ink,
+        textContentColor = workspace.ink,
         title = { Text(skillFile.relativePath, fontFamily = FontFamily.Monospace) },
         text = {
             OutlinedTextField(
@@ -377,10 +382,18 @@ private fun EditFileDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(content) }) { Text(stringResource(R.string.skill_detail_page_save)) }
+            PulseDialogButton(
+                onClick = { onConfirm(content) },
+                text = stringResource(R.string.skill_detail_page_save),
+                variant = PulseDialogVariant.Primary,
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            PulseDialogButton(
+                onClick = onDismiss,
+                text = stringResource(R.string.cancel),
+                variant = PulseDialogVariant.Ghost,
+            )
         },
     )
 }
@@ -393,9 +406,13 @@ private fun AddFileDialog(
     var fileName by rememberSaveable { mutableStateOf("") }
     var content by rememberSaveable { mutableStateOf("") }
     val fileNameError = fileName.isNotBlank() && (fileName.contains('\\'))
+    val workspace = workspaceColors()
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        titleContentColor = workspace.ink,
+        textContentColor = workspace.ink,
         title = { Text(stringResource(R.string.skill_detail_page_new_file)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -428,15 +445,19 @@ private fun AddFileDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            PulseDialogButton(
                 onClick = { onConfirm(fileName.trim(), content) },
+                text = stringResource(R.string.skill_detail_page_create),
+                variant = PulseDialogVariant.Primary,
                 enabled = fileName.isNotBlank() && !fileNameError,
-            ) {
-                Text(stringResource(R.string.skill_detail_page_create))
-            }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            PulseDialogButton(
+                onClick = onDismiss,
+                text = stringResource(R.string.cancel),
+                variant = PulseDialogVariant.Ghost,
+            )
         },
     )
 }

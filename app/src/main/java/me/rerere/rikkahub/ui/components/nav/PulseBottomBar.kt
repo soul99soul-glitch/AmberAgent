@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.nav
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -19,13 +20,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.hooks.pulsePress
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.MagicWand01
@@ -126,13 +133,24 @@ private fun NavSlot(
     active: Boolean,
     onClick: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val haptic = LocalHapticFeedback.current
+    val label = stringResource(destination.labelRes)
     if (active) {
         // Active: chartreuse-filled inner pill with icon + ALL-CAPS label
         Surface(
             modifier = Modifier
                 .height(36.dp)
+                .pulsePress(interactionSource)
                 .clip(CircleShape)
-                .clickable(onClick = onClick),
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onClick()
+                    },
+                ),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primary,         // chartreuse
             contentColor = MaterialTheme.colorScheme.onPrimary, // ink
@@ -144,11 +162,11 @@ private fun NavSlot(
             ) {
                 Icon(
                     imageVector = destination.icon,
-                    contentDescription = destination.label,
+                    contentDescription = label,
                     modifier = Modifier.size(16.dp),
                 )
                 Text(
-                    text = destination.label.uppercase(),
+                    text = label.uppercase(),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.05.em,
@@ -161,13 +179,21 @@ private fun NavSlot(
         Box(
             modifier = Modifier
                 .size(36.dp)
+                .pulsePress(interactionSource)
                 .clip(CircleShape)
-                .clickable(onClick = onClick),
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onClick()
+                    },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = destination.icon,
-                contentDescription = destination.label,
+                contentDescription = label,
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.55f),
             )
@@ -181,17 +207,27 @@ private fun CenterPlusButton(onClick: () -> Unit) {
     // reads as the primary CTA rather than another nav slot. Soft inner
     // ink contrast keeps the + icon visible against the cream fill even
     // when the surrounding ink pill darkens the page.
+    val interactionSource = remember { MutableInteractionSource() }
+    val haptic = LocalHapticFeedback.current
     Box(
         modifier = Modifier
             .size(40.dp)
+            .pulsePress(interactionSource)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)  // cream
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClick()
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = HugeIcons.MessageAdd01,
-            contentDescription = "New chat",
+            contentDescription = stringResource(R.string.bottom_bar_new_chat),
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurface,  // ink
         )
@@ -204,11 +240,11 @@ private fun CenterPlusButton(onClick: () -> Unit) {
  * in PulseBottomBar so it doesn't appear here.
  */
 enum class PulseNavDestination(
-    val label: String,
+    @androidx.annotation.StringRes val labelRes: Int,
     val icon: ImageVector,
 ) {
-    Chats(label = "Chats", icon = HugeIcons.BubbleChatQuestion),
-    Search(label = "Search", icon = HugeIcons.Search01),
-    Skills(label = "Skills", icon = HugeIcons.MagicWand01),
-    Settings(label = "Settings", icon = HugeIcons.Settings03),
+    Chats(labelRes = R.string.bottom_bar_chats, icon = HugeIcons.BubbleChatQuestion),
+    Search(labelRes = R.string.bottom_bar_search, icon = HugeIcons.Search01),
+    Skills(labelRes = R.string.bottom_bar_skills, icon = HugeIcons.MagicWand01),
+    Settings(labelRes = R.string.bottom_bar_settings, icon = HugeIcons.Settings03),
 }

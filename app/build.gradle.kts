@@ -29,8 +29,8 @@ android {
         applicationId = "me.rerere.pulse"
         minSdk = 26
         targetSdk = 37
-        versionCode = 194
-        versionName = "1.1.7"
+        versionCode = 200
+        versionName = "1.2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

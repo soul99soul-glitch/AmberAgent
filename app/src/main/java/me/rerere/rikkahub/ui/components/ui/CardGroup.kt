@@ -175,14 +175,13 @@ fun CardGroup(
 
     Column(modifier = modifier) {
         if (title != null) {
-            // Pulse section label: secondary (sport-orange), bold, letter-spaced.
-            // Reads as a deliberate eyebrow above each modular card group instead
-            // of a quiet warm-grey caption — matches the Pulse mockup's
-            // "TYPOGRAPHY", "GRANTED", "RECENT" treatment. We don't force
-            // uppercasing here because the app mixes Chinese and English titles
-            // and uppercasing the Latin half alone reads as a typo. The
-            // colour + weight + tracking carry the signal regardless.
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.secondary) {
+            // Pulse section label: onSurfaceVariant (warm grey), bold, letter-spaced.
+            // Reads as a deliberate eyebrow above each modular card group.
+            // Previously used secondary (sport-orange) but that had ~3.5:1
+            // contrast on cream — below WCAG AA for small text. onSurfaceVariant
+            // gives reliable contrast on both light and dark backgrounds while
+            // the weight + tracking still carry the "section label" signal.
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
                 ProvideTextStyle(
                     MaterialTheme.typography.labelMedium.copy(
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,

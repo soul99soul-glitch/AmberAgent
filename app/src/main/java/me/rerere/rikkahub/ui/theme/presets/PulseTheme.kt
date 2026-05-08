@@ -20,7 +20,7 @@ import me.rerere.rikkahub.ui.theme.PresetTheme
  *   - primary             -> chartreuse  (active, in-progress, primary affordances)
  *   - primaryContainer    -> chartreuse with mild surface tint  (selected backgrounds)
  *   - secondary           -> sport-orange (emphasis numerals + secondary CTAs)
- *   - tertiary            -> ink  (high-contrast spotlight cards & floating nav)
+ *   - tertiary            -> ink (light) / nightCard (dark)  (spotlight cards & floating nav)
  *   - background/surface  -> warm cream
  *   - surfaceVariant      -> tan  (modular cards)
  *   - onSurfaceVariant    -> warm grey  (metadata + ALL-CAPS labels)
@@ -153,8 +153,8 @@ private val pulseDark = darkColorScheme(
     secondaryContainer = orangeDark,
     onSecondaryContainer = orangeContainer,
 
-    tertiary = cream,
-    onTertiary = ink,
+    tertiary = nightCard,
+    onTertiary = cream,
     tertiaryContainer = nightCard,
     onTertiaryContainer = chartreuse,
 

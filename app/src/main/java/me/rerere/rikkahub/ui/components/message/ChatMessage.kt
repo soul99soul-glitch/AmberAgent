@@ -29,7 +29,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogButton
+import me.rerere.rikkahub.ui.components.ui.PulseDialogVariant
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -643,13 +644,13 @@ private fun MessagePartsBlock(
                     }
                 }
             }
-            TextButton(
+            PulseDialogButton(
                 onClick = {
                     expand = !expand
-                }
-            ) {
-                Text(stringResource(R.string.citations_count, annotations.size))
-            }
+                },
+                text = stringResource(R.string.citations_count, annotations.size),
+                variant = PulseDialogVariant.Ghost,
+            )
         }
     }
 }

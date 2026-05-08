@@ -6,12 +6,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryScrollableTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import me.rerere.rikkahub.ui.pages.backup.components.BackupDialog
 import me.rerere.rikkahub.ui.pages.backup.tabs.ImportExportTab
 import me.rerere.rikkahub.ui.pages.backup.tabs.ReminderTab
@@ -62,32 +60,24 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
-            SecondaryScrollableTabRow(
-                selectedTabIndex = pagerState.currentPage,
-                containerColor = CustomColors.topBarColors.containerColor,
-                edgePadding = 4.dp,
-            ) {
-                Tab(
-                    selected = pagerState.currentPage == 0,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                    text = { Text(stringResource(R.string.backup_page_webdav_backup)) }
-                )
-                Tab(
-                    selected = pagerState.currentPage == 1,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                    text = { Text(stringResource(R.string.backup_page_s3_backup)) }
-                )
-                Tab(
-                    selected = pagerState.currentPage == 2,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
-                    text = { Text(stringResource(R.string.backup_page_import_export)) }
-                )
-                Tab(
-                    selected = pagerState.currentPage == 3,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(3) } },
-                    text = { Text(stringResource(R.string.backup_page_reminder)) }
-                )
-            }
+            WorkspaceSegmentedChoice(
+                options = listOf(0, 1, 2, 3),
+                selected = pagerState.currentPage,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                onSelected = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+                label = { page ->
+                    Text(
+                        when (page) {
+                            0 -> stringResource(R.string.backup_page_webdav_backup)
+                            1 -> stringResource(R.string.backup_page_s3_backup)
+                            2 -> stringResource(R.string.backup_page_import_export)
+                            else -> stringResource(R.string.backup_page_reminder)
+                        }
+                    )
+                },
+            )
 
             HorizontalPager(
                 state = pagerState,

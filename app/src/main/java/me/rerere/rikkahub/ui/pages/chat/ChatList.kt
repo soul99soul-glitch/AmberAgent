@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -120,7 +121,6 @@ import me.rerere.rikkahub.ui.components.chat.NewChatHero
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
-import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
@@ -223,9 +223,9 @@ private fun TimelineHistoryLoadingIndicator(
             PulseActivityIndicator(label = null, barCount = 5)
             Text(
                 text = if (prefetching) {
-                    "正在预取更早消息 $loadedNodeCount/$totalNodeCount"
+                    stringResource(R.string.chat_list_prefetching, loadedNodeCount, totalNodeCount)
                 } else {
-                    "更早消息准备中 $loadedNodeCount/$totalNodeCount"
+                    stringResource(R.string.chat_list_preparing, loadedNodeCount, totalNodeCount)
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.85f),
@@ -327,11 +327,11 @@ private fun PendingUserMessageBubble(
                         )
                         IconButton(
                             onClick = onCancel,
-                            modifier = Modifier.size(26.dp),
+                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                         ) {
                             Icon(
                                 imageVector = HugeIcons.Cancel01,
-                                contentDescription = "取消排队消息",
+                                contentDescription = stringResource(R.string.chat_list_cancel_queued),
                                 tint = textColor.copy(alpha = 0.72f),
                                 modifier = Modifier.size(15.dp),
                             )
@@ -340,7 +340,7 @@ private fun PendingUserMessageBubble(
                 }
                 if (queueCount != null && queueCount > 0) {
                     Text(
-                        text = "已排队 $queueCount 条",
+                        text = stringResource(R.string.chat_list_queued_count, queueCount),
                         modifier = Modifier
                             .padding(top = 4.dp, end = 2.dp)
                             .clickable { onOpenQueue() },
@@ -773,7 +773,7 @@ private fun ChatListNormal(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            PigLoadingIndicator(
+                            PulseActivityIndicator(
                                 modifier = Modifier.size(24.dp)
                             )
                             AnimatedVisibility(
@@ -836,7 +836,7 @@ private fun ChatListNormal(
                 ) {
                     Tooltip(
                         tooltip = {
-                            Text("Clear selection")
+                            Text(stringResource(R.string.chat_list_clear_selection))
                         }
                     ) {
                         IconButton(
@@ -845,12 +845,12 @@ private fun ChatListNormal(
                                 selectedItems.clear()
                             }
                         ) {
-                            Icon(HugeIcons.Cancel01, null)
+                            Icon(HugeIcons.Cancel01, stringResource(R.string.chat_list_clear_selection))
                         }
                     }
                     Tooltip(
                         tooltip = {
-                            Text("Select all")
+                            Text(stringResource(R.string.chat_list_select_all))
                         }
                     ) {
                         IconButton(
@@ -862,12 +862,12 @@ private fun ChatListNormal(
                                 }
                             }
                         ) {
-                            Icon(HugeIcons.CursorPointer01, null)
+                            Icon(HugeIcons.CursorPointer01, stringResource(R.string.chat_list_select_all))
                         }
                     }
                     Tooltip(
                         tooltip = {
-                            Text("Confirm")
+                            Text(stringResource(R.string.chat_list_confirm))
                         }
                     ) {
                         FilledIconButton(
@@ -879,7 +879,7 @@ private fun ChatListNormal(
                                 }
                             }
                         ) {
-                            Icon(HugeIcons.Tick01, null)
+                            Icon(HugeIcons.Tick01, stringResource(R.string.chat_list_confirm))
                         }
                     }
                 }
@@ -1221,7 +1221,7 @@ private fun BoxScope.MessageJumper(
             ) {
                 Icon(
                     imageVector = HugeIcons.ArrowUpDouble,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.chat_jumper_scroll_to_top),
                     modifier = Modifier
                         .padding(4.dp)
                 )
@@ -1244,7 +1244,7 @@ private fun BoxScope.MessageJumper(
             ) {
                 Icon(
                     imageVector = HugeIcons.ArrowUp01,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.chat_jumper_previous_message),
                     modifier = Modifier
                         .padding(4.dp)
                 )
@@ -1262,7 +1262,7 @@ private fun BoxScope.MessageJumper(
             ) {
                 Icon(
                     imageVector = HugeIcons.ArrowDown01,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.chat_jumper_next_message),
                     modifier = Modifier
                         .padding(4.dp)
                 )
