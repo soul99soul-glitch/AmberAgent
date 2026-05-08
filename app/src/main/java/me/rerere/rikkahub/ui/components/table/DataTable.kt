@@ -16,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import kotlin.math.max
@@ -66,17 +69,15 @@ fun DataTable(
             val minWidthsPx = IntArray(columnCount) { i -> columnMinWidths.getOrNull(i)?.roundToPx() ?: 0 }
             val maxWidthsPx = IntArray(columnCount) { i -> columnMaxWidths.getOrNull(i)?.roundToPx() ?: Int.MAX_VALUE }
             val colWidths = IntArray(columnCount) { 0 }
-            val headerP1 = arrayOfNulls<Placeable>(columnCount)
-            val bodyP1 = arrayOfNulls<Placeable>(rowCount * columnCount)
+            val headerContent = arrayOfNulls<Placeable>(columnCount)
+            val bodyContent = arrayOfNulls<Placeable>(rowCount * columnCount)
 
-            // ---------- 第一阶段：自然尺寸测量（估列宽、算行高） ----------
-            fun subcomposeHeaderOnce(c: Int): Placeable {
+            // ---------- 内容只测量一次：估列宽、算行高 ----------
+            fun subcomposeHeaderContent(c: Int): Placeable {
                 val measurables = subcompose("h1_$c") {
-                    CellBox(
+                    CellContentBox(
                         padding = cellPadding,
-                        border = cellBorder,
-                        background = headerBackground,
-                        alignment = cellAlignment
+                        alignment = cellAlignment,
                     ) {
                         headers.getOrNull(c)?.invoke()
                     }
@@ -91,10 +92,12 @@ fun DataTable(
                 return p
             }
 
-            fun subcomposeBodyOnce(r: Int, c: Int): Placeable {
-                val bg = if (zebraStriping && r % 2 == 1) surfaceContainer else Color.Transparent
+            fun subcomposeBodyContent(r: Int, c: Int): Placeable {
                 val measurables = subcompose("b1_${r}_$c") {
-                    CellBox(padding = cellPadding, border = cellBorder, background = bg, alignment = cellAlignment) {
+                    CellContentBox(
+                        padding = cellPadding,
+                        alignment = cellAlignment,
+                    ) {
                         rows[r].getOrNull(c)?.invoke()
                     }
                 }
@@ -108,75 +111,59 @@ fun DataTable(
                 return p
             }
 
-            for (c in 0 until columnCount) headerP1[c] = subcomposeHeaderOnce(c)
-            for (r in 0 until rowCount) for (c in 0 until columnCount) bodyP1[r * columnCount + c] =
-                subcomposeBodyOnce(r, c)
+            for (c in 0 until columnCount) headerContent[c] = subcomposeHeaderContent(c)
+            for (r in 0 until rowCount) for (c in 0 until columnCount) bodyContent[r * columnCount + c] =
+                subcomposeBodyContent(r, c)
 
             val rowHeights = IntArray(rowCount) { r ->
                 var h = 0
                 for (c in 0 until columnCount) {
-                    h = max(h, bodyP1[r * columnCount + c]!!.height)
+                    h = max(h, bodyContent[r * columnCount + c]!!.height)
                 }
                 h
             }
-            val headerHeight = headerP1.maxOf { it?.height ?: 0 }
-
-            // ---------- 第二阶段：固定列宽 + 统一行高重新测量 ----------
-            fun constraintsFor(colWidth: Int, minH: Int): Constraints {
-                val safeColWidth = colWidth.coerceAtLeast(0)
-                val safeMinH = minH.coerceAtLeast(0)
-                return Constraints(
-                    minWidth = safeColWidth,
-                    maxWidth = safeColWidth,
-                    minHeight = safeMinH,
-                    maxHeight = infinity,
-                )
-            }
-
-            val headerPlaceables = Array(columnCount) { c ->
-                val measurables = subcompose("h2_$c") {
-                    CellBox(
-                        padding = cellPadding,
-                        border = cellBorder,
-                        background = headerBackground,
-                        alignment = cellAlignment
-                    ) {
-                        headers.getOrNull(c)?.invoke()
-                    }
-                }
-                measurables.first().measure(constraintsFor(colWidths[c], headerHeight))
-            }
-
-            val bodyPlaceables = Array(rowCount * columnCount) { i ->
-                val r = i / columnCount
-                val c = i % columnCount
-                val bg =
-                    if (zebraStriping && r % 2 == 1) surfaceContainer else Color.Transparent
-                val measurables = subcompose("b2_${r}_$c") {
-                    CellBox(padding = cellPadding, border = cellBorder, background = bg, alignment = cellAlignment) {
-                        rows[r].getOrNull(c)?.invoke()
-                    }
-                }
-                measurables.first().measure(constraintsFor(colWidths[c], rowHeights[r]))
-            }
+            val headerHeight = headerContent.maxOf { it?.height ?: 0 }
 
             val tableWidth = colWidths.sum()
             val tableHeight = headerHeight + rowHeights.sum()
             val finalWidth = tableWidth.coerceIn(constraints.minWidth, constraints.maxWidth)
             val finalHeight = tableHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
+            val currentLayoutDirection = layoutDirection
+            val tableFrame = subcompose("table_frame") {
+                TableFrame(
+                    columnWidths = colWidths.copyOf(),
+                    rowHeights = rowHeights,
+                    headerHeight = headerHeight,
+                    border = cellBorder,
+                    headerBackground = headerBackground,
+                    zebraStriping = zebraStriping,
+                    zebraBackground = surfaceContainer,
+                )
+            }.first().measure(Constraints.fixed(tableWidth, tableHeight))
 
             // ---------- 放置 ----------
             layout(finalWidth, finalHeight) {
+                tableFrame.placeRelative(0, 0)
+
+                fun Placeable.placeAligned(x: Int, y: Int, cellWidth: Int, cellHeight: Int) {
+                    val offset = cellAlignment.align(
+                        size = IntSize(width, height),
+                        space = IntSize(cellWidth, cellHeight),
+                        layoutDirection = currentLayoutDirection,
+                    )
+                    placeRelative(x + offset.x, y + offset.y)
+                }
+
                 var x = 0
                 for (c in 0 until columnCount) {
-                    headerPlaceables[c].placeRelative(x, 0)
+                    headerContent[c]?.placeAligned(x, 0, colWidths[c], headerHeight)
                     x += colWidths[c]
                 }
                 var y = headerHeight
                 for (r in 0 until rowCount) {
                     x = 0
                     for (c in 0 until columnCount) {
-                        bodyPlaceables[r * columnCount + c].placeRelative(x, y)
+                        bodyContent[r * columnCount + c]?.placeAligned(x, y, colWidths[c], rowHeights[r])
                         x += colWidths[c]
                     }
                     y += rowHeights[r]
@@ -187,22 +174,72 @@ fun DataTable(
 }
 
 @Composable
-private fun CellBox(
+private fun CellContentBox(
     padding: Dp,
-    border: BorderStroke?,
-    background: Color,
     alignment: Alignment,
     content: @Composable () -> Unit,
 ) {
     Box(
-        modifier = Modifier
-            .then(if (background != Color.Transparent) Modifier.background(background) else Modifier)
-            .then(if (border != null) Modifier.border(border) else Modifier)
-            .padding(padding),
+        modifier = Modifier.padding(padding),
         contentAlignment = alignment,
     ) {
         content()
     }
+}
+
+@Composable
+private fun TableFrame(
+    columnWidths: IntArray,
+    rowHeights: IntArray,
+    headerHeight: Int,
+    border: BorderStroke?,
+    headerBackground: Color,
+    zebraStriping: Boolean,
+    zebraBackground: Color,
+) {
+    Box(
+        modifier = Modifier
+            .drawBehind {
+                val tableWidth = columnWidths.sum().toFloat()
+                if (headerHeight > 0) {
+                    drawRect(
+                        color = headerBackground,
+                        size = Size(tableWidth, headerHeight.toFloat()),
+                    )
+                }
+                if (zebraStriping) {
+                    var y = headerHeight.toFloat()
+                    rowHeights.forEachIndexed { index, height ->
+                        if (index % 2 == 1 && height > 0) {
+                            drawRect(
+                                color = zebraBackground,
+                                topLeft = androidx.compose.ui.geometry.Offset(0f, y),
+                                size = Size(tableWidth, height.toFloat()),
+                            )
+                        }
+                        y += height
+                    }
+                }
+                if (border != null) {
+                    val strokeWidth = border.width.toPx()
+                    var x = 0f
+                    drawLine(border.brush, start = androidx.compose.ui.geometry.Offset(x, 0f), end = androidx.compose.ui.geometry.Offset(x, size.height), strokeWidth = strokeWidth)
+                    columnWidths.forEach { width ->
+                        x += width
+                        drawLine(border.brush, start = androidx.compose.ui.geometry.Offset(x, 0f), end = androidx.compose.ui.geometry.Offset(x, size.height), strokeWidth = strokeWidth)
+                    }
+
+                    var y = 0f
+                    drawLine(border.brush, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(tableWidth, y), strokeWidth = strokeWidth)
+                    y += headerHeight
+                    drawLine(border.brush, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(tableWidth, y), strokeWidth = strokeWidth)
+                    rowHeights.forEach { height ->
+                        y += height
+                        drawLine(border.brush, start = androidx.compose.ui.geometry.Offset(0f, y), end = androidx.compose.ui.geometry.Offset(tableWidth, y), strokeWidth = strokeWidth)
+                    }
+                }
+            },
+    )
 }
 
 // -------------------- 示例 --------------------

@@ -102,10 +102,10 @@ import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.AssistantAffectScope
@@ -1171,7 +1171,7 @@ class ChatService(
 
         runCatching {
             val settings = settingsStore.settingsFlow.first()
-            val model = settings.findModelById(settings.titleModelId) ?: return
+            val model = settings.resolveTaskChatModel(settings.titleModelId) ?: return
             val provider = model.findProvider(settings.providers) ?: return
 
             val providerHandler = providerManager.getProviderByType(provider)
@@ -1209,7 +1209,7 @@ class ChatService(
     suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) {
         runCatching {
             val settings = settingsStore.settingsFlow.first()
-            val model = settings.findModelById(settings.suggestionModelId) ?: return
+            val model = settings.resolveTaskChatModel(settings.suggestionModelId) ?: return
             val provider = model.findProvider(settings.providers) ?: return
 
             sessions[conversationId]?.let { session ->
@@ -1281,7 +1281,7 @@ class ChatService(
                 keepRecentTurns = (keepRecentMessages / 2).coerceAtLeast(1),
                 maxSummaryTokens = targetTokens,
             ),
-            model = settings.findModelById(settings.compressModelId) ?: settings.getCurrentChatModel(),
+            model = settings.resolveTaskChatModel(settings.compressModelId),
             reason = "manual_compact_dialog",
             additionalPrompt = additionalPrompt,
             force = true,

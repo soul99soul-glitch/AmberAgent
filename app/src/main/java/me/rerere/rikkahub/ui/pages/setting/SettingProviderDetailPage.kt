@@ -58,6 +58,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -84,9 +85,11 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
@@ -397,6 +400,24 @@ private fun ModelList(
                 .toList()
         }.onFailure {
             it.printStackTrace()
+        }
+    }
+    LaunchedEffect(providerSetting, modelList) {
+        if (
+            providerSetting is ProviderSetting.OpenAI &&
+            providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH &&
+            providerSetting.models.any { it.isCodexOAuthReviewModel() }
+        ) {
+            onUpdateProvider(providerSetting.copy(models = providerSetting.models.filterNot { it.isCodexOAuthReviewModel() }))
+            return@LaunchedEffect
+        }
+        if (
+            providerSetting is ProviderSetting.OpenAI &&
+            providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH &&
+            providerSetting.models.isEmpty() &&
+            modelList.isNotEmpty()
+        ) {
+            onUpdateProvider(providerSetting.copy(models = modelList))
         }
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
@@ -719,7 +740,11 @@ private fun AddModelButton(
             onAllModelSelected = {
                 onUpdateProvider(
                     parentProvider.copyProvider(
-                        models = parentProvider.models + it.filter { model ->
+                        models = parentProvider.models + it.filterNot { model ->
+                            parentProvider is ProviderSetting.OpenAI &&
+                                parentProvider.authMode == OpenAIAuthMode.CODEX_OAUTH &&
+                                model.isCodexOAuthReviewModel()
+                        }.filter { model ->
                             parentProvider.models.none { existing -> existing.modelId == model.modelId }
                         }.map { model ->
                             model.copy(

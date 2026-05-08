@@ -69,7 +69,9 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Brain02
@@ -110,6 +112,9 @@ fun ModelSelector(
     onlyIcon: Boolean = false,
     compact: Boolean = false,
     allowClear: Boolean = false,
+    emptyLabel: String? = null,
+    clearContentDescription: String? = null,
+    onClear: (() -> Unit)? = null,
     onSelect: (Model) -> Unit
 ) {
     var popup by remember { mutableStateOf(false) }
@@ -139,7 +144,9 @@ fun ModelSelector(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = model?.compactDisplayName() ?: stringResource(R.string.model_list_select_model),
+                            text = model?.compactDisplayName()
+                                ?: emptyLabel
+                                ?: stringResource(R.string.model_list_select_model),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
@@ -163,19 +170,21 @@ fun ModelSelector(
                     onClick = {
                         popup = true
                     },
-                    text = model?.displayName ?: stringResource(R.string.model_list_select_model),
+                    text = model?.displayName
+                        ?: emptyLabel
+                        ?: stringResource(R.string.model_list_select_model),
                     variant = PulseDialogVariant.Ghost,
                     modifier = modifier,
                 )
                 if (allowClear && model != null) {
                     IconButton(
                         onClick = {
-                            onSelect(Model())
+                            onClear?.invoke() ?: onSelect(Model())
                         }
                     ) {
                         Icon(
                             imageVector = HugeIcons.Cancel01,
-                            contentDescription = "Clear"
+                            contentDescription = clearContentDescription ?: "Clear"
                         )
                     }
                 }
@@ -295,6 +304,7 @@ private fun ColumnScope.ModelList(
         val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
         if (model.type != modelType) return@mapNotNull null
         val provider = model.findProvider(providers = providers, checkOverwrite = false) ?: return@mapNotNull null
+        if (provider.isCodexOAuthProvider() && model.isCodexOAuthReviewModel()) return@mapNotNull null
         model to provider
     }
 
@@ -302,14 +312,18 @@ private fun ColumnScope.ModelList(
 
     val typeFilteredModelsByProvider = remember(providers, modelType) {
         providers.associate { provider ->
-            provider.id to provider.models.fastFilter { it.type == modelType }
+            provider.id to provider.models.fastFilter {
+                it.type == modelType && !provider.isHiddenCodexOAuthModel(it)
+            }
         }
     }
 
     val searchFilteredModelsByProvider = remember(providers, modelType, searchKeywords) {
         providers.associate { provider ->
             provider.id to provider.models.fastFilter {
-                it.type == modelType && it.displayName.contains(searchKeywords, true)
+                it.type == modelType &&
+                    !provider.isHiddenCodexOAuthModel(it) &&
+                    it.displayName.contains(searchKeywords, true)
             }
         }
     }
@@ -824,4 +838,12 @@ fun ModelAbilityTag(model: Model) {
             }
         }
     }
+}
+
+private fun ProviderSetting.isCodexOAuthProvider(): Boolean {
+    return this is ProviderSetting.OpenAI && authMode == OpenAIAuthMode.CODEX_OAUTH
+}
+
+private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
+    return isCodexOAuthProvider() && model.isCodexOAuthReviewModel()
 }

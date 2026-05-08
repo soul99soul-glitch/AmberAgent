@@ -64,7 +64,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -563,19 +565,79 @@ private fun handleImageQRCode(
     }
 }
 
-/**
- * Provider row card. Tan/cream surface with:
- *   - Provider icon (AutoAIIcon) on the left
- *   - Name + short description stacked
- *   - Right side: chartreuse pulse-dot for enabled (sport-orange dot for
- *     disabled), model count in mono labelSmall, then the more-actions
- *     menu trigger
- *
- * Disabled state: card uses a subdued container with reduced content
- * alpha, and the leading dot flips to sport-orange to read as a warning
- * without the M3 errorContainer's heavy fill that the previous
- * implementation used (which made disabled providers look like errors).
- */
+
+@Composable
+private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
+    val workspace = workspaceColors()
+    val dialogState = useEditState<ProviderSetting> {
+        onAdd(it)
+    }
+
+    IconButton(
+        onClick = {
+            dialogState.open(ProviderSetting.OpenAI())
+        }
+    ) {
+        Icon(HugeIcons.Add01, "Add")
+    }
+
+    if (dialogState.isEditing) {
+        AlertDialog(
+            onDismissRequest = {
+                dialogState.dismiss()
+            },
+            containerColor = workspace.paper,
+            titleContentColor = workspace.ink,
+            textContentColor = workspace.ink,
+            title = {
+                Text(stringResource(R.string.setting_provider_page_add_provider))
+            },
+            text = {
+                dialogState.currentState?.let {
+                    ProviderConfigure(it) { newState ->
+                        dialogState.currentState = newState
+                    }
+                }
+            },
+            confirmButton = {
+                PulseDialogButton(
+                    onClick = {
+                        dialogState.confirm()
+                    },
+                    text = stringResource(R.string.setting_provider_page_add),
+                    variant = PulseDialogVariant.Primary,
+                )
+            },
+            dismissButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PulseDialogButton(
+                        onClick = {
+                            dialogState.currentState = ProviderSetting.OpenAI(
+                                name = "OpenAI Codex OAuth",
+                                baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
+                                useResponseApi = true,
+                                authMode = OpenAIAuthMode.CODEX_OAUTH,
+                            )
+                        },
+                        text = stringResource(R.string.setting_provider_page_add_codex_oauth),
+                        variant = PulseDialogVariant.Ghost,
+                    )
+                    PulseDialogButton(
+                        onClick = {
+                            dialogState.dismiss()
+                        },
+                        text = stringResource(R.string.cancel),
+                        variant = PulseDialogVariant.Ghost,
+                    )
+                }
+            },
+        )
+    }
+}
+
+
 @Composable
 private fun ProviderItem(
     provider: ProviderSetting,

@@ -69,6 +69,7 @@ import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.ui.components.chat.ChatModelSwitchRow
@@ -120,6 +121,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
     val pendingUserMessageState = vm.pendingUserMessages.collectAsStateWithLifecycle()
+    val pendingUserMessages = pendingUserMessageState.value
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
@@ -173,8 +175,30 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val chatListState = rememberLazyListState()
+    val chatAssistant = remember(setting.assistants, conversation.assistantId) {
+        setting.getAssistantById(conversation.assistantId)
+    }
+    val lazyItemMessageIndexes = remember(
+        conversation.messageNodes,
+        timelineLoadState.isFullyLoaded,
+        pendingUserMessages.size,
+        loadingJob != null,
+        chatAssistant,
+        setting.displaySetting.showAssistantBubble,
+    ) {
+        buildLazyItemMessageIndexMap(
+            messageNodes = conversation.messageNodes,
+            assistant = chatAssistant,
+            showAssistantBubble = setting.displaySetting.showAssistantBubble,
+            loading = loadingJob != null,
+            hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
+            pendingMessageCount = pendingUserMessages.size,
+        )
+    }
+
     LaunchedEffect(nodeId, conversation.messageNodes.size, timelineLoadState.initialized) {
         if (nodeId == null && !vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
+            withFrameNanos { }
             withFrameNanos { }
             val lastIndex = chatListState.layoutInfo.totalItemsCount - 1
             if (lastIndex >= 0) {
@@ -188,18 +212,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         if (nodeId != null && conversation.messageNodes.isNotEmpty() && !vm.chatListInitialized) {
             val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
             if (index >= 0) {
-                val listIndex = index + if (!timelineLoadState.isFullyLoaded) 1 else 0
-                chatListState.scrollToItem(listIndex)
-                vm.chatListInitialized = true
+                val listIndex = lazyItemMessageIndexes.firstLazyIndexForMessage(index)
+                if (listIndex != null) {
+                    chatListState.scrollToItem(listIndex)
+                    vm.chatListInitialized = true
+                }
             } else if (!timelineLoadState.isFullyLoaded) {
                 vm.ensureTimelineLoaded()
             }
         }
     }
 
-    // Pulse layout: chat is a detail surface with no drawer. Big screens
-    // and phones use the same single-column layout; the master-detail
-    // tablet pattern is parked (Phase 25 may revisit).
     ChatPageContent(
         inputState = inputState,
         loadingJob = loadingJob,
@@ -207,11 +230,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         setting = setting,
         conversation = conversation,
         timelineLoadState = timelineLoadState,
-        pendingUserMessages = pendingUserMessageState.value,
+        pendingUserMessages = pendingUserMessages,
         contextCompacts = contextCompacts,
         navController = navController,
         vm = vm,
         chatListState = chatListState,
+        lazyItemMessageIndexes = lazyItemMessageIndexes,
         enableWebSearch = enableWebSearch,
         currentChatModel = currentChatModel,
         errors = errors,
@@ -233,6 +257,7 @@ private fun ChatPageContent(
     navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
+    lazyItemMessageIndexes: List<Int?>,
     enableWebSearch: Boolean,
     currentChatModel: Model?,
     errors: List<ChatError>,
@@ -245,6 +270,7 @@ private fun ChatPageContent(
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
     var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
+    var sendFollowRequest by remember(conversation.id) { mutableStateOf(0) }
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val hazeState = rememberHazeState()
     val activityStore: AgentToolActivityStore = koinInject()
@@ -288,6 +314,22 @@ private fun ChatPageContent(
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
     val pendingQueueCount = pendingUserMessages.size
+
+    LaunchedEffect(
+        sendFollowRequest,
+        conversation.messageNodes.size,
+        pendingUserMessages.size,
+        loadingJob != null,
+    ) {
+        if (sendFollowRequest <= 0) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        val lastIndex = chatListState.layoutInfo.totalItemsCount - 1
+        if (lastIndex >= 0) {
+            chatListState.scrollToItem(lastIndex)
+        }
+        sendFollowRequest = 0
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -381,12 +423,14 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll &&
+                                chatListState.isNearListEnd(bufferItems = 4)
                             vm.handleMessageSend(
                                 content = inputState.getContents(),
                                 queueMode = queueMode,
                             )
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+                            if (shouldFollowAfterSend) {
+                                sendFollowRequest += 1
                             }
                         }
                         inputState.clearInput()
@@ -398,13 +442,15 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll &&
+                                chatListState.isNearListEnd(bufferItems = 4)
                             vm.handleMessageSend(
                                 content = inputState.getContents(),
                                 answer = loadingJob != null && queueMode == PendingUserMessageMode.STEER,
                                 queueMode = queueMode,
                             )
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+                            if (shouldFollowAfterSend) {
+                                sendFollowRequest += 1
                             }
                         }
                         inputState.clearInput()
@@ -497,7 +543,9 @@ private fun ChatPageContent(
                 onJumpToMessage = { index ->
                     previewMode = false
                     scope.launch {
-                        chatListState.animateScrollToItem(index)
+                        val listIndex = lazyItemMessageIndexes.firstLazyIndexForMessage(index)
+                            ?: index
+                        chatListState.animateScrollToItem(listIndex)
                     }
                 },
                 onToolApproval = { toolCallId, approved, reason ->

@@ -113,6 +113,32 @@ object ConversationContextPlanner {
         return compactSummaryMessages + recentMessages.limitContext(keepLimit)
     }
 
+    fun fitMessagesToTokenBudget(
+        messages: List<UIMessage>,
+        maxTokens: Int,
+    ): List<UIMessage> {
+        if (maxTokens <= 0 || messages.isEmpty()) return messages.takeLast(1)
+        if (estimateTokens(messages) <= maxTokens) return messages
+
+        val systemMessages = messages.filter { it.role == MessageRole.SYSTEM }
+        val tail = messages.filter { it.role != MessageRole.SYSTEM }
+        val selected = mutableListOf<UIMessage>()
+
+        for (message in tail.asReversed()) {
+            selected.add(0, message)
+            val candidate = systemMessages + selected
+            if (estimateTokens(candidate) > maxTokens) {
+                selected.removeAt(0)
+                if (selected.isEmpty()) {
+                    selected.add(0, message)
+                }
+                break
+            }
+        }
+
+        return systemMessages + selected
+    }
+
     fun buildCompressionInput(messages: List<UIMessage>): String {
         return messages.joinToString("\n\n") { message ->
             buildString {

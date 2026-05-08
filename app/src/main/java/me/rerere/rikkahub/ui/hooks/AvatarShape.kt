@@ -14,7 +14,9 @@ import kotlin.math.roundToInt
 
 @Composable
 fun rememberAvatarShape(loading: Boolean): Shape {
-    val infiniteTransition = rememberInfiniteTransition()
+    if (!loading) return CircleShape
+
+    val infiniteTransition = rememberInfiniteTransition(label = "avatar-shape")
     val rotateAngle = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,

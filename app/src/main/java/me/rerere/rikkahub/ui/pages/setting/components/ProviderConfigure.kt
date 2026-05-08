@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -14,18 +16,35 @@ import me.rerere.rikkahub.ui.components.ui.PulseGhostButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSegmentedChoice
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.launch
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.OpenAIAuthMode
+import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
+import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
+import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
+import me.rerere.ai.provider.providers.openai.OpenAICodexOAuthClient
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.utils.openUrl
+import me.rerere.rikkahub.utils.writeClipboardText
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import org.koin.compose.koinInject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -232,7 +251,17 @@ private fun ColumnScope.ProviderConfigureOpenAI(
     provider: ProviderSetting.OpenAI,
     onEdit: (provider: ProviderSetting.OpenAI) -> Unit
 ) {
+    val context = LocalContext.current
     val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    val httpClient = koinInject<OkHttpClient>()
+    val providerManager = koinInject<ProviderManager>()
+    val authStore = remember(context) { OpenAICodexAuthStore(context) }
+    val oauthClient = remember(httpClient, authStore) { OpenAICodexOAuthClient(httpClient, authStore) }
+    var oauthTokens by remember(provider.id) { mutableStateOf(authStore.get(provider.id)) }
+    var oauthBusy by remember(provider.id) { mutableStateOf(false) }
+    var oauthDeviceCode by remember(provider.id) { mutableStateOf<String?>(null) }
+    var oauthVerificationUrl by remember(provider.id) { mutableStateOf<String?>(null) }
 
     provider.description()
 
@@ -259,63 +288,317 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    OutlinedTextField(
-        value = provider.apiKey,
-        onValueChange = {
-            onEdit(provider.copy(apiKey = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_api_key))
-        },
+    Text(
+        text = stringResource(R.string.setting_provider_page_openai_auth_mode),
+        style = MaterialTheme.typography.labelLarge,
+    )
+    WorkspaceSegmentedChoice(
+        options = OpenAIAuthMode.entries.toList(),
+        selected = provider.authMode,
         modifier = Modifier.fillMaxWidth(),
-        maxLines = 3,
+        onSelected = { authMode ->
+            when (authMode) {
+                OpenAIAuthMode.API_KEY -> onEdit(provider.copy(authMode = OpenAIAuthMode.API_KEY))
+                OpenAIAuthMode.CODEX_OAUTH -> onEdit(
+                    provider.copy(
+                        authMode = OpenAIAuthMode.CODEX_OAUTH,
+                        baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
+                        useResponseApi = true,
+                        name = if (provider.name == "OpenAI") "OpenAI Codex OAuth" else provider.name,
+                    )
+                )
+            }
+        },
+        label = { authMode ->
+            Text(
+                when (authMode) {
+                    OpenAIAuthMode.API_KEY -> stringResource(R.string.setting_provider_page_openai_auth_api_key)
+                    OpenAIAuthMode.CODEX_OAUTH -> stringResource(R.string.setting_provider_page_openai_auth_codex_oauth)
+                }
+            )
+        },
     )
 
-    OutlinedTextField(
-        value = provider.baseUrl,
-        onValueChange = {
-            onEdit(provider.copy(baseUrl = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-        },
-        modifier = Modifier.fillMaxWidth(),
-        isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
-    )
-
-    if (!provider.useResponseApi) {
+    if (provider.authMode == OpenAIAuthMode.API_KEY) {
         OutlinedTextField(
-            value = provider.chatCompletionsPath,
+            value = provider.apiKey,
             onValueChange = {
-                onEdit(provider.copy(chatCompletionsPath = it.trim()))
+                onEdit(provider.copy(apiKey = it.trim()))
             },
             label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_path))
+                Text(stringResource(id = R.string.setting_provider_page_api_key))
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !provider.builtIn
+            maxLines = 3,
         )
-    }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(stringResource(id = R.string.setting_provider_page_response_api), modifier = Modifier.weight(1f))
-        val responseAPIWarning = stringResource(id = R.string.setting_provider_page_response_api_warning)
-        Checkbox(
-            checked = provider.useResponseApi,
-            onCheckedChange = {
-                onEdit(provider.copy(useResponseApi = it))
+        OutlinedTextField(
+            value = provider.baseUrl,
+            onValueChange = {
+                onEdit(provider.copy(baseUrl = it.trim()))
+            },
+            label = {
+                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
+        )
 
-                if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
-                    toaster.show(
-                        message = responseAPIWarning,
-                        type = ToastType.Warning
-                    )
+        if (!provider.useResponseApi) {
+            OutlinedTextField(
+                value = provider.chatCompletionsPath,
+                onValueChange = {
+                    onEdit(provider.copy(chatCompletionsPath = it.trim()))
+                },
+                label = {
+                    Text(stringResource(id = R.string.setting_provider_page_api_path))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !provider.builtIn
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(id = R.string.setting_provider_page_response_api), modifier = Modifier.weight(1f))
+            val responseAPIWarning = stringResource(id = R.string.setting_provider_page_response_api_warning)
+            Checkbox(
+                checked = provider.useResponseApi,
+                onCheckedChange = {
+                    onEdit(provider.copy(useResponseApi = it))
+
+                    if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
+                        toaster.show(
+                            message = responseAPIWarning,
+                            type = ToastType.Warning
+                        )
+                    }
                 }
+            )
+        }
+    } else {
+        Text(
+            text = stringResource(R.string.setting_provider_page_codex_oauth_warning),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = OPENAI_CODEX_BACKEND_BASE_URL,
+            onValueChange = {},
+            label = {
+                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = false,
+        )
+        Text(
+            text = oauthTokens?.let { tokens ->
+                val account = listOfNotNull(tokens.email, tokens.planType).joinToString(" · ")
+                if (account.isBlank()) {
+                    stringResource(R.string.setting_provider_page_codex_oauth_signed_in)
+                } else {
+                    stringResource(R.string.setting_provider_page_codex_oauth_signed_in_as, account)
+                }
+            } ?: stringResource(R.string.setting_provider_page_codex_oauth_not_signed_in),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (oauthDeviceCode != null) {
+            Text(
+                text = stringResource(R.string.setting_provider_page_codex_oauth_enter_code_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = oauthDeviceCode.orEmpty(),
+                onValueChange = {},
+                label = {
+                    Text(stringResource(R.string.setting_provider_page_codex_oauth_device_code))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = false,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                PulseGhostButton(
+                    onClick = {
+                        context.writeClipboardText(oauthDeviceCode.orEmpty())
+                        toaster.show(
+                            context.getString(R.string.setting_provider_page_codex_oauth_code_recopied),
+                            type = ToastType.Success,
+                        )
+                    },
+                    text = stringResource(R.string.setting_provider_page_codex_oauth_copy_code),
+                    modifier = Modifier.weight(1f),
+                )
+                PulseGhostButton(
+                    onClick = {
+                        oauthVerificationUrl?.let(context::openUrl)
+                    },
+                    text = stringResource(R.string.setting_provider_page_codex_oauth_open_page),
+                    modifier = Modifier.weight(1f),
+                    enabled = oauthVerificationUrl != null,
+                )
             }
+        }
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            PulseGhostButton(
+                onClick = {
+                    scope.launch {
+                        oauthBusy = true
+                        try {
+                            val authorization = oauthClient.requestDeviceCode()
+                            oauthDeviceCode = authorization.userCode
+                            oauthVerificationUrl = authorization.verificationUrl
+                            context.writeClipboardText(authorization.userCode)
+                            context.openUrl(authorization.verificationUrl)
+                            toaster.show(
+                                context.getString(
+                                    R.string.setting_provider_page_codex_oauth_code_copied,
+                                    authorization.userCode
+                                ),
+                                type = ToastType.Info,
+                            )
+                            oauthTokens = oauthClient.pollDeviceCode(provider.id, authorization)
+                            oauthDeviceCode = null
+                            oauthVerificationUrl = null
+                            val modelCount = runCatching {
+                                val fetchedModels = providerManager.getProviderByType(provider)
+                                    .listModels(provider.codexOAuthReadyCopy())
+                                    .sortedBy { it.modelId }
+                                onEdit(provider.copy(models = provider.models.withoutCodexReviewModels().mergeByModelId(fetchedModels)))
+                                fetchedModels.size
+                            }.getOrNull()
+                            toaster.show(
+                                if (modelCount != null) {
+                                    context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, modelCount)
+                                } else {
+                                    context.getString(R.string.setting_provider_page_codex_oauth_login_success)
+                                },
+                                type = ToastType.Success,
+                            )
+                        } catch (e: Exception) {
+                            toaster.show(
+                                context.getString(
+                                    R.string.setting_provider_page_codex_oauth_login_failed,
+                                    e.message ?: e.toString()
+                                ),
+                                type = ToastType.Error,
+                            )
+                        } finally {
+                            oauthBusy = false
+                        }
+                    }
+                },
+                text = stringResource(R.string.setting_provider_page_codex_oauth_login),
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !oauthBusy,
+            )
+            PulseGhostButton(
+                onClick = {
+                    scope.launch {
+                        oauthBusy = true
+                        try {
+                            val fetchedModels = providerManager.getProviderByType(provider)
+                                .listModels(provider.codexOAuthReadyCopy())
+                                .sortedBy { it.modelId }
+                            onEdit(provider.copy(models = provider.models.withoutCodexReviewModels().mergeByModelId(fetchedModels)))
+                            toaster.show(
+                                context.getString(
+                                    R.string.setting_provider_page_codex_oauth_models_loaded,
+                                    fetchedModels.size
+                                ),
+                                type = ToastType.Success,
+                            )
+                        } catch (e: Exception) {
+                            toaster.show(
+                                context.getString(
+                                    R.string.setting_provider_page_codex_oauth_models_failed,
+                                    e.message ?: e.toString()
+                                ),
+                                type = ToastType.Error,
+                            )
+                        } finally {
+                            oauthBusy = false
+                        }
+                    }
+                },
+                text = stringResource(R.string.setting_provider_page_codex_oauth_fetch_models),
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !oauthBusy && oauthTokens != null,
+            )
+            PulseGhostButton(
+                onClick = {
+                    scope.launch {
+                        oauthBusy = true
+                        try {
+                            oauthTokens = oauthClient.refresh(provider.id)
+                            toaster.show(
+                                context.getString(R.string.setting_provider_page_codex_oauth_refresh_success),
+                                type = ToastType.Success,
+                            )
+                        } catch (e: Exception) {
+                            toaster.show(
+                                context.getString(
+                                    R.string.setting_provider_page_codex_oauth_refresh_failed,
+                                    e.message ?: e.toString()
+                                ),
+                                type = ToastType.Error,
+                            )
+                        } finally {
+                            oauthBusy = false
+                        }
+                    }
+                },
+                text = stringResource(R.string.setting_provider_page_codex_oauth_refresh),
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !oauthBusy && oauthTokens != null,
+            )
+            PulseGhostButton(
+                onClick = {
+                    oauthClient.logout(provider.id)
+                    oauthTokens = null
+                    oauthDeviceCode = null
+                    oauthVerificationUrl = null
+                    toaster.show(
+                        context.getString(R.string.setting_provider_page_codex_oauth_logged_out),
+                        type = ToastType.Success,
+                    )
+                },
+                text = stringResource(R.string.setting_provider_page_codex_oauth_logout),
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !oauthBusy && oauthTokens != null,
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.setting_provider_page_codex_oauth_text_only),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+private fun ProviderSetting.OpenAI.codexOAuthReadyCopy(): ProviderSetting.OpenAI {
+    return copy(
+        authMode = OpenAIAuthMode.CODEX_OAUTH,
+        baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
+        useResponseApi = true,
+    )
+}
+
+private fun List<Model>.mergeByModelId(models: List<Model>): List<Model> {
+    val existingIds = map { it.modelId }.toMutableSet()
+    return this + models.filter { existingIds.add(it.modelId) }
+}
+
+private fun List<Model>.withoutCodexReviewModels(): List<Model> {
+    return filterNot { it.isCodexOAuthReviewModel() }
 }
 
 @Composable

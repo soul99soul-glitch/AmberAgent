@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -126,7 +127,12 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
+import me.rerere.ai.provider.providers.openai.OpenAICodexOAuthClient
+import me.rerere.ai.provider.providers.openai.OpenAICodexUsageStatus
+import me.rerere.ai.provider.providers.openai.OpenAICodexUsageWindow
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
@@ -185,8 +191,12 @@ import me.rerere.rikkahub.utils.formatNumber
 import org.koin.compose.koinInject
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.OkHttpClient
 import java.io.File
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.uuid.Uuid
 
 enum class ExpandState {
@@ -250,6 +260,9 @@ fun ChatInput(
 
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
     var showUsageSheet by remember { mutableStateOf(false) }
+    var usageStatus by remember { mutableStateOf(ComposerUsageStatus()) }
+    var usageLoading by remember { mutableStateOf(false) }
+    var usageError by remember { mutableStateOf<String?>(null) }
     fun dismissExpand() {
         expand = ExpandState.Collapsed
     }
@@ -264,6 +277,39 @@ fun ChatInput(
 
     val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
+    val httpClient: OkHttpClient = koinInject()
+    val usageClient = remember(context, httpClient) {
+        OpenAICodexOAuthClient(httpClient, OpenAICodexAuthStore(context))
+    }
+    val scope = rememberCoroutineScope()
+    val selectedChatModelId = assistant.chatModelId ?: settings.chatModelId
+    val chatModel = remember(settings.providers, selectedChatModelId) {
+        settings.providers.findModelById(selectedChatModelId)
+    }
+    val chatProvider = remember(settings.providers, chatModel) {
+        chatModel?.findProvider(settings.providers)
+    }
+
+    suspend fun refreshCodexUsage() {
+        val openAIProvider = chatProvider as? ProviderSetting.OpenAI
+        if (openAIProvider?.authMode != OpenAIAuthMode.CODEX_OAUTH) {
+            usageStatus = ComposerUsageStatus()
+            usageError = context.getString(R.string.chat_input_usage_codex_oauth_required)
+            return
+        }
+
+        usageLoading = true
+        usageError = null
+        runCatching {
+            usageClient.fetchUsage(openAIProvider.id).toComposerUsageStatus(context)
+        }.onSuccess {
+            usageStatus = it
+        }.onFailure {
+            usageStatus = ComposerUsageStatus()
+            usageError = it.message ?: it.toString()
+        }
+        usageLoading = false
+    }
 
     // Camera launcher
     var cameraOutputUri by remember { mutableStateOf<Uri?>(null) }
@@ -398,8 +444,18 @@ fun ChatInput(
     }
 
     if (showUsageSheet) {
+        LaunchedEffect(showUsageSheet, chatProvider.providerRoutingKey()) {
+            refreshCodexUsage()
+        }
         ComposerUsageSheet(
-            status = ComposerUsageStatus(),
+            status = usageStatus,
+            loading = usageLoading,
+            error = usageError,
+            onRefresh = {
+                scope.launch {
+                    refreshCodexUsage()
+                }
+            },
             onDismissRequest = { showUsageSheet = false },
         )
     }
@@ -450,13 +506,6 @@ fun ChatInput(
                         MediaFileInputRow(state = state)
                     }
 
-                    val selectedChatModelId = assistant.chatModelId ?: settings.chatModelId
-                    val chatModel = remember(settings.providers, selectedChatModelId) {
-                        settings.providers.findModelById(selectedChatModelId)
-                    }
-                    val chatProvider = remember(settings.providers, chatModel) {
-                        chatModel?.findProvider(settings.providers)
-                    }
                     TextInputRow(
                         state = state,
                         onSendMessage = { sendMessage() },
@@ -777,6 +826,7 @@ private fun UIMessagePart.estimatedTokenChars(): Int = when (this) {
 }
 
 private data class ComposerUsageStatus(
+    val planType: String? = null,
     val fiveHourQuota: ComposerUsageMetric? = null,
     val weeklyQuota: ComposerUsageMetric? = null,
     val cacheHitRate: ComposerUsageMetric? = null,
@@ -789,6 +839,21 @@ private data class ComposerUsageMetric(
     val percent: Int? = null,
     val detail: String? = null,
 )
+
+private fun OpenAICodexUsageStatus.toComposerUsageStatus(context: Context): ComposerUsageStatus {
+    return ComposerUsageStatus(
+        planType = planType,
+        fiveHourQuota = fiveHour?.toComposerUsageMetric(context),
+        weeklyQuota = weekly?.toComposerUsageMetric(context),
+    )
+}
+
+private fun OpenAICodexUsageWindow.toComposerUsageMetric(context: Context): ComposerUsageMetric {
+    return ComposerUsageMetric(
+        percent = usedPercent.toInt(),
+        detail = resetsAtEpochSeconds?.formatUsageResetDetail(context),
+    )
+}
 
 @Composable
 private fun ReasoningLevelChip(
@@ -944,6 +1009,9 @@ private fun ComposerStatusChip(
 @Composable
 private fun ComposerUsageSheet(
     status: ComposerUsageStatus,
+    loading: Boolean,
+    error: String?,
+    onRefresh: () -> Unit,
     onDismissRequest: () -> Unit,
 ) {
     val workspace = workspaceColors()
@@ -958,9 +1026,45 @@ private fun ComposerUsageSheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!status.hasData) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = "No usage data",
+                    text = stringResource(R.string.chat_input_usage_sheet_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = workspace.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                PulseDialogButton(
+                    onClick = onRefresh,
+                    text = stringResource(R.string.chat_input_usage_refresh),
+                    variant = PulseDialogVariant.Ghost,
+                    enabled = !loading,
+                )
+            }
+            status.planType?.let {
+                Text(
+                    text = stringResource(R.string.chat_input_usage_plan, it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
+            }
+            if (loading && !status.hasData) {
+                Text(
+                    text = stringResource(R.string.chat_input_usage_loading),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = workspace.muted,
+                )
+            } else if (error != null) {
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else if (!status.hasData) {
+                Text(
+                    text = stringResource(R.string.chat_input_usage_no_data),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspace.muted,
                 )
@@ -991,13 +1095,27 @@ private fun UsageMetricRow(
         )
         Text(
             text = listOfNotNull(
-                metric.percent?.let { "$it%" },
+                metric.percent?.let { stringResource(R.string.chat_input_usage_percent_used, it) },
                 metric.detail,
             ).joinToString("  ").ifBlank { "--" },
             style = MaterialTheme.typography.bodyMedium,
             color = workspace.ink,
         )
     }
+}
+
+private fun Long.formatUsageResetDetail(context: Context): String {
+    val resetMillis = if (this < 10_000_000_000L) this * 1000L else this
+    val remainingMillis = (resetMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+    val totalMinutes = remainingMillis / 60_000L
+    val timeText = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(resetMillis))
+    val relative = when {
+        totalMinutes >= 24 * 60 -> "${totalMinutes / (24 * 60)}d"
+        totalMinutes >= 60 -> "${totalMinutes / 60}h ${totalMinutes % 60}m"
+        totalMinutes > 0 -> "${totalMinutes}m"
+        else -> "now"
+    }
+    return context.getString(R.string.chat_input_usage_reset_detail, timeText, relative)
 }
 
 private fun ReasoningLevel.composerLabel(): String = when (this) {

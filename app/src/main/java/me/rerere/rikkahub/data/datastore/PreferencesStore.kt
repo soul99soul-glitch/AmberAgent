@@ -824,6 +824,10 @@ fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
 }
 
+fun Settings.resolveTaskChatModel(modelId: Uuid): Model? {
+    return findModelById(modelId) ?: getCurrentChatModel()
+}
+
 fun Settings.getCurrentAssistant(): Assistant {
     return this.assistants.find { it.id == DEFAULT_ASSISTANT_ID }
         ?: this.assistants.find { it.id == assistantId }
