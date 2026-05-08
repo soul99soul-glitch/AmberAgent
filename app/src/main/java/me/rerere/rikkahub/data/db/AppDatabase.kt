@@ -9,6 +9,10 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.ConversationCompactDAO
 import me.rerere.rikkahub.data.db.dao.ConversationContextEventDAO
+import me.rerere.rikkahub.data.db.dao.FeishuDocChangeDAO
+import me.rerere.rikkahub.data.db.dao.FeishuDocDependencyDAO
+import me.rerere.rikkahub.data.db.dao.FeishuDocSnapshotDAO
+import me.rerere.rikkahub.data.db.dao.FeishuWatchedDocDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
@@ -20,6 +24,10 @@ import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
 import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
+import me.rerere.rikkahub.data.db.entity.FeishuDocChangeEntity
+import me.rerere.rikkahub.data.db.entity.FeishuDocDependencyEntity
+import me.rerere.rikkahub.data.db.entity.FeishuDocSnapshotEntity
+import me.rerere.rikkahub.data.db.entity.FeishuWatchedDocEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
@@ -45,8 +53,12 @@ import me.rerere.rikkahub.utils.JsonInstant
         MemoryCandidateEntity::class,
         MemoryEventEntity::class,
         MemoryDreamPlanEntity::class,
+        FeishuWatchedDocEntity::class,
+        FeishuDocSnapshotEntity::class,
+        FeishuDocChangeEntity::class,
+        FeishuDocDependencyEntity::class,
     ],
-    version = 21,
+    version = 22,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -85,6 +97,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun managedFileDao(): ManagedFileDAO
 
     abstract fun favoriteDao(): FavoriteDAO
+
+    abstract fun feishuWatchedDocDao(): FeishuWatchedDocDAO
+
+    abstract fun feishuDocSnapshotDao(): FeishuDocSnapshotDAO
+
+    abstract fun feishuDocChangeDao(): FeishuDocChangeDAO
+
+    abstract fun feishuDocDependencyDao(): FeishuDocDependencyDAO
 }
 
 object TokenUsageConverter {

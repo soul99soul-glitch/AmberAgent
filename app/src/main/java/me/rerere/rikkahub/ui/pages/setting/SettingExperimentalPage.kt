@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,7 +73,13 @@ import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeat
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
+import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
+import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentMonitor
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.db.dao.FeishuDocDependencyDAO
+import me.rerere.rikkahub.data.db.dao.FeishuWatchedDocDAO
+import me.rerere.rikkahub.data.db.entity.FeishuDocDependencyEntity
+import me.rerere.rikkahub.data.db.entity.FeishuWatchedDocEntity
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
@@ -703,26 +710,30 @@ fun SettingExperimentalICloudPage(
 @Composable
 fun SettingExperimentalOfficeProPage(
     feishuOfficeManager: FeishuOfficeEnhancementManager = koinInject(),
-    workspaceManager: WorkspaceManager = koinInject(),
+    watchedDocDAO: FeishuWatchedDocDAO = koinInject(),
+    dependencyDAO: FeishuDocDependencyDAO = koinInject(),
+    monitor: FeishuDocumentMonitor = koinInject(),
 ) {
     val officeState by feishuOfficeManager.state.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
-    val context = LocalContext.current
-    val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     var officeBusy by remember { mutableStateOf(false) }
     var officePackageInput by remember(officeState.targetPackage) { mutableStateOf(officeState.targetPackage) }
-    var officeOutputDirInput by remember(officeState.defaultOutputDir) { mutableStateOf(officeState.defaultOutputDir) }
-    var officeProjectKeywordsInput by remember(officeState.workDashboard.defaultProjectKeywords) {
-        mutableStateOf(officeState.workDashboard.defaultProjectKeywords.joinToString("，"))
-    }
     var officeCandidates by remember { mutableStateOf("") }
-    var editingProject by remember { mutableStateOf<FeishuWorkProject?>(null) }
-    var creatingProject by remember { mutableStateOf(false) }
     val officeSavedToast = stringResource(R.string.setting_officepro_saved)
     val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
-    val workflowEntries = remember(officeState.workDashboard.projects) {
-        officeProWorkflowEntries(officeState.workDashboard.projects)
+    var docRadarNotify by remember { mutableStateOf(true) }
+    var watchedDocs by remember { mutableStateOf<List<FeishuWatchedDocEntity>>(emptyList()) }
+    var dependencies by remember { mutableStateOf<List<FeishuDocDependencyEntity>>(emptyList()) }
+    var showWatchDialog by remember { mutableStateOf(false) }
+    var showDependencyDialog by remember { mutableStateOf(false) }
+    var checkBusy by remember { mutableStateOf(false) }
+
+    LaunchedEffect(officeState.enabled) {
+        if (officeState.enabled) {
+            watchedDocs = watchedDocDAO.getEnabled()
+            dependencies = dependencyDAO.getEnabled()
+        }
     }
 
     ExperimentalSettingsScaffold(
@@ -823,340 +834,246 @@ fun SettingExperimentalOfficeProPage(
                     }
                 }
             }
+            // Simplified: 2-toggles instead of the old 5-switch detail panel
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_officepro_capture_section)) {
-                    Select(
-                        options = FeishuOfficeAnalysisTemplate.entries,
-                        selectedOption = officeState.defaultTemplate,
-                        onOptionSelected = { feishuOfficeManager.setDefaultTemplate(it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        optionToString = { it.zhLabel },
-                    )
-                    OutlinedTextField(
-                        value = officeOutputDirInput,
-                        onValueChange = { officeOutputDirInput = it },
-                        modifier = Modifier.fillMaxWidth(),
+                    OfficeProSwitchRow(
+                        text = stringResource(R.string.setting_officepro_local_signals),
+                        checked = officeState.includeNotificationsByDefault || officeState.includeUsageByDefault,
                         enabled = officeState.enabled,
-                        singleLine = true,
-                        label = { Text(stringResource(R.string.setting_officepro_output_dir)) },
-                        supportingText = { Text(stringResource(R.string.setting_officepro_output_dir_desc)) },
+                        onCheckedChange = { checked ->
+                            feishuOfficeManager.setIncludeNotificationsByDefault(checked)
+                            feishuOfficeManager.setIncludeUsageByDefault(checked)
+                        },
                     )
-                    OutlinedTextField(
-                        value = officeProjectKeywordsInput,
-                        onValueChange = { officeProjectKeywordsInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = officeState.enabled,
-                        minLines = 2,
-                        maxLines = 4,
-                        label = { Text(stringResource(R.string.setting_officepro_project_keywords)) },
-                        supportingText = { Text(stringResource(R.string.setting_officepro_project_keywords_desc)) },
-                    )
-                    ExperimentActionRow {
-                        ExperimentActionButton(
-                            text = stringResource(R.string.setting_officepro_save_dashboard),
-                            primary = true,
-                            enabled = officeState.enabled,
-                            onClick = {
-                                feishuOfficeManager.setDefaultOutputDir(officeOutputDirInput)
-                                feishuOfficeManager.setWorkDashboardProjectKeywords(officeProjectKeywordsInput)
-                                toaster.show(officeSavedToast)
-                            },
-                        )
-                    }
+                    ExperimentNote(text = stringResource(R.string.setting_officepro_local_signals_note))
                     ExperimentDivider()
                     OfficeProSwitchRow(
-                        text = stringResource(R.string.setting_officepro_include_notifications),
-                        checked = officeState.includeNotificationsByDefault,
-                        enabled = officeState.enabled,
-                        onCheckedChange = feishuOfficeManager::setIncludeNotificationsByDefault,
-                    )
-                    OfficeProSwitchRow(
-                        text = stringResource(R.string.setting_officepro_include_usage),
-                        checked = officeState.includeUsageByDefault,
-                        enabled = officeState.enabled,
-                        onCheckedChange = feishuOfficeManager::setIncludeUsageByDefault,
-                    )
-                    OfficeProSwitchRow(
-                        text = stringResource(R.string.setting_officepro_include_screen),
-                        checked = officeState.includeCurrentScreenByDefault,
-                        enabled = officeState.enabled,
-                        onCheckedChange = feishuOfficeManager::setIncludeCurrentScreenByDefault,
-                    )
-                    OfficeProSwitchRow(
-                        text = stringResource(R.string.setting_officepro_include_mcp_hints),
+                        text = stringResource(R.string.setting_officepro_mcp_enhance),
                         checked = officeState.includeMcpHintsByDefault,
                         enabled = officeState.enabled,
                         onCheckedChange = feishuOfficeManager::setIncludeMcpHintsByDefault,
                     )
-                    OfficeProSwitchRow(
-                        text = stringResource(R.string.setting_officepro_include_model_council),
-                        checked = officeState.workDashboard.includeModelCouncil,
-                        enabled = officeState.enabled,
-                        onCheckedChange = feishuOfficeManager::setWorkDashboardIncludeModelCouncil,
-                    )
-                    ExperimentNote(text = stringResource(R.string.setting_officepro_workos_note))
+                    ExperimentNote(text = stringResource(R.string.setting_officepro_mcp_note))
                 }
             }
+            // New: Document Radar
             item {
-                ExperimentSectionCard(title = stringResource(R.string.setting_officepro_project_pack_section)) {
-                    ExperimentNote(text = stringResource(R.string.setting_officepro_project_pack_desc))
+                ExperimentSectionCard(title = stringResource(R.string.setting_officepro_doc_radar_section)) {
+                    ExperimentNote(text = stringResource(R.string.setting_officepro_doc_radar_desc))
                     ExperimentActionRow {
                         ExperimentActionButton(
-                            text = stringResource(R.string.setting_officepro_add_project),
+                            text = stringResource(R.string.setting_officepro_watch_doc),
                             primary = true,
                             enabled = officeState.enabled,
+                            onClick = { showWatchDialog = true },
+                        )
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_officepro_check_now),
+                            enabled = officeState.enabled && !checkBusy,
                             onClick = {
-                                creatingProject = true
-                                editingProject = null
+                                checkBusy = true
+                                scope.launch {
+                                    try {
+                                        monitor.runOnce()
+                                        watchedDocs = watchedDocDAO.getEnabled()
+                                        toaster.show(officeSavedToast)
+                                    } catch (e: Exception) {
+                                        toaster.show(e.message ?: "检查失败")
+                                    }
+                                    checkBusy = false
+                                }
                             },
                         )
                     }
-                    officeState.workDashboard.projects.forEach { project ->
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Row(
+                    if (watchedDocs.isNotEmpty()) {
+                        watchedDocs.forEach { doc ->
+                            ExperimentDivider()
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = doc.docTitle,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    ExperimentActionButton(
+                                        text = stringResource(R.string.setting_officepro_doc_unsubscribe),
+                                        enabled = officeState.enabled,
+                                        onClick = {
+                                            scope.launch {
+                                                watchedDocDAO.deleteById(doc.id)
+                                                watchedDocs = watchedDocDAO.getEnabled()
+                                            }
+                                        },
+                                    )
+                                }
+                                if (doc.lastCheckedAt != null) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.setting_officepro_doc_last_checked,
+                                            formatOfficeProjectUpdatedAt(doc.lastCheckedAt!!),
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = workspaceColors().faint,
+                                    )
+                                }
+                                if (doc.lastChangedAt != null) {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.setting_officepro_doc_last_changed,
+                                            formatOfficeProjectUpdatedAt(doc.lastChangedAt!!),
+                                            doc.changeThreshold,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = workspaceColors().faint,
+                                    )
+                                } else {
+                                    Text(
+                                        text = stringResource(R.string.setting_officepro_doc_no_change),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = workspaceColors().faint,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        ExperimentNote(text = stringResource(R.string.setting_officepro_doc_empty))
+                    }
+                    ExperimentDivider()
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_officepro_change_threshold_label),
+                        value = stringResource(R.string.setting_officepro_threshold_value),
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_officepro_check_interval_label),
+                        value = stringResource(R.string.setting_officepro_interval_value),
+                    )
+                    OfficeProSwitchRow(
+                        text = stringResource(R.string.setting_officepro_change_notification),
+                        checked = docRadarNotify,
+                        enabled = officeState.enabled,
+                        onCheckedChange = { docRadarNotify = it },
+                    )
+                }
+            }
+            // New: Document Dependencies
+            item {
+                ExperimentSectionCard(title = stringResource(R.string.setting_officepro_dependency_section)) {
+                    ExperimentNote(text = stringResource(R.string.setting_officepro_dependency_desc))
+                    ExperimentActionRow {
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_officepro_add_dependency),
+                            primary = true,
+                            enabled = officeState.enabled,
+                            onClick = { showDependencyDialog = true },
+                        )
+                    }
+                    if (dependencies.isNotEmpty()) {
+                        dependencies.forEach { dep ->
+                            ExperimentDivider()
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
                                 Text(
-                                    text = project.name,
-                                    modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                ExperimentActionButton(
-                                    text = stringResource(R.string.setting_officepro_edit_project),
-                                    enabled = officeState.enabled,
-                                    onClick = {
-                                        editingProject = project
-                                        creatingProject = false
-                                    },
-                                )
-                            }
-                            Text(
-                                text = project.keywords.joinToString(" / "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = workspaceColors().muted,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            project.currentGoal.takeIf { it.isNotBlank() }?.let { goal ->
-                                Text(
-                                    text = goal,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = workspaceColors().faint,
+                                    text = "${dep.upstreamLabel.ifBlank { dep.upstreamUrl.takeLast(40) }} → ${dep.downstreamLabel.ifBlank { dep.downstreamUrl.takeLast(40) }}",
+                                    style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                            }
-                            if (project.sourceRefs.isNotEmpty()) {
-                                Text(
-                                    text = stringResource(
-                                        R.string.setting_officepro_project_sources_count,
-                                        project.sourceRefs.size,
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = workspaceColors().faint,
-                                )
-                            }
-                            if (project.updatedAtMs > 0L) {
-                                Text(
-                                    text = stringResource(
-                                        R.string.setting_officepro_project_updated_at,
-                                        formatOfficeProjectUpdatedAt(project.updatedAtMs),
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = workspaceColors().faint,
-                                )
+                                if (dep.relationNote.isNotBlank()) {
+                                    Text(
+                                        text = dep.relationNote,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = workspaceColors().faint,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                ExperimentActionRow {
+                                    ExperimentActionButton(
+                                        text = stringResource(R.string.setting_officepro_dependency_edit),
+                                        enabled = officeState.enabled,
+                                        onClick = { showDependencyDialog = true },
+                                    )
+                                    ExperimentActionButton(
+                                        text = stringResource(R.string.setting_officepro_dependency_delete),
+                                        enabled = officeState.enabled,
+                                        onClick = {
+                                            scope.launch {
+                                                dependencyDAO.deleteById(dep.id)
+                                                dependencies = dependencyDAO.getEnabled()
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
-                        if (project != officeState.workDashboard.projects.last()) {
-                            ExperimentDivider()
-                        }
-                    }
-                    ExperimentActionRow {
-                        ExperimentActionButton(
-                            text = stringResource(R.string.setting_officepro_restore_projects),
-                            enabled = officeState.enabled,
-                            onClick = {
-                                feishuOfficeManager.restoreDefaultProjects()
-                                toaster.show(officeSavedToast)
-                            },
-                        )
-                    }
-                }
-            }
-            item {
-                ExperimentSectionCard(title = stringResource(R.string.setting_officepro_usage_section)) {
-                    ExperimentNote(text = stringResource(R.string.setting_officepro_usage_intro))
-                    workflowEntries.forEach { entry ->
-                        OfficeProWorkflowCard(
-                            entry = entry,
-                            onSend = {
-                                navigateToChatPage(
-                                    navigator = navController,
-                                    initText = entry.promptTemplate.base64Encode(),
-                                )
-                            },
-                        )
-                        if (entry != workflowEntries.last()) {
-                            ExperimentDivider()
-                        }
+                    } else {
+                        ExperimentNote(text = stringResource(R.string.setting_officepro_dependency_empty))
                     }
                 }
             }
         }
     }
-    if (creatingProject || editingProject != null) {
-        OfficeProjectEditorDialog(
-            project = editingProject,
-            workspaceManager = workspaceManager,
-            context = context,
-            onDismiss = {
-                creatingProject = false
-                editingProject = null
-            },
-            onSave = { project ->
+    if (showWatchDialog) {
+        WatchDocDialog(
+            onDismiss = { showWatchDialog = false },
+            onSave = { title, url, threshold, interval, notify ->
                 scope.launch {
-                    feishuOfficeManager.saveProject(project)
+                    val now = System.currentTimeMillis()
+                    watchedDocDAO.insert(
+                        FeishuWatchedDocEntity(
+                            id = kotlin.uuid.Uuid.random().toString(),
+                            docUrl = url,
+                            docTitle = title,
+                            enabled = true,
+                            changeThreshold = threshold,
+                            checkIntervalMin = interval,
+                            notifyEnabled = notify,
+                            createdAt = now,
+                            updatedAt = now,
+                        )
+                    )
+                    watchedDocs = watchedDocDAO.getEnabled()
                     toaster.show(officeSavedToast)
-                    creatingProject = false
-                    editingProject = null
+                    showWatchDialog = false
                 }
             },
             onToast = toaster::show,
         )
     }
-}
-
-private data class OfficeProWorkflowEntry(
-    val id: String,
-    val title: String,
-    val description: String,
-    val inputs: String,
-    val output: String,
-    val promptTemplate: String,
-    val requiresApproval: Boolean,
-)
-
-private fun officeProWorkflowEntries(projects: List<FeishuWorkProject>): List<OfficeProWorkflowEntry> {
-    val project = projects.firstOrNull()
-    val projectName = project?.name ?: "Q 代"
-    val sourceHint = if (project?.sourceRefs.orEmpty().isEmpty()) {
-        "如果项目还没有资料源，请先提示我导入 PDF、Word 或 Markdown。"
-    } else {
-        "请优先读取该项目知识包里已经导入的 workspace 资料源。"
-    }
-    return listOf(
-        OfficeProWorkflowEntry(
-            id = "daily_radar",
-            title = "今日飞书雷达",
-            description = "把通知、使用情况、当前屏幕和 MCP 线索整理成今天该先处理什么。",
-            inputs = "办公通知 / 使用情况 / MCP hints / workspace 资料",
-            output = "今日优先级、待跟进事项、建议动作",
-            promptTemplate = "请基于我的飞书办公增强模式，调用 officepro_daily_radar 生成今日飞书雷达。请说明使用了哪些来源；如果飞书 MCP 不可用，就用通知、使用情况、当前屏幕和 workspace 资料降级生成。",
-            requiresApproval = true,
-        ),
-        OfficeProWorkflowEntry(
-            id = "project_briefing",
-            title = "项目 Briefing",
-            description = "围绕一个项目知识包，生成评审前 10 分钟能读完的 briefing。",
-            inputs = "$projectName 项目知识包 / 已导入资料 / MCP hints",
-            output = "项目目标、卖点、风险、待确认和评审建议",
-            promptTemplate = "请基于「$projectName」项目知识包，调用 officepro_project_briefing 和必要的 officepro_project_context，生成 10 分钟评审前 Briefing。$sourceHint 如果需要写入 workspace 报告，请先请求审批。",
-            requiresApproval = true,
-        ),
-        OfficeProWorkflowEntry(
-            id = "document_warroom",
-            title = "文档作战室",
-            description = "读取当前小米办公 Pro 可见文档，结合项目知识包做白皮书/卖点/竞品评审。",
-            inputs = "当前可见文档 / 项目知识包 / workspace 文档 / Model Council 可选",
-            output = "必改项、风险项、证据缺口、评论草稿、修订建议",
-            promptTemplate = "请读取当前小米办公 Pro 可见文档，并结合「$projectName」项目知识包和已导入 workspace 资料，调用 officepro_document_warroom 做文档作战室分析。请输出必改项、可选优化、风险与待确认、证据缺口、可复制评论草稿；不要自动发送或写回飞书。",
-            requiresApproval = true,
-        ),
-    )
-}
-
-@Composable
-private fun OfficeProWorkflowCard(
-    entry: OfficeProWorkflowEntry,
-    onSend: () -> Unit,
-) {
-    val workspace = workspaceColors()
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = workspace.row,
-        contentColor = workspace.ink,
-        border = BorderStroke(1.dp, workspace.hairline),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = entry.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = workspace.ink,
-            )
-            Text(
-                text = entry.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = workspace.muted,
-            )
-            OfficeProWorkflowMetaItem(
-                label = stringResource(R.string.setting_officepro_workflow_inputs),
-                value = entry.inputs,
-            )
-            OfficeProWorkflowMetaItem(
-                label = stringResource(R.string.setting_officepro_workflow_output),
-                value = entry.output,
-            )
-            OfficeProWorkflowMetaItem(
-                label = stringResource(R.string.setting_officepro_workflow_approval),
-                value = if (entry.requiresApproval) {
-                    stringResource(R.string.setting_officepro_workflow_approval_required)
-                } else {
-                    stringResource(R.string.setting_officepro_workflow_approval_not_required)
-                },
-            )
-            ExperimentActionRow {
-                ExperimentActionButton(
-                    text = stringResource(R.string.setting_officepro_send_to_chat),
-                    primary = true,
-                    enabled = true,
-                    onClick = onSend,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun OfficeProWorkflowMetaItem(
-    label: String,
-    value: String,
-) {
-    val workspace = workspaceColors()
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = workspace.faint,
-            maxLines = 1,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            color = workspace.muted,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
+    if (showDependencyDialog) {
+        DocDependencyDialog(
+            onDismiss = { showDependencyDialog = false },
+            onSave = { upstream, downstream, upLabel, downLabel, note ->
+                scope.launch {
+                    val now = System.currentTimeMillis()
+                    dependencyDAO.insert(
+                        FeishuDocDependencyEntity(
+                            id = kotlin.uuid.Uuid.random().toString(),
+                            upstreamUrl = upstream,
+                            downstreamUrl = downstream,
+                            upstreamLabel = upLabel,
+                            downstreamLabel = downLabel,
+                            relationNote = note,
+                            createdAt = now,
+                            updatedAt = now,
+                        )
+                    )
+                    dependencies = dependencyDAO.getEnabled()
+                    toaster.show(officeSavedToast)
+                    showDependencyDialog = false
+                }
+            },
+            onToast = toaster::show,
         )
     }
 }
@@ -1379,6 +1296,222 @@ private fun OfficeProjectEditorDialog(
                     ExperimentActionButton(
                         text = stringResource(R.string.cancel),
                         enabled = !importing,
+                        onClick = onDismiss,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchDocDialog(
+    onDismiss: () -> Unit,
+    onSave: (title: String, url: String, threshold: Int, interval: Int, notify: Boolean) -> Unit,
+    onToast: (String) -> Unit,
+) {
+    var titleInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf("") }
+    var thresholdInput by remember { mutableStateOf("500") }
+    var intervalInput by remember { mutableStateOf("90") }
+    var notifyEnabled by remember { mutableStateOf(true) }
+    val workspace = workspaceColors()
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.setting_officepro_watch_doc),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(HugeIcons.Cancel01, contentDescription = null)
+                    }
+                }
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("飞书文档 URL") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("文档标题") },
+                    singleLine = true,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedTextField(
+                        value = thresholdInput,
+                        onValueChange = { thresholdInput = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("变更阈值（字）") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = intervalInput,
+                        onValueChange = { intervalInput = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("间隔（分钟）") },
+                        singleLine = true,
+                    )
+                }
+                OfficeProSwitchRow(
+                    text = stringResource(R.string.setting_officepro_change_notification),
+                    checked = notifyEnabled,
+                    enabled = true,
+                    onCheckedChange = { notifyEnabled = it },
+                )
+                ExperimentActionRow {
+                    ExperimentActionButton(
+                        text = stringResource(R.string.setting_officepro_save_project),
+                        primary = true,
+                        enabled = urlInput.isNotBlank() && titleInput.isNotBlank(),
+                        onClick = {
+                            val url = urlInput.trim()
+                            val title = titleInput.trim()
+                            val threshold = thresholdInput.trim().toIntOrNull() ?: 500
+                            val interval = intervalInput.trim().toIntOrNull() ?: 90
+                            if (url.isBlank() || title.isBlank()) {
+                                onToast("请填写文档 URL 和标题")
+                            } else {
+                                onSave(title, url, threshold, interval, notifyEnabled)
+                            }
+                        },
+                    )
+                    ExperimentActionButton(
+                        text = stringResource(R.string.cancel),
+                        enabled = true,
+                        onClick = onDismiss,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocDependencyDialog(
+    onDismiss: () -> Unit,
+    onSave: (upstream: String, downstream: String, upLabel: String, downLabel: String, note: String) -> Unit,
+    onToast: (String) -> Unit,
+) {
+    var upstreamInput by remember { mutableStateOf("") }
+    var downstreamInput by remember { mutableStateOf("") }
+    var upLabelInput by remember { mutableStateOf("") }
+    var downLabelInput by remember { mutableStateOf("") }
+    var noteInput by remember { mutableStateOf("") }
+    val workspace = workspaceColors()
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = workspace.paper,
+            border = BorderStroke(1.dp, workspace.hairline),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.setting_officepro_add_dependency),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(HugeIcons.Cancel01, contentDescription = null)
+                    }
+                }
+                OutlinedTextField(
+                    value = upstreamInput,
+                    onValueChange = { upstreamInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("上游文档 URL") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = upLabelInput,
+                    onValueChange = { upLabelInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("上游标签（可选）") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = downstreamInput,
+                    onValueChange = { downstreamInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("下游文档 URL") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = downLabelInput,
+                    onValueChange = { downLabelInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("下游标签（可选）") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = noteInput,
+                    onValueChange = { noteInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("关系说明") },
+                    minLines = 2,
+                    maxLines = 4,
+                )
+                ExperimentActionRow {
+                    ExperimentActionButton(
+                        text = stringResource(R.string.setting_officepro_save_project),
+                        primary = true,
+                        enabled = upstreamInput.isNotBlank() && downstreamInput.isNotBlank(),
+                        onClick = {
+                            val upstream = upstreamInput.trim()
+                            val downstream = downstreamInput.trim()
+                            if (upstream.isBlank() || downstream.isBlank()) {
+                                onToast("请填写上游和下游文档 URL")
+                            } else {
+                                onSave(
+                                    upstream, downstream,
+                                    upLabelInput.trim(), downLabelInput.trim(), noteInput.trim(),
+                                )
+                            }
+                        },
+                    )
+                    ExperimentActionButton(
+                        text = stringResource(R.string.cancel),
+                        enabled = true,
                         onClick = onDismiss,
                     )
                 }

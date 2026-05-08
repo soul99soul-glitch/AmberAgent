@@ -54,6 +54,7 @@ const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update_v3"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
+const val FEISHU_DOC_CHANGE_CHANNEL_ID = "feishu_doc_change"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -265,6 +266,13 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(memoryChannel)
+
+        val feishuDocChangeChannel = NotificationChannelCompat
+            .Builder(FEISHU_DOC_CHANGE_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
+            .setName(getString(R.string.notification_channel_feishu_doc_change))
+            .setVibrationEnabled(true)
+            .build()
+        notificationManager.createNotificationChannel(feishuDocChangeChannel)
     }
 
     override fun onTerminate() {

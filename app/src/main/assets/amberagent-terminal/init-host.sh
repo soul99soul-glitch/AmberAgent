@@ -75,6 +75,24 @@ if [ ! -d "$PREFIX/local/alpine/tmp" ]; then
 fi
 ARGS="$ARGS -b $PREFIX/local/alpine/tmp:/dev/shm"
 
+# --- DNS setup (fixes package download failures in PROOT) ---
+RESOLV_CONF="$ALPINE_DIR/etc/resolv.conf"
+mkdir -p "$(dirname "$RESOLV_CONF")"
+if [ ! -s "$RESOLV_CONF" ]; then
+    # Try Android system DNS first, fall back to public resolvers
+    DNS1=$(getprop net.dns1 2>/dev/null)
+    DNS2=$(getprop net.dns2 2>/dev/null)
+    {
+        [ -n "$DNS1" ] && echo "nameserver $DNS1"
+        [ -n "$DNS2" ] && echo "nameserver $DNS2"
+        if [ -z "$DNS1" ] && [ -z "$DNS2" ]; then
+            echo "nameserver 8.8.8.8"
+            echo "nameserver 8.8.4.4"
+        fi
+    } > "$RESOLV_CONF"
+fi
+# ----------------------------------------------------
+
 ARGS="$ARGS -r $PREFIX/local/alpine"
 ARGS="$ARGS -0"
 ARGS="$ARGS --link2symlink"

@@ -109,7 +109,7 @@ object ModelRegistry {
     val GEMINI_2_5_FLASH = defineModel {
         tokens("gemini", "2", "5", "flash")
         notTokens("image")
-        visionInput()
+        audioVisionInput()
         toolReasoningAbility()
         contextWindow(1_000_000)
     }
@@ -323,7 +323,7 @@ object ModelRegistry {
 
     private val QWEN_3_6_1M = defineModel {
         tokens("qwen", "3", "6", "plus|flash")
-        visionInput()
+        audioVisionInput()
         toolReasoningAbility()
         contextWindow(1_000_000)
     }
@@ -337,7 +337,7 @@ object ModelRegistry {
 
     private val QWEN_3_5_1M = defineModel {
         tokens("qwen", "3", "5", "plus|flash")
-        visionInput()
+        audioVisionInput()
         toolReasoningAbility()
         contextWindow(1_000_000)
     }
@@ -699,12 +699,16 @@ object ModelRegistry {
         return if (modalities.isEmpty()) {
             listOf(Modality.TEXT)
         } else {
-            listOf(Modality.TEXT, Modality.IMAGE).filter { it in modalities }
+            listOf(Modality.TEXT, Modality.IMAGE, Modality.AUDIO).filter { it in modalities }
         }
     }
 
     private fun ModelDefinitionBuilder.visionInput() {
         input(Modality.TEXT, Modality.IMAGE)
+    }
+
+    private fun ModelDefinitionBuilder.audioVisionInput() {
+        input(Modality.TEXT, Modality.IMAGE, Modality.AUDIO)
     }
 
     private fun ModelDefinitionBuilder.imageOutput() {

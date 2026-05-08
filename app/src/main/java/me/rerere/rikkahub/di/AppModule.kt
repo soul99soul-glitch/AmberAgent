@@ -48,6 +48,10 @@ import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
+import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeAnalyzer
+import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
+import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentFetcher
+import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentMonitor
 import me.rerere.rikkahub.data.memory.extraction.MemoryCandidateFilter
 import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
 import me.rerere.rikkahub.data.memory.export.MemoryFrontmatterCodec
@@ -266,6 +270,23 @@ val appModule = module {
 
     single {
         MemoryDreamScheduler(get(), get())
+    }
+
+    // Feishu Document Radar
+    single {
+        FeishuDocumentFetcher(get(), get(), get(), get())
+    }
+
+    single {
+        FeishuChangeAnalyzer(get(), get(), get())
+    }
+
+    single {
+        FeishuChangeNotifier(get())
+    }
+
+    single {
+        FeishuDocumentMonitor(get(), get())
     }
 
     single {

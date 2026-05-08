@@ -33,6 +33,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_15_16
 import me.rerere.rikkahub.data.db.migrations.Migration_18_19
 import me.rerere.rikkahub.data.db.migrations.Migration_19_20
 import me.rerere.rikkahub.data.db.migrations.Migration_20_21
+import me.rerere.rikkahub.data.db.migrations.Migration_21_22
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
@@ -66,6 +67,7 @@ val dataSourceModule = module {
                 Migration_18_19,
                 Migration_19_20,
                 Migration_20_21,
+                Migration_21_22,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -170,6 +172,22 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().favoriteDao()
+    }
+
+    single {
+        get<AppDatabase>().feishuWatchedDocDao()
+    }
+
+    single {
+        get<AppDatabase>().feishuDocSnapshotDao()
+    }
+
+    single {
+        get<AppDatabase>().feishuDocChangeDao()
+    }
+
+    single {
+        get<AppDatabase>().feishuDocDependencyDao()
     }
 
     single {
