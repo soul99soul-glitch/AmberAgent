@@ -7,11 +7,14 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.lang.reflect.InvocationTargetException
 
 /**
  * Unit tests for GoogleProvider message building logic.
@@ -99,6 +102,23 @@ class GoogleProviderMessageTest {
         // Verify functionResponse contents
         assertEquals("search", functionResponses[0]["name"]?.jsonPrimitive?.content)
         assertEquals("calculate", functionResponses[1]["name"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `image encoding failure should fail instead of dropping image part`() {
+        try {
+            invokeBuildContents(
+                listOf(
+                    UIMessage(
+                        role = MessageRole.USER,
+                        parts = listOf(UIMessagePart.Image("content://missing-image"))
+                    )
+                )
+            )
+            fail("Expected image encoding failure")
+        } catch (error: InvocationTargetException) {
+            assertTrue(error.cause is ImageEncodingException)
+        }
     }
 
     @Test

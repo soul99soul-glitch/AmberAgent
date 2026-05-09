@@ -30,6 +30,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,10 +42,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.hugeicons.HugeIcons
@@ -57,11 +62,13 @@ import me.rerere.hugeicons.stroke.Notebook01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.View
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.vision.VisionModelHealthChecker
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.resolveVisionRecognitionPrompt
 import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
 import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
 import me.rerere.rikkahub.data.datastore.Settings
@@ -77,6 +84,7 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 @Composable
 fun SettingModelPage(vm: SettingVM = koinViewModel()) {
@@ -306,12 +314,23 @@ private fun DefaultOcrModelSetting(
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
+    val providerManager = koinInject<ProviderManager>()
+    val health by produceState(
+        initialValue = VisionModelHealthChecker.checking(),
+        key1 = settings.ocrModelId,
+        key2 = settings.providers,
+    ) {
+        value = withContext(Dispatchers.IO) {
+            VisionModelHealthChecker.probe(settings, providerManager)
+        }
+    }
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_ocr_model),
-        description = stringResource(R.string.setting_model_page_ocr_model_desc),
+        description = "${stringResource(R.string.setting_model_page_ocr_model_desc)} · ${health.label}",
         icon = HugeIcons.View,
         modelId = settings.ocrModelId,
         providers = settings.providers,
+        preferredInputModality = Modality.IMAGE,
         onSelect = {
             vm.updateSettings(settings.copy(ocrModelId = it.id))
         },
@@ -321,7 +340,7 @@ private fun DefaultOcrModelSetting(
         ModelPromptSheet(
             title = stringResource(R.string.setting_model_page_ocr_model),
             variableHint = stringResource(R.string.setting_model_page_ocr_prompt_vars),
-            prompt = settings.ocrPrompt,
+            prompt = resolveVisionRecognitionPrompt(settings.ocrPrompt),
             onPromptChange = {
                 vm.updateSettings(settings.copy(ocrPrompt = it))
             },
@@ -488,6 +507,7 @@ private fun ModelTaskSetting(
     allowClear: Boolean = false,
     followsChatModel: Boolean = false,
     fallbackModel: Model? = null,
+    preferredInputModality: Modality? = null,
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
     onOpenParams: () -> Unit,
@@ -514,6 +534,7 @@ private fun ModelTaskSetting(
                 null
             },
             clearContentDescription = stringResource(R.string.setting_model_page_restore_follow_chat_model),
+            preferredInputModality = preferredInputModality,
             onClear = onClear,
             onSelect = onSelect,
             trailingContent = {
@@ -574,6 +595,7 @@ private fun ModelPickerRow(
     allowClear: Boolean = false,
     emptyLabel: String? = null,
     clearContentDescription: String? = null,
+    preferredInputModality: Modality? = null,
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
@@ -604,6 +626,7 @@ private fun ModelPickerRow(
                     allowClear = allowClear,
                     emptyLabel = emptyLabel,
                     clearContentDescription = clearContentDescription,
+                    preferredInputModality = preferredInputModality,
                     onClear = onClear,
                     modifier = Modifier.fillMaxWidth(),
                 )

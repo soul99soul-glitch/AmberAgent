@@ -977,8 +977,8 @@
   <string name="setting_model_page_compress_model_desc">用于压缩对话历史的模型</string>
   <string name="setting_model_page_compress_prompt_vars">变量：{content}、{target_tokens}、{additional_context}</string>
   <string name="setting_model_page_ocr_model">视觉识别模型</string>
-  <string name="setting_model_page_ocr_model_desc">当主模型不支持图片时，使用此模型将图片转换为文字描述</string>
-  <string name="setting_model_page_ocr_prompt_vars">变量：图像数据：{images}</string>
+  <string name="setting_model_page_ocr_model_desc">当前聊天模型不能直接读取图片时，用它理解图片内容</string>
+  <string name="setting_model_page_ocr_prompt_vars">变量：图片数据：{images}</string>
   <string name="setting_model_page_prompt">提示词</string>
   <string name="setting_model_page_reset_to_default">重置为默认</string>
   <string name="setting_model_page_suggestion_model">聊天建议模型</string>
@@ -1066,6 +1066,8 @@
   <string name="setting_page_agent_operation_preview_always">常驻</string>
   <string name="setting_page_agent_operation_preview_auto">自动</string>
   <string name="setting_page_agent_operation_preview_hidden">隐藏</string>
+  <string name="setting_page_agent_generative_ui">生成式 UI</string>
+  <string name="setting_page_agent_generative_ui_desc">允许模型在聊天中生成安全的可视化卡片。</string>
   <string name="setting_page_agent_tool_loop_steps">工具循环上限</string>
   <string name="setting_page_agent_tool_loop_steps_desc">单次回复最多调用多少轮工具。</string>
   <string name="setting_page_agent_tool_loop_steps_value">%1$d 步</string>

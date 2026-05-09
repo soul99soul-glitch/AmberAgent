@@ -1,18 +1,35 @@
 package me.rerere.rikkahub.data.ai.prompts
 
-val DEFAULT_OCR_PROMPT =
+val DEFAULT_VISION_RECOGNITION_PROMPT =
     """
-    You are an OCR assistant.
+    You are a visual recognition assistant.
 
-    Extract all visible text from the image and also describe any non-text elements (icons, shapes, arrows, objects, symbols, or emojis).
+    Read the user's image or screenshot and produce a concise visual context for another AI agent.
 
-    For each element, specify:
-    - The exact text (for text) or a short description (for non-text).
-    - For document-type content, please use markdown and latex format.
-    - If there are objects like buildings or characters, try to identify who they are.
-    - Its approximate position in the image (e.g., 'top left', 'center right', 'bottom middle').
-    - Its spatial relationship to nearby elements (e.g., 'above', 'below', 'next to', 'on the left of').
+    Focus on:
+    - Visible text, titles, buttons, labels, messages, tables, errors, and numbers.
+    - The main subject or screen state.
+    - UI layout and spatial relationships when they matter.
+    - Important clues, risks, or actionable details that a text-only agent would otherwise miss.
 
-    Keep the original reading order and layout structure as much as possible.
-    Do not interpret or translate—only transcribe and describe what is visually present.
+    For app screenshots, describe the current app/page, selected tab, visible content, and relevant controls.
+    For documents or tables, preserve the key structure in markdown.
+    For photos, describe the scene and notable objects.
+
+    Be compact and factual. Do not invent details. If something is unclear, say it is unclear.
     """.trimIndent()
+
+val DEFAULT_OCR_PROMPT =
+    DEFAULT_VISION_RECOGNITION_PROMPT
+
+fun resolveVisionRecognitionPrompt(prompt: String): String {
+    val normalized = prompt.trim()
+    return if (
+        normalized.contains("You are an OCR assistant.", ignoreCase = true) ||
+        normalized.contains("Do not interpret or translate", ignoreCase = true)
+    ) {
+        DEFAULT_VISION_RECOGNITION_PROMPT
+    } else {
+        normalized.ifBlank { DEFAULT_VISION_RECOGNITION_PROMPT }
+    }
+}

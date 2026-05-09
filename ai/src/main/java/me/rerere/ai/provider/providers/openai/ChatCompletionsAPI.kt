@@ -531,16 +531,11 @@ class ChatCompletionsAPI(
 
                             is UIMessagePart.Image -> {
                                 add(buildJsonObject {
-                                    part.encodeBase64().onSuccess { encodedImage ->
-                                        put("type", "image_url")
-                                        put("image_url", buildJsonObject {
-                                            put("url", encodedImage.base64)
-                                        })
-                                    }.onFailure {
-                                        it.printStackTrace()
-                                        put("type", "text")
-                                        put("text", "")
-                                    }
+                                    val encodedImage = part.encodeBase64().getOrThrow()
+                                    put("type", "image_url")
+                                    put("image_url", buildJsonObject {
+                                        put("url", encodedImage.base64)
+                                    })
                                 })
                             }
 
@@ -587,16 +582,11 @@ class ChatCompletionsAPI(
 
                             is UIMessagePart.Image -> {
                                 add(buildJsonObject {
-                                    part.encodeBase64().onSuccess { encodedImage ->
-                                        put("type", "image_url")
-                                        put("image_url", buildJsonObject {
-                                            put("url", encodedImage.base64)
-                                        })
-                                    }.onFailure {
-                                        it.printStackTrace()
-                                        put("type", "text")
-                                        put("text", "")
-                                    }
+                                    val encodedImage = part.encodeBase64().getOrThrow()
+                                    put("type", "image_url")
+                                    put("image_url", buildJsonObject {
+                                        put("url", encodedImage.base64)
+                                    })
                                 })
                             }
 

@@ -376,7 +376,9 @@ private fun ChatPageContent(
         liveActivity = scopedLiveSandboxActivity?.withStepProgress(conversation),
     )
     val sandboxTimeline = when (setting.agentRuntime.operationPreviewMode) {
-        AgentOperationPreviewMode.ALWAYS -> rawSandboxTimeline
+        AgentOperationPreviewMode.ALWAYS -> rawSandboxTimeline.ifEmpty {
+            listOf(conversation.idleSandboxActivity())
+        }
         AgentOperationPreviewMode.AUTO -> rawSandboxTimeline.filter { it.isActiveOperation() }
         AgentOperationPreviewMode.HIDDEN -> emptyList()
     }
@@ -653,6 +655,24 @@ private fun ChatPageContent(
                 onOpenQueue = {
                     queuePanelOpen = true
                 },
+                onGenerativeWidgetAction = { instruction ->
+                    val text = instruction.trim()
+                    if (text.isNotEmpty()) {
+                        if (currentChatModel == null) {
+                            toaster.show("请先选择模型", type = ToastType.Error)
+                        } else {
+                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
+                            inputState.editingMessage = null
+                            vm.handleMessageSend(
+                                content = listOf(UIMessagePart.Text(text)),
+                                queueMode = PendingUserMessageMode.FOLLOWUP,
+                            )
+                            if (shouldFollowAfterSend) {
+                                sendFollowRequest += 1
+                            }
+                        }
+                    }
+                },
             )
         }
 
@@ -885,6 +905,19 @@ private fun Conversation.deriveSandboxActivities(
         )
     }
 }
+
+private fun Conversation.idleSandboxActivity(): SandboxActivityUiState =
+    SandboxActivityUiState(
+        toolCallId = "agent-idle-$id",
+        toolName = "agent_idle",
+        title = "Agent 操作预览",
+        status = ToolActivityStatus.RUNNING,
+        conversationId = id.toString(),
+        inputPreview = "等待下一次工具调用",
+        runtime = "standby",
+        stepIndex = null,
+        stepTotal = null,
+    )
 
 private fun SandboxActivityUiState.withStepProgress(conversation: Conversation): SandboxActivityUiState {
     val sandboxTools = conversation.sandboxActivityTools().takeLast(MAX_SANDBOX_TIMELINE_ITEMS)

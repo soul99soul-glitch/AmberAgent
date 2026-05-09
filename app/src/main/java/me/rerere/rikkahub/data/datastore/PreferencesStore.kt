@@ -610,6 +610,7 @@ data class AgentRuntimeSetting(
     val enableTimeReminder: Boolean = false,
     val agentSoulMarkdown: String = DEFAULT_AGENT_SOUL_MARKDOWN,
     val operationPreviewMode: AgentOperationPreviewMode = AgentOperationPreviewMode.ALWAYS,
+    val generativeUi: GenerativeUiSetting = GenerativeUiSetting(),
     val enableLiveStatusNotification: Boolean = true,
     val hideSensitiveLiveStatus: Boolean = true,
     val liveMode: LiveModeSetting = LiveModeSetting(),
@@ -631,6 +632,16 @@ data class AgentRuntimeSetting(
     val speculativeToolExecution: SpeculativeToolExecutionSetting = SpeculativeToolExecutionSetting(),
     val generationRetry: GenerationRetrySetting = GenerationRetrySetting(),
     val keepGenerationAliveInBackground: Boolean = true,
+)
+
+@Serializable
+data class GenerativeUiSetting(
+    val enabled: Boolean = true,
+    val allowModelJavaScript: Boolean = false,
+    val maxWidgetCodeChars: Int = 12_000,
+    val maxWidgetHeightDp: Int = 720,
+    val enableActions: Boolean = true,
+    val enableStructuredRenderers: Boolean = true,
 )
 
 @Serializable

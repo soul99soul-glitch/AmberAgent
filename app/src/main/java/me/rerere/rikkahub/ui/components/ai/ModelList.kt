@@ -115,6 +115,7 @@ fun ModelSelector(
     allowClear: Boolean = false,
     emptyLabel: String? = null,
     clearContentDescription: String? = null,
+    preferredInputModality: Modality? = null,
     onClear: (() -> Unit)? = null,
     onSelect: (Model) -> Unit
 ) {
@@ -240,6 +241,7 @@ fun ModelSelector(
                     currentModel = modelId,
                     providers = filteredProviderSettings,
                     modelType = type,
+                    preferredInputModality = preferredInputModality,
                     onSelect = {
                         onSelect(it)
                         scope.launch {
@@ -293,11 +295,19 @@ private fun Model.compactDisplayName(): String {
         }
 }
 
+private fun List<Model>.prioritizeInputModality(modality: Modality?): List<Model> =
+    if (modality == null) {
+        this
+    } else {
+        sortedWith(compareByDescending<Model> { modality in it.inputModalities }.thenBy { it.displayName })
+    }
+
 @Composable
 private fun ColumnScope.ModelList(
     currentModel: Uuid? = null,
     providers: List<ProviderSetting>,
     modelType: ModelType,
+    preferredInputModality: Modality? = null,
     onSelect: (Model) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -316,21 +326,21 @@ private fun ColumnScope.ModelList(
 
     var searchKeywords by remember { mutableStateOf("") }
 
-    val typeFilteredModelsByProvider = remember(providers, modelType) {
+    val typeFilteredModelsByProvider = remember(providers, modelType, preferredInputModality) {
         providers.associate { provider ->
             provider.id to provider.models.fastFilter {
                 it.type == modelType && !provider.isHiddenCodexOAuthModel(it)
-            }
+            }.prioritizeInputModality(preferredInputModality)
         }
     }
 
-    val searchFilteredModelsByProvider = remember(providers, modelType, searchKeywords) {
+    val searchFilteredModelsByProvider = remember(providers, modelType, preferredInputModality, searchKeywords) {
         providers.associate { provider ->
             provider.id to provider.models.fastFilter {
                 it.type == modelType &&
                     !provider.isHiddenCodexOAuthModel(it) &&
                     it.displayName.contains(searchKeywords, true)
-            }
+            }.prioritizeInputModality(preferredInputModality)
         }
     }
 

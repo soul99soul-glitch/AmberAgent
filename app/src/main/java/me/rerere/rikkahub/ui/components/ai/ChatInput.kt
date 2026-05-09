@@ -78,6 +78,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -119,12 +120,15 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.OpenAIAuthMode
+import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.providers.openai.OpenAICodexOAuthClient
@@ -159,6 +163,9 @@ import me.rerere.rikkahub.data.agent.webview.WebViewLink
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatus
+import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatusKind
+import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -224,7 +231,9 @@ fun ChatInput(
     onOpenQueue: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
+    val providerManager = koinInject<ProviderManager>()
     val assistant = settings.getCurrentAssistant()
+    val coroutineScope = rememberCoroutineScope()
     val workspace = workspaceColors()
     val hazeTintColor = workspace.paper
     val composerShape = RoundedCornerShape(8.dp)
@@ -239,7 +248,20 @@ fun ChatInput(
         if (loading && state.isEmpty()) {
             onCancelClick()
         } else {
-            onSendClick(PendingUserMessageMode.FOLLOWUP)
+            coroutineScope.launch {
+                val blockingIssue = withContext(Dispatchers.IO) {
+                    ImageAttachmentValidator.firstBlockingIssueForSend(
+                        parts = state.getContents(),
+                        settings = settings,
+                        providerManager = providerManager,
+                    )
+                }
+                if (blockingIssue != null) {
+                    toaster.show(blockingIssue.message, type = ToastType.Error)
+                } else {
+                    onSendClick(PendingUserMessageMode.FOLLOWUP)
+                }
+            }
         }
     }
 
@@ -249,7 +271,20 @@ fun ChatInput(
         if (loading && state.isEmpty()) {
             onCancelClick()
         } else {
-            onLongSendClick(if (loading) PendingUserMessageMode.STEER else PendingUserMessageMode.FOLLOWUP)
+            coroutineScope.launch {
+                val blockingIssue = withContext(Dispatchers.IO) {
+                    ImageAttachmentValidator.firstBlockingIssueForSend(
+                        parts = state.getContents(),
+                        settings = settings,
+                        providerManager = providerManager,
+                    )
+                }
+                if (blockingIssue != null) {
+                    toaster.show(blockingIssue.message, type = ToastType.Error)
+                } else {
+                    onLongSendClick(if (loading) PendingUserMessageMode.STEER else PendingUserMessageMode.FOLLOWUP)
+                }
+            }
         }
     }
 
@@ -2199,6 +2234,7 @@ private fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = w
 }
 
 private fun SandboxActivityUiState.operationPreviewKind(): String = when {
+    toolName == "agent_idle" -> "agent"
     toolName == "search_web" -> "web search"
     toolName == "scrape_web" || toolName == "webview_search_open" || toolName == "webview_open" || toolName == "webview_wait_for_load" || toolName == "webview_read" -> "webview"
     toolName.startsWith("icloud_") -> "icloud"
@@ -2210,6 +2246,10 @@ private fun SandboxActivityUiState.operationPreviewKind(): String = when {
 }
 
 private fun SandboxActivityUiState.operationPreviewText(): String {
+    if (toolName == "agent_idle") {
+        return "• ${inputPreview.ifBlank { "等待下一次工具调用" }}\n常驻预览已开启"
+    }
+
     val previewUrl = operationPreviewUrl()
     if (previewUrl != null) {
         return buildString {
@@ -2254,6 +2294,7 @@ private fun SandboxActivityUiState.operationPreviewUrl(): String? {
 }
 
 private fun SandboxActivityUiState.stepProgressText(): String {
+    if (toolName == "agent_idle") return "待命"
     val current = stepIndex
     val total = stepTotal
     return if (current != null && total != null) {
@@ -2752,6 +2793,8 @@ private fun MediaFileInputRow(
     state: ChatInputState,
 ) {
     val filesManager: FilesManager = koinInject()
+    val settings = LocalSettings.current
+    val toaster = LocalToaster.current
     val managedFiles by filesManager.observe().collectAsState(initial = emptyList())
     val displayNameByRelativePath = remember(managedFiles) {
         managedFiles.associate { it.relativePath to it.displayName }
@@ -2777,6 +2820,17 @@ private fun MediaFileInputRow(
         state.messageContent.fastForEach { part ->
             when (part) {
                 is UIMessagePart.Image -> {
+                    val status by produceState(
+                        ImageAttachmentValidator.checking(),
+                        part.url,
+                        settings.chatModelId,
+                        settings.ocrModelId,
+                        settings.providers,
+                    ) {
+                        value = withContext(Dispatchers.IO) {
+                            ImageAttachmentValidator.inspectImage(part, settings)
+                        }
+                    }
                     AttachmentChip(
                         title = attachmentNameFromUrl(
                             url = part.url,
@@ -2785,18 +2839,15 @@ private fun MediaFileInputRow(
                             displayNameByFileName = displayNameByFileName
                         ),
                         leading = {
-                            Surface(
-                                modifier = Modifier.size(34.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ) {
-                                AsyncImage(
-                                    model = part.url,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
+                            ImageAttachmentPreview(
+                                url = part.url,
+                                status = status,
+                                onStatusClick = {
+                                    if (status.blocksSend) {
+                                        toaster.show(status.message, type = ToastType.Error)
+                                    }
+                                }
+                            )
                         },
                         onRemove = { removePart(part, part.url) }
                     )
@@ -2845,6 +2896,52 @@ private fun MediaFileInputRow(
             }
         }
     }
+}
+
+@Composable
+private fun ImageAttachmentPreview(
+    url: String,
+    status: ImageAttachmentStatus,
+    onStatusClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clickable(
+                enabled = status.blocksSend,
+                onClick = onStatusClick,
+            )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Surface(
+            modifier = Modifier
+                .size(8.dp)
+                .align(Alignment.TopEnd),
+            shape = CircleShape,
+            color = status.dotColor(),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {}
+    }
+}
+
+@Composable
+private fun ImageAttachmentStatus.dotColor(): Color = when (kind) {
+    ImageAttachmentStatusKind.CHECKING -> workspaceColors().muted
+    ImageAttachmentStatusKind.READY -> Color(0xFF2EAD5B)
+    ImageAttachmentStatusKind.FALLBACK -> Color(0xFFFFB020)
+    ImageAttachmentStatusKind.BLOCKED -> MaterialTheme.colorScheme.error
 }
 
 @Composable

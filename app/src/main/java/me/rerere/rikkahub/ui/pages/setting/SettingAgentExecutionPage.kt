@@ -104,6 +104,25 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        leadingContent = { Icon(HugeIcons.Sparkles, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_generative_ui_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_generative_ui)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.generativeUi.enabled,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                generativeUi = settings.agentRuntime.generativeUi.copy(enabled = checked)
+                                            )
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    item(
                         leadingContent = { Icon(HugeIcons.Code, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps)) },

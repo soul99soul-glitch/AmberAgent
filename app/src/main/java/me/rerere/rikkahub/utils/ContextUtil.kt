@@ -164,6 +164,56 @@ fun Context.exportImage(
     }
 }
 
+fun Context.exportJpegImage(
+    activity: Activity,
+    bitmap: Bitmap,
+    fileName: String = "AmberAgent_Widget_${System.currentTimeMillis()}.jpg"
+): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                activity,
+                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                1
+            )
+            return false
+        }
+    }
+
+    var outputStream: OutputStream? = null
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+            }
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            outputStream = uri?.let { contentResolver.openOutputStream(it) }
+            val stream = checkNotNull(outputStream) { "Unable to open image output stream" }
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 94, stream)
+        } else {
+            val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            val image = File(imagesDir, fileName)
+            outputStream = FileOutputStream(image)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 94, outputStream)
+
+            val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+            mediaScanIntent.data = Uri.fromFile(image)
+            sendBroadcast(mediaScanIntent)
+        }
+        Log.i(TAG, "JPEG image saved successfully: $fileName")
+        true
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to save JPEG image", e)
+        false
+    } finally {
+        outputStream?.close()
+    }
+}
+
 fun Context.exportImageFile(
     activity: Activity,
     file: File,

@@ -719,9 +719,9 @@
   <string name="setting_model_page_compress_model">Compress Model</string>
   <string name="setting_model_page_compress_model_desc">Model for compressing conversation history</string>
   <string name="setting_model_page_compress_prompt_vars">Variables: {content}, {target_tokens}, {additional_context}</string>
-  <string name="setting_model_page_ocr_model">Vision Model</string>
-  <string name="setting_model_page_ocr_model_desc">Used to convert images to text descriptions when the main model does not support vision</string>
-  <string name="setting_model_page_ocr_prompt_vars">Variables: Image data: {images}</string>
+  <string name="setting_model_page_ocr_model">Visual Recognition Model</string>
+  <string name="setting_model_page_ocr_model_desc">Used to understand images when the current chat model cannot read them directly</string>
+  <string name="setting_model_page_ocr_prompt_vars">Variables: image data: {images}</string>
   <string name="setting_model_page_prompt">Prompt</string>
   <string name="setting_model_page_reset_to_default">Reset to default</string>
   <string name="setting_model_page_suggestion_model">Chat Suggestion Model</string>
@@ -811,6 +811,8 @@
   <string name="setting_page_agent_operation_preview_always">Always</string>
   <string name="setting_page_agent_operation_preview_auto">Auto</string>
   <string name="setting_page_agent_operation_preview_hidden">Hidden</string>
+  <string name="setting_page_agent_generative_ui">Generative UI</string>
+  <string name="setting_page_agent_generative_ui_desc">Allow models to render safe visual cards in the chat timeline.</string>
   <string name="setting_page_agent_tool_loop_steps">Tool loop limit</string>
   <string name="setting_page_agent_tool_loop_steps_desc">Maximum tool rounds in one reply.</string>
   <string name="setting_page_agent_tool_loop_steps_value">%1$d steps</string>

@@ -26,6 +26,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,6 +88,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -174,6 +177,12 @@ private val ActionOptionCuePhrases = listOf(
     "next step",
     "would you like",
 )
+
+private enum class TimelineFollowMode {
+    Idle,
+    FollowingBottom,
+    PausedForUser,
+}
 
 private fun Conversation.latestRenderToken(): String {
     val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
@@ -417,6 +426,7 @@ fun ChatList(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onCancelPendingMessage: (String) -> Unit = {},
     onOpenQueue: () -> Unit = {},
+    onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -464,6 +474,7 @@ fun ChatList(
                 onToggleFavorite = onToggleFavorite,
                 onCancelPendingMessage = onCancelPendingMessage,
                 onOpenQueue = onOpenQueue,
+                onGenerativeWidgetAction = onGenerativeWidgetAction,
             )
         }
     }
@@ -499,13 +510,14 @@ private fun ChatListNormal(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onCancelPendingMessage: (String) -> Unit = {},
     onOpenQueue: () -> Unit = {},
+    onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val activeGeneration = loading || pendingUserMessages.isNotEmpty()
     val activeGenerationState by rememberUpdatedState(activeGeneration)
     var isRecentScroll by remember { mutableStateOf(false) }
-    var autoFollowActive by remember(conversation.id) { mutableStateOf(false) }
-    var userPausedAutoFollow by remember(conversation.id) { mutableStateOf(false) }
+    var followMode by remember(conversation.id) { mutableStateOf(TimelineFollowMode.Idle) }
+    var autoFollowResumeToken by remember(conversation.id) { mutableIntStateOf(0) }
     var programmaticScrollInProgress by remember(conversation.id) { mutableStateOf(false) }
     var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
@@ -524,9 +536,30 @@ private fun ChatListNormal(
     fun endProgrammaticScroll(token: Int) {
         scope.launch {
             withFrameNanos { }
+            delay(120)
             if (programmaticScrollToken == token) {
                 programmaticScrollInProgress = false
             }
+        }
+    }
+
+    fun enterIdleFollowMode() {
+        followMode = TimelineFollowMode.Idle
+        autoFollowResumeToken += 1
+    }
+
+    fun resumeBottomFollow() {
+        followMode = TimelineFollowMode.FollowingBottom
+        autoFollowResumeToken += 1
+    }
+
+    fun pauseAutoFollowTemporarily(
+        mode: TimelineFollowMode,
+        scheduleIdleReturn: Boolean,
+    ) {
+        followMode = mode
+        if (scheduleIdleReturn) {
+            autoFollowResumeToken += 1
         }
     }
 
@@ -609,7 +642,12 @@ private fun ChatListNormal(
         lazyListState = state,
         shouldScroll = {
             settings.displaySetting.enableAutoScroll &&
-                (autoFollowActive || state.isAtTimelineBottom(bottomFollowBufferPx) || state.isNearListEnd())
+                followMode != TimelineFollowMode.PausedForUser &&
+                (
+                    followMode == TimelineFollowMode.FollowingBottom ||
+                        state.isAtTimelineBottom(bottomFollowBufferPx) ||
+                        state.isNearListEnd()
+                    )
         },
         onProgrammaticScrollStart = {
             imeProgrammaticScrollToken = beginProgrammaticScroll()
@@ -626,11 +664,15 @@ private fun ChatListNormal(
         conversation.id,
     ) {
         if (!settings.displaySetting.enableAutoScroll || !activeGeneration) {
-            autoFollowActive = false
-            userPausedAutoFollow = false
-        } else if (!userPausedAutoFollow) {
-            autoFollowActive = state.isAtTimelineBottom(bottomFollowBufferPx) ||
-                state.isNearListEnd(bufferItems = 4)
+            enterIdleFollowMode()
+        } else if (
+            followMode == TimelineFollowMode.Idle &&
+            (
+                state.isAtTimelineBottom(bottomFollowBufferPx) ||
+                    state.isNearListEnd(bufferItems = 4)
+                )
+        ) {
+            resumeBottomFollow()
         }
     }
 
@@ -641,26 +683,58 @@ private fun ChatListNormal(
             settings.displaySetting.enableAutoScroll &&
             latestMessage?.role == MessageRole.USER
         ) {
-            userPausedAutoFollow = false
-            autoFollowActive = true
+            resumeBottomFollow()
         }
     }
 
     LaunchedEffect(state.isScrollInProgress) {
         if (state.isScrollInProgress) {
             isRecentScroll = true
+            if (activeGenerationState && !programmaticScrollInProgress) {
+                pauseAutoFollowTemporarily(
+                    mode = TimelineFollowMode.PausedForUser,
+                    scheduleIdleReturn = true,
+                )
+            }
         } else {
             if (activeGenerationState && !programmaticScrollInProgress) {
                 if (state.isAtTimelineBottom(bottomFollowBufferPx)) {
-                    userPausedAutoFollow = false
-                    autoFollowActive = true
+                    resumeBottomFollow()
                 } else {
-                    userPausedAutoFollow = true
-                    autoFollowActive = false
+                    pauseAutoFollowTemporarily(
+                        mode = TimelineFollowMode.PausedForUser,
+                        scheduleIdleReturn = true,
+                    )
                 }
             }
             delay(1500)
             isRecentScroll = false
+        }
+    }
+
+    LaunchedEffect(
+        autoFollowResumeToken,
+        activeGeneration,
+        settings.displaySetting.enableAutoScroll,
+    ) {
+        if (
+            activeGeneration &&
+            settings.displaySetting.enableAutoScroll &&
+            followMode != TimelineFollowMode.Idle &&
+            followMode != TimelineFollowMode.FollowingBottom
+        ) {
+            val token = autoFollowResumeToken
+            delay(8_000)
+            if (
+                token == autoFollowResumeToken &&
+                activeGenerationState &&
+                followMode != TimelineFollowMode.Idle &&
+                followMode != TimelineFollowMode.FollowingBottom &&
+                !state.isScrollInProgress
+            ) {
+                resumeBottomFollow()
+                scrollToTimelineBottom()
+            }
         }
     }
 
@@ -750,7 +824,10 @@ private fun ChatListNormal(
                 pendingUserMessages.size,
                 loading,
             ) {
-                if (activeGenerationState && autoFollowActive && !userPausedAutoFollow) {
+                if (
+                    activeGenerationState &&
+                    followMode == TimelineFollowMode.FollowingBottom
+                ) {
                     scrollToTimelineBottom()
                 }
             }
@@ -771,6 +848,17 @@ private fun ChatListNormal(
                 .then(
                     if (useTimelineHaze) Modifier.hazeSource(state = hazeState) else Modifier
                 )
+                .pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        if (activeGenerationState && settings.displaySetting.enableAutoScroll) {
+                            pauseAutoFollowTemporarily(
+                                mode = TimelineFollowMode.PausedForUser,
+                                scheduleIdleReturn = true,
+                            )
+                        }
+                    }
+                }
                 .padding(top = innerPadding.calculateTopPadding()),
         ) {
             if (!timelineLoadState.isFullyLoaded) {
@@ -858,6 +946,7 @@ private fun ChatListNormal(
                                     onClearTranslation = onClearTranslation,
                                     onToolApproval = onToolApproval,
                                     onToolAnswer = onToolAnswer,
+                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
                                     lastMessage = isLastMessage,
                                 )
                             }
@@ -939,6 +1028,7 @@ private fun ChatListNormal(
                                         onClearTranslation = onClearTranslation,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
+                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
                                         lastMessage = isLastMessage,
                                     )
                                 }

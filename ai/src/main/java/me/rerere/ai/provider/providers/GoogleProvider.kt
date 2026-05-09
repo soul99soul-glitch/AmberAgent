@@ -669,15 +669,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
 
         is UIMessagePart.Image -> {
-            encodeBase64(false).getOrNull()?.let { encoded ->
-                buildJsonObject {
-                    put("inlineData", buildJsonObject {
-                        put("mimeType", encoded.mimeType)
-                        put("data", encoded.base64)
-                    })
-                    metadata?.get("thoughtSignature")?.jsonPrimitive?.contentOrNull?.let {
-                        put("thoughtSignature", it)
-                    }
+            val encoded = encodeBase64(false).getOrThrow()
+            buildJsonObject {
+                put("inlineData", buildJsonObject {
+                    put("mimeType", encoded.mimeType)
+                    put("data", encoded.base64)
+                })
+                metadata?.get("thoughtSignature")?.jsonPrimitive?.contentOrNull?.let {
+                    put("thoughtSignature", it)
                 }
             }
         }

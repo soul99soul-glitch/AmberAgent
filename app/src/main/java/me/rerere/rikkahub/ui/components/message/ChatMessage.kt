@@ -84,6 +84,8 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
+import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
+import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.MarkdownTopLevelBlock
@@ -130,6 +132,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalSettings.current.displaySetting
@@ -181,6 +184,7 @@ fun ChatMessage(
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
+                onGenerativeWidgetAction = onGenerativeWidgetAction,
             )
 
             message.translation?.let { translation ->
@@ -353,7 +357,8 @@ internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
                     scope = AssistantAffectScope.ASSISTANT,
                     visual = true,
                 )
-                .takeIf(::shouldVirtualizeMarkdownContent)
+                .takeUnless(GenerativeWidgetParser::containsWidgetFence)
+                ?.takeIf(::shouldVirtualizeMarkdownContent)
         }
 }
 
@@ -395,6 +400,10 @@ internal fun buildChatMessageVirtualItems(
                             scope = AssistantAffectScope.ASSISTANT,
                             visual = true,
                         )
+                        if (GenerativeWidgetParser.containsWidgetFence(content)) {
+                            add(ChatMessageVirtualItem.Content(block, index))
+                            return@fastForEachIndexed
+                        }
                         val shouldVirtualize = shouldVirtualizeMarkdownContent(content)
                         val parseResult = if (shouldVirtualize) {
                             cachedMarkdownParseResult(content) ?: parseMarkdownContent(content)
@@ -464,6 +473,7 @@ internal fun ChatMessageVirtualItemContent(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val message = node.currentMessage
     val textStyle = rememberChatMessageTextStyle()
@@ -503,6 +513,7 @@ internal fun ChatMessageVirtualItemContent(
                     model = model,
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
+                    onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
         }
@@ -523,6 +534,7 @@ internal fun ChatMessageVirtualItemContent(
                     model = model,
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
+                    onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
         }
@@ -536,6 +548,7 @@ internal fun ChatMessageVirtualItemContent(
                         assistant = assistant,
                         markdownChild = null,
                         showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
+                        onGenerativeWidgetAction = onGenerativeWidgetAction,
                     )
                 } else {
                     MessagePartsBlock(
@@ -547,6 +560,7 @@ internal fun ChatMessageVirtualItemContent(
                         model = model,
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
+                        onGenerativeWidgetAction = onGenerativeWidgetAction,
                     )
                 }
             }
@@ -560,6 +574,7 @@ internal fun ChatMessageVirtualItemContent(
                     assistant = assistant,
                     markdownChild = item,
                     showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
+                    onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
         }
@@ -593,6 +608,7 @@ private fun VirtualizedAssistantText(
     assistant: Assistant?,
     markdownChild: ChatMessageVirtualItem.MarkdownChild?,
     showAssistantBubble: Boolean,
+    onGenerativeWidgetAction: (String) -> Unit,
 ) {
     val handleClickCitation = rememberClickCitationHandler(fullMessageParts)
     val workspace = workspaceColors()
@@ -626,28 +642,129 @@ private fun VirtualizedAssistantText(
                     border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
-                        MarkdownBlock(
+                        AssistantMarkdownBlockOrWidgets(
                             content = part.text.replaceRegexes(
                                 assistant = assistant,
                                 scope = AssistantAffectScope.ASSISTANT,
                                 visual = true,
                             ),
+                            streaming = false,
                             onClickCitation = handleClickCitation,
+                            onGenerativeWidgetAction = onGenerativeWidgetAction,
                         )
                     }
                 }
             } else {
-                MarkdownBlock(
+                AssistantMarkdownBlockOrWidgets(
                     content = part.text.replaceRegexes(
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
                         visual = true,
                     ),
+                    streaming = false,
                     onClickCitation = handleClickCitation,
+                    onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun AssistantMarkdownBlockOrWidgets(
+    content: String,
+    modifier: Modifier = Modifier,
+    streaming: Boolean,
+    onClickCitation: (String) -> Unit,
+    onGenerativeWidgetAction: (String) -> Unit,
+) {
+    val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
+    if (!generativeUiEnabled || !GenerativeWidgetParser.containsWidgetFence(content)) {
+        MarkdownBlock(
+            content = content,
+            modifier = modifier,
+            onClickCitation = onClickCitation,
+        )
+        return
+    }
+
+    val segments = remember(content, streaming) {
+        GenerativeWidgetParser.parse(content, streaming = streaming)
+    }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        segments.forEachIndexed { index, segment ->
+            key(index) {
+                when (segment) {
+                    is GenerativeWidgetSegment.Text -> MarkdownBlock(
+                        content = segment.content,
+                        onClickCitation = onClickCitation,
+                    )
+
+                    is GenerativeWidgetSegment.Widget -> GenerativeWidgetCard(
+                        widget = segment,
+                        onAction = onGenerativeWidgetAction,
+                    )
+                    GenerativeWidgetSegment.Loading -> GenerativeWidgetLoading()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReasoningWidgetRescue(
+    steps: List<ThinkingStep>,
+    streaming: Boolean,
+    onGenerativeWidgetAction: (String) -> Unit,
+) {
+    val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
+    if (!generativeUiEnabled) return
+
+    val reasoningTexts = remember(steps) {
+        steps.mapNotNull { step ->
+            (step as? ThinkingStep.ReasoningStep)?.reasoning?.reasoning
+        }
+    }
+    val segments = remember(reasoningTexts, streaming) {
+        reasoningTexts.flatMap { reasoning ->
+            val widgetSource = reasoning.reasoningWidgetSource() ?: return@flatMap emptyList()
+            GenerativeWidgetParser.parse(widgetSource, streaming = streaming)
+                .filter { segment ->
+                    segment is GenerativeWidgetSegment.Widget || segment is GenerativeWidgetSegment.Loading
+                }
+        }
+    }
+    if (segments.isEmpty()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 32.dp, top = 4.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        segments.forEachIndexed { index, segment ->
+            key(index) {
+                when (segment) {
+                    is GenerativeWidgetSegment.Widget -> GenerativeWidgetCard(
+                        widget = segment,
+                        onAction = onGenerativeWidgetAction,
+                    )
+
+                    GenerativeWidgetSegment.Loading -> GenerativeWidgetLoading()
+                    is GenerativeWidgetSegment.Text -> Unit
+                }
+            }
+        }
+    }
+}
+
+internal fun String.reasoningWidgetSource(): String? {
+    val marker = Regex("""(?m)^[ \t]*```[ \t]*(?:show-widget|widget|generative-ui)[^\r\n]*""")
+    val match = marker.findAll(this).lastOrNull() ?: return null
+    return substring(match.range.first).take(24_000)
 }
 
 @Composable
@@ -995,6 +1112,7 @@ private fun MessagePartsBlock(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
+    onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val workspace = workspaceColors()
@@ -1019,6 +1137,11 @@ private fun MessagePartsBlock(
 
     // Render parts in original order (group thinking/tool as chain-of-thought)
     val groupedParts = remember(parts) { parts.groupMessageParts() }
+    val hasVisibleWidgetContent = remember(parts) {
+        parts.filterIsInstance<UIMessagePart.Text>().any { part ->
+            GenerativeWidgetParser.hasRenderableWidget(part.text)
+        }
+    }
     groupedParts.fastForEach { block ->
         when (block) {
             is MessagePartBlock.ThinkingBlock -> {
@@ -1053,6 +1176,13 @@ private fun MessagePartsBlock(
                                 }
                             }
                         }
+                    }
+                    if (!hasVisibleWidgetContent) {
+                        ReasoningWidgetRescue(
+                            steps = block.steps,
+                            streaming = loading,
+                            onGenerativeWidgetAction = onGenerativeWidgetAction,
+                        )
                     }
                 }
             }
@@ -1110,24 +1240,28 @@ private fun MessagePartsBlock(
                                             border = BorderStroke(1.dp, workspace.hairline),
                                         ) {
                                             Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
-                                                MarkdownBlock(
+                                                AssistantMarkdownBlockOrWidgets(
                                                     content = part.text.replaceRegexes(
                                                         assistant = assistant,
                                                         scope = AssistantAffectScope.ASSISTANT,
                                                         visual = true,
                                                     ),
+                                                    streaming = loading,
                                                     onClickCitation = handleClickCitation,
+                                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
                                                 )
                                             }
                                         }
                                     } else {
-                                        MarkdownBlock(
+                                        AssistantMarkdownBlockOrWidgets(
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
                                                 scope = AssistantAffectScope.ASSISTANT,
                                                 visual = true,
                                             ),
                                             onClickCitation = handleClickCitation,
+                                            streaming = loading,
+                                            onGenerativeWidgetAction = onGenerativeWidgetAction,
                                             modifier = Modifier
                                                 .animateContentSizeIf(loading)
                                         )

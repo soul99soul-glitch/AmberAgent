@@ -13,11 +13,14 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.hasExplicitReasoningContentField
 import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.lang.reflect.InvocationTargetException
 
 /**
  * Unit tests for ChatCompletionsAPI message building logic.
@@ -71,6 +74,23 @@ class ChatCompletionsAPIMessageTest {
         assertTrue(assistant.containsKey("reasoning_content"))
         assertEquals("", assistant["reasoning_content"]?.jsonPrimitive?.content)
         assertEquals("ok", assistant["content"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `image encoding failure should fail instead of inserting empty text`() {
+        try {
+            invokeBuildMessages(
+                listOf(
+                    UIMessage(
+                        role = MessageRole.USER,
+                        parts = listOf(UIMessagePart.Image("content://missing-image"))
+                    )
+                )
+            )
+            fail("Expected image encoding failure")
+        } catch (error: InvocationTargetException) {
+            assertTrue(error.cause is ImageEncodingException)
+        }
     }
 
     @Test

@@ -666,8 +666,8 @@
   <string name="setting_model_page_compress_model">壓縮模型</string>
   <string name="setting_model_page_compress_model_desc">用於壓縮對話歷程的模型</string>
   <string name="setting_model_page_compress_prompt_vars">變數：{content}、{target_tokens}、{additional_context}</string>
-  <string name="setting_model_page_ocr_model">OCR 模型</string>
-  <string name="setting_model_page_ocr_model_desc">用於圖片光學字元辨識的模型</string>
+  <string name="setting_model_page_ocr_model">視覺識別模型</string>
+  <string name="setting_model_page_ocr_model_desc">目前聊天模型無法直接讀取圖片時，用它理解圖片內容</string>
   <string name="setting_model_page_ocr_prompt_vars">變數：圖片資料：{images}</string>
   <string name="setting_model_page_prompt">提示詞</string>
   <string name="setting_model_page_reset_to_default">重置為預設值</string>

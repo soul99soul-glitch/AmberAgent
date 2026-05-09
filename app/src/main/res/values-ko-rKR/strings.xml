@@ -665,8 +665,8 @@
   <string name="setting_model_page_compress_model">모델 압축</string>
   <string name="setting_model_page_compress_model_desc">대화 기록 압축용 모델</string>
   <string name="setting_model_page_compress_prompt_vars">변수: {content}, {target_tokens}, {additional_context}</string>
-  <string name="setting_model_page_ocr_model">OCR 모델</string>
-  <string name="setting_model_page_ocr_model_desc">이미지에서 광학 문자 인식에 사용되는 모델</string>
+  <string name="setting_model_page_ocr_model">시각 인식 모델</string>
+  <string name="setting_model_page_ocr_model_desc">현재 채팅 모델이 이미지를 직접 읽을 수 없을 때 이미지 내용을 이해합니다</string>
   <string name="setting_model_page_ocr_prompt_vars">변수: 이미지 데이터: {images}</string>
   <string name="setting_model_page_prompt">프롬프트</string>
   <string name="setting_model_page_reset_to_default">기본값으로 재설정</string>

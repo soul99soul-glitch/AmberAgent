@@ -3,6 +3,8 @@ package me.rerere.rikkahub.data.ai
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import me.rerere.ai.provider.Model
+import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -20,6 +22,96 @@ internal fun buildAgentSoulPrompt(soulMarkdown: String) =
             appendLine("</agents_md>")
         }
     }.orEmpty()
+
+internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting): String =
+    buildGenerativeUiPrompt(setting = setting, model = null)
+
+internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting, model: Model?): String =
+    if (!setting.enabled) {
+        ""
+    } else {
+        buildString {
+            appendLine()
+            appendLine("**AmberAgent Generative UI**")
+            appendLine("You may create safe inline visual widgets in the chat timeline with this fenced JSON format:")
+            appendLine("```show-widget")
+            appendLine("""{"title":"流程概览","widget_code":"<svg width=\"100%\" viewBox=\"0 0 680 180\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"24\" y=\"24\" width=\"632\" height=\"132\" rx=\"18\" fill=\"#ffffff\" stroke=\"#e5e7eb\"/><text x=\"48\" y=\"70\" font-size=\"20\" font-weight=\"700\" fill=\"#111827\">流程概览</text><rect x=\"48\" y=\"96\" width=\"128\" height=\"40\" rx=\"12\" fill=\"#eff6ff\"/><text x=\"72\" y=\"122\" font-size=\"14\" fill=\"#1e3a8a\">输入</text><path d=\"M188 116 H258\" stroke=\"#94a3b8\" stroke-width=\"2\" marker-end=\"url(#a)\"/><rect x=\"270\" y=\"96\" width=\"128\" height=\"40\" rx=\"12\" fill=\"#f0fdf4\"/><text x=\"294\" y=\"122\" font-size=\"14\" fill=\"#166534\">处理</text><path d=\"M410 116 H480\" stroke=\"#94a3b8\" stroke-width=\"2\" marker-end=\"url(#a)\"/><rect x=\"492\" y=\"96\" width=\"128\" height=\"40\" rx=\"12\" fill=\"#fff7ed\"/><text x=\"516\" y=\"122\" font-size=\"14\" fill=\"#9a3412\">结果</text><defs><marker id=\"a\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#94a3b8\"/></marker></defs></svg>"}""")
+            appendLine("```")
+            appendLine("- Use widgets only when a process flow, timeline, comparison, risk matrix, architecture map, data chart, status card, or UI mockup helps.")
+            appendLine("- Put explanatory text outside the code fence.")
+            appendLine("- For drawing/diagram/chart requests, do not call tools just to create SVG, HTML, or widget JSON; write the show-widget block directly in visible assistant content.")
+            appendLine("- Do not call eval_javascript, terminal, browser, WebView, or automation tools only to assemble a visual widget.")
+            appendLine("- Keep the JSON object on one line when possible; escape quotes and newlines inside widget_code.")
+            appendLine("- widget_code must be a JSON string and stay under ${setting.maxWidgetCodeChars} characters.")
+            appendLine("- Prefer SVG with width=\"100%\" and viewBox=\"0 0 680 H\" for responsive rendering.")
+            appendLine("- Keep every visible SVG element inside the viewBox: use at least 24px padding, and ensure x + width <= 656 and y + height <= H - 24 for a 680-wide viewBox.")
+            appendLine("- Use 10-16px labels in compact diagrams, wrap long labels manually, and avoid dense text that can overflow small mobile cards.")
+            appendLine("- Never output generic placeholder titles or template-only widget code; every widget must contain real rendered SVG/HTML.")
+            appendLine("- Do not use iframe, object, embed, form, meta, link, base tags, external CDNs, fixed positioning, or navigation.")
+            if (setting.enableActions) {
+                appendLine("- You may add up to 3 optional native actions: \"actions\":[{\"id\":\"explain\",\"label\":\"解释这块\",\"instruction\":\"解释图中的关键节点\"}].")
+            }
+            if (setting.enableStructuredRenderers) {
+                appendLine("- For requests that ask to draw, visualize, or inspect a diagram live, prefer widget_code SVG so the timeline can render progressively while you stream.")
+                appendLine("- Use renderer/spec only for compact chart/diagram data when streaming progressive drawing is less important: {\"title\":\"...\",\"renderer\":\"chart\",\"spec\":{\"type\":\"bar|line|pie\",\"x\":[\"A\"],\"series\":[{\"name\":\"Value\",\"data\":[1]}]}}.")
+                appendLine("- Diagram specs support type \"flow\", \"timeline\", or \"matrix\" with concise labels and details.")
+            }
+            appendLine("- Do not use script tags or inline event handlers; JavaScript will be stripped before rendering.")
+            appendLine("- Do not make decorative widgets that merely repeat the prose answer.")
+            buildGenerativeUiModelGuidance(model).takeIf { it.isNotBlank() }?.let { guidance ->
+                append(guidance)
+            }
+        }
+    }
+
+private fun buildGenerativeUiModelGuidance(model: Model?): String {
+    val name = listOfNotNull(model?.modelId, model?.displayName)
+        .joinToString(" ")
+        .lowercase()
+    if (name.isBlank()) return ""
+    return buildString {
+        appendLine()
+        appendLine("Model-specific widget guidance:")
+        when {
+            "deepseek" in name -> {
+                appendLine("- DeepSeek: keep hidden reasoning extremely brief for visual requests; do not draft coordinates, SVG, JSON, or layout prose in reasoning.")
+                appendLine("- DeepSeek: start visible content within one short sentence, then stream the show-widget block.")
+            }
+
+            "kimi" in name || "moonshot" in name -> {
+                appendLine("- Kimi/Moonshot: do not use function/tool calls to generate SVG. Do not place SVG in tool arguments.")
+                appendLine("- Kimi/Moonshot: output a visible show-widget fence directly; avoid first emitting raw SVG or JavaScript code blocks.")
+            }
+
+            "minimax" in name || "mini-max" in name || "abab" in name || Regex("""\bm\d+(?:\.\d+)?\b""").containsMatchIn(name) -> {
+                appendLine("- MiniMax: prioritize layout safety over detail density. Use one 680-wide viewBox and keep all boxes, dashed groups, arrows, and text inside it.")
+                appendLine("- MiniMax: do not draw elements that extend past the right edge; reduce columns, shorten labels, or increase H instead.")
+                appendLine("- MiniMax: avoid tiny multi-line text inside small boxes; use fewer, larger nodes with concise labels.")
+            }
+
+            "claude" in name || "anthropic" in name -> {
+                appendLine("- Claude: use one polished, self-contained SVG widget; native actions are welcome when they help the user iterate.")
+                appendLine("- Claude: avoid plan/tool detours and long preambles before the fence; put design quality into the visible SVG itself.")
+            }
+
+            "gemini" in name || "google" in name -> {
+                appendLine("- Gemini: keep widget JSON simple and valid; prefer one widget_code SVG over multiple partial code blocks.")
+            }
+
+            "qwen" in name || "dashscope" in name || "aliyun" in name -> {
+                appendLine("- Qwen: avoid wrapping SVG in ordinary markdown code fences; use only the show-widget fence.")
+            }
+
+            "gpt" in name || "openai" in name || Regex("""\bo\d+""").containsMatchIn(name) -> {
+                appendLine("- OpenAI: use visible widget_code directly; do not describe a widget without emitting the fenced JSON.")
+            }
+
+            else -> {
+                appendLine("- This model: prefer visible widget_code SVG directly; avoid hidden drafting and tool calls for static visuals.")
+            }
+        }
+    }
+}
 
 internal fun buildMemoryPrompt(
     title: String,

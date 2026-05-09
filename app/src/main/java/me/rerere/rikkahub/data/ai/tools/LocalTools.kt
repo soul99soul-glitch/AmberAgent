@@ -115,6 +115,7 @@ class LocalTools(
                 For calculations with decimals, use toFixed() to control precision.
                 Console output (log/info/warn/error) is captured and returned in 'logs' field.
                 No DOM or Node.js APIs available.
+                Do not use this tool to create SVG, HTML, charts, diagrams, or generative UI widgets; write those directly in the assistant response.
                 Example: '1 + 2' returns 3; 'const x = 5; x * 2' returns 10.
             """.trimIndent().replace("\n", " "),
             parameters = {

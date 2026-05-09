@@ -7,11 +7,14 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.lang.reflect.InvocationTargetException
 
 /**
  * Unit tests for ClaudeProvider message building logic.
@@ -102,6 +105,23 @@ class ClaudeProviderMessageTest {
         // Verify tool_result contents
         assertEquals("call_1", toolResultBlocks[0]["tool_use_id"]?.jsonPrimitive?.content)
         assertEquals("call_2", toolResultBlocks[1]["tool_use_id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `image encoding failure should fail instead of inserting empty text block`() {
+        try {
+            invokeBuildMessages(
+                listOf(
+                    UIMessage(
+                        role = MessageRole.USER,
+                        parts = listOf(UIMessagePart.Image("content://missing-image"))
+                    )
+                )
+            )
+            fail("Expected image encoding failure")
+        } catch (error: InvocationTargetException) {
+            assertTrue(error.cause is ImageEncodingException)
+        }
     }
 
     @Test

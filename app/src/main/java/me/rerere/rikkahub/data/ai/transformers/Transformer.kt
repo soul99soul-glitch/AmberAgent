@@ -15,6 +15,7 @@ class TransformerContext(
     val assistant: Assistant,
     val settings: Settings,
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
+    val forceImageToText: Boolean = false,
 )
 
 interface MessageTransformer {
@@ -66,8 +67,9 @@ suspend fun List<UIMessage>.transforms(
     assistant: Assistant,
     settings: Settings,
     processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
+    forceImageToText: Boolean = false,
 ): List<UIMessage> {
-    val ctx = TransformerContext(context, model, assistant, settings, processingStatus)
+    val ctx = TransformerContext(context, model, assistant, settings, processingStatus, forceImageToText)
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc).also { output ->
             validateTransformerInvariants(

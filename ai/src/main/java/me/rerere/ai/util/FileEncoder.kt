@@ -23,6 +23,11 @@ data class EncodedImage(
     val mimeType: String
 )
 
+class ImageEncodingException(
+    val imageUrl: String,
+    cause: Throwable
+) : IllegalArgumentException("Failed to encode image: ${cause.message}", cause)
+
 internal enum class ExifTransformType {
     NONE,
     FLIP_HORIZONTAL,
@@ -70,7 +75,10 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
         this.url.startsWith("data:") -> {
             // 从 data URL 提取 mime type
             val mimeType = url.substringAfter("data:").substringBefore(";")
-            EncodedImage(base64 = url, mimeType = mimeType)
+            EncodedImage(
+                base64 = if (withPrefix) url else url.substringAfter("base64,"),
+                mimeType = mimeType
+            )
         }
         this.url.startsWith("http") -> {
             // HTTP URL 无法确定 mime type，默认使用 image/png
@@ -78,6 +86,8 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
         }
         else -> throw IllegalArgumentException("Unsupported URL format: $url")
     }
+}.recoverCatching { error ->
+    throw if (error is ImageEncodingException) error else ImageEncodingException(url, error)
 }
 
 fun UIMessagePart.Video.encodeBase64(withPrefix: Boolean = true): Result<String> = runCatching {

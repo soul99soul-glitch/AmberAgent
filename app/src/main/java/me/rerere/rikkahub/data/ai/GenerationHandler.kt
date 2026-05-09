@@ -16,6 +16,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
@@ -23,6 +24,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
 import me.rerere.ai.core.merge
 import me.rerere.ai.provider.CustomBody
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
@@ -34,12 +36,15 @@ import me.rerere.ai.ui.MessageStreamAccumulator
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
+import me.rerere.ai.util.ImageEncodingException
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
+import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
+import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
@@ -62,6 +67,16 @@ import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
 private const val STREAM_UI_FLUSH_INTERVAL_MS = 50L
+private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS = 5_000L
+private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS = 800
+
+private class GenerativeUiReasoningOnlyStreamException : RuntimeException(
+    "Generative UI stream emitted only hidden reasoning without visible content"
+)
+
+private class GenerativeUiMissingWidgetStreamException : RuntimeException(
+    "Generative UI stream completed without a widget"
+)
 
 internal fun shouldPauseForToolApproval(
     toolDef: Tool?,
@@ -123,9 +138,18 @@ class GenerationHandler(
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
+            val hasResumableTools = messages.lastOrNull()?.getTools()?.any { it.canResumeExecution } == true
+            val directWidgetRequested =
+                GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(settings.agentRuntime.generativeUi, messages)
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
-                addAll(tools)
+                addAll(
+                    if (directWidgetRequested && !hasResumableTools) {
+                        emptyList()
+                    } else {
+                        tools
+                    }
+                )
             }
             val speculativeRunner = if (settings.agentRuntime.speculativeToolExecution.enabled && assistant.streamOutput) {
                 SpeculativeToolRunner(
@@ -344,6 +368,14 @@ class GenerationHandler(
                 appendLine()
                 append(memoryContextPrompt)
             }
+            buildGenerativeUiPrompt(settings.agentRuntime.generativeUi, model).takeIf { it.isNotBlank() }?.let { prompt ->
+                appendLine()
+                append(prompt)
+            }
+            GenerativeUiPlanner.buildPrompt(settings.agentRuntime.generativeUi, messages).takeIf { it.isNotBlank() }?.let { prompt ->
+                appendLine()
+                append(prompt)
+            }
             if (settings.agentRuntime.enableRecentChatsReference) {
                 appendLine()
                 append(buildRecentChatsPrompt(conversationRepo))
@@ -364,17 +396,22 @@ class GenerationHandler(
             contextMessageSize = sessionDefaults.contextMessageSize,
             promptOverheadTokens = ConversationContextPlanner.estimateTokens(listOf(UIMessage.system(system))),
         )
-        val internalMessages = buildList {
-            if (system.isNotBlank()) add(UIMessage.system(prompt = system))
-            addAll(preparedContext.messages)
-        }.transforms(
-            transformers = transformers,
-            context = context,
-            model = model,
-            assistant = assistant,
-            settings = settings,
-            processingStatus = processingStatus,
-        )
+        suspend fun prepareInternalMessages(forceImageToText: Boolean = false): List<UIMessage> =
+            buildList {
+                if (system.isNotBlank()) add(UIMessage.system(prompt = system))
+                addAll(preparedContext.messages)
+            }.transforms(
+                transformers = transformers,
+                context = context,
+                model = model,
+                assistant = assistant,
+                settings = settings,
+                processingStatus = processingStatus,
+                forceImageToText = forceImageToText,
+            )
+
+        val internalMessages = prepareInternalMessages()
+        val canUseVisionFallback = model.inputModalities.contains(Modality.IMAGE) && internalMessages.hasImageParts()
 
         val baseMessages: List<UIMessage> = messages
         var messages: List<UIMessage> = baseMessages
@@ -394,6 +431,10 @@ class GenerationHandler(
                 addAll(model.customBodies)
             }
         )
+        val shouldRequireGenerativeUiWidget =
+            GenerativeUiPlanner.needsVisibleStreamingFallback(settings.agentRuntime.generativeUi, messages)
+        val shouldGuardGenerativeUiReasoningOnly =
+            shouldRequireGenerativeUiWidget
         if (stream) {
             runProviderCallWithRetry(
                 retrySetting = settings.agentRuntime.generationRetry,
@@ -413,25 +454,104 @@ class GenerationHandler(
                         stream = true
                     )
                 )
-                val accumulator = MessageStreamAccumulator(baseMessages, model)
-                var lastFlushAt = 0L
-                providerImpl.streamText(
-                    providerSetting = provider,
-                    messages = internalMessages,
-                    params = params
-                ).collect { chunk ->
-                    accumulator.append(chunk)
-                    val now = System.currentTimeMillis()
-                    if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
-                        messages = accumulator.snapshot()
-                        speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
-                        onUpdateMessages(messages)
-                        lastFlushAt = now
+                suspend fun streamWith(
+                    providerMessages: List<UIMessage>,
+                    streamParams: TextGenerationParams,
+                    guardReasoningOnly: Boolean,
+                    requireWidget: Boolean,
+                ) {
+                    val accumulator = MessageStreamAccumulator(baseMessages, model)
+                    var lastFlushAt = 0L
+                    val streamStartedAt = System.currentTimeMillis()
+                    var visibleTextChars = 0
+                    var reasoningChars = 0
+                    providerImpl.streamText(
+                        providerSetting = provider,
+                        messages = providerMessages,
+                        params = streamParams,
+                    ).collect { chunk ->
+                        val deltaParts = chunk.choices.getOrNull(0)?.let { choice ->
+                            choice.delta?.parts ?: choice.message?.parts
+                        }.orEmpty()
+                        visibleTextChars += deltaParts
+                            .filterIsInstance<UIMessagePart.Text>()
+                            .sumOf { it.text.length }
+                        reasoningChars += deltaParts
+                            .filterIsInstance<UIMessagePart.Reasoning>()
+                            .sumOf { it.reasoning.length }
+                        accumulator.append(chunk)
+                        val now = System.currentTimeMillis()
+                        if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
+                            messages = accumulator.snapshot()
+                            speculativeRunner?.observe(
+                                messages.lastOrNull()?.getTools().orEmpty(),
+                                tools.associateBy { it.name }
+                            )
+                            onUpdateMessages(messages)
+                            lastFlushAt = now
+                        }
+                        if (
+                            guardReasoningOnly &&
+                            visibleTextChars == 0 &&
+                            reasoningChars > 0 &&
+                            (
+                                reasoningChars >= GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS ||
+                                    now - streamStartedAt >= GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS
+                                )
+                        ) {
+                            throw GenerativeUiReasoningOnlyStreamException()
+                        }
+                    }
+                    messages = accumulator.snapshot()
+                    speculativeRunner?.observe(
+                        messages.lastOrNull()?.getTools().orEmpty(),
+                        tools.associateBy { it.name }
+                    )
+                    onUpdateMessages(messages)
+                    if (requireWidget && !messages.hasVisibleWidgetFence()) {
+                        throw GenerativeUiMissingWidgetStreamException()
                     }
                 }
-                messages = accumulator.snapshot()
-                speculativeRunner?.observe(messages.lastOrNull()?.getTools().orEmpty(), tools.associateBy { it.name })
-                onUpdateMessages(messages)
+
+                try {
+                    streamWith(
+                        providerMessages = internalMessages,
+                        streamParams = params,
+                        guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
+                        requireWidget = shouldRequireGenerativeUiWidget,
+                    )
+                } catch (error: Throwable) {
+                    if (
+                        error is GenerativeUiReasoningOnlyStreamException ||
+                        error is GenerativeUiMissingWidgetStreamException
+                    ) {
+                        messages = baseMessages
+                        onUpdateMessages(messages)
+                        processingStatus.value = "正在切换为可见输出模式生成可视化..."
+                        streamWith(
+                            providerMessages = internalMessages.withGenerativeUiVisibleFallbackPrompt(),
+                            streamParams = params.copy(reasoningLevel = ReasoningLevel.OFF),
+                            guardReasoningOnly = false,
+                            requireWidget = false,
+                        )
+                        if (!messages.hasVisibleWidgetFence()) {
+                            messages = messages.withLocalGenerativeUiFallbackWidget(
+                                baseMessages = baseMessages,
+                                model = model,
+                            )
+                            onUpdateMessages(messages)
+                        }
+                        return@runProviderCallWithRetry
+                    }
+                    if (!canUseVisionFallback || !shouldFallbackToVisionRecognition(error)) throw error
+                    processingStatus.value = "正在改用视觉识别模型读取图片..."
+                    streamWith(
+                        providerMessages = prepareInternalMessages(forceImageToText = true),
+                        streamParams = params,
+                        guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
+                        requireWidget = shouldRequireGenerativeUiWidget,
+                    )
+                }
             }
         } else {
             runProviderCallWithRetry(
@@ -452,11 +572,20 @@ class GenerationHandler(
                         stream = false
                     )
                 )
-                val chunk = providerImpl.generateText(
-                    providerSetting = provider,
-                    messages = internalMessages,
-                    params = params,
-                )
+                suspend fun generateWith(providerMessages: List<UIMessage>) =
+                    providerImpl.generateText(
+                        providerSetting = provider,
+                        messages = providerMessages,
+                        params = params,
+                    )
+
+                val chunk = try {
+                    generateWith(internalMessages)
+                } catch (error: Throwable) {
+                    if (!canUseVisionFallback || !shouldFallbackToVisionRecognition(error)) throw error
+                    processingStatus.value = "正在改用视觉识别模型读取图片..."
+                    generateWith(prepareInternalMessages(forceImageToText = true))
+                }
                 messages = baseMessages.handleMessageChunk(chunk = chunk, model = model)
                 chunk.usage?.let { usage ->
                     messages = messages.mapIndexed { index, message ->
@@ -520,6 +649,147 @@ class GenerationHandler(
                 retryAttempt++
             }
         }
+    }
+
+    private fun List<UIMessage>.hasImageParts(): Boolean =
+        any { message -> message.parts.any { it is UIMessagePart.Image && it.url.isNotBlank() } }
+
+    private fun List<UIMessage>.hasVisibleWidgetFence(): Boolean =
+        lastOrNull { it.role == MessageRole.ASSISTANT }
+            ?.parts
+            ?.filterIsInstance<UIMessagePart.Text>()
+            ?.any { GenerativeWidgetParser.hasRenderableWidget(it.text) } == true
+
+    private fun List<UIMessage>.withGenerativeUiVisibleFallbackPrompt(): List<UIMessage> {
+        val instruction = UIMessage.system(
+            prompt = """
+            **Visible Generative UI Retry**
+            The previous stream did not produce a visible widget. Reply in visible content immediately.
+            First output one valid fenced widget block with widget_code, then at most one short sentence.
+            Use this exact form:
+            ```show-widget
+            {"title":"可视化草图","widget_code":"<svg width=\"100%\" viewBox=\"0 0 680 260\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"24\" y=\"24\" width=\"632\" height=\"212\" rx=\"18\" fill=\"#ffffff\" stroke=\"#e5e7eb\"/><text x=\"48\" y=\"64\" font-size=\"20\" font-weight=\"700\" fill=\"#111827\">可视化结果</text><rect x=\"48\" y=\"96\" width=\"160\" height=\"74\" rx=\"14\" fill=\"#eff6ff\" stroke=\"#bfdbfe\"/><text x=\"72\" y=\"140\" font-size=\"15\" fill=\"#1e3a8a\">起点</text><path d=\"M220 133 H300\" stroke=\"#94a3b8\" stroke-width=\"3\" marker-end=\"url(#arrow)\"/><rect x=\"312\" y=\"96\" width=\"160\" height=\"74\" rx=\"14\" fill=\"#f0fdf4\" stroke=\"#bbf7d0\"/><text x=\"336\" y=\"140\" font-size=\"15\" fill=\"#166534\">过程</text><path d=\"M484 133 H552\" stroke=\"#94a3b8\" stroke-width=\"3\" marker-end=\"url(#arrow)\"/><circle cx=\"600\" cy=\"133\" r=\"36\" fill=\"#fff7ed\" stroke=\"#fed7aa\"/><text x=\"582\" y=\"140\" font-size=\"15\" fill=\"#9a3412\">结果</text><defs><marker id=\"arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#94a3b8\"/></marker></defs></svg>"}
+            ```
+            Replace the labels with the actual answer content.
+            Keep the SVG small, static, and self-contained.
+            Do not use renderer/spec in this retry because the timeline needs widget_code for streaming partial render.
+            Do not put widget JSON, SVG, HTML, or renderer/spec inside hidden reasoning.
+            Do not output Markdown-only prose for this retry.
+            """.trimIndent()
+        )
+        val first = firstOrNull()
+        return if (first?.role == MessageRole.SYSTEM) {
+            listOf(first, instruction) + drop(1)
+        } else {
+            listOf(instruction) + this
+        }
+    }
+
+    private fun List<UIMessage>.withLocalGenerativeUiFallbackWidget(
+        baseMessages: List<UIMessage>,
+        model: Model,
+    ): List<UIMessage> {
+        val fallbackText = buildLocalGenerativeUiFallbackWidget(labels = fallbackWidgetLabels(baseMessages))
+        val lastAssistantIndex = indexOfLast { it.role == MessageRole.ASSISTANT }
+        if (lastAssistantIndex < 0) {
+            return this + UIMessage(
+                role = MessageRole.ASSISTANT,
+                modelId = model.id,
+                parts = listOf(UIMessagePart.Text(fallbackText)),
+            )
+        }
+        return mapIndexed { index, message ->
+            if (index == lastAssistantIndex) {
+                message.copy(parts = message.parts + UIMessagePart.Text("\n\n$fallbackText"))
+            } else {
+                message
+            }
+        }
+    }
+
+    private fun List<UIMessage>.fallbackWidgetLabels(baseMessages: List<UIMessage>): List<String> {
+        val assistantLines = lastOrNull { it.role == MessageRole.ASSISTANT }
+            ?.parts
+            ?.filterIsInstance<UIMessagePart.Text>()
+            ?.joinToString("\n") { it.text }
+            ?.lineSequence()
+            ?.mapNotNull(::cleanFallbackWidgetLine)
+            ?.distinct()
+            ?.take(4)
+            ?.toList()
+            .orEmpty()
+        if (assistantLines.isNotEmpty()) return assistantLines
+
+        val userHint = baseMessages.lastOrNull { it.role == MessageRole.USER }
+            ?.parts
+            ?.filterIsInstance<UIMessagePart.Text>()
+            ?.joinToString(" ") { it.text }
+            ?.replace(Regex("""\s+"""), " ")
+            ?.trim()
+            ?.take(26)
+            ?.takeIf { it.isNotBlank() }
+        return listOfNotNull("需求", userHint, "结构化", "结论").take(4)
+    }
+
+    private fun cleanFallbackWidgetLine(line: String): String? {
+        val compact = line
+            .trim()
+            .removePrefix("-")
+            .removePrefix("*")
+            .removePrefix("•")
+            .removePrefix("·")
+            .replace(Regex("""^\d+[.)、]\s*"""), "")
+            .replace(Regex("""[#*_`>]+"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        if (compact.length < 2) return null
+        if (compact.startsWith("```")) return null
+        if (compact.contains("widget_code") || compact.contains("renderer")) return null
+        if (GenerativeWidgetParser.containsWidgetFence(compact)) return null
+        return compact.take(30)
+    }
+
+    private fun buildLocalGenerativeUiFallbackWidget(labels: List<String>): String {
+        val nodes = buildJsonArray {
+            labels.take(4).forEach { label ->
+                add(buildJsonObject { put("label", label) })
+            }
+        }
+        val widget = buildJsonObject {
+            put("title", "可视化摘要")
+            put("renderer", "diagram")
+            put(
+                "spec",
+                buildJsonObject {
+                    put("type", "flow")
+                    put("nodes", nodes)
+                }
+            )
+        }
+        return """
+        ```show-widget
+        $widget
+        ```
+        """.trimIndent()
+    }
+
+    private fun shouldFallbackToVisionRecognition(error: Throwable): Boolean {
+        if (error is ImageEncodingException) return true
+        val message = generateSequence(error) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase()
+        return listOf(
+            "image",
+            "vision",
+            "modalit",
+            "unsupported url",
+            "unsupported file",
+            "invalid file",
+            "invalid mime",
+            "decode",
+            "base64"
+        ).any { it in message }
     }
 
     fun translateText(

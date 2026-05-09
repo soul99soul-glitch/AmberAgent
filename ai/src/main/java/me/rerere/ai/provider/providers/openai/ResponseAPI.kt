@@ -503,14 +503,9 @@ class ResponseAPI(
 
                             is UIMessagePart.Image -> {
                                 add(buildJsonObject {
-                                    part.encodeBase64().onSuccess { encodedImage ->
-                                        put("type", if (role == MessageRole.USER) "input_image" else "output_image")
-                                        put("image_url", encodedImage.base64)
-                                    }.onFailure {
-                                        it.printStackTrace()
-                                        put("type", "input_text")
-                                        put("text", "Error: Failed to encode image to base64")
-                                    }
+                                    val encodedImage = part.encodeBase64().getOrThrow()
+                                    put("type", if (role == MessageRole.USER) "input_image" else "output_image")
+                                    put("image_url", encodedImage.base64)
                                 })
                             }
 

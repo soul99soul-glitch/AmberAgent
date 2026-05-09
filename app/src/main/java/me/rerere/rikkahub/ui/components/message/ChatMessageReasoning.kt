@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
@@ -62,6 +63,10 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
+
+private const val REASONING_PREVIEW_CHAR_LIMIT = 1_600
+private const val REASONING_EXPANDED_STREAM_CHAR_LIMIT = 6_000
+private const val REASONING_EXPANDED_FINAL_CHAR_LIMIT = 18_000
 
 enum class ReasoningCardState(val expanded: Boolean) {
     Collapsed(false),
@@ -100,11 +105,10 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
         )
     }
 
-    LaunchedEffect(reasoning.reasoning, loading) {
+    LaunchedEffect(loading) {
         if (loading) {
             if (!state.expandState.expanded && settings.displaySetting.showThinkingContent)
                 state.expandState = ReasoningCardState.Preview
-            scrollState.animateScrollTo(scrollState.maxValue)
         } else {
             if (state.expandState.expanded) {
                 state.expandState = if (settings.displaySetting.autoCloseThinking)
@@ -112,6 +116,20 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
                 else
                     ReasoningCardState.Expanded
             }
+        }
+    }
+
+    LaunchedEffect(reasoning.reasoning.length, loading, state.expandState) {
+        if (
+            loading &&
+            state.expandState.expanded &&
+            !reasoning.reasoning.isReasoningTailTrimmed(
+                loading = true,
+                expanded = state.expandState == ReasoningCardState.Expanded,
+            )
+        ) {
+            withFrameNanos { }
+            scrollState.scrollTo(scrollState.maxValue)
         }
     }
 
@@ -137,6 +155,12 @@ private fun ReasoningContent(
 ) {
     val workspace = workspaceColors()
     val isPreview = expandState == ReasoningCardState.Preview
+    val displayText = remember(reasoning.reasoning, reasoning.finishedAt, expandState) {
+        reasoning.reasoning.toDisplayReasoningText(
+            loading = reasoning.finishedAt == null,
+            expanded = expandState == ReasoningCardState.Expanded,
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -179,7 +203,7 @@ private fun ReasoningContent(
                 border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 MarkdownBlock(
-                    content = reasoning.reasoning.replaceRegexes(
+                    content = displayText.replaceRegexes(
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
                         visual = true,
@@ -289,6 +313,33 @@ private fun Int.formatReasoningBudget(): String {
     return if (this >= 1_000) "${this / 1_000}K" else toString()
 }
 
+internal fun String.toDisplayReasoningText(
+    loading: Boolean,
+    expanded: Boolean,
+): String {
+    val limit = reasoningDisplayLimit(loading = loading, expanded = expanded)
+    if (length <= limit) return this
+    val omitted = length - limit
+    return "… 已省略前 $omitted 字，以保持流式思考界面流畅。\n\n" + takeLast(limit)
+}
+
+internal fun String.isReasoningTailTrimmed(
+    loading: Boolean,
+    expanded: Boolean,
+): Boolean = length > reasoningDisplayLimit(loading = loading, expanded = expanded)
+
+private fun reasoningDisplayLimit(
+    loading: Boolean,
+    expanded: Boolean,
+): Int {
+    val limit = when {
+        loading && expanded -> REASONING_EXPANDED_STREAM_CHAR_LIMIT
+        loading -> REASONING_PREVIEW_CHAR_LIMIT
+        expanded -> REASONING_EXPANDED_FINAL_CHAR_LIMIT
+        else -> REASONING_PREVIEW_CHAR_LIMIT
+    }
+    return limit
+}
 
 @Composable
 private fun ReasoningTitle(title: String) {

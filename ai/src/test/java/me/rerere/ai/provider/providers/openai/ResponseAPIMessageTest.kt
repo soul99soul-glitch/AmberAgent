@@ -13,10 +13,12 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
@@ -124,6 +126,23 @@ class ResponseAPIMessageTest {
         val output2 = functionOutputs[1].jsonObject
         assertEquals("call_2", output2["call_id"]?.jsonPrimitive?.content)
         assertTrue(output2["output"]?.jsonPrimitive?.content?.contains("4") == true)
+    }
+
+    @Test
+    fun `image encoding failure should fail instead of inserting synthetic error text`() {
+        try {
+            invokeBuildMessages(
+                listOf(
+                    UIMessage(
+                        role = MessageRole.USER,
+                        parts = listOf(UIMessagePart.Image("content://missing-image"))
+                    )
+                )
+            )
+            fail("Expected image encoding failure")
+        } catch (error: ImageEncodingException) {
+            assertTrue(error.message?.contains("Failed to encode image") == true)
+        }
     }
 
     @Test

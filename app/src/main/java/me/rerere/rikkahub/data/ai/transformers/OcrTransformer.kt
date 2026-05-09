@@ -15,6 +15,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.cache.LruCache
 import me.rerere.common.cache.SingleFileCacheStore
+import me.rerere.rikkahub.data.ai.prompts.resolveVisionRecognitionPrompt
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -25,12 +26,14 @@ import kotlin.time.Duration.Companion.days
 
 private const val TAG = "VisionTransformer"
 
+class VisualRecognitionException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
+
 object OcrTransformer : InputMessageTransformer, KoinComponent {
     private val cache by lazy {
         val context = get<Context>()
         val json = Json { allowStructuredMapKeys = true }
         val store = SingleFileCacheStore(
-            file = File(context.cacheDir, "ocr_cache.json"),
+            file = File(context.cacheDir, "vision_cache.json"),
             keySerializer = String.serializer(),
             valueSerializer = String.serializer(),
             json = json
@@ -48,12 +51,12 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        if (ctx.model.inputModalities.contains(Modality.IMAGE)) {
+        if (ctx.model.inputModalities.contains(Modality.IMAGE) && !ctx.forceImageToText) {
             return messages
         }
 
         val hasImages = messages.any { message ->
-            message.parts.any { it is UIMessagePart.Image && it.url.startsWith("file:") }
+            message.parts.any { it is UIMessagePart.Image && it.url.isNotBlank() }
         }
         if (!hasImages) return messages
 
@@ -64,8 +67,8 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                     message.copy(
                         parts = message.parts.map { part ->
                             when {
-                                part is UIMessagePart.Image && part.url.startsWith("file:") -> {
-                                    UIMessagePart.Text(performOcr(part))
+                                part is UIMessagePart.Image && part.url.isNotBlank() -> {
+                                    UIMessagePart.Text(performImageRecognition(part))
                                 }
 
                                 else -> part
@@ -79,43 +82,54 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
     }
 
-    suspend fun performOcr(part: UIMessagePart.Image): String = runCatching {
-        // Check cache first
-        cache.get(part.url)?.let { cachedResult ->
+    suspend fun performImageRecognition(part: UIMessagePart.Image): String {
+        val settings = get<SettingsStore>().settingsFlow.value
+        val model = settings.findModelById(settings.ocrModelId)
+            ?: throw VisualRecognitionException("请先配置视觉识别模型")
+        if (Modality.IMAGE !in model.inputModalities) {
+            throw VisualRecognitionException("视觉识别模型不支持图片输入")
+        }
+        val providerSetting = model.findProvider(settings.providers)
+            ?: throw VisualRecognitionException("视觉识别模型的提供商不可用")
+        val prompt = resolveVisionRecognitionPrompt(settings.ocrPrompt)
+        val cacheKey = "${part.url}|${model.id}|${prompt.hashCode()}"
+
+        cache.get(cacheKey)?.let { cachedResult ->
             Log.i(TAG, "performImageToText: Using cached result for ${part.url}")
             return cachedResult
         }
 
-        val settings = get<SettingsStore>().settingsFlow.value
-        val model = settings.findModelById(settings.ocrModelId) ?: return "[Image]"
-        val providerSetting = model.findProvider(settings.providers) ?: return "[Image]"
         val provider = get<ProviderManager>().getProviderByType(providerSetting)
-        val result = provider.generateText(
-            providerSetting = providerSetting,
-            messages = listOf(
-                UIMessage.system(settings.ocrPrompt),
-                UIMessage(
-                    role = MessageRole.USER,
-                    parts = listOf(UIMessagePart.Image(part.url))
-                )
-            ),
-            params = TextGenerationParams(
-                model = model,
-            ),
-        )
-        val content = result.choices[0].message?.toText() ?: "[ERROR, Vision model failed]"
+        val result = runCatching {
+            provider.generateText(
+                providerSetting = providerSetting,
+                messages = listOf(
+                    UIMessage.system(prompt),
+                    UIMessage(
+                        role = MessageRole.USER,
+                        parts = listOf(UIMessagePart.Image(part.url))
+                    )
+                ),
+                params = TextGenerationParams(
+                    model = model,
+                ),
+            )
+        }.getOrElse {
+            throw VisualRecognitionException("视觉识别模型调用失败：${it.message}", it)
+        }
+        val content = result.choices[0].message?.toText()?.trim().orEmpty()
+        if (content.isBlank()) {
+            throw VisualRecognitionException("视觉识别模型没有返回可用内容")
+        }
         Log.i(TAG, "performImageToText: $content")
-        val ocrResult = """
-            <image_file_ocr>
-               $content
-            </image_file_ocr>
-            * The image_file_ocr tag contains a description of an image that the user uploaded to you, not the user's prompt.
+        val visionResult = """
+            <image_context>
+            $content
+            </image_context>
+            * The image_context tag contains visual recognition results for an image uploaded by the user, not the user's prompt.
         """.trimIndent()
 
-        // Cache the result
-        cache.put(part.url, ocrResult)
-        return ocrResult
-    }.getOrElse {
-        "[ERROR, OCR failed: $it]"
+        cache.put(cacheKey, visionResult)
+        return visionResult
     }
 }
