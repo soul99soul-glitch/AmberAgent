@@ -23,7 +23,7 @@ import org.koin.core.component.get
 import java.io.File
 import kotlin.time.Duration.Companion.days
 
-private const val TAG = "OcrTransformer"
+private const val TAG = "VisionTransformer"
 
 object OcrTransformer : InputMessageTransformer, KoinComponent {
     private val cache by lazy {
@@ -82,7 +82,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
     suspend fun performOcr(part: UIMessagePart.Image): String = runCatching {
         // Check cache first
         cache.get(part.url)?.let { cachedResult ->
-            Log.i(TAG, "performOcr: Using cached result for ${part.url}")
+            Log.i(TAG, "performImageToText: Using cached result for ${part.url}")
             return cachedResult
         }
 
@@ -103,8 +103,8 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                 model = model,
             ),
         )
-        val content = result.choices[0].message?.toText() ?: "[ERROR, OCR failed]"
-        Log.i(TAG, "performOcr: $content")
+        val content = result.choices[0].message?.toText() ?: "[ERROR, Vision model failed]"
+        Log.i(TAG, "performImageToText: $content")
         val ocrResult = """
             <image_file_ocr>
                $content
