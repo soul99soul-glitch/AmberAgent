@@ -31,6 +31,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,15 +42,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -85,6 +91,15 @@ import me.rerere.rikkahub.ui.components.ai.SandboxActivitySheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+import me.rerere.rikkahub.ui.components.workspace.WorkspaceFilePreview
+import me.rerere.rikkahub.ui.components.workspace.WorkspaceFileSheet
+import me.rerere.rikkahub.ui.components.workspace.WorkspaceFileVM
+import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import me.rerere.rikkahub.data.agent.office.radar.SlidesPreviewBus
+import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizeStatus
+import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
+import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
+import me.rerere.rikkahub.ui.components.message.ExpandedGenerativeWidgetDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
@@ -110,6 +125,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val filesManager: FilesManager = koinInject()
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
+    var showWorkspaceSheet by remember { mutableStateOf(false) }
+    var showFavoritesLiveSheet by remember { mutableStateOf(false) }
+    var previewFilePath by remember { mutableStateOf<String?>(null) }
+    val workspaceManager: WorkspaceManager = koinInject()
+
+    // Clear any leftover slides preview when this chat page leaves composition
+    DisposableEffect(Unit) {
+        onDispose { SlidesPreviewBus.dismiss() }
+    }
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
@@ -258,6 +282,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         settings = setting,
                         drawerState = drawerState,
                         drawerWidth = drawerWidth,
+                        onOpenWorkspace = { showWorkspaceSheet = true },
+                        onOpenFavoritesLive = { showFavoritesLiveSheet = true },
                     )
                 }
             ) {
@@ -296,6 +322,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         settings = setting,
                         drawerState = drawerState,
                         drawerWidth = drawerWidth,
+                        onOpenWorkspace = { showWorkspaceSheet = true },
+                        onOpenFavoritesLive = { showFavoritesLiveSheet = true },
                     )
                 }
             ) {
@@ -324,6 +352,83 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             BackHandler(drawerState.isOpen) {
                 scope.launch { drawerState.close() }
             }
+        }
+    }
+    if (showWorkspaceSheet) {
+        val workspaceCtx = LocalContext.current
+        val workspaceVm = viewModel<WorkspaceFileVM>(
+            factory = object : ViewModelProvider.Factory {
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    @Suppress("UNCHECKED_CAST")
+                    return WorkspaceFileVM(workspaceCtx) as T
+                }
+            }
+        )
+        WorkspaceFileSheet(
+            vm = workspaceVm,
+            onDismiss = { showWorkspaceSheet = false },
+            onOpenFile = { path ->
+                if (path.endsWith(".json") || path.contains("/slides/") || path.contains("/ppt/")) {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val content = workspaceManager.readText(path)
+                            if (content.length > 60_000) return@launch
+                            if (content.trimStart().startsWith("[")) {
+                                val json = kotlinx.serialization.json.Json
+                                val parsed = json.parseToJsonElement(content)
+                                if (parsed is kotlinx.serialization.json.JsonArray && parsed.isNotEmpty()) {
+                                    val firstObj = parsed.firstOrNull()
+                                    val title = (firstObj as? kotlinx.serialization.json.JsonObject)
+                                        ?.get("title")
+                                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+                                        ?: path.substringAfterLast('/')
+                                    SlidesPreviewBus.preview(title, content)
+                                    return@launch
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+                previewFilePath = path
+            },
+        )
+    }
+    if (showFavoritesLiveSheet) {
+        FavoritesLiveSheet(
+            navController = navController,
+            onDismiss = { showFavoritesLiveSheet = false },
+        )
+    }
+    previewFilePath?.let { path ->
+        WorkspaceFilePreview(
+            relativePath = path,
+            workspaceManager = workspaceManager,
+            onDismiss = { previewFilePath = null },
+        )
+    }
+    val slidesRequest by SlidesPreviewBus.request.collectAsStateWithLifecycle()
+    slidesRequest?.let { req ->
+        val syntheticWidget = remember(req.title, req.specJson) {
+            val escapedTitle = req.title
+                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+            GenerativeWidgetSegment.Widget(
+                title = req.title,
+                widgetCode = "<svg width=\"100%\" viewBox=\"0 0 680 100\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"100%\" height=\"100%\" fill=\"#f0fdf4\" rx=\"10\" stroke=\"#bbf7d0\"/><text x=\"340\" y=\"52\" text-anchor=\"middle\" font-size=\"16\" fill=\"#166534\">${escapedTitle}</text><text x=\"340\" y=\"78\" text-anchor=\"middle\" font-size=\"13\" fill=\"#86efac\">${req.specJson.length} 字符 · 点击展开浏览</text></svg>",
+                complete = true,
+                renderer = "slides",
+                specJson = req.specJson,
+            )
+        }
+        val sanitized = remember(req.specJson) {
+            GenerativeWidgetSanitizer.sanitize(syntheticWidget.widgetCode, setting.agentRuntime.generativeUi)
+        }
+        if (sanitized.status == GenerativeWidgetSanitizeStatus.READY) {
+            ExpandedGenerativeWidgetDialog(
+                widget = syntheticWidget,
+                html = sanitized.html,
+                setting = setting.agentRuntime.generativeUi,
+                onDismissRequest = { SlidesPreviewBus.dismiss() },
+            )
         }
     }
 }

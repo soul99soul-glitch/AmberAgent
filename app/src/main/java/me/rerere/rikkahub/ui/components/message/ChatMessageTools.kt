@@ -513,16 +513,18 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val scope = rememberCoroutineScope()
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
-    val arguments = tool.inputAsJson()
+    val arguments = remember(tool.input) { tool.inputAsJson() }
     val memoryAction = arguments.getStringContent("action")
-    val content = if (tool.isExecuted) {
-        runCatching {
-            JsonInstant.parseToJsonElement(
-                tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-            )
-        }.getOrElse { JsonObject(emptyMap()) }
-    } else {
-        null
+    val content = remember(tool.isExecuted, tool.output) {
+        if (tool.isExecuted) {
+            runCatching {
+                JsonInstant.parseToJsonElement(
+                    tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+                )
+            }.getOrElse { JsonObject(emptyMap()) }
+        } else {
+            null
+        }
     }
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     val title = toolDisplayTitle(tool.toolName, arguments, memoryAction)

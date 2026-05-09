@@ -155,6 +155,7 @@ object GenerativeWidgetParser {
         val code = when (renderer) {
             "vchart", "slides" -> renderedCode ?: rawWidgetCode
             "html" -> rawWidgetCode
+            null -> rawWidgetCode  // old widgets without renderer field
             else -> renderedCode ?: rawWidgetCode
         }
         val renderableCode = code?.takeIf { isRenderableWidgetCode(it, complete = true) } ?: return null
@@ -169,15 +170,66 @@ object GenerativeWidgetParser {
     }
 
     private fun parsePartialWidget(jsonText: String): GenerativeWidgetSegment.Widget? {
+        // If widget_code is present (SVG/HTML widgets), use it for streaming preview
         val code = extractJsonStringValue(jsonText, "widget_code", allowUnclosed = true)
             ?.takeIf { it.isNotBlank() }
-            ?: return null
-        if (!isRenderableWidgetCode(code, complete = false)) return null
-        return GenerativeWidgetSegment.Widget(
-            title = normalizeWidgetTitle(extractJsonStringValue(jsonText, "title", allowUnclosed = true)),
-            widgetCode = code,
-            complete = false,
-        )
+        if (code != null) {
+            if (!isRenderableWidgetCode(code, complete = false)) return null
+            return GenerativeWidgetSegment.Widget(
+                title = normalizeWidgetTitle(extractJsonStringValue(jsonText, "title", allowUnclosed = true)),
+                widgetCode = code,
+                complete = false,
+            )
+        }
+        // For renderer-based widgets (slides, vchart) that have no widget_code during streaming,
+        // generate a placeholder card so the user sees progress instead of a generic loading spinner.
+        val renderer = extractJsonStringValue(jsonText, "renderer", allowUnclosed = true)
+            ?.lowercase()?.takeIf { it in setOf("vchart", "slides") }
+        if (renderer != null) {
+            val title = normalizeWidgetTitle(extractJsonStringValue(jsonText, "title", allowUnclosed = true))
+            // For slides, try to extract completed slide objects from the partial JSON array
+            // so the user sees a progressively updating preview during streaming.
+            if (renderer == "slides") {
+                val partialSlides = extractPartialSlides(jsonText)
+                if (partialSlides.isNotEmpty()) {
+                    val count = partialSlides.size
+                    val countLabel = if (count >= 24) "24+ 页" else "$count 页"
+                    val slidePreview = buildString {
+                        appendLine("<svg width=\"100%\" viewBox=\"0 0 680 ${80 + count * 30}\" xmlns=\"http://www.w3.org/2000/svg\">")
+                        appendLine("<rect width=\"100%\" height=\"100%\" fill=\"#f0fdf4\" rx=\"10\" stroke=\"#bbf7d0\"/>")
+                        appendLine("<text x=\"340\" y=\"36\" text-anchor=\"middle\" font-size=\"15\" fill=\"#166534\">生成幻灯片: $countLabel</text>")
+                        partialSlides.take(5).forEachIndexed { i, slide ->
+                            val slideTitle = (slide as? kotlinx.serialization.json.JsonObject)
+                                ?.get("title")
+                                ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+                                ?: "第${i+1}页"
+                            val escaped = slideTitle.replace("&", "&amp;").replace("<", "&lt;")
+                            appendLine("<text x=\"48\" y=\"${72 + i * 24}\" font-size=\"13\" fill=\"#065f46\">${i+1}. $escaped</text>")
+                        }
+                        if (count > 5) {
+                            appendLine("<text x=\"340\" y=\"${72 + 5 * 24 + 12}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#86efac\">还有 ${count - 5} 页...</text>")
+                        }
+                        appendLine("</svg>")
+                    }
+                    return GenerativeWidgetSegment.Widget(
+                        title = title,
+                        widgetCode = slidePreview,
+                        complete = false,
+                        renderer = renderer,
+                    )
+                }
+            }
+            val label = if (renderer == "slides") "幻灯片" else "图表"
+            val titleText = title ?: "正在生成"
+            val placeholder = """<svg width="100%" viewBox="0 0 680 100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f9ff" rx="10" stroke="#bae6fd"/><text x="340" y="42" text-anchor="middle" font-size="15" fill="#0369a1">生成$label...</text><text x="340" y="68" text-anchor="middle" font-size="13" fill="#7dd3fc">$titleText</text></svg>"""
+            return GenerativeWidgetSegment.Widget(
+                title = title,
+                widgetCode = placeholder,
+                complete = false,
+                renderer = renderer,
+            )
+        }
+        return null
     }
 
     private fun normalizeWidgetTitle(title: String?): String? =
@@ -234,6 +286,61 @@ object GenerativeWidgetParser {
             }
         }
         return -1
+    }
+
+    /**
+     * Scans partial JSON for completed slide objects inside a "spec" array.
+     * Tracks brace/string state: an object at depth=1 (inside the spec array)
+     * that properly closes represents one complete slide.
+     */
+    private fun extractPartialSlides(jsonText: String): List<kotlinx.serialization.json.JsonElement> {
+        val specKey = "\"spec\""
+        val specStart = jsonText.indexOf(specKey)
+        if (specStart < 0) return emptyList()
+
+        // Find the opening '[' of the spec array
+        val arrayStart = jsonText.indexOf('[', specStart + specKey.length)
+        if (arrayStart < 0) return emptyList()
+
+        val slides = mutableListOf<kotlinx.serialization.json.JsonElement>()
+        var objectStart = -1
+        var depth = 0
+        var arrayDepth = 0
+        var inString = false
+        var escaped = false
+
+        for (i in arrayStart until jsonText.length) {
+            val char = jsonText[i]
+            if (escaped) { escaped = false; continue }
+            if (char == '\\' && inString) { escaped = true; continue }
+            if (char == '"') { inString = !inString; continue }
+            if (inString) continue
+
+            when (char) {
+                '[' -> { arrayDepth++ }
+                ']' -> { arrayDepth--; if (arrayDepth == 0) break }
+                '{' -> {
+                    depth++
+                    if (arrayDepth == 1 && depth == 1 && objectStart < 0) {
+                        objectStart = i
+                    }
+                }
+                '}' -> {
+                    depth--
+                    if (arrayDepth == 1 && depth == 0 && objectStart >= 0) {
+                        val candidate = jsonText.substring(objectStart, i + 1)
+                        val parsed = runCatching { json.parseToJsonElement(candidate) }
+                            .getOrNull() ?: continue
+                        if (parsed is kotlinx.serialization.json.JsonObject) {
+                            slides.add(parsed)
+                        }
+                        objectStart = -1
+                        if (slides.size >= 24) break
+                    }
+                }
+            }
+        }
+        return slides
     }
 
     private fun skipTrailingFence(text: String, start: Int): Int {

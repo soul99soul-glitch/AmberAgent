@@ -828,7 +828,8 @@ private fun ChatListNormal(
             ) {
                 if (
                     activeGenerationState &&
-                    followMode == TimelineFollowMode.FollowingBottom
+                    followMode == TimelineFollowMode.FollowingBottom &&
+                    !state.isScrollInProgress
                 ) {
                     scrollToTimelineBottom()
                 }

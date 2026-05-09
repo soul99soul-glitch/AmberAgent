@@ -17,21 +17,14 @@ object GenerativeUiPlanner {
             appendLine("**Generative UI Planner**")
             when (classification) {
                 WidgetUse.ENCOURAGE -> {
-                    appendLine("For this request, prefer a concise widget if it makes the answer easier to inspect.")
-                    appendLine("Good widget types: process flow, architecture map, comparison table, timeline, risk matrix, data chart, or status card.")
-                    appendLine("Start the visible assistant answer immediately with a short sentence, then output the show-widget block in visible content.")
-                    appendLine("Prefer widget_code SVG for this request so the card can appear progressively during streaming; avoid renderer/spec when the user expects a drawing to form live.")
-                    appendLine("Do not call tools just to draw the widget. Static SVG/HTML must be written directly as visible show-widget content.")
-                    appendLine("Keep the SVG within its viewBox. Leave 24px padding on every side and reduce detail density instead of drawing outside the card.")
-                    appendLine("If you use hidden reasoning, keep it brief; do not spend a long hidden phase before visible content appears.")
-                }
-
-                WidgetUse.ALLOW -> {
-                    appendLine("Use a widget only if it materially improves clarity; otherwise answer in normal Markdown.")
+                    appendLine("The user asked for a visual. Create a concise widget to answer the request.")
+                    appendLine("Start with one short sentence, then output the show-widget block immediately.")
+                    appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart or slides.")
+                    appendLine("Keep the SVG inside its viewBox with 24px padding; do not draw outside the card.")
                 }
 
                 WidgetUse.DISCOURAGE -> {
-                    appendLine("Prefer normal Markdown for this request. Do not create a widget unless the user explicitly asks for a visual card, diagram, chart, or mockup.")
+                    appendLine("Answer in normal Markdown. Do NOT create a widget.")
                 }
             }
             appendLine("Never put show-widget JSON, SVG, HTML, renderer/spec, or widget code in hidden reasoning/thinking content.")
@@ -68,23 +61,30 @@ object GenerativeUiPlanner {
 
     internal fun classify(text: String): WidgetUse {
         val lower = text.lowercase()
-        val visualKeywords = listOf(
-            "可视化", "图", "图表", "流程", "架构", "时间线", "路线图", "对比", "矩阵", "风险",
-            "画", "绘制", "计划", "plan", "draw", "diagram", "chart", "graph", "timeline", "roadmap", "architecture",
-            "compare", "matrix", "risk", "ui", "界面", "mockup", "live", "伴随",
+        // Only ENCOURAGE when the user explicitly asks for a visual artifact.
+        // Chinese: unambiguous verb phrases (not bare "画" which matches 动画/漫画/画面).
+        // English: \b-anchored to avoid substring hits like "paragraph" -> "graph".
+        val explicitVisual = listOf(
+            "画一下", "画一个", "画个", "画出", "可视化",
+            "结构图", "流程图", "架构图", "组织图", "时序图", "思维导图",
+            "幻灯片", "PPT", "presentation", "slides", "slide deck",
+            "slide", "简报", "汇报", "演示",
         )
-        val simpleKeywords = listOf("是什么", "怎么读", "翻译", "改写", "一句话", "简单说")
-        val simpleEnglishReply = Regex("""\b(yes|no)\b""").containsMatchIn(lower)
+        val englishVisualRegex = Regex(
+            """\b(draw|diagram|flowchart|chart|graph|visualize|visualise|sketch|plot)\b""",
+            RegexOption.IGNORE_CASE,
+        )
+        val simpleKeywords = listOf("是什么", "怎么读", "翻译", "改写", "一句话", "简单说", "帮我改")
         return when {
-            visualKeywords.any { it in lower } -> WidgetUse.ENCOURAGE
-            text.length < 48 || simpleKeywords.any { it in lower } || simpleEnglishReply -> WidgetUse.DISCOURAGE
-            else -> WidgetUse.ALLOW
+            explicitVisual.any { it in lower } -> WidgetUse.ENCOURAGE
+            englishVisualRegex.containsMatchIn(lower) -> WidgetUse.ENCOURAGE
+            text.length < 48 || simpleKeywords.any { it in lower } -> WidgetUse.DISCOURAGE
+            else -> WidgetUse.DISCOURAGE
         }
     }
 }
 
 enum class WidgetUse {
     ENCOURAGE,
-    ALLOW,
     DISCOURAGE,
 }

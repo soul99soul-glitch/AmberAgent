@@ -10,6 +10,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import me.rerere.rikkahub.data.agent.office.radar.SlidesPreviewBus
 
 class WorkspaceTools(
     private val workspaceManager: WorkspaceManager,
@@ -22,6 +23,7 @@ class WorkspaceTools(
         fileEditTool,
         fileSearchTool,
         fileMoveTool,
+        previewSlidesTool,
     )
 
     private val fileListTool = Tool(
@@ -57,7 +59,7 @@ class WorkspaceTools(
 
     private val fileReadTool = Tool(
         name = "file_read",
-        description = "Read a UTF-8 text file from /workspace.",
+        description = "Read a UTF-8 text file from /workspace. Common locations: notes/, reports/, ppt/, scripts/, data/.",
         parameters = {
             obj(
                 "path" to stringProp("Workspace-relative file path to read."),
@@ -76,7 +78,7 @@ class WorkspaceTools(
 
     private val fileWriteTool = Tool(
         name = "file_write",
-        description = "Write UTF-8 text to a file in /workspace. Creates parent folders when needed.",
+        description = "Write UTF-8 text to a file in /workspace. Creates parent folders. Put files in the matching subdirectory:\n- notes/ for .md, .txt, Markdown notes and documentation\n- reports/ for analysis reports, briefings, summaries\n- ppt/ or slides/ for presentation slides, slide specs\n- scripts/ for code, scripts, config files (.py, .sh, .json, .kt)\n- data/ for datasets, CSV, JSON data files\n- officepro/ for Feishu office documents and drafts\nOnly put files at the workspace root when none of the above apply.",
         parameters = {
             obj(
                 "path" to stringProp("Workspace-relative file path to write."),
@@ -185,6 +187,25 @@ class WorkspaceTools(
                     put("directory", entry.directory)
                 }
             }
+        }
+    )
+
+    private val previewSlidesTool = Tool(
+        name = "preview_slides",
+        description = "Open a full-screen interactive slides viewer from a JSON slides spec. Use when the user asks to preview a previously generated presentation.",
+        parameters = {
+            obj(
+                "title" to stringProp("Display title for the presentation."),
+                "spec_json" to stringProp("The full slides JSON spec array (from a previous show-widget block or workspace slides file)."),
+                required = listOf("title", "spec_json")
+            )
+        },
+        needsApproval = false,
+        execute = { input ->
+            val title = input.requiredString("title")
+            val spec = input.requiredString("spec_json")
+            SlidesPreviewBus.preview(title, spec)
+            listOf(UIMessagePart.Text("已打开幻灯片预览: $title"))
         }
     )
 

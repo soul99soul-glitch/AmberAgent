@@ -17,10 +17,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -51,9 +52,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.InLove
-import me.rerere.hugeicons.stroke.LanguageCircle
+import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
@@ -86,6 +85,8 @@ fun ChatDrawerContent(
     current: Conversation,
     drawerState: DrawerState,
     drawerWidth: Dp = 336.dp,
+    onOpenWorkspace: () -> Unit = {},
+    onOpenFavoritesLive: () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -126,7 +127,6 @@ fun ChatDrawerContent(
     }
 
     // Menu popup 状态
-    var showMenuPopup by remember { mutableStateOf(false) }
     val workspace = workspaceColors()
 
     ModalDrawerSheet(
@@ -257,85 +257,32 @@ fun ChatDrawerContent(
                     .fillMaxWidth()
                     .padding(horizontal = 2.dp, vertical = 6.dp)
             ) {
-                Box {
-                    DrawerAction(
-                        icon = {
-                            Icon(HugeIcons.Sparkles, "Menu")
-                        },
-                        label = {
-                            Text(stringResource(R.string.menu))
-                        },
-                        onClick = {
-                            showMenuPopup = true
-                        },
-                    )
-                    DropdownMenu(
-                        expanded = showMenuPopup,
-                        onDismissRequest = { showMenuPopup = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_ai_translator)) },
-                            leadingIcon = { Icon(HugeIcons.LanguageCircle, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.Translator)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.live_companion_title)) },
-                            leadingIcon = { Icon(HugeIcons.Sparkles, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.LiveCompanion)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
-                            leadingIcon = { Icon(HugeIcons.Image02, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.ImageGen)
-                            }
-                        )
-                    }
-                }
-
                 DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.InLove, stringResource(R.string.favorite_page_title))
-                    },
-                    label = {
-                        Text(stringResource(R.string.favorite_page_title))
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Favorite)
-                    },
+                    icon = { Icon(HugeIcons.Folder01, "Workspace") },
+                    label = { Text("文件") },
+                    onClick = onOpenWorkspace,
                 )
 
                 DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.ChartColumn, "统计数据")
-                    },
-                    label = {
-                        Text("统计数据")
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Stats)
-                    },
+                    icon = { Icon(HugeIcons.Sparkles, "Live") },
+                    label = { Text("Live") },
+                    onClick = onOpenFavoritesLive,
+                )
+
+                DrawerAction(
+                    icon = { Icon(HugeIcons.ChartColumn, "统计数据") },
+                    label = { Text("统计数据") },
+                    onClick = { navController.navigate(Screen.Stats) },
                 )
 
                 Spacer(Modifier.weight(1f))
 
                 DrawerAction(
-                        icon = {
-                            Icon(HugeIcons.Settings03, null)
-                        },
-                        label = { Text(stringResource(R.string.settings)) },
-                        onClick = {
-                            navController.navigate(Screen.Setting)
-                        },
-                        tone = WorkspaceTone.Accent,
-                    )
+                    icon = { Icon(HugeIcons.Settings03, null) },
+                    label = { Text(stringResource(R.string.settings)) },
+                    onClick = { navController.navigate(Screen.Setting) },
+                    tone = WorkspaceTone.Accent,
+                )
             }
         }
     }
@@ -461,6 +408,28 @@ private fun DrawerAction(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Box(modifier = Modifier.size(22.dp)) { icon() }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FavoritesLiveSheet(
+    navController: Navigator,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Live 伴随", style = MaterialTheme.typography.titleMedium)
+            Text("实时监听屏幕内容，让 Amber 边看边帮你。", style = MaterialTheme.typography.bodyMedium, color = workspaceColors().muted)
+            TextButton(onClick = { onDismiss(); navController.navigate(Screen.LiveCompanion) }) {
+                Text("打开 Live 伴随")
             }
         }
     }

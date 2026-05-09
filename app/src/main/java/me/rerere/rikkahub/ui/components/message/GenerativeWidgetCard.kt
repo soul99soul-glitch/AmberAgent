@@ -228,7 +228,7 @@ fun GenerativeWidgetCard(
 }
 
 @Composable
-private fun ExpandedGenerativeWidgetDialog(
+fun ExpandedGenerativeWidgetDialog(
     widget: GenerativeWidgetSegment.Widget,
     html: String,
     setting: GenerativeUiSetting,
@@ -648,7 +648,9 @@ private fun RichSandboxWebView(
             else -> VChartSpecValidator.ValidationResult(false, "unknown renderer")
         }
     }
-    var heightDp by remember { mutableStateOf(360) }
+    // Start at a reasonable initial height; JS resize will adjust to exact content.
+    // Capped to avoid jarring shrink animation when maxHeightDp is very large (tablet fullscreen).
+    var heightDp by remember(maxHeightDp) { mutableStateOf(maxHeightDp) }
     // Strip U+2028/U+2029 (line/paragraph separators) — JSON allows them,
     // but evaluateJavascript treats them as line terminators and silently fails.
     val safeJson = specJson.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
@@ -684,19 +686,20 @@ private fun RichSandboxWebView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(animatedHeight)
+            .then(if (renderer == "slides") Modifier.fillMaxSize() else Modifier.height(animatedHeight))
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
+                    overScrollMode = android.view.View.OVER_SCROLL_NEVER
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
-                    settings.setSupportZoom(true)
-                    settings.builtInZoomControls = true
+                    settings.setSupportZoom(renderer != "slides")
+                    settings.builtInZoomControls = renderer != "slides"
                     settings.displayZoomControls = false
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
