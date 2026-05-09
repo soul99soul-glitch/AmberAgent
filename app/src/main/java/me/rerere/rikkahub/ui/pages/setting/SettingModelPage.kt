@@ -585,6 +585,7 @@ private fun ModelPickerRow(
         if (description != null) {
             Text(
                 text = description,
+                modifier = Modifier.padding(start = 42.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = workspaceColors().muted,
             )
