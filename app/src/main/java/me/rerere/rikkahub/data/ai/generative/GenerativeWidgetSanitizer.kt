@@ -55,7 +55,8 @@ object GenerativeWidgetSanitizer {
         }
 
         val sanitized = code
-            .let { if (setting.allowModelJavaScript) it else it.replace(scriptBlock, "").replace(scriptOpen, "") }
+            .replace(scriptBlock, "")
+            .replace(scriptOpen, "")
             .replace(dangerousBlock, "")
             .replace(dangerousVoid, "")
             .replace(eventAttribute, "")
@@ -103,7 +104,7 @@ object GenerativeWidgetSanitizer {
 
     private fun safetyViolation(html: String): String? {
         val lower = html.lowercase()
-        val compact = lower.replace(Regex("""[\u0000-\u001f\s]+"""), "")
+        val compact = lower.replace(Regex("""[\u0000-\u001f\u00a0\u2000-\u200f\ufeff\s]+"""), "")
         return when {
             "<script" in compact -> "script"
             Regex("""<\s*(iframe|object|embed|form|meta|link|base|foreignobject)\b""", RegexOption.IGNORE_CASE)

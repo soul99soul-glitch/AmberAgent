@@ -637,6 +637,8 @@ data class AgentRuntimeSetting(
 @Serializable
 data class GenerativeUiSetting(
     val enabled: Boolean = true,
+    @kotlinx.serialization.SerialName("allowModelJavaScript")
+    @Deprecated("Dead code — sanitizer always strips scripts regardless")
     val allowModelJavaScript: Boolean = false,
     val maxWidgetCodeChars: Int = 12_000,
     val maxWidgetHeightDp: Int = 720,

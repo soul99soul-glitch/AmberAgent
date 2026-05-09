@@ -8,20 +8,47 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/**
+ * Preview-only renderer for static SVG generation from widget specs.
+ * Does NOT replace the interactive VChart/slides sandbox — those use the actual
+ * spec JSON injected into a sandboxed WebView. This renderer produces inline SVG
+ * that displays as a fallback preview in the chat timeline.
+ */
 object GenerativeWidgetRenderer {
     fun render(renderer: String?, spec: JsonElement?): String? {
         if (renderer?.lowercase() == "slides") {
-            val specArray = spec as? JsonArray ?: return null
-            return runCatching { renderSlidesPreview(specArray) }.getOrNull()
+            val specArray = when (spec) {
+                is JsonArray -> spec
+                is JsonObject -> spec["slides"]?.jsonArrayOrNull() ?: spec["spec"]?.jsonArrayOrNull()
+                else -> null
+            }
+            if (specArray != null) {
+                return runCatching { renderSlidesPreview(specArray) }.getOrNull()
+                    ?: renderErrorSvg("slides: rendering failed")
+            }
+            return renderErrorSvg("slides: invalid spec shape")
         }
-        val specObject = spec as? JsonObject ?: return null
+        val specObject = spec as? JsonObject ?: return renderErrorSvg("${renderer}: no spec")
         return runCatching {
             when (renderer?.lowercase()) {
-                "chart", "vchart" -> renderChart(specObject)
-                "diagram" -> renderDiagram(specObject)
+                "chart", "vchart" -> renderChart(specObject) ?: renderErrorSvg("chart: no renderable data")
+                "diagram" -> renderDiagram(specObject) ?: renderErrorSvg("diagram: no renderable data")
                 else -> null
             }
         }.getOrNull()
+    }
+
+    /**
+     * Returns a minimal error SVG so the parser never drops the widget silently.
+     */
+    private fun renderErrorSvg(message: String): String {
+        val escaped = message.replace("&", "&amp;").replace("<", "&lt;")
+        return """
+            <svg width="400" height="80" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill="#fef2f2" rx="8"/>
+                <text x="200" y="44" text-anchor="middle" font-size="13" fill="#dc2626">$escaped</text>
+            </svg>
+        """.trimIndent()
     }
 
     private fun renderChart(spec: JsonObject): String? {

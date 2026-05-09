@@ -56,8 +56,14 @@ object GenerativeWidgetParser {
 
     private val partialFenceEndRegex = Regex("""(?m)^[ \t]*`{3}[ \t]*(?:show-widget|widget|generative-ui)[^\r\n]*$""")
 
-    private fun hasPartialWidgetFenceAtEnd(text: String): Boolean =
-        partialFenceEndRegex.find(text)?.let { it.range.last == text.lastIndex } == true
+    // Finds the LAST partial fence — if the model emits two ```show-widget markers
+    // the last one is the incomplete streaming fence. Also tolerates trailing CRLF/whitespace.
+    private fun hasPartialWidgetFenceAtEnd(text: String): Boolean {
+        val normalized = text.trimEnd()
+        return partialFenceEndRegex.findAll(normalized).lastOrNull()?.let {
+            it.range.last >= normalized.lastIndex - 2
+        } == true
+    }
 
     private fun partialFenceMatch(text: String): String? =
         partialFenceEndRegex.find(text)?.let { text.substring(it.range.first) }
@@ -137,7 +143,9 @@ object GenerativeWidgetParser {
         val parsed = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
         val renderer = parsed?.stringOrNull("renderer")?.lowercase()?.takeIf {
             it in setOf("html", "chart", "diagram", "vchart", "slides")
-        } ?: "html"
+        }
+        // Reject unknown renderers instead of silently coercing to "html"
+        if (renderer == null && parsed?.stringOrNull("renderer") != null) return null
         val renderedCode = GenerativeWidgetRenderer.render(renderer, parsed?.get("spec"))
         val rawWidgetCode = parsed?.stringOrNull("widget_code")
             ?: extractJsonStringValue(jsonText, "widget_code", allowUnclosed = false)
@@ -154,7 +162,7 @@ object GenerativeWidgetParser {
             title = normalizeWidgetTitle(title),
             widgetCode = renderableCode,
             complete = true,
-            renderer = renderer,
+            renderer = renderer ?: "html",
             actions = parseActions(parsed),
             specJson = specJson,
         )
@@ -195,6 +203,9 @@ object GenerativeWidgetParser {
         return true
     }
 
+    // Custom JSON boundary finder because kotlinx.serialization has no incremental API.
+    // Used during streaming to locate the closing brace of the widget JSON object
+    // before the full model output is complete.
     private fun findJsonEnd(text: String, start: Int): Int {
         var depth = 0
         var inString = false
@@ -233,6 +244,9 @@ object GenerativeWidgetParser {
         return start
     }
 
+    // Partial-stream string extraction. Malformed \u sequences (e.g. \u123 with 3 chars)
+    // keep the literal 'u' — this is intentional: the partial value is a best-effort preview
+    // that gets replaced when the full JSON arrives and parseWidgetJson runs the real parser.
     private fun extractJsonStringValue(source: String, key: String, allowUnclosed: Boolean): String? {
         val keyRegex = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\"")
         val match = keyRegex.find(source) ?: return null

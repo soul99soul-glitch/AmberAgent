@@ -87,8 +87,18 @@ private const val WIDGET_MIN_PARTIAL_RENDER_CHARS = 40
 private const val MAX_WIDGET_URL_LENGTH = 2048
 private const val STREAM_WIDGET_DEBOUNCE_MS = 48L
 
-private object GenerativeWidgetHeightCache {
-    val heights = mutableStateMapOf<String, Int>()
+private val heightCache = object {
+    private val map = java.util.LinkedHashMap<String, Int>(16, 0.75f, true)
+    private val MAX_ENTRIES = 100
+
+    @Synchronized fun get(key: String): Int? = map[key]
+    @Synchronized fun put(key: String, value: Int) {
+        map[key] = value
+        if (map.size > MAX_ENTRIES) {
+            val iter = map.keys.iterator()
+            if (iter.hasNext()) { iter.next(); iter.remove() }
+        }
+    }
 }
 
 @Composable
@@ -359,7 +369,15 @@ private fun ExpandedGenerativeWidgetDialog(
     }
 
     DisposableEffect(Unit) {
-        onDispose { webView = null }
+        onDispose {
+            webView?.apply {
+                stopLoading()
+                removeJavascriptInterface("AmberWidget")
+                loadUrl("about:blank")
+                destroy()
+            }
+            webView = null
+        }
     }
 }
 
@@ -441,12 +459,12 @@ private fun SafeGenerativeWidgetWebView(
     val bridgeToken = remember { UUID.randomUUID().toString() }
     var heightDp by remember(cacheKey) {
         mutableStateOf(
-            GenerativeWidgetHeightCache.heights[cacheKey]
+            heightCache.get(cacheKey)
                 ?: if (streaming) minHeightDp else fallbackHeightDp
         )
     }
     var hasMeasuredHeight by remember(cacheKey) {
-        mutableStateOf(GenerativeWidgetHeightCache.heights[cacheKey] != null)
+        mutableStateOf(heightCache.get(cacheKey) != null)
     }
     val animatedHeight by animateDpAsState(
         targetValue = heightDp.coerceIn(minHeightDp, maxHeight).dp,
@@ -508,7 +526,7 @@ private fun SafeGenerativeWidgetWebView(
                                 val coerced = nextHeight.coerceIn(minHeightDp, maxHeight)
                                 hasMeasuredHeight = true
                                 heightDp = coerced
-                                GenerativeWidgetHeightCache.heights[cacheKey] = coerced
+                                heightCache.put(cacheKey, coerced)
                             },
                             onOpenUrl = { url ->
                                 if (isSafeExternalWidgetUrl(url)) {
@@ -560,6 +578,12 @@ private fun SafeGenerativeWidgetWebView(
 
     DisposableEffect(cacheKey) {
         onDispose {
+            activeWebView?.apply {
+                stopLoading()
+                removeJavascriptInterface("AmberWidget")
+                loadUrl("about:blank")
+                destroy()
+            }
             activeWebView = null
             onWebViewReady(null)
         }
@@ -625,6 +649,9 @@ private fun RichSandboxWebView(
         }
     }
     var heightDp by remember { mutableStateOf(360) }
+    // Strip U+2028/U+2029 (line/paragraph separators) — JSON allows them,
+    // but evaluateJavascript treats them as line terminators and silently fails.
+    val safeJson = specJson.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     val animatedHeight by animateDpAsState(
         targetValue = heightDp.coerceIn(240, maxHeightDp).dp,
         animationSpec = tween(durationMillis = 200),
@@ -651,6 +678,8 @@ private fun RichSandboxWebView(
         "slides" -> "__renderSlides"
         else -> return
     }
+
+    var activeWebView by remember { mutableStateOf<WebView?>(null) }
 
     Box(
         modifier = modifier
@@ -695,12 +724,13 @@ private fun RichSandboxWebView(
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             view?.evaluateJavascript(
-                                "window.$renderFunction(${JSONObject.quote(specJson)});",
+                                "window.$renderFunction(${JSONObject.quote(safeJson)});",
                                 null,
                             )
                         }
                     }
                     loadUrl("file:///android_asset/$assetFile")
+                    activeWebView = this
                     onWebViewReady(this)
                 }
             },
@@ -708,7 +738,16 @@ private fun RichSandboxWebView(
     }
 
     DisposableEffect(Unit) {
-        onDispose { onWebViewReady(null) }
+        onDispose {
+            activeWebView?.apply {
+                stopLoading()
+                removeJavascriptInterface("AmberWidget")
+                loadUrl("about:blank")
+                destroy()
+            }
+            activeWebView = null
+            onWebViewReady(null)
+        }
     }
 }
 

@@ -662,6 +662,8 @@ class GenerationHandler(
 
     private fun List<UIMessage>.withGenerativeUiVisibleFallbackPrompt(): List<UIMessage> {
         val instruction = UIMessage.system(
+            // NOTE: the inline SVG example below adds ~400 input tokens to every fallback retry.
+            // If weak models trigger this path frequently, consider trimming to a skeleton SVG.
             prompt = """
             **Visible Generative UI Retry**
             The previous stream did not produce a visible widget. Reply in visible content immediately.
@@ -739,7 +741,7 @@ class GenerationHandler(
             .removePrefix("•")
             .removePrefix("·")
             .replace(Regex("""^\d+[.)、]\s*"""), "")
-            .replace(Regex("""[#*_`>]+"""), "")
+            .replace(Regex("""[#*_`><]+"""), "")
             .replace(Regex("""\s+"""), " ")
             .trim()
         if (compact.length < 2) return null
