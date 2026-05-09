@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=0.5,maximum-scale=5,user-scalable=yes">
+<style>
+html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:auto;}
+#root{width:100%;min-height:200px;}
+#error{display:none;padding:16px;color:#dc2626;font-size:14px;}
+#loading{padding:24px;text-align:center;color:#6b7280;font-size:14px;}
+</style>
+<script src="./vchart.min.js"></script>
+</head>
+<body>
+<div id="loading">正在渲染图表...</div>
+<div id="root"></div>
+<div id="error"></div>
+<script>
+(function(){
+  var rendered = false;
+  var timeout = setTimeout(function(){
+    if(!rendered){
+      document.getElementById('loading').style.display='none';
+      document.getElementById('error').style.display='block';
+      document.getElementById('error').textContent='图表渲染超时';
+      try{ AmberWidget.resize(120); }catch(e){}
+    }
+  }, 5000);
+
+  window.__renderChart = function(specJson){
+    try{
+      clearTimeout(timeout);
+      rendered = true;
+      document.getElementById('loading').style.display='none';
+      var spec = JSON.parse(specJson);
+      // Ensure responsive sizing
+      if(!spec.width) spec.width = '100%';
+      if(!spec.height) spec.height = 320;
+      var chart = new VChart.default(spec, {dom:'root', animation: true});
+      chart.renderSync();
+      setTimeout(function(){
+        var h = Math.max(
+          document.getElementById('root').scrollHeight,
+          document.getElementById('root').offsetHeight,
+          320
+        );
+        try{ AmberWidget.resize(Math.ceil(h)); }catch(e){}
+      }, 100);
+    }catch(e){
+      document.getElementById('error').style.display='block';
+      document.getElementById('error').textContent='图表渲染失败: ' + (e.message || e);
+      try{ AmberWidget.resize(120); }catch(ex){}
+    }
+  };
+
+  // Report initial height
+  try{ AmberWidget.resize(320); }catch(e){}
+})();
+</script>
+</body>
+</html>

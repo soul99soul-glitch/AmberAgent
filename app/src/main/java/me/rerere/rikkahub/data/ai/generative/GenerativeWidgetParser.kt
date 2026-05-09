@@ -17,6 +17,7 @@ sealed interface GenerativeWidgetSegment {
         val complete: Boolean,
         val renderer: String = "html",
         val actions: List<GenerativeWidgetAction> = emptyList(),
+        val specJson: String? = null,
     ) : GenerativeWidgetSegment
 
     data object Loading : GenerativeWidgetSegment
@@ -52,6 +53,14 @@ object GenerativeWidgetParser {
         "todo",
     )
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val partialFenceEndRegex = Regex("""(?m)^[ \t]*`{3}[ \t]*(?:show-widget|widget|generative-ui)[^\r\n]*$""")
+
+    private fun hasPartialWidgetFenceAtEnd(text: String): Boolean =
+        partialFenceEndRegex.find(text)?.let { it.range.last == text.lastIndex } == true
+
+    private fun partialFenceMatch(text: String): String? =
+        partialFenceEndRegex.find(text)?.let { text.substring(it.range.first) }
 
     fun containsWidgetFence(content: String): Boolean = markerRegex.containsMatchIn(content)
 
@@ -108,7 +117,13 @@ object GenerativeWidgetParser {
             return segments
         }
 
-        appendTextSegment(segments, content.substring(cursor))
+        val trailing = content.substring(cursor)
+        if (streaming && !foundWidgetMarker && hasPartialWidgetFenceAtEnd(trailing)) {
+            appendTextSegment(segments, trailing.substringBefore(partialFenceMatch(trailing)!!))
+            segments += GenerativeWidgetSegment.Loading
+            return segments
+        }
+        appendTextSegment(segments, trailing)
         return if (foundWidgetMarker) segments else listOf(GenerativeWidgetSegment.Text(content))
     }
 
@@ -121,21 +136,27 @@ object GenerativeWidgetParser {
     private fun parseWidgetJson(jsonText: String): GenerativeWidgetSegment.Widget? {
         val parsed = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
         val renderer = parsed?.stringOrNull("renderer")?.lowercase()?.takeIf {
-            it in setOf("html", "chart", "diagram")
+            it in setOf("html", "chart", "diagram", "vchart", "slides")
         } ?: "html"
         val renderedCode = GenerativeWidgetRenderer.render(renderer, parsed?.get("spec"))
         val rawWidgetCode = parsed?.stringOrNull("widget_code")
             ?: extractJsonStringValue(jsonText, "widget_code", allowUnclosed = false)
-        val code = if (renderer == "html") rawWidgetCode else renderedCode ?: rawWidgetCode
-        val renderableCode = code?.takeIf { isRenderableWidgetCode(it, complete = true) } ?: return null
         val title = parsed?.stringOrNull("title")
             ?: extractJsonStringValue(jsonText, "title", allowUnclosed = false)
+        val specJson = parsed?.get("spec")?.toString()
+        val code = when (renderer) {
+            "vchart", "slides" -> renderedCode ?: rawWidgetCode
+            "html" -> rawWidgetCode
+            else -> renderedCode ?: rawWidgetCode
+        }
+        val renderableCode = code?.takeIf { isRenderableWidgetCode(it, complete = true) } ?: return null
         return GenerativeWidgetSegment.Widget(
             title = normalizeWidgetTitle(title),
             widgetCode = renderableCode,
             complete = true,
             renderer = renderer,
             actions = parseActions(parsed),
+            specJson = specJson,
         )
     }
 

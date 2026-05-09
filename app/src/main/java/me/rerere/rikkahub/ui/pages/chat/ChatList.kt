@@ -28,6 +28,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,6 +107,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
@@ -850,8 +852,10 @@ private fun ChatListNormal(
                 )
                 .pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id) {
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        if (activeGenerationState && settings.displaySetting.enableAutoScroll) {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // Only pause follow on sustained press (drag intent), not quick taps
+                        val up = withTimeoutOrNull(150) { waitForUpOrCancellation() }
+                        if (up == null && activeGenerationState && settings.displaySetting.enableAutoScroll) {
                             pauseAutoFollowTemporarily(
                                 mode = TimelineFollowMode.PausedForUser,
                                 scheduleIdleReturn = true,

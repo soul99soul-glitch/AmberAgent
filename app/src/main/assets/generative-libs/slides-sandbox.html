@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
+*{box-sizing:border-box;}
+.deck{position:relative;width:100%;height:100%;overflow:hidden;}
+.slide{display:none;width:100%;height:100%;padding:32px;flex-direction:column;justify-content:center;}
+.slide.active{display:flex;}
+.slide h1{margin:0 0 16px;font-size:28px;font-weight:700;color:#111827;line-height:1.3;}
+.slide h2{margin:0 0 12px;font-size:22px;font-weight:600;color:#1f2937;line-height:1.3;}
+.slide p,.slide li{font-size:16px;color:#374151;line-height:1.6;margin:4px 0;}
+.slide ul,.slide ol{padding-left:24px;margin:8px 0;}
+.slide .subtitle{font-size:18px;color:#6b7280;margin-top:8px;}
+.nav{position:absolute;bottom:12px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:12px;z-index:10;}
+.nav button{border:none;background:#e5e7eb;color:#374151;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;}
+.nav button:active{background:#d1d5db;}
+.nav button:disabled{opacity:0.4;cursor:default;}
+.nav .indicator{font-size:12px;color:#6b7280;}
+#error{display:none;padding:16px;color:#dc2626;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="deck" id="deck"></div>
+<div id="error"></div>
+<script>
+(function(){
+  var currentSlide = 0;
+  var totalSlides = 0;
+
+  function renderSlide(slide, index){
+    var div = document.createElement('div');
+    div.className = 'slide' + (index === 0 ? ' active' : '');
+    div.setAttribute('data-index', index);
+    var html = '';
+    if(slide.title) html += '<h1>' + esc(slide.title) + '</h1>';
+    if(slide.subtitle) html += '<p class="subtitle">' + esc(slide.subtitle) + '</p>';
+    if(slide.content){
+      if(Array.isArray(slide.content)){
+        html += '<ul>';
+        slide.content.forEach(function(item){ html += '<li>' + esc(String(item)) + '</li>'; });
+        html += '</ul>';
+      } else {
+        html += '<p>' + esc(String(slide.content)) + '</p>';
+      }
+    }
+    if(slide.notes) html += '<p style="font-size:12px;color:#9ca3af;margin-top:auto;padding-top:16px;">' + esc(slide.notes) + '</p>';
+    div.innerHTML = html;
+    return div;
+  }
+
+  function esc(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showSlide(index){
+    var slides = document.querySelectorAll('.slide');
+    slides.forEach(function(s,i){ s.className = 'slide' + (i===index?' active':''); });
+    currentSlide = index;
+    updateNav();
+  }
+
+  function updateNav(){
+    var prev = document.getElementById('prev');
+    var next = document.getElementById('next');
+    var ind = document.getElementById('ind');
+    if(prev) prev.disabled = currentSlide <= 0;
+    if(next) next.disabled = currentSlide >= totalSlides - 1;
+    if(ind) ind.textContent = (currentSlide+1) + ' / ' + totalSlides;
+  }
+
+  window.__renderSlides = function(slidesJson){
+    try{
+      var slides = JSON.parse(slidesJson);
+      if(!Array.isArray(slides) || slides.length === 0){
+        throw new Error('空幻灯片数据');
+      }
+      totalSlides = slides.length;
+      var deck = document.getElementById('deck');
+      deck.innerHTML = '';
+      slides.forEach(function(slide, i){
+        deck.appendChild(renderSlide(slide, i));
+      });
+      // Add nav if more than 1 slide
+      if(totalSlides > 1){
+        var nav = document.createElement('div');
+        nav.className = 'nav';
+        nav.innerHTML = '<button id="prev" onclick="window.__prevSlide()">上一页</button>'
+          + '<span class="indicator" id="ind">1 / '+totalSlides+'</span>'
+          + '<button id="next" onclick="window.__nextSlide()">下一页</button>';
+        deck.appendChild(nav);
+      }
+      currentSlide = 0;
+      updateNav();
+      var h = Math.max(deck.scrollHeight, 360);
+      try{ AmberWidget.resize(Math.ceil(h)); }catch(e){}
+    }catch(e){
+      document.getElementById('error').style.display='block';
+      document.getElementById('error').textContent='幻灯片渲染失败: '+(e.message||e);
+      try{ AmberWidget.resize(120); }catch(ex){}
+    }
+  };
+
+  window.__prevSlide = function(){ if(currentSlide > 0) showSlide(currentSlide - 1); };
+  window.__nextSlide = function(){ if(currentSlide < totalSlides - 1) showSlide(currentSlide + 1); };
+
+  // Keyboard nav
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'ArrowRight' || e.key === 'ArrowDown') window.__nextSlide();
+    else if(e.key === 'ArrowLeft' || e.key === 'ArrowUp') window.__prevSlide();
+  });
+
+  // Swipe nav
+  var startX = 0;
+  document.addEventListener('touchstart', function(e){ startX = e.touches[0].clientX; });
+  document.addEventListener('touchend', function(e){
+    var dx = e.changedTouches[0].clientX - startX;
+    if(Math.abs(dx) > 50){
+      if(dx < 0) window.__nextSlide();
+      else window.__prevSlide();
+    }
+  });
+
+  try{ AmberWidget.resize(360); }catch(e){}
+})();
+</script>
+</body>
+</html>

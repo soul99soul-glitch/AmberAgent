@@ -63,11 +63,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowExpand01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizeStatus
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
+import me.rerere.rikkahub.data.ai.generative.VChartSpecValidator
 import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -99,13 +101,13 @@ fun GenerativeWidgetCard(
     val sanitized = remember(widget.widgetCode, settings) {
         GenerativeWidgetSanitizer.sanitize(widget.widgetCode, settings)
     }
-    val widgetKey = remember(widget.title) {
+    val widgetKey = remember(widget.title, widget.widgetCode.take(120)) {
         listOfNotNull(
             widget.title?.takeIf { it.isNotBlank() },
             widget.widgetCode.toStableWidgetKeyFragment(),
         )
             .joinToString("|")
-            .ifBlank { UUID.randomUUID().toString() }
+            .ifBlank { "widget-${widget.widgetCode.hashCode()}" }
     }
     var showExpanded by remember { mutableStateOf(false) }
     val canOpenExpanded = sanitized.status == GenerativeWidgetSanitizeStatus.READY &&
@@ -190,6 +192,20 @@ fun GenerativeWidgetCard(
                     onAction = onAction,
                 )
             }
+            if (widget.complete && widget.renderer in setOf("vchart", "slides") && widget.specJson != null && canOpenExpanded) {
+                Surface(
+                    onClick = { showExpanded = true },
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Text(
+                        text = if (widget.renderer == "slides") "▶ 打开演示" else "▶ 交互式图表",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
             if (!widget.complete && sanitized.status == GenerativeWidgetSanitizeStatus.READY) {
                 Text(
                     text = "正在生成可视化...",
@@ -212,37 +228,48 @@ private fun ExpandedGenerativeWidgetDialog(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var isFullscreen by remember { mutableStateOf(false) }
+    val isRichRenderer = widget.renderer in setOf("vchart", "slides")
 
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
-            dismissOnClickOutside = true,
+            dismissOnClickOutside = !isFullscreen,
             usePlatformDefaultWidth = false,
         ),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.42f))
-                .padding(14.dp),
+                .background(
+                    if (isFullscreen) MaterialTheme.colorScheme.surface
+                    else androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.42f)
+                )
+                .then(if (isFullscreen) Modifier else Modifier.padding(14.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.9f)
-                    .widthIn(max = 1080.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = if (isFullscreen) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.9f)
+                        .widthIn(max = 1080.dp)
+                },
+                shape = if (isFullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 12.dp,
+                tonalElevation = if (isFullscreen) 0.dp else 2.dp,
+                shadowElevation = if (isFullscreen) 0.dp else 12.dp,
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(if (isFullscreen) 0.dp else 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (isFullscreen) 0.dp else 10.dp),
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = if (isFullscreen) 12.dp else 0.dp, vertical = if (isFullscreen) 6.dp else 0.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -254,6 +281,14 @@ private fun ExpandedGenerativeWidgetDialog(
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(
+                            onClick = { isFullscreen = !isFullscreen },
+                        ) {
+                            Icon(
+                                if (isFullscreen) HugeIcons.Cancel01 else HugeIcons.ArrowExpand01,
+                                contentDescription = if (isFullscreen) "退出全屏" else "全屏",
+                            )
+                        }
                         IconButton(
                             onClick = {
                                 val activity = context.getActivity()
@@ -284,8 +319,10 @@ private fun ExpandedGenerativeWidgetDialog(
                         ) {
                             Icon(HugeIcons.Download01, contentDescription = "保存 JPG")
                         }
-                        IconButton(onClick = onDismissRequest) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "关闭")
+                        if (!isFullscreen) {
+                            IconButton(onClick = onDismissRequest) {
+                                Icon(HugeIcons.Cancel01, contentDescription = "关闭")
+                            }
                         }
                     }
                     BoxWithConstraints(
@@ -293,18 +330,28 @@ private fun ExpandedGenerativeWidgetDialog(
                             .fillMaxWidth()
                             .weight(1f),
                     ) {
-                        SafeGenerativeWidgetWebView(
-                            html = html,
-                            setting = setting,
-                            streaming = false,
-                            modifier = Modifier.align(Alignment.TopCenter),
-                            widgetKey = "expanded-${widget.title.orEmpty()}-${widget.widgetCode.toStableWidgetKeyFragment()}",
-                            minHeightDp = 240,
-                            fallbackHeightDp = 520,
-                            maxHeightOverrideDp = maxHeight.value.toInt().coerceAtLeast(240),
-                            interactive = true,
-                            onWebViewReady = { webView = it },
-                        )
+                        if (isRichRenderer && widget.specJson != null && setting.enableInteractiveCharts) {
+                            RichSandboxWebView(
+                                renderer = widget.renderer,
+                                specJson = widget.specJson,
+                                modifier = Modifier.align(Alignment.TopCenter),
+                                maxHeightDp = maxHeight.value.toInt().coerceAtLeast(240),
+                                onWebViewReady = { webView = it },
+                            )
+                        } else {
+                            SafeGenerativeWidgetWebView(
+                                html = html,
+                                setting = setting,
+                                streaming = false,
+                                modifier = Modifier.align(Alignment.TopCenter),
+                                widgetKey = "expanded-${widget.title.orEmpty()}-${widget.widgetCode.toStableWidgetKeyFragment()}",
+                                minHeightDp = 240,
+                                fallbackHeightDp = 520,
+                                maxHeightOverrideDp = maxHeight.value.toInt().coerceAtLeast(240),
+                                interactive = true,
+                                onWebViewReady = { webView = it },
+                            )
+                        }
                     }
                 }
             }
@@ -561,6 +608,110 @@ private fun isSafeExternalWidgetUrl(url: String): Boolean {
     return uri.scheme?.lowercase() in setOf("http", "https")
 }
 
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun RichSandboxWebView(
+    renderer: String,
+    specJson: String,
+    modifier: Modifier = Modifier,
+    maxHeightDp: Int = 720,
+    onWebViewReady: (WebView?) -> Unit = {},
+) {
+    val validated = remember(specJson, renderer) {
+        when (renderer) {
+            "vchart" -> VChartSpecValidator.validateChartSpec(specJson)
+            "slides" -> VChartSpecValidator.validateSlidesSpec(specJson)
+            else -> VChartSpecValidator.ValidationResult(false, "unknown renderer")
+        }
+    }
+    var heightDp by remember { mutableStateOf(360) }
+    val animatedHeight by animateDpAsState(
+        targetValue = heightDp.coerceIn(240, maxHeightDp).dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "rich-widget-height",
+    )
+
+    if (!validated.valid) {
+        Text(
+            text = "交互式图表数据校验失败: ${validated.reason.orEmpty()}",
+            modifier = modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+
+    val assetFile = when (renderer) {
+        "vchart" -> "generative-libs/vchart-sandbox.html"
+        "slides" -> "generative-libs/slides-sandbox.html"
+        else -> return
+    }
+    val renderFunction = when (renderer) {
+        "vchart" -> "__renderChart"
+        "slides" -> "__renderSlides"
+        else -> return
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(animatedHeight)
+    ) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = false
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.setSupportZoom(true)
+                    settings.builtInZoomControls = true
+                    settings.displayZoomControls = false
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.javaScriptCanOpenWindowsAutomatically = false
+                    settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                    settings.blockNetworkLoads = true
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    settings.setSupportMultipleWindows(false)
+                    addJavascriptInterface(
+                        object {
+                            @JavascriptInterface
+                            fun resize(height: Int) {
+                                Handler(Looper.getMainLooper()).post {
+                                    heightDp = height.coerceIn(240, maxHeightDp)
+                                }
+                            }
+                        },
+                        "AmberWidget",
+                    )
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean = true
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            view?.evaluateJavascript(
+                                "window.$renderFunction(${JSONObject.quote(specJson)});",
+                                null,
+                            )
+                        }
+                    }
+                    loadUrl("file:///android_asset/$assetFile")
+                    onWebViewReady(this)
+                }
+            },
+        )
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onWebViewReady(null) }
+    }
+}
+
 private fun String.toStableStreamingWidgetHtml(): String? {
     var stable = trim()
     if (stable.length < WIDGET_MIN_PARTIAL_RENDER_CHARS) return null
@@ -594,14 +745,16 @@ private fun String.closeStreamingSvgIfNeeded(): String {
     return "$compact</svg>"
 }
 
-private fun String.toStableWidgetKeyFragment(): String =
-    trim()
+private fun String.toStableWidgetKeyFragment(): String {
+    val lines = trim()
         .lineSequence()
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .take(6)
         .joinToString("")
         .take(220)
+    return lines.ifBlank { "hash-${hashCode()}" }
+}
 
 private fun WebView.pushWidgetHtml(html: String, finalize: Boolean) {
     val fn = if (finalize) "__amberWidgetFinalizeHtml" else "__amberWidgetSetHtml"
@@ -671,11 +824,11 @@ a{color:$primary;text-decoration:none;}
       return;
     }
     if(event.defaultPrevented) return;
-    try{
+    ${if (!interactive) """try{
       event.preventDefault();
       AmberWidget.tap('$bridgeToken');
     }catch(e){
-    }
+    }""" else ""}
   });
   report();
 })();

@@ -10,10 +10,14 @@ import kotlinx.serialization.json.jsonPrimitive
 
 object GenerativeWidgetRenderer {
     fun render(renderer: String?, spec: JsonElement?): String? {
+        if (renderer?.lowercase() == "slides") {
+            val specArray = spec as? JsonArray ?: return null
+            return runCatching { renderSlidesPreview(specArray) }.getOrNull()
+        }
         val specObject = spec as? JsonObject ?: return null
         return runCatching {
             when (renderer?.lowercase()) {
-                "chart" -> renderChart(specObject)
+                "chart", "vchart" -> renderChart(specObject)
                 "diagram" -> renderDiagram(specObject)
                 else -> null
             }
@@ -182,6 +186,35 @@ object GenerativeWidgetRenderer {
                 appendLine("""<rect x="28" y="$y" width="624" height="40" rx="10" fill="$tone"/>""")
                 appendLine("""<text x="44" y="${y + 26}" font-size="15" font-weight="700" fill="#111827">${escape(row.string("label").orEmpty()).take(32)}</text>""")
                 appendLine("""<text x="316" y="${y + 26}" font-size="14" fill="#334155">${escape(row.string("value").orEmpty()).take(48)}</text>""")
+            }
+        }
+    }
+
+    private fun renderSlidesPreview(slides: JsonArray): String? {
+        val items = slides.mapNotNull { it as? JsonObject }.take(12)
+        if (items.isEmpty()) return null
+        val first = items.first()
+        val title = first.string("title").orEmpty().ifBlank { "Slide 1" }
+        val subtitle = first.string("subtitle").orEmpty()
+        val bulletItems = first["content"]?.jsonArrayOrNull()
+            ?.mapNotNull { runCatching { it.jsonPrimitive.content.trim() }.getOrNull() }
+            ?.take(5)
+            .orEmpty()
+        val height = 220 + bulletItems.size * 28
+        return baseSvg(680, height) {
+            appendLine("""<rect x="16" y="16" width="648" height="${height - 32}" rx="14" fill="#ffffff" stroke="#e5e7eb"/>""")
+            appendLine("""<text x="40" y="56" font-size="22" font-weight="700" fill="#111827">${escape(title).take(40)}</text>""")
+            if (subtitle.isNotBlank()) {
+                appendLine("""<text x="40" y="84" font-size="15" fill="#6b7280">${escape(subtitle).take(50)}</text>""")
+            }
+            val startY = if (subtitle.isNotBlank()) 112 else 88
+            bulletItems.forEachIndexed { index, item ->
+                val y = startY + index * 28
+                appendLine("""<circle cx="50" cy="${y + 1}" r="4" fill="#3b82f6"/>""")
+                appendLine("""<text x="64" y="${y + 6}" font-size="14" fill="#374151">${escape(item).take(50)}</text>""")
+            }
+            if (items.size > 1) {
+                appendLine("""<text x="40" y="${height - 28}" font-size="12" fill="#9ca3af">${items.size} slides · 点击展开浏览</text>""")
             }
         }
     }

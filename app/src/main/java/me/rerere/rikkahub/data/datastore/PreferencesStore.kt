@@ -642,6 +642,7 @@ data class GenerativeUiSetting(
     val maxWidgetHeightDp: Int = 720,
     val enableActions: Boolean = true,
     val enableStructuredRenderers: Boolean = true,
+    val enableInteractiveCharts: Boolean = true,
 )
 
 @Serializable

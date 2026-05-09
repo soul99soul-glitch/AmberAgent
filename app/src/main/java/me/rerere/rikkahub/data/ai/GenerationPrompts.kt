@@ -52,9 +52,16 @@ internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting, model: Model?
                 appendLine("- You may add up to 3 optional native actions: \"actions\":[{\"id\":\"explain\",\"label\":\"解释这块\",\"instruction\":\"解释图中的关键节点\"}].")
             }
             if (setting.enableStructuredRenderers) {
-                appendLine("- For requests that ask to draw, visualize, or inspect a diagram live, prefer widget_code SVG so the timeline can render progressively while you stream.")
+                appendLine("- For requests that ask to draw, visualize, or inspect a diagram live, prefer widget_code SVG for this request so the timeline can render progressively while you stream.")
                 appendLine("- Use renderer/spec only for compact chart/diagram data when streaming progressive drawing is less important: {\"title\":\"...\",\"renderer\":\"chart\",\"spec\":{\"type\":\"bar|line|pie\",\"x\":[\"A\"],\"series\":[{\"name\":\"Value\",\"data\":[1]}]}}.")
                 appendLine("- Diagram specs support type \"flow\", \"timeline\", or \"matrix\" with concise labels and details.")
+            }
+            if (setting.enableInteractiveCharts) {
+                appendLine("- For interactive charts with hover tooltips and animations, use renderer \"vchart\" with a VChart spec: {\"title\":\"...\",\"renderer\":\"vchart\",\"spec\":{\"type\":\"bar\",\"data\":[{\"values\":[{\"x\":\"A\",\"y\":10}]}],\"xField\":\"x\",\"yField\":\"y\"}}.")
+                appendLine("- VChart spec follows VChart 2.x API: type, data, xField, yField, seriesField, color, legends, tooltip, title, etc.")
+                appendLine("- For slide presentations, use renderer \"slides\": {\"title\":\"Deck Title\",\"renderer\":\"slides\",\"spec\":[{\"title\":\"Page 1\",\"subtitle\":\"...\",\"content\":[\"bullet 1\",\"bullet 2\"]},{\"title\":\"Page 2\",\"content\":\"paragraph text\"}]}.")
+                appendLine("- Slides spec is a JSON array; each slide has title, optional subtitle, optional content (string or string array), optional notes.")
+                appendLine("- VChart/slides specs must be under 50KB; array data capped at 1000 items; string values under 500 chars.")
             }
             appendLine("- Do not use script tags or inline event handlers; JavaScript will be stripped before rendering.")
             appendLine("- Do not make decorative widgets that merely repeat the prose answer.")
@@ -76,17 +83,23 @@ private fun buildGenerativeUiModelGuidance(model: Model?): String {
             "deepseek" in name -> {
                 appendLine("- DeepSeek: keep hidden reasoning extremely brief for visual requests; do not draft coordinates, SVG, JSON, or layout prose in reasoning.")
                 appendLine("- DeepSeek: start visible content within one short sentence, then stream the show-widget block.")
+                appendLine("- DeepSeek: if you catch yourself spending more than 2 sentences of hidden thought on layout, STOP reasoning and start writing the visible widget immediately.")
+                appendLine("- DeepSeek: never put widget_code, SVG tags, or JSON objects inside <think> blocks.")
             }
 
             "kimi" in name || "moonshot" in name -> {
                 appendLine("- Kimi/Moonshot: do not use function/tool calls to generate SVG. Do not place SVG in tool arguments.")
                 appendLine("- Kimi/Moonshot: output a visible show-widget fence directly; avoid first emitting raw SVG or JavaScript code blocks.")
+                appendLine("- Kimi/Moonshot: NEVER call eval_javascript, code_interpreter, or any code execution tool to produce widget content.")
+                appendLine("- Kimi/Moonshot: the show-widget fence IS the output mechanism; no intermediate step is needed.")
             }
 
             "minimax" in name || "mini-max" in name || "abab" in name || Regex("""\bm\d+(?:\.\d+)?\b""").containsMatchIn(name) -> {
                 appendLine("- MiniMax: prioritize layout safety over detail density. Use one 680-wide viewBox and keep all boxes, dashed groups, arrows, and text inside it.")
                 appendLine("- MiniMax: do not draw elements that extend past the right edge; reduce columns, shorten labels, or increase H instead.")
                 appendLine("- MiniMax: avoid tiny multi-line text inside small boxes; use fewer, larger nodes with concise labels.")
+                appendLine("- MiniMax: before finalizing SVG, verify: every rect must have x + width <= 656, every text x + estimated_width <= 656, every circle cx + r <= 656.")
+                appendLine("- MiniMax: if content doesn't fit in 680px width, stack vertically instead of squeezing horizontally.")
             }
 
             "claude" in name || "anthropic" in name -> {
@@ -96,14 +109,17 @@ private fun buildGenerativeUiModelGuidance(model: Model?): String {
 
             "gemini" in name || "google" in name -> {
                 appendLine("- Gemini: keep widget JSON simple and valid; prefer one widget_code SVG over multiple partial code blocks.")
+                appendLine("- Gemini: do not wrap the show-widget fence inside another markdown code fence.")
             }
 
             "qwen" in name || "dashscope" in name || "aliyun" in name -> {
                 appendLine("- Qwen: avoid wrapping SVG in ordinary markdown code fences; use only the show-widget fence.")
+                appendLine("- Qwen: do not output a separate ````svg` block before or after the show-widget fence.")
             }
 
             "gpt" in name || "openai" in name || Regex("""\bo\d+""").containsMatchIn(name) -> {
                 appendLine("- OpenAI: use visible widget_code directly; do not describe a widget without emitting the fenced JSON.")
+                appendLine("- OpenAI: do not wrap show-widget inside another code fence or quote block.")
             }
 
             else -> {
