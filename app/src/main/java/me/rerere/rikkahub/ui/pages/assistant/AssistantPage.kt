@@ -472,7 +472,8 @@ private fun AssistantItem(
             ) {
                 Icon(
                     imageVector = HugeIcons.MoreVertical,
-                    contentDescription = stringResource(R.string.assistant_page_actions)
+                    contentDescription = stringResource(R.string.assistant_page_actions),
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }

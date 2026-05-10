@@ -7,7 +7,7 @@ import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.FileDownload
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.MagicWand01
@@ -375,7 +375,7 @@ private fun ModeInjectionCard(
                     Icon(HugeIcons.Share03, stringResource(R.string.export_title))
                 }
                 IconButton(onClick = onEdit) {
-                    Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit))
+                    Icon(HugeIcons.Edit01, stringResource(R.string.prompt_page_edit))
                 }
             }
         }
@@ -785,7 +785,7 @@ private fun LorebookCard(
                     Icon(HugeIcons.Share03, stringResource(R.string.export_title))
                 }
                 IconButton(onClick = onEdit) {
-                    Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit))
+                    Icon(HugeIcons.Edit01, stringResource(R.string.prompt_page_edit))
                 }
             }
         }
@@ -971,7 +971,7 @@ private fun RegexInjectionEntryCard(
                 }
             }
             IconButton(onClick = onEdit) {
-                Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit))
+                Icon(HugeIcons.Edit01, stringResource(R.string.prompt_page_edit))
             }
             IconButton(onClick = onDelete) {
                 Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))

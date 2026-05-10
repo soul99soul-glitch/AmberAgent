@@ -286,7 +286,8 @@ private fun ConversationItem(
                     leadingIcon = {
                         Icon(
                             if (conversation.isPinned) HugeIcons.PinOff else HugeIcons.Pin,
-                            null
+                            null,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 )
@@ -300,7 +301,7 @@ private fun ConversationItem(
                         showDropdownMenu = false
                     },
                     leadingIcon = {
-                        Icon(HugeIcons.Refresh01, null)
+                        Icon(HugeIcons.Refresh01, null, modifier = Modifier.size(20.dp))
                     }
                 )
 
@@ -313,7 +314,7 @@ private fun ConversationItem(
                         showDropdownMenu = false
                     },
                     leadingIcon = {
-                        Icon(HugeIcons.Delete01, null)
+                        Icon(HugeIcons.Delete01, null, modifier = Modifier.size(20.dp))
                     }
                 )
             }

@@ -214,6 +214,7 @@ private fun QuickMessageCard(
                     Icon(
                         imageVector = HugeIcons.MoreVertical,
                         contentDescription = stringResource(R.string.skills_page_more_actions),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
                 DropdownMenu(
@@ -226,6 +227,7 @@ private fun QuickMessageCard(
                             Icon(
                                 imageVector = HugeIcons.Edit01,
                                 contentDescription = null,
+                                modifier = Modifier.size(20.dp),
                             )
                         },
                         onClick = {
@@ -240,6 +242,7 @@ private fun QuickMessageCard(
                                 imageVector = HugeIcons.Delete01,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp),
                             )
                         },
                         onClick = {

@@ -3,19 +3,23 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -145,46 +149,27 @@ fun SettingSandboxPage(
                             }
                         },
                     )
-                    item(
-                        leadingContent = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_mirror_title)) },
-                        supportingContent = {
-                            Text(
-                                stringResource(
-                                    R.string.setting_sandbox_mirror_desc,
-                                    workspaceManager.mirrorDir.absolutePath,
-                                ),
-                            )
-                        },
-                    )
                 }
             }
 
             item {
-                CardGroup(
-                    title = { Text(stringResource(R.string.setting_sandbox_runtime_section)) },
-                ) {
-                    item(
-                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_alpine_title)) },
-                        supportingContent = {
-                            Text(
-                                installStatus?.let { status ->
-                                    if (status.success) {
-                                        stringResource(R.string.setting_sandbox_alpine_ready, status.prefix)
-                                    } else {
-                                        stringResource(R.string.setting_sandbox_alpine_failed, status.message)
-                                    }
-                                } ?: stringResource(R.string.calculating),
-                            )
-                        },
-                    )
-                    item(
-                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_session_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_sandbox_session_desc)) },
-                    )
-                    item(
+                // Runtime section: an inline status block above the operational items.
+                // The previous Alpine + "终端会话" rows were styled like clickable
+                // ListItems but had no action — confusing affordance. Now the install
+                // status sits in its own non-interactive Surface (clearly read-only),
+                // and the static "non-PTY shell" implementation note is dropped (users
+                // don't need to know about PTY plumbing).
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 4.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_sandbox_runtime_section),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    RuntimeStatusBlock(installStatus = installStatus)
+                    CardGroup {
+                        item(
                         leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_desc)) },
@@ -213,7 +198,7 @@ fun SettingSandboxPage(
                                             stringResource(R.string.setting_sandbox_terminal_runtime_termux)
                                     }
                                 },
-                                modifier = Modifier.width(156.dp),
+                                modifier = Modifier.width(120.dp),
                             )
                         },
                     )
@@ -235,7 +220,7 @@ fun SettingSandboxPage(
                                     )
                                 },
                                 optionToString = { stringResource(R.string.setting_sandbox_terminal_jobs_value, it) },
-                                modifier = Modifier.width(108.dp),
+                                modifier = Modifier.width(120.dp),
                             )
                         },
                     )
@@ -259,7 +244,7 @@ fun SettingSandboxPage(
                                 optionToString = {
                                     stringResource(R.string.setting_sandbox_terminal_output_value, it / 1024)
                                 },
-                                modifier = Modifier.width(116.dp),
+                                modifier = Modifier.width(120.dp),
                             )
                         },
                     )
@@ -283,7 +268,7 @@ fun SettingSandboxPage(
                                 optionToString = {
                                     stringResource(R.string.setting_sandbox_terminal_install_timeout_value, it / 60_000L)
                                 },
-                                modifier = Modifier.width(116.dp),
+                                modifier = Modifier.width(120.dp),
                             )
                         },
                     )
@@ -299,8 +284,48 @@ fun SettingSandboxPage(
                             }
                         },
                     )
+                    }
                 }
             }
         }
+    }
+}
+
+/**
+ * Read-only status block above the operational items in the Runtime section. Used to
+ * surface "is the runtime healthy?" without dressing it up as a tappable row — the
+ * previous implementation styled this as a ListItem which read as clickable but did
+ * nothing on tap. Errors get a subtle errorContainer tint so the user notices them
+ * even though there's no action wired up here yet (manual retry is via reinstall).
+ */
+@Composable
+private fun RuntimeStatusBlock(installStatus: InstallStatus?) {
+    val isFailed = installStatus?.success == false
+    val text = installStatus?.let { status ->
+        if (status.success) {
+            stringResource(R.string.setting_sandbox_alpine_ready)
+        } else {
+            stringResource(R.string.setting_sandbox_alpine_failed, status.message)
+        }
+    } ?: stringResource(R.string.calculating)
+    Surface(
+        color = if (isFailed) {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isFailed) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        )
     }
 }

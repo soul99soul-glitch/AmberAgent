@@ -51,7 +51,7 @@ import com.dokar.sonner.ToastType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -1046,10 +1046,14 @@ private fun MemoryItem(
                 )
             }
             IconButton(onClick = { onEditMemory(memory) }) {
-                Icon(HugeIcons.PencilEdit01, contentDescription = null)
+                Icon(HugeIcons.Edit01, contentDescription = null, modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = { onDeleteMemory(memory) }) {
-                Icon(HugeIcons.Delete01, contentDescription = stringResource(R.string.assistant_page_delete))
+                Icon(
+                    HugeIcons.Delete01,
+                    contentDescription = stringResource(R.string.assistant_page_delete),
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
     }

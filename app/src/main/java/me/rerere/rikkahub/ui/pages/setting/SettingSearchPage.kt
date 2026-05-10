@@ -3,14 +3,13 @@ package me.rerere.rikkahub.ui.pages.setting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Delete01
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -55,6 +56,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -245,18 +247,27 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                             .scale(if (isDragging) 0.95f else 1f)
                             .animateItem(),
                         dragHandle = {
-                            Icon(
-                                imageVector = HugeIcons.DragDropHorizontal,
-                                contentDescription = null,
-                                modifier = Modifier.longPressDraggableHandle(
-                                    onDragStarted = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-                                    },
-                                    onDragStopped = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                    }
+                            // 36dp touch box — sized to match the new compact IconButton
+                            // siblings in the action row. Glyph stays 20dp centered.
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .longPressDraggableHandle(
+                                        onDragStarted = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                        },
+                                        onDragStopped = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.DragDropHorizontal,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
                                 )
-                            )
+                            }
                         }
                     )
                 }
@@ -547,103 +558,81 @@ private fun SearchProviderCard(
     modifier: Modifier = Modifier,
     dragHandle: @Composable () -> Unit = {}
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    val name = SearchServiceOptions.TYPES[service::class] ?: "Search"
+    // Plan B compact card. Header row carries identity + Switch (the high-frequency
+    // toggle). Action row holds the secondary controls — all rendered as plain
+    // IconButtons for visual consistency (the previous card mixed IconButton +
+    // outlined TextButton + Switch which read as four different button languages).
+    //
+    // Dropped from the prior version:
+    //   - The "用于 Agent 搜索" subtitle (Switch state already conveys this)
+    //   - The hard-coded "搜索" ability tag (every search service trivially has it,
+    //     so the tag carries no information on this page)
+    //   - The whole SearchAbilityTagLine row — `scrape` and other differentiators
+    //     are visible inside the editor sheet where they actually matter
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            // Header: icon + name + Switch.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 AutoAIIcon(
-                    name = SearchServiceOptions.TYPES[service::class] ?: "Search",
-                    modifier = Modifier.size(32.dp)
+                    name = name,
+                    modifier = Modifier.size(24.dp)
                 )
-                Column(
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = SearchServiceOptions.TYPES[service::class] ?: "Search",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = if (enabled) {
-                            stringResource(R.string.setting_page_search_use_for_agent)
-                        } else {
-                            stringResource(R.string.setting_provider_page_disabled)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                )
                 Switch(
                     checked = enabled,
                     onCheckedChange = onEnabledChange,
                 )
             }
 
-            SearchAbilityTagLine(options = service)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_page_search_use_for_agent_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
+            // Action strip — IconButtons forced to 36dp (vs Material default 40dp) to
+            // shave 4dp off the action row's contribution to overall card height. The
+            // 20dp glyph + 36dp ripple still sits comfortably above Material's 32dp
+            // dense-row floor.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(
+                    onClick = onEditService,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Edit01,
+                        contentDescription = stringResource(R.string.edit),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 if (canDelete) {
                     IconButton(
-                        onClick = onDeleteService
+                        onClick = onDeleteService,
+                        modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
                             HugeIcons.Delete01,
-                            contentDescription = stringResource(R.string.setting_page_search_delete_provider)
+                            contentDescription = stringResource(R.string.setting_page_search_delete_provider),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
-
-                Spacer(Modifier.weight(1f))
-
-                TextButton(onClick = onEditService) {
-                    Icon(
-                        imageVector = HugeIcons.PencilEdit01,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text(stringResource(R.string.edit))
-                }
-
-                IconButton(
-                    onClick = {}
-                ) {
-                    dragHandle()
-                }
+                dragHandle()
             }
         }
     }

@@ -6,7 +6,8 @@ import me.rerere.hugeicons.stroke.Connect
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Refresh03
-import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.SlidersHorizontal
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
@@ -199,7 +200,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 NavigationBarItem(
                     selected = pager.currentPage == 0,
                     label = { Text(stringResource(id = R.string.setting_provider_page_configuration)) },
-                    icon = { Icon(HugeIcons.Tools, null) },
+                    icon = { Icon(HugeIcons.SlidersHorizontal, null) },
                     onClick = {
                         scope.launch {
                             pager.animateScrollToPage(0)
@@ -1416,7 +1417,7 @@ private fun ModelCard(
                         dialogState.open(model.copy())
                     }
                 ) {
-                    Icon(HugeIcons.Tools, "Edit")
+                    Icon(HugeIcons.Edit01, "Edit", modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -1555,14 +1556,14 @@ private fun ProviderOverrideSettings(
                                 showProviderConfig = true
                             }
                         ) {
-                            Icon(HugeIcons.Tools, contentDescription = "Edit override")
+                            Icon(HugeIcons.Edit01, contentDescription = "Edit override", modifier = Modifier.size(20.dp))
                         }
                         IconButton(
                             onClick = {
                                 onUpdateProviderOverride(null)
                             }
                         ) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "Remove override")
+                            Icon(HugeIcons.Cancel01, contentDescription = "Remove override", modifier = Modifier.size(20.dp))
                         }
                     }
                 }

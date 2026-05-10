@@ -157,6 +157,12 @@ android {
     }
     androidResources {
         generateLocaleConfig = true
+        // Skip APK compression on bundled font files. Noto Serif SC OTF (~11.6MB) takes
+        // a perceptible CPU hit per launch if AAPT2 deflates it; storing uncompressed
+        // grows the APK ~10% but lets the framework mmap the font directly. JetBrains
+        // Mono TTF benefits the same way.
+        noCompress.add("otf")
+        noCompress.add("ttf")
     }
     packaging {
         jniLibs {

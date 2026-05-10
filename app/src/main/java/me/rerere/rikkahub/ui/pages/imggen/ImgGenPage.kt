@@ -6,7 +6,7 @@ import me.rerere.hugeicons.stroke.Image03
 import me.rerere.hugeicons.stroke.Colors
 import me.rerere.hugeicons.stroke.FloppyDisk
 import me.rerere.hugeicons.stroke.SendToMobile
-import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.SlidersHorizontal
 import me.rerere.hugeicons.stroke.Delete01
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -307,7 +307,7 @@ private fun InputBar(
         IconButton(
             onClick = onShowSettings
         ) {
-            Icon(HugeIcons.Tools, null)
+            Icon(HugeIcons.SlidersHorizontal, null)
         }
 
         OutlinedTextField(

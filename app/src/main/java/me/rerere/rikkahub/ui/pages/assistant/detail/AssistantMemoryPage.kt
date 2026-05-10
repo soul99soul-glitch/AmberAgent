@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -343,14 +344,15 @@ private fun MemoryItem(
             IconButton(
                 onClick = { onEditMemory(memory) }
             ) {
-                Icon(HugeIcons.PencilEdit01, null)
+                Icon(HugeIcons.Edit01, null, modifier = Modifier.size(20.dp))
             }
             IconButton(
                 onClick = { onDeleteMemory(memory) }
             ) {
                 Icon(
                     HugeIcons.Delete01,
-                    stringResource(R.string.assistant_page_delete)
+                    stringResource(R.string.assistant_page_delete),
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }

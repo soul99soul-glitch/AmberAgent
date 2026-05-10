@@ -8,10 +8,8 @@ import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.MoreVertical
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -34,8 +32,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
@@ -181,18 +177,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         provider = provider,
                         onEdit = {
                             navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                        },
-                        onCopy = {
-                            val copy = provider.copyProvider(
-                                id = Uuid.random(),
-                                name = "${provider.name} Copy",
-                                builtIn = false,
-                            )
-                            val providerIndex = settings.providers.indexOfFirst { it.id == provider.id }
-                            val newProviders = settings.providers.toMutableList().apply {
-                                add(if (providerIndex == -1) 0 else providerIndex + 1, copy)
-                            }
-                            vm.updateSettings(settings.copy(providers = newProviders))
                         },
                         onDelete = {
                             pendingDeleteProvider = provider
@@ -513,10 +497,8 @@ private fun ProviderItem(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
     onEdit: () -> Unit,
-    onCopy: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    var showMenu by remember { mutableStateOf(false) }
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -571,39 +553,21 @@ private fun ProviderItem(
                     }
                 }
             }
-            IconButton(onClick = { showMenu = true }) {
+            // Inline Edit + Delete; card tap also fires onEdit for row-tap discoverability.
+            // Glyphs at 20dp keep the touch target at the IconButton-default 40dp while
+            // visually shedding weight to match the new compact card vocabulary.
+            IconButton(onClick = onEdit) {
                 Icon(
-                    imageVector = HugeIcons.MoreVertical,
-                    contentDescription = stringResource(R.string.more_options),
+                    imageVector = HugeIcons.Edit01,
+                    contentDescription = stringResource(R.string.edit),
+                    modifier = Modifier.size(20.dp),
                 )
             }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.edit)) },
-                    leadingIcon = { Icon(HugeIcons.Edit01, contentDescription = null) },
-                    onClick = {
-                        showMenu = false
-                        onEdit()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.copy)) },
-                    leadingIcon = { Icon(HugeIcons.Copy01, contentDescription = null) },
-                    onClick = {
-                        showMenu = false
-                        onCopy()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.delete)) },
-                    leadingIcon = { Icon(HugeIcons.Delete01, contentDescription = null) },
-                    onClick = {
-                        showMenu = false
-                        onDelete()
-                    },
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = HugeIcons.Delete01,
+                    contentDescription = stringResource(R.string.delete),
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }

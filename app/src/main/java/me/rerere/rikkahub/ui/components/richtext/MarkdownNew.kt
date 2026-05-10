@@ -75,6 +75,7 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
@@ -1354,8 +1355,10 @@ private fun parseFontFamily(fontFamily: String): FontFamily? {
         ?: return null
 
     return when {
-        normalized.contains("mono") || normalized.contains("courier") -> FontFamily.Monospace
-        normalized.contains("serif") || normalized.contains("georgia") || normalized.contains("times") -> FontFamily.Serif
+        // Route mono/serif requests to the project-bundled families so HTML font-family
+        // hints in markdown render with full CJK coverage (matches the chat font picker).
+        normalized.contains("mono") || normalized.contains("courier") -> JetbrainsMono
+        normalized.contains("serif") || normalized.contains("georgia") || normalized.contains("times") -> NotoSerifSC
         normalized.contains("sans") || normalized.contains("arial") || normalized.contains("helvetica") -> FontFamily.SansSerif
         normalized.contains("cursive") -> FontFamily.Cursive
         else -> null

@@ -397,6 +397,7 @@ private fun SkillCard(
                     imageVector = HugeIcons.MagicWand01,
                     contentDescription = "规整化为移动端",
                     tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
                 )
             }
             IconButton(onClick = onDelete) {
@@ -404,6 +405,7 @@ private fun SkillCard(
                     imageVector = HugeIcons.Delete01,
                     contentDescription = stringResource(R.string.delete),
                     tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }

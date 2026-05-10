@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ListItem
@@ -19,7 +20,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -60,7 +60,12 @@ import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceString
 import me.rerere.rikkahub.ui.pages.setting.components.PresetThemeButtonGroup
+import me.rerere.rikkahub.ui.components.ui.IntLabel
+import me.rerere.rikkahub.ui.components.ui.NotionSlider
+import me.rerere.rikkahub.ui.components.ui.PercentLabel
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
@@ -451,8 +456,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                             modifier = Modifier.fillMaxWidth(),
                                             fontFamily = when (family) {
                                                 ChatFontFamily.DEFAULT -> FontFamily.Default
-                                                ChatFontFamily.SERIF -> FontFamily.Serif
-                                                ChatFontFamily.MONOSPACE -> FontFamily.Monospace
+                                                ChatFontFamily.SERIF -> NotoSerifSC
+                                                ChatFontFamily.MONOSPACE -> JetbrainsMono
                                             }
                                         )
                                     },
@@ -462,23 +467,17 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_font_size_title)) },
                             supportingContent = {
-                                Column {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Slider(
-                                            value = displaySetting.fontSizeRatio,
-                                            onValueChange = {
-                                                updateDisplaySetting(displaySetting.copy(fontSizeRatio = it))
-                                            },
-                                            valueRange = 0.5f..2f,
-                                            steps = 11,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(text = "${(displaySetting.fontSizeRatio * 100).toInt()}%")
-                                    }
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    // Range 0.5..2.0 with 5% snap → {50, 55, ..., 200}%.
+                                    NotionSlider(
+                                        value = displaySetting.fontSizeRatio,
+                                        onValueChangeFinished = {
+                                            updateDisplaySetting(displaySetting.copy(fontSizeRatio = it))
+                                        },
+                                        valueRange = 0.5f..2.0f,
+                                        snapStep = 0.05f,
+                                        valueLabel = { PercentLabel(it) },
+                                    )
                                     MarkdownBlock(
                                         content = stringResource(R.string.setting_display_page_font_size_preview),
                                         style = LocalTextStyle.current.copy(
@@ -486,8 +485,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                             lineHeight = LocalTextStyle.current.lineHeight * displaySetting.fontSizeRatio,
                                             fontFamily = when (displaySetting.chatFontFamily) {
                                                 ChatFontFamily.DEFAULT -> FontFamily.Default
-                                                ChatFontFamily.SERIF -> FontFamily.Serif
-                                                ChatFontFamily.MONOSPACE -> FontFamily.Monospace
+                                                ChatFontFamily.SERIF -> NotoSerifSC
+                                                ChatFontFamily.MONOSPACE -> JetbrainsMono
                                             }
                                         )
                                     )
@@ -668,22 +667,18 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             item(
                                 headlineContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_threshold_title)) },
                                 supportingContent = {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Slider(
-                                            value = displaySetting.pasteLongTextThreshold.toFloat(),
-                                            onValueChange = {
-                                                updateDisplaySetting(displaySetting.copy(pasteLongTextThreshold = it.toInt()))
-                                            },
-                                            valueRange = 100f..10000f,
-                                            steps = 98,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(text = "${displaySetting.pasteLongTextThreshold}")
-                                    }
+                                    // Range 100..10000 chars, 100-char step. Single int value
+                                    // shown on the right; the Material slider previously had
+                                    // 99 stop dots which read as visual noise.
+                                    NotionSlider(
+                                        value = displaySetting.pasteLongTextThreshold.toFloat(),
+                                        onValueChangeFinished = {
+                                            updateDisplaySetting(displaySetting.copy(pasteLongTextThreshold = it.toInt()))
+                                        },
+                                        valueRange = 100f..10000f,
+                                        snapStep = 100f,
+                                        valueLabel = { IntLabel(it) },
+                                    )
                                 },
                             )
                         }
@@ -703,22 +698,16 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             item(
                                 headlineContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_ratio)) },
                                 supportingContent = {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Slider(
-                                            value = displaySetting.volumeKeyScrollRatio,
-                                            onValueChange = {
-                                                updateDisplaySetting(displaySetting.copy(volumeKeyScrollRatio = it))
-                                            },
-                                            valueRange = 0.25f..1.0f,
-                                            steps = 2,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(text = "${(displaySetting.volumeKeyScrollRatio * 100).toInt()}%")
-                                    }
+                                    // Range 25%..100%, 25% snap → {25, 50, 75, 100}%.
+                                    NotionSlider(
+                                        value = displaySetting.volumeKeyScrollRatio,
+                                        onValueChangeFinished = {
+                                            updateDisplaySetting(displaySetting.copy(volumeKeyScrollRatio = it))
+                                        },
+                                        valueRange = 0.25f..1.0f,
+                                        snapStep = 0.25f,
+                                        valueLabel = { PercentLabel(it) },
+                                    )
                                 }
                             )
                         }
@@ -760,3 +749,4 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
         }
     }
 }
+
