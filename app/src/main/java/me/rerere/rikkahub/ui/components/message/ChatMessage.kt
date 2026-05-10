@@ -318,6 +318,7 @@ internal sealed interface ChatMessageVirtualItem {
             // Stable key by runId only — stepIndex/blockIndex shift when surrounding tools
             // collapse during streaming, which would otherwise force the capsule to recreate.
             is ThinkingStep.SubAgentTaskStep -> "thinking-subagent-${step.runId}"
+            is ThinkingStep.CouncilTaskStep -> "thinking-council-${step.runId}"
         }
     }
 
@@ -333,6 +334,13 @@ internal sealed interface ChatMessageVirtualItem {
         val block: MessagePartBlock.SubAgentBlock,
     ) : ChatMessageVirtualItem {
         override val keySuffix: String = "subagent-${block.step.runId}"
+    }
+
+    /** Standalone Model Council task card — same lifting rationale as [SubAgent]. */
+    data class Council(
+        val block: MessagePartBlock.CouncilBlock,
+    ) : ChatMessageVirtualItem {
+        override val keySuffix: String = "council-${block.step.runId}"
     }
 
     data class MarkdownChild(
@@ -448,6 +456,10 @@ internal fun buildChatMessageVirtualItems(
                 is MessagePartBlock.SubAgentBlock -> {
                     add(ChatMessageVirtualItem.SubAgent(block))
                 }
+
+                is MessagePartBlock.CouncilBlock -> {
+                    add(ChatMessageVirtualItem.Council(block))
+                }
             }
         }
     }
@@ -526,6 +538,7 @@ internal fun ChatMessageVirtualItemContent(
                             is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
                             is ThinkingStep.ToolStep -> listOf(step.tool)
                             is ThinkingStep.SubAgentTaskStep -> step.tools
+                            is ThinkingStep.CouncilTaskStep -> step.tools
                         }
                     },
                     annotations = emptyList(),
@@ -548,6 +561,7 @@ internal fun ChatMessageVirtualItemContent(
                         is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
                         is ThinkingStep.ToolStep -> listOf(step.tool)
                         is ThinkingStep.SubAgentTaskStep -> step.tools
+                        is ThinkingStep.CouncilTaskStep -> step.tools
                     },
                     annotations = emptyList(),
                     loading = loading,
@@ -604,6 +618,15 @@ internal fun ChatMessageVirtualItemContent(
         is ChatMessageVirtualItem.SubAgent -> {
             ProvideTextStyle(textStyle) {
                 SubAgentTaskStepView(
+                    step = item.block.step,
+                    loading = loading,
+                )
+            }
+        }
+
+        is ChatMessageVirtualItem.Council -> {
+            ProvideTextStyle(textStyle) {
+                CouncilTaskStepView(
                     step = item.block.step,
                     loading = loading,
                 )
@@ -1217,6 +1240,19 @@ private fun MessagePartsBlock(
                                     )
                                 }
                             }
+
+                            is ThinkingStep.CouncilTaskStep -> {
+                                // Council steps are normally lifted to top-level CouncilBlock by
+                                // groupMessageParts. This branch only fires if a council task slips
+                                // into a ThinkingBlock somehow (e.g. fan-out re-render path) — render
+                                // the same card so nothing is lost.
+                                key(step.runId) {
+                                    CouncilTaskStepView(
+                                        step = step,
+                                        loading = loading,
+                                    )
+                                }
+                            }
                         }
                     }
                     if (!hasVisibleWidgetContent) {
@@ -1460,6 +1496,13 @@ private fun MessagePartsBlock(
 
             is MessagePartBlock.SubAgentBlock -> key("subagent-${block.step.runId}") {
                 SubAgentTaskStepView(
+                    step = block.step,
+                    loading = loading,
+                )
+            }
+
+            is MessagePartBlock.CouncilBlock -> key("council-${block.step.runId}") {
+                CouncilTaskStepView(
                     step = block.step,
                     loading = loading,
                 )

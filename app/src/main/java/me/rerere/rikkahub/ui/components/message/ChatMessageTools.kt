@@ -34,6 +34,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -111,6 +113,8 @@ import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
+import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRunStatus
@@ -423,16 +427,10 @@ private fun AgentToolCallCapsule(
                     ToolStatusPill(status = status)
                 }
             }
-            if (loading && status == AgentToolStatus.RUNNING) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(CircleShape),
-                    color = workspace.blue,
-                    trackColor = workspace.hairline,
-                )
-            }
+            // Note: dropped the LinearProgressIndicator below the row. Title-level shimmer
+            // (line 409) plus the running status pill on the right already convey "in flight";
+            // the indeterminate bar's segmented sweep (Material3 1.3+ default) read as stuttery
+            // against this tight capsule layout and added visual noise without info gain.
         }
     }
 }
@@ -1553,9 +1551,11 @@ private fun parseLatestSubAgentStatus(tools: List<UIMessagePart.Tool>): SubAgent
     for (tool in tools.asReversed()) {
         val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
             ?: continue
+        // Use `as?` casts (same defensive pattern as parseLatestCouncilStatus) — runCatching
+        // caught the throws before, but the cast version is clearer about intent and fails open.
         val statusStr = runCatching {
-            JsonInstant.parseToJsonElement(outputText).jsonObject["status"]
-                ?.jsonPrimitive?.contentOrNull
+            (JsonInstant.parseToJsonElement(outputText) as? JsonObject)?.get("status")
+                ?.let { it as? JsonPrimitive }?.contentOrNull
         }.getOrNull() ?: continue
         SubAgentRunStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
             ?.let { return it }
@@ -1712,6 +1712,330 @@ private fun SubAgentRunSheet(
             }
         }
     }
+}
+
+/**
+ * Render a coalesced Model Council run: one card replaces the multiple model_council_* tool calls
+ * sharing one run_id. Tap → opens [ModelCouncilRunSheet] showing per-seat live streaming output
+ * in a tab layout.
+ */
+@Composable
+fun CouncilTaskStepView(
+    step: ThinkingStep.CouncilTaskStep,
+    loading: Boolean,
+) {
+    var showSheet by remember(step.runId) { mutableStateOf(false) }
+    val parsedStatus = parseLatestCouncilStatus(step.tools)
+    val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
+    val phaseLabels = listOf("听证", "辩论", "权衡", "裁决")
+    var phaseIndex by remember(step.runId) { mutableIntStateOf(0) }
+    LaunchedEffect(step.runId, isRunning) {
+        if (!isRunning) return@LaunchedEffect
+        while (true) {
+            delay(PHASE_LABEL_INTERVAL_MS)
+            phaseIndex = (phaseIndex + 1) % phaseLabels.size
+        }
+    }
+    val currentPhase = if (isRunning) phaseLabels[phaseIndex.coerceIn(phaseLabels.indices)]
+        else phaseLabels.last()
+    val statusVerb = when (parsedStatus) {
+        ModelCouncilCardStatus.RUNNING -> "正在审议"
+        ModelCouncilCardStatus.COMPLETED -> "已完成"
+        ModelCouncilCardStatus.PARTIAL_FAILED -> "部分失败"
+        ModelCouncilCardStatus.FAILED -> "失败"
+        ModelCouncilCardStatus.CANCELLED -> "已取消"
+        ModelCouncilCardStatus.TIMED_OUT -> "超时"
+        ModelCouncilCardStatus.INTERRUPTED -> "已中断"
+    }
+    val title = if (isRunning) "@Council $statusVerb · $currentPhase" else "@Council $statusVerb"
+    AgentToolCallCapsule(
+        title = title,
+        toolName = "model_council",
+        icon = HugeIcons.MagicWand01,
+        kind = AgentToolKind.GENERIC,
+        status = parsedStatus.toAgentToolStatus(),
+        loading = loading && isRunning,
+        onClick = { showSheet = true },
+        approvalActions = null,
+    )
+
+    if (showSheet) {
+        ModelCouncilRunSheet(
+            step = step,
+            onDismiss = { showSheet = false },
+        )
+    }
+}
+
+private enum class ModelCouncilCardStatus {
+    RUNNING, COMPLETED, PARTIAL_FAILED, FAILED, CANCELLED, TIMED_OUT, INTERRUPTED
+}
+
+/** Walk model_council_* tools in reverse, find the most recent parsable `status`. */
+private fun parseLatestCouncilStatus(tools: List<UIMessagePart.Tool>): ModelCouncilCardStatus {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val statusStr = runCatching {
+            (JsonInstant.parseToJsonElement(outputText) as? JsonObject)?.get("status")
+                ?.let { it as? JsonPrimitive }?.contentOrNull
+        }.getOrNull() ?: continue
+        ModelCouncilCardStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
+            ?.let { return it }
+    }
+    return ModelCouncilCardStatus.RUNNING
+}
+
+private fun ModelCouncilCardStatus.toAgentToolStatus(): AgentToolStatus = when (this) {
+    ModelCouncilCardStatus.RUNNING -> AgentToolStatus.RUNNING
+    ModelCouncilCardStatus.COMPLETED,
+    ModelCouncilCardStatus.PARTIAL_FAILED -> AgentToolStatus.SUCCEEDED
+    ModelCouncilCardStatus.FAILED,
+    ModelCouncilCardStatus.TIMED_OUT,
+    ModelCouncilCardStatus.INTERRUPTED -> AgentToolStatus.FAILED
+    ModelCouncilCardStatus.CANCELLED -> AgentToolStatus.CANCELLED
+}
+
+/**
+ * Bottom sheet showing the council run's task + per-seat live streaming output, organized in
+ * tabs. Synthesizer pane is the default tab; each seat (in run order) gets its own tab. Falls
+ * back to extracting final text from tool result when the live flow is gone (process restart).
+ */
+@Composable
+private fun ModelCouncilRunSheet(
+    step: ThinkingStep.CouncilTaskStep,
+    onDismiss: () -> Unit,
+) {
+    val manager: ModelCouncilManager = koinInject()
+    val workspace = workspaceColors()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val anchor = step.anchor
+    val arguments = remember(anchor.input) { anchor.inputAsJson() }
+    val taskObjective = remember(arguments) {
+        runCatching {
+            (arguments.jsonObject["task"] as? JsonObject)?.get("objective")?.let { it as? JsonPrimitive }?.contentOrNull
+                ?: arguments.jsonObject["objective"]?.let { it as? JsonPrimitive }?.contentOrNull
+        }.getOrNull()
+    }
+
+    val parsedStatus = parseLatestCouncilStatus(step.tools)
+    val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
+    val statusVerb = when (parsedStatus) {
+        ModelCouncilCardStatus.RUNNING -> "正在审议"
+        ModelCouncilCardStatus.COMPLETED -> "已完成"
+        ModelCouncilCardStatus.PARTIAL_FAILED -> "部分失败"
+        ModelCouncilCardStatus.FAILED -> "失败"
+        ModelCouncilCardStatus.CANCELLED -> "已取消"
+        ModelCouncilCardStatus.TIMED_OUT -> "超时"
+        ModelCouncilCardStatus.INTERRUPTED -> "已中断"
+    }
+
+    // Resolve seat list from the snapshot (preserves run order). Synthesizer is appended last.
+    val snapshot = remember(step.runId) { manager.snapshot(step.runId) }
+    val seatTabs = remember(step.runId, snapshot?.seats) {
+        val seatEntries = snapshot?.seats?.map { seat ->
+            CouncilTabEntry(
+                key = seat.seatId,
+                label = seat.name.ifBlank { ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role },
+            )
+        }.orEmpty()
+        // Synthesizer pane is conceptually the "verdict"; show it first so the user sees the
+        // bottom-line answer immediately when the run finishes.
+        listOf(CouncilTabEntry(ModelCouncilManager.SYNTHESIZER_SEAT_KEY, "综合裁决")) + seatEntries
+    }
+
+    // While the run is still going, default to the FIRST seat tab (index 1) instead of the
+    // synthesizer (index 0) — the synthesizer has nothing to show until debate is over.
+    // After completion, jump to synthesizer (index 0) for the verdict.
+    val initialTab = if (isRunning && seatTabs.size > 1) 1 else 0
+    var selectedTab by remember(step.runId, isRunning) { mutableIntStateOf(initialTab) }
+    val safeSelected = selectedTab.coerceIn(0, (seatTabs.size - 1).coerceAtLeast(0))
+
+    ModalBottomSheet(
+        sheetState = sheetState,
+        onDismissRequest = onDismiss,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.MagicWand01,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = workspace.muted,
+                )
+                Text(
+                    text = "@Council",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = workspace.ink,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = statusVerb,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = workspace.muted,
+                )
+            }
+
+            taskObjective?.takeIf { it.isNotBlank() }?.let { objective ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = workspace.row,
+                    border = BorderStroke(1.dp, workspace.hairline),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "议题",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = workspace.faint,
+                        )
+                        Text(
+                            text = objective,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = workspace.ink,
+                        )
+                    }
+                }
+            }
+
+            if (seatTabs.isNotEmpty()) {
+                ScrollableTabRow(
+                    selectedTabIndex = safeSelected,
+                    edgePadding = 0.dp,
+                    containerColor = workspace.paper,
+                    contentColor = workspace.ink,
+                ) {
+                    seatTabs.forEachIndexed { index, tab ->
+                        Tab(
+                            selected = index == safeSelected,
+                            onClick = { selectedTab = index },
+                            text = {
+                                Text(
+                                    text = tab.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = workspace.hairline)
+
+            // Active tab body — subscribe to the seat's live flow + auto-scroll while running.
+            val activeSeatKey = seatTabs.getOrNull(safeSelected)?.key
+            val seatFlow = remember(step.runId, activeSeatKey) {
+                activeSeatKey?.let { manager.liveTextFlow(step.runId, it) } ?: MutableStateFlow("")
+            }
+            val liveText by seatFlow.collectAsState()
+            val finalText = remember(step.tools, activeSeatKey) {
+                if (activeSeatKey == ModelCouncilManager.SYNTHESIZER_SEAT_KEY) {
+                    extractFinalCouncilSynthesisText(step.tools)
+                } else if (activeSeatKey != null) {
+                    extractFinalCouncilSeatText(step.tools, activeSeatKey)
+                } else ""
+            }
+            val displayText = liveText.ifBlank { finalText }
+            val scrollState = rememberScrollState()
+            LaunchedEffect(displayText, isRunning, activeSeatKey) {
+                if (isRunning) scrollState.animateScrollTo(scrollState.maxValue)
+            }
+            Column(
+                modifier = Modifier.verticalScroll(scrollState),
+            ) {
+                if (displayText.isBlank()) {
+                    Text(
+                        text = if (isRunning) "等待此席位输出..." else "（无输出）",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = workspace.faint,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                } else {
+                    SelectionContainer {
+                        MarkdownBlock(
+                            content = displayText,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class CouncilTabEntry(val key: String, val label: String)
+
+/** Pull the synthesizer's final text from the latest read/wait result (`result.finalRecommendation`). */
+private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): String {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val parsed = runCatching {
+            JsonInstant.parseToJsonElement(outputText) as? JsonObject
+        }.getOrNull() ?: continue
+        // Council payload encodes `result` as a JSON-string (manager.runToPayload uses encoded()
+        // which serializes ModelCouncilResult to a literal). Re-parse the inner string.
+        val resultStr = (parsed["result"] as? JsonPrimitive)?.contentOrNull
+        val recommendation = resultStr?.let {
+            runCatching {
+                ((JsonInstant.parseToJsonElement(it) as? JsonObject)?.get("final_recommendation")
+                    as? JsonPrimitive)?.contentOrNull
+            }.getOrNull()
+        }
+        if (!recommendation.isNullOrBlank()) return recommendation
+    }
+    return ""
+}
+
+/**
+ * Pull a specific seat's content across ALL rounds from the latest tool result, joined the same
+ * way the live flow renders them (with `--- 第 N 轮 ---` separators between rounds 2+). Walking
+ * tools in reverse means we pick the most recent (richest) turns array; within it, all matching
+ * turns are kept in original order.
+ */
+private fun extractFinalCouncilSeatText(tools: List<UIMessagePart.Tool>, seatId: String): String {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val parsed = runCatching {
+            JsonInstant.parseToJsonElement(outputText) as? JsonObject
+        }.getOrNull() ?: continue
+        val turnsStr = (parsed["turns"] as? JsonPrimitive)?.contentOrNull ?: continue
+        val parsedTurns = runCatching {
+            JsonInstant.parseToJsonElement(turnsStr).jsonArray
+        }.getOrNull() ?: continue
+        val matching = parsedTurns.mapNotNull { turnElement ->
+            val turn = turnElement as? JsonObject ?: return@mapNotNull null
+            val tSeatId = (turn["seat_id"] as? JsonPrimitive)?.contentOrNull
+            if (tSeatId != seatId) return@mapNotNull null
+            val round = (turn["round"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 1
+            val content = (turn["content"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            round to content
+        }.sortedBy { it.first }
+        if (matching.isNotEmpty()) {
+            return matching.joinToString("\n\n") { (round, content) ->
+                if (round == 1) content else "--- 第 $round 轮 ---\n\n$content"
+            }
+        }
+    }
+    return ""
 }
 
 /**

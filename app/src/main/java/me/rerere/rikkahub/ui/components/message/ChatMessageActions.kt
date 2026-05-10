@@ -1,22 +1,31 @@
 package me.rerere.rikkahub.ui.components.message
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,6 +63,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.utils.copyMessageToClipboard
@@ -220,216 +230,112 @@ fun ChatMessageActionsSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        val workspace = workspaceColors()
+        val hasTextContent = message.parts.filterIsInstance<UIMessagePart.Text>()
+            .any { it.text.isNotBlank() }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Select and Copy
-            Card(
-                onClick = {
-                    onDismissRequest()
-                    onSelectAndCopy()
-                },
-                shape = MaterialTheme.shapes.medium
+            // Single hairline-bordered card; rows separated by thin dividers, ripple-on-tap.
+            // Replaces the previous "stack of fat tonal cards" look that fought the rest of the
+            // Notion-like UI.
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = workspace.paper,
+                contentColor = workspace.ink,
+                border = BorderStroke(1.dp, workspace.hairline),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.TextSelection,
-                        contentDescription = null,
-                        modifier = Modifier.padding(4.dp)
-                    )
-                    Text(
+                Column {
+                    MessageActionRow(
+                        icon = HugeIcons.TextSelection,
                         text = stringResource(R.string.select_and_copy),
-                        style = MaterialTheme.typography.titleMedium,
+                        workspace = workspace,
+                        onClick = {
+                            onDismissRequest()
+                            onSelectAndCopy()
+                        },
                     )
-                }
-            }
-
-            // WebView Preview (only show if message has text content)
-            val hasTextContent = message.parts.filterIsInstance<UIMessagePart.Text>()
-                .any { it.text.isNotBlank() }
-
-            if (hasTextContent) {
-                Card(
-                    onClick = {
-                        onDismissRequest()
-                        onWebViewPreview()
-                    },
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.WebDesign01,
-                            contentDescription = null,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                        Text(
+                    if (hasTextContent) {
+                        MessageActionDivider(workspace)
+                        MessageActionRow(
+                            icon = HugeIcons.WebDesign01,
                             text = stringResource(R.string.render_with_webview),
-                            style = MaterialTheme.typography.titleMedium,
+                            workspace = workspace,
+                            onClick = {
+                                onDismissRequest()
+                                onWebViewPreview()
+                            },
                         )
                     }
-                }
-            }
-
-            // Edit
-            Card(
-                onClick = {
-                    onDismissRequest()
-                    onEdit()
-                },
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Edit01,
-                        contentDescription = null,
-                        modifier = Modifier.padding(4.dp)
-                    )
-                    Text(
+                    MessageActionDivider(workspace)
+                    MessageActionRow(
+                        icon = HugeIcons.Edit01,
                         text = stringResource(R.string.edit),
-                        style = MaterialTheme.typography.titleMedium,
+                        workspace = workspace,
+                        onClick = {
+                            onDismissRequest()
+                            onEdit()
+                        },
                     )
-                }
-            }
-
-            // Share
-            Card(
-                onClick = {
-                    onDismissRequest()
-                    onShare()
-                },
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Share04,
-                        contentDescription = null,
-                        modifier = Modifier.padding(4.dp)
-                    )
-                    Text(
+                    MessageActionDivider(workspace)
+                    MessageActionRow(
+                        icon = HugeIcons.Share04,
                         text = stringResource(R.string.share),
-                        style = MaterialTheme.typography.titleMedium,
+                        workspace = workspace,
+                        onClick = {
+                            onDismissRequest()
+                            onShare()
+                        },
                     )
-                }
-            }
-
-            // Create a Fork
-            Card(
-                onClick = {
-                    onDismissRequest()
-                    onFork()
-                },
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.GitFork,
-                        contentDescription = null,
-                        modifier = Modifier.padding(4.dp)
-                    )
-                    Text(
+                    MessageActionDivider(workspace)
+                    MessageActionRow(
+                        icon = HugeIcons.GitFork,
                         text = stringResource(R.string.create_fork),
-                        style = MaterialTheme.typography.titleMedium,
+                        workspace = workspace,
+                        onClick = {
+                            onDismissRequest()
+                            onFork()
+                        },
                     )
-                }
-            }
-
-            if (onToggleFavorite != null) {
-                Card(
-                    onClick = {
-                        onDismissRequest()
-                        onToggleFavorite()
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.FavouriteCircle,
-                            contentDescription = null,
-                            modifier = Modifier.padding(4.dp)
-                        )
-                        Text(
+                    if (onToggleFavorite != null) {
+                        MessageActionDivider(workspace)
+                        MessageActionRow(
+                            icon = HugeIcons.FavouriteCircle,
                             text = stringResource(
                                 if (isFavorite) R.string.chat_message_remove_favorite
                                 else R.string.chat_message_add_favorite
                             ),
-                            style = MaterialTheme.typography.titleMedium,
+                            workspace = workspace,
+                            onClick = {
+                                onDismissRequest()
+                                onToggleFavorite()
+                            },
                         )
                     }
-                }
-            }
-
-            // Delete
-            Card(
-                onClick = {
-                    onDismissRequest()
-                    onDelete()
-                },
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Delete01,
-                        contentDescription = null,
-                        modifier = Modifier.padding(4.dp)
-                    )
-                    Text(
+                    MessageActionDivider(workspace)
+                    MessageActionRow(
+                        icon = HugeIcons.Delete01,
                         text = stringResource(R.string.delete),
-                        style = MaterialTheme.typography.titleMedium,
+                        workspace = workspace,
+                        danger = true,
+                        onClick = {
+                            onDismissRequest()
+                            onDelete()
+                        },
                     )
                 }
             }
 
-            // Message Info
-            ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+            ProvideTextStyle(
+                MaterialTheme.typography.labelSmall.copy(color = workspace.faint)
+            ) {
                 Text(message.createdAt.toJavaLocalDateTime().toLocalString())
                 if (model != null) {
                     Text(model.displayName)
@@ -437,4 +343,48 @@ fun ChatMessageActionsSheet(
             }
         }
     }
+}
+
+@Composable
+private fun MessageActionRow(
+    icon: ImageVector,
+    text: String,
+    workspace: me.rerere.rikkahub.ui.components.ui.WorkspaceColors,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val tint = if (danger) workspace.red else workspace.muted
+    val textColor = if (danger) workspace.red else workspace.ink
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = textColor,
+        )
+    }
+}
+
+@Composable
+private fun MessageActionDivider(
+    workspace: me.rerere.rikkahub.ui.components.ui.WorkspaceColors,
+) {
+    HorizontalDivider(
+        thickness = 0.6.dp,
+        color = workspace.hairline,
+        modifier = Modifier.padding(start = 44.dp),  // align under the text, not under the icon
+    )
 }

@@ -222,6 +222,11 @@ class SubAgentManager(
     /** Snapshot of a known run, or null if it was never started or was already evicted. */
     fun snapshot(runId: String): SubAgentRun? = runs[runId]?.snapshot
 
+    /** True iff Model Council experimental mode is currently on. Used by SubAgentTools to
+     *  decide whether to advertise @council alongside the regular subagent roster. */
+    fun isModelCouncilEnabled(): Boolean =
+        settingsStore.settingsFlow.value.agentRuntime.modelCouncil.enabled
+
     /**
      * Keep [liveTextFlows] bounded. Iterate the flow keys (not [runs].values) so orphaned
      * entries — flows whose run snapshot was already evicted elsewhere — are also reclaimed.

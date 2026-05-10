@@ -75,7 +75,9 @@ object ModelCouncilValidator {
         task: JsonObject,
         setting: ModelCouncilRuntimeSetting,
     ): List<ModelCouncilSeat> {
-        val inputSeats = task["seats"]?.jsonArray?.mapIndexed { index, element ->
+        // Path 1: caller passed an explicit `seats` array — full manual control,
+        // no auto-injection. Power-user / debug path.
+        val explicit = task["seats"]?.jsonArray?.mapIndexed { index, element ->
             val seat = element.jsonObject
             val role = seat.string("role")
             val preset = ModelCouncilRolePresets.byName(role)
@@ -88,8 +90,65 @@ object ModelCouncilValidator {
                 outputBudgetChars = (seat["output_budget_chars"]?.jsonPrimitive?.intOrNull
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
             )
+        }?.takeIf { it.isNotEmpty() }
+        if (explicit != null) return explicit
+
+        // Path 2 (default): start from user's defaultSeats, force-inject the 3 core seats
+        // (supporter/opponent/judge) if missing, then add extra_lens picked by the orchestrator.
+        // Composition: core (always 3) + user defaults (lens picks) + extra_lens — deduplicated by id.
+        require(setting.defaultSeats.isNotEmpty()) {
+            "Model Council needs at least one default seat configured (Settings → Model Council) so the auto-injected core seats (supporter / opponent / judge) have a model to run on. Either add 1+ default seats or pass an explicit `seats` array in the tool call."
         }
-        return inputSeats?.takeIf { it.isNotEmpty() } ?: setting.defaultSeats
+        val baseSeatModelId = setting.defaultSeats.firstOrNull()?.modelId
+        val coreInjected = ModelCouncilRolePresets.coreSeats.map { preset ->
+            // Match by id (canonical) — falls back to creating a new seat using the first
+            // available default-seat's model when the user hasn't pre-configured this core seat.
+            setting.defaultSeats.firstOrNull { ModelCouncilRolePresets.byName(it.role)?.id == preset.id }
+                ?: baseSeatModelId?.let { modelId ->
+                    ModelCouncilSeat(
+                        seatId = "core-${preset.id}",
+                        name = preset.name,
+                        role = preset.id,
+                        modelId = modelId,
+                        systemPrompt = preset.prompt,
+                        outputBudgetChars = setting.outputBudgetChars,
+                    )
+                }
+        }.filterNotNull()
+
+        // User's existing non-core defaults (lens choices baked into settings)
+        val userLensSeats = setting.defaultSeats.filter { seat ->
+            val canonicalId = ModelCouncilRolePresets.byName(seat.role)?.id ?: seat.role
+            !ModelCouncilRolePresets.isCore(canonicalId)
+        }
+
+        // Per-task extra_lens from the orchestrator
+        val extraLensIds = task["extra_lens"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf(String::isNotBlank) }
+            .orEmpty()
+        val extraLensSeats = extraLensIds.mapNotNull { lensId ->
+            val preset = ModelCouncilRolePresets.byName(lensId) ?: return@mapNotNull null
+            if (ModelCouncilRolePresets.isCore(preset.id)) return@mapNotNull null  // core handled above
+            val modelId = baseSeatModelId ?: return@mapNotNull null  // need a model to seat them
+            ModelCouncilSeat(
+                seatId = "lens-${preset.id}",
+                name = preset.name,
+                role = preset.id,
+                modelId = modelId,
+                systemPrompt = preset.prompt,
+                outputBudgetChars = setting.outputBudgetChars,
+            )
+        }
+
+        // Dedupe by canonical role id (preserves first-seen order)
+        val seen = HashSet<String>()
+        val merged = (coreInjected + userLensSeats + extraLensSeats).filter { seat ->
+            val canonicalId = ModelCouncilRolePresets.byName(seat.role)?.id ?: seat.role
+            seen.add(canonicalId)
+        }
+
+        // Hard cap by maxSeats; truncate excess lenses (core is at the front so it survives).
+        return merged.take(setting.maxSeats.coerceAtLeast(2))
     }
 
     private fun JsonObject.string(name: String): String =

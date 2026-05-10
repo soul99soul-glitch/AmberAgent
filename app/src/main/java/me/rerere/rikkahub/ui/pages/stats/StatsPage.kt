@@ -6,6 +6,7 @@ import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.Message01
 import me.rerere.hugeicons.stroke.Rocket01
 import me.rerere.hugeicons.stroke.Zap
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -233,26 +239,80 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
                 }
             }
 
-            // Heatmap grid
-            Row(horizontalArrangement = Arrangement.spacedBy(cellSpacing)) {
-                for (weekIdx in 0 until numWeeks) {
-                    Column(verticalArrangement = Arrangement.spacedBy(cellSpacing)) {
-                        for (dow in 0..6) {
-                            val date = startSunday.plusDays((weekIdx * 7 + dow).toLong())
-                            val isFuture = date.isAfter(today)
-                            val count = if (isFuture) 0 else (conversationsPerDay[date] ?: 0)
-                            val alpha = when {
-                                isFuture -> -1f
-                                count == 0 -> 0f
-                                count <= q1 -> 0.25f
-                                count <= q2 -> 0.5f
-                                count <= q3 -> 0.75f
-                                else -> 1f
-                            }
-                            HeatmapCell(alpha = alpha, sizeDp = cellSize.value.toInt())
-                        }
-                    }
+            // Heatmap grid — single Canvas instead of 53*7 = 371 individual Box composables.
+            // Originally this caused the navigation enter animation to drop frames (the page
+            // had to measure ~370 layout nodes on first composition) and the
+            // rememberScrollState(initial=Int.MAX_VALUE) couldn't settle in time, making the
+            // grid look like it briefly scrolled from the left before snapping right.
+            HeatmapGridCanvas(
+                conversationsPerDay = conversationsPerDay,
+                startSunday = startSunday,
+                today = today,
+                numWeeks = numWeeks,
+                q1 = q1,
+                q2 = q2,
+                q3 = q3,
+                cellSize = cellSize,
+                cellSpacing = cellSpacing,
+            )
+        }
+    }
+}
+
+/**
+ * Draw all 371 heatmap cells in a single Canvas pass. Compose's per-cell layout cost was the
+ * dominant overhead during page entry; collapsing it to one DrawScope keeps the navigation
+ * animation smooth and lets the parent horizontalScroll's initial=Int.MAX_VALUE settle on the
+ * first frame (only one child to measure now).
+ */
+@Composable
+private fun HeatmapGridCanvas(
+    conversationsPerDay: Map<LocalDate, Int>,
+    startSunday: LocalDate,
+    today: LocalDate,
+    numWeeks: Int,
+    q1: Int,
+    q2: Int,
+    q3: Int,
+    cellSize: androidx.compose.ui.unit.Dp,
+    cellSpacing: androidx.compose.ui.unit.Dp,
+) {
+    val futureColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+    val emptyColor = MaterialTheme.colorScheme.surfaceVariant
+    val baseColor = MaterialTheme.colorScheme.primary
+    val density = LocalDensity.current
+    val cellPx = with(density) { cellSize.toPx() }
+    val spacingPx = with(density) { cellSpacing.toPx() }
+    val cornerPx = with(density) { (cellSize / 4).toPx() }
+    val totalWidth = cellSize * numWeeks + cellSpacing * (numWeeks - 1)
+    val totalHeight = cellSize * 7 + cellSpacing * 6
+
+    Canvas(
+        modifier = Modifier.size(width = totalWidth, height = totalHeight),
+    ) {
+        val cellSizeOffset = Size(cellPx, cellPx)
+        val corner = CornerRadius(cornerPx)
+        for (weekIdx in 0 until numWeeks) {
+            val x = weekIdx * (cellPx + spacingPx)
+            for (dow in 0..6) {
+                val date = startSunday.plusDays((weekIdx * 7 + dow).toLong())
+                val isFuture = date.isAfter(today)
+                val count = if (isFuture) 0 else (conversationsPerDay[date] ?: 0)
+                val color: Color = when {
+                    isFuture -> futureColor
+                    count == 0 -> emptyColor
+                    count <= q1 -> baseColor.copy(alpha = 0.25f)
+                    count <= q2 -> baseColor.copy(alpha = 0.5f)
+                    count <= q3 -> baseColor.copy(alpha = 0.75f)
+                    else -> baseColor
                 }
+                val y = dow * (cellPx + spacingPx)
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(x, y),
+                    size = cellSizeOffset,
+                    cornerRadius = corner,
+                )
             }
         }
     }

@@ -6,6 +6,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
@@ -39,12 +42,19 @@ import java.time.Instant
 import kotlin.uuid.Uuid
 
 interface ModelCouncilTextRunner {
+    /**
+     * Generate the seat's reply.
+     * - [onChunk] is invoked with the *cumulative* text every time the provider streams in.
+     *   Pass `{ }` if you don't care about live updates.
+     * - The returned String is the final (already truncated to budget) text.
+     */
     suspend fun generate(
         settings: Settings,
         modelId: Uuid,
         systemPrompt: String,
         userPrompt: String,
         outputBudgetChars: Int,
+        onChunk: (String) -> Unit = {},
     ): String
 }
 
@@ -57,6 +67,7 @@ class ProviderModelCouncilTextRunner(
         systemPrompt: String,
         userPrompt: String,
         outputBudgetChars: Int,
+        onChunk: (String) -> Unit,
     ): String {
         val model = settings.findModelById(modelId) ?: error("Model not found: $modelId")
         val provider = model.findProvider(settings.providers) ?: error("Provider not found for model: ${model.displayName}")
@@ -65,19 +76,29 @@ class ProviderModelCouncilTextRunner(
             add(UIMessage.system(systemPrompt))
             add(UIMessage.user(userPrompt))
         }
-        val chunk = providerImpl.generateText(
+        val params = TextGenerationParams(
+            model = model,
+            temperature = 0.2f,
+            tools = emptyList(),
+            reasoningLevel = ReasoningLevel.OFF,
+        )
+        // Streaming path: per-chunk MessageChunk.choices.first.delta is the delta; we accumulate
+        // and emit the running text. The provider abstraction returns chunked deltas, so we keep
+        // a builder. If anything throws mid-stream, the partial text we already have is what
+        // callers see (better than blank).
+        val accumulated = StringBuilder()
+        providerImpl.streamText(
             providerSetting = provider,
             messages = messages,
-            params = TextGenerationParams(
-                model = model,
-                temperature = 0.2f,
-                tools = emptyList(),
-                reasoningLevel = ReasoningLevel.OFF,
-            ),
-        )
-        return chunk.choices.firstOrNull()?.message?.toText()
-            ?.take(outputBudgetChars)
-            .orEmpty()
+            params = params,
+        ).collect { chunk ->
+            val delta = chunk.choices.firstOrNull()?.delta?.toText().orEmpty()
+            if (delta.isNotEmpty()) {
+                accumulated.append(delta)
+                onChunk(accumulated.toString())
+            }
+        }
+        return accumulated.toString().take(outputBudgetChars)
     }
 }
 
@@ -91,6 +112,18 @@ class ModelCouncilManager(
 ) {
     private val runDir = File(context.filesDir, "amberagent/model-council/runs").also { it.mkdirs() }
     private val runs = java.util.concurrent.ConcurrentHashMap<String, RuntimeRun>()
+
+    /**
+     * Per-run, per-seat live text streams. Each seat's MutableStateFlow receives the seat's
+     * accumulating reply as it streams from the provider; UI subscribes via [liveTextFlow] /
+     * [liveTextFlows] to render real-time tabs in the run sheet.
+     *
+     * Synthesizer uses the special key [SYNTHESIZER_SEAT_KEY].
+     *
+     * Kept after the run finishes so a sheet opened later can still see the final text.
+     * Capped at [LIVE_TEXT_CAP] active runs by evicting the oldest finished entries.
+     */
+    private val seatLiveTextFlows = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<String>>>()
 
     suspend fun start(input: JsonObject): JsonObject = withContext(Dispatchers.IO) {
         val settings = settingsStore.settingsFlow.value
@@ -120,6 +153,14 @@ class ModelCouncilManager(
         )
         val runtimeRun = RuntimeRun(run)
         runs[runId] = runtimeRun
+        // Pre-create a flow per seat (and the synthesizer) so the run sheet can subscribe
+        // immediately, even before the first chunk arrives. Live flows survive after finish so
+        // a freshly opened sheet still sees the final text.
+        val perSeatFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<String>>()
+        run.seats.forEach { seat -> perSeatFlows[seat.seatId] = MutableStateFlow("") }
+        perSeatFlows[SYNTHESIZER_SEAT_KEY] = MutableStateFlow("")
+        seatLiveTextFlows[runId] = perSeatFlows
+        capLiveTextFlows()
         agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
             cancel(runId)
             true
@@ -192,12 +233,50 @@ class ModelCouncilManager(
         runToPayload(runtimeRun.snapshot)
     }
 
+    /**
+     * UI-facing live stream of a council seat's accumulating reply. `seatId` may be a real seat id
+     * or [SYNTHESIZER_SEAT_KEY] for the synthesizer pane. Null = unknown runId or seatId.
+     *
+     * **Completion signal**: this flow does NOT carry a "done" marker. UI should observe
+     * [snapshot] / [read] in parallel to know when the run finished.
+     */
+    fun liveTextFlow(runId: String, seatId: String): StateFlow<String>? =
+        seatLiveTextFlows[runId]?.get(seatId)?.asStateFlow()
+
+    /** All live flows for a run, keyed by seatId (+ [SYNTHESIZER_SEAT_KEY]). Null if run unknown. */
+    fun liveTextFlows(runId: String): Map<String, StateFlow<String>>? =
+        seatLiveTextFlows[runId]?.mapValues { it.value.asStateFlow() }
+
+    /** Snapshot of a known run, or null if it was never started or was already evicted. */
+    fun snapshot(runId: String): ModelCouncilRun? = runs[runId]?.snapshot
+
+    /**
+     * Drop oldest finished entries when over [LIVE_TEXT_CAP]. Active runs are skipped (the runner
+     * still holds references to write into them). Iterates [seatLiveTextFlows] keys (not [runs])
+     * so orphaned entries — flows whose snapshot was already evicted elsewhere — also get reclaimed.
+     */
+    private fun capLiveTextFlows() {
+        if (seatLiveTextFlows.size <= LIVE_TEXT_CAP) return
+        val candidates = seatLiveTextFlows.keys.mapNotNull { id ->
+            val snap = runs[id]?.snapshot
+            when {
+                snap == null -> id to 0L  // orphan
+                snap.status.running -> null
+                else -> id to snap.updatedAtMs
+            }
+        }.sortedBy { it.second }
+        val toDrop = seatLiveTextFlows.size - LIVE_TEXT_CAP
+        candidates.take(toDrop).forEach { (id, _) -> seatLiveTextFlows.remove(id) }
+    }
+
     fun runtimeSummary(): JsonObject {
         val settings = settingsStore.settingsFlow.value
         val setting = settings.agentRuntime.modelCouncil
         return buildJsonObject {
             put("enabled", setting.enabled)
             put("default_seat_count", setting.defaultSeats.size)
+            put("auto_injected_core_seats", 3)
+            put("seat_composition_note", "Effective seat count at run time = 3 core (supporter/opponent/judge, always auto-injected) + user lens defaults + any extra_lens passed in tool call, deduped by role id and capped at max_seats.")
             put("max_seats", setting.maxSeats)
             put("default_rounds", setting.defaultRounds)
             put("max_rounds", setting.maxRounds)
@@ -295,7 +374,7 @@ class ModelCouncilManager(
         if (completed.isEmpty()) {
             return failResult("All Model Council seats failed.")
         }
-        val synthesis = synthesize(settings, setting, synthesisModelId, task, allTurns)
+        val synthesis = synthesize(settings, setting, synthesisModelId, task, allTurns, runtimeRun.snapshot.runId)
         val status = if (allTurns.any { it.status != ModelCouncilRunStatus.COMPLETED }) {
             ModelCouncilRunStatus.PARTIAL_FAILED
         } else {
@@ -311,9 +390,28 @@ class ModelCouncilManager(
         round: Int,
         promptForSeat: (ModelCouncilSeat) -> String,
     ): List<ModelCouncilTurn> = supervisorScope {
+        val runId = runtimeRun.snapshot.runId
+        val seatFlows = seatLiveTextFlows[runId]
+        // For round 2+, derive prior text from the canonical `runtimeRun.snapshot.turns` (the
+        // source of truth) instead of reading from the live flow. The live flow could in theory
+        // be cleared/reformatted by a future change; turns are append-only.
+        val priorPrefixBySeat: Map<String, String> = if (round > 1) {
+            runtimeRun.snapshot.seats.associate { seat ->
+                val priorTurns = runtimeRun.snapshot.turns
+                    .filter { it.seatId == seat.seatId && it.round < round }
+                    .sortedBy { it.round }
+                val priorText = priorTurns.joinToString("\n\n") { turn ->
+                    if (turn.round == 1) turn.content
+                    else "--- 第 ${turn.round} 轮 ---\n\n${turn.content}"
+                }
+                seat.seatId to if (priorText.isNotEmpty()) "$priorText\n\n--- 第 $round 轮 ---\n\n" else ""
+            }
+        } else emptyMap()
         runtimeRun.snapshot.seats.map { seat ->
             async {
                 val systemPrompt = seatSystemPrompt(seat)
+                val seatFlow = seatFlows?.get(seat.seatId)
+                val priorPrefix = priorPrefixBySeat[seat.seatId].orEmpty()
                 val result = runCatching {
                     withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
                         runner.generate(
@@ -322,6 +420,9 @@ class ModelCouncilManager(
                             systemPrompt = systemPrompt,
                             userPrompt = promptForSeat(seat),
                             outputBudgetChars = seat.outputBudgetChars,
+                            onChunk = { running ->
+                                seatFlow?.value = priorPrefix + running
+                            },
                         )
                     }
                 }
@@ -365,8 +466,10 @@ class ModelCouncilManager(
         synthesisModelId: Uuid,
         task: ModelCouncilTaskSpec,
         turns: List<ModelCouncilTurn>,
+        runId: String,
     ): ModelCouncilResult {
         val prompt = synthesisPrompt(task, turns)
+        val synthFlow = seatLiveTextFlows[runId]?.get(SYNTHESIZER_SEAT_KEY)
         val text = runCatching {
             withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
                 runner.generate(
@@ -375,6 +478,7 @@ class ModelCouncilManager(
                     systemPrompt = "你是 AmberAgent 的 Model Council 裁判。只综合证据，不引入未给出的事实。",
                     userPrompt = prompt,
                     outputBudgetChars = setting.outputBudgetChars,
+                    onChunk = { running -> synthFlow?.value = running },
                 )
             }
         }.getOrElse { error ->
@@ -527,6 +631,14 @@ class ModelCouncilManager(
         @Volatile var snapshot: ModelCouncilRun,
         @Volatile var job: Job? = null,
     )
+
+    companion object {
+        /** Reserved seat id for the synthesizer pane in [seatLiveTextFlows]. */
+        const val SYNTHESIZER_SEAT_KEY = "__synthesizer__"
+
+        /** Soft cap on retained live-text run entries. Same scale as SubAgent. */
+        const val LIVE_TEXT_CAP = 64
+    }
 }
 
 private fun ModelCouncilTurn.visible(exposeContent: Boolean): ModelCouncilTurn {

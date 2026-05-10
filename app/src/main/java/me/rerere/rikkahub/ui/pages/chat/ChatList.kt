@@ -703,19 +703,19 @@ private fun ChatListNormal(
                 )
             }
         } else {
-            // After a fling/scroll ends, keep follow paused regardless of whether the user
-            // happened to land within the bottom buffer. Auto-resuming here is the root cause
-            // of "I touched the screen and it yanked back to bottom" — a tiny scroll often
-            // ends within bufferPx, so the old code would re-arm follow and the next stream
-            // chunk would scroll the user away from what they were trying to read.
-            // The 30s idle-resume timer (autoFollowResumeToken) plus explicit user gestures
-            // (sending a new message, pressing the jump-to-bottom button) are the only paths
-            // back to FollowingBottom now.
             if (activeGenerationState && !programmaticScrollInProgress) {
-                pauseAutoFollowTemporarily(
-                    mode = TimelineFollowMode.PausedForUser,
-                    scheduleIdleReturn = true,
-                )
+                // Resume follow ONLY when the list cannot scroll forward at all — i.e. the user
+                // truly scrolled back to the very bottom (no buffer wiggle room). Stricter than
+                // isAtTimelineBottom(bottomFollowBufferPx); avoids the old "tiny scroll ends
+                // within bufferPx → re-arm follow → next chunk yanks the user away" bug.
+                if (!state.canScrollForward) {
+                    resumeBottomFollow()
+                } else {
+                    pauseAutoFollowTemporarily(
+                        mode = TimelineFollowMode.PausedForUser,
+                        scheduleIdleReturn = true,
+                    )
+                }
             }
             delay(1500)
             isRecentScroll = false

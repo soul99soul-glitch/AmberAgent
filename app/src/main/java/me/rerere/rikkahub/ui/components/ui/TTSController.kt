@@ -1,19 +1,19 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -47,10 +48,7 @@ fun TTSController() {
     var isVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(isSpeaking) {
-        if (isSpeaking) {
-            // 如果开启，显示悬浮窗
-            isVisible = true
-        }
+        if (isSpeaking) isVisible = true
     }
 
     FloatingWindow(
@@ -59,68 +57,87 @@ fun TTSController() {
     ) {
         val playbackState by ttsState.playbackState.collectAsState()
         var expand by remember { mutableStateOf(false) }
+        val workspace = workspaceColors()
+        // Notion-like card: rounded rectangle, paper background, hairline border, no elevation —
+        // matches the rest of the experimental UI (settings, workspace tools, subagent cards).
         Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
+            shape = RoundedCornerShape(10.dp),
+            color = workspace.paper,
+            contentColor = workspace.ink,
+            border = BorderStroke(1.dp, workspace.hairline),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.padding(8.dp),
-            shadowElevation = 4.dp,
         ) {
             Row(
-                modifier = Modifier.padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PlayPauseButton(playbackState = playbackState, ttsState = ttsState)
+                PlayPauseButton(playbackState = playbackState, ttsState = ttsState, workspace = workspace)
 
-                IconButton(
+                ControllerIconButton(
+                    icon = HugeIcons.Cancel01,
+                    tone = WorkspaceTone.Danger,
+                    workspace = workspace,
                     onClick = {
                         ttsState.stop()
                         isVisible = false
-                    }
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Cancel01,
-                        contentDescription = null,
-                    )
-                }
+                    },
+                )
 
                 AnimatedVisibility(expand) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        SpeedButton(playbackState, ttsState)
-
-                        FastForwardButton(ttsState = ttsState)
+                        SpeedButton(playbackState, ttsState, workspace)
+                        ControllerIconButton(
+                            icon = HugeIcons.Forward02,
+                            tone = WorkspaceTone.Neutral,
+                            workspace = workspace,
+                            onClick = { ttsState.fastForward(5000) },
+                        )
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        expand = !expand
-                    }
-                ) {
-                    Icon(
-                        imageVector = if (expand) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
-                        contentDescription = null,
-                    )
-                }
+                ControllerIconButton(
+                    icon = if (expand) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
+                    tone = WorkspaceTone.Neutral,
+                    workspace = workspace,
+                    onClick = { expand = !expand },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun FastForwardButton(ttsState: CustomTtsState) {
-    IconButton(
-        onClick = {
-            ttsState.fastForward(5000)
-        }
+private fun ControllerIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tone: WorkspaceTone,
+    workspace: WorkspaceColors,
+    onClick: () -> Unit,
+) {
+    val tint = when (tone) {
+        WorkspaceTone.Danger -> workspace.red
+        WorkspaceTone.Accent -> workspace.blue
+        WorkspaceTone.Success -> workspace.green
+        WorkspaceTone.Warning -> workspace.amber
+        WorkspaceTone.Neutral -> workspace.muted
+    }
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = HugeIcons.Forward02,
+            imageVector = icon,
             contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(14.dp),
         )
     }
 }
@@ -128,89 +145,69 @@ private fun FastForwardButton(ttsState: CustomTtsState) {
 @Composable
 private fun PlayPauseButton(
     playbackState: PlaybackState,
-    ttsState: CustomTtsState
+    ttsState: CustomTtsState,
+    workspace: WorkspaceColors,
 ) {
-    FilledTonalIconButton(
-        onClick = {
-            when (playbackState.status) {
-                PlaybackStatus.Playing -> {
-                    ttsState.pause()
-                }
-
-                else -> {
-                    ttsState.resume()
-                }
-            }
-        },
-        colors = IconButtonDefaults.filledTonalIconButtonColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-        )
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable {
+                if (playbackState.status == PlaybackStatus.Playing) ttsState.pause()
+                else ttsState.resume()
+            },
+        contentAlignment = Alignment.Center,
     ) {
+        // Thin progress ring around the play/pause icon: continuous chunk progress,
+        // no double-ring + no flashy tertiary container background.
+        val activePlayback = playbackState.status == PlaybackStatus.Playing ||
+            playbackState.status == PlaybackStatus.Buffering ||
+            playbackState.status == PlaybackStatus.Paused
+        if (activePlayback && playbackState.totalChunks > 0) {
+            CircularProgressIndicator(
+                progress = {
+                    val total = playbackState.totalChunks.coerceAtLeast(1)
+                    playbackState.currentChunkIndex.toFloat() / total
+                },
+                color = workspace.ink,
+                trackColor = Color.Transparent,
+                strokeWidth = 1.5.dp,
+                modifier = Modifier.size(24.dp),
+            )
+        }
         Icon(
             imageVector = if (playbackState.status == PlaybackStatus.Playing) HugeIcons.Pause else HugeIcons.Play,
             contentDescription = null,
+            tint = workspace.ink,
+            modifier = Modifier.size(13.dp),
         )
-        if (playbackState.status == PlaybackStatus.Playing || playbackState.status == PlaybackStatus.Buffering || playbackState.status == PlaybackStatus.Paused) {
-            CircularProgressIndicator(
-                progress = {
-                    if (playbackState.status == PlaybackStatus.Playing) {
-                        playbackState.positionMs.toFloat() / playbackState.durationMs
-                    } else {
-                        0f
-                    }
-                },
-                color = MaterialTheme.colorScheme.tertiary,
-                strokeWidth = 2.dp,
-                trackColor = Color.Transparent
-            )
-            CircularProgressIndicator(
-                progress = {
-                    if (playbackState.status == PlaybackStatus.Playing) {
-                        playbackState.currentChunkIndex.toFloat() / playbackState.totalChunks
-                    } else {
-                        0f
-                    }
-                },
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.padding(2.dp),
-                strokeWidth = 2.dp,
-                trackColor = Color.Transparent
-            )
-        }
     }
 }
 
 @Composable
 private fun SpeedButton(
     playbackState: PlaybackState,
-    ttsState: CustomTtsState
+    ttsState: CustomTtsState,
+    workspace: WorkspaceColors,
 ) {
-    TextButton(
-        onClick = {
-            when (playbackState.speed) {
-                0.8f -> {
-                    ttsState.setSpeed(1.0f)
-                }
-
-                1.0f -> {
-                    ttsState.setSpeed(1.2f)
-                }
-
-                1.2f -> {
-                    ttsState.setSpeed(1.5f)
-                }
-
-                1.5f -> {
-                    ttsState.setSpeed(0.8f)
-                }
-
-                else -> {
-                    ttsState.setSpeed(1.0f)
-                }
-            }
-        }
+    val nextSpeed = when (playbackState.speed) {
+        0.8f -> 1.0f
+        1.0f -> 1.2f
+        1.2f -> 1.5f
+        1.5f -> 0.8f
+        else -> 1.0f
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { ttsState.setSpeed(nextSpeed) }
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(text = "x${"%.1f".format(playbackState.speed)}")
+        Text(
+            text = "${"%.1f".format(playbackState.speed)}×",
+            style = MaterialTheme.typography.labelSmall,
+            color = workspace.muted,
+        )
     }
 }

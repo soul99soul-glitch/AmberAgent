@@ -578,6 +578,13 @@ private fun ExportedChatMessage(
                                             ExportedToolStep(tool = tool)
                                         }
                                     }
+
+                                    is ThinkingStep.CouncilTaskStep -> {
+                                        // Same fan-out as SubAgentTaskStep above.
+                                        step.tools.forEach { tool ->
+                                            ExportedToolStep(tool = tool)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -644,6 +651,17 @@ private fun ExportedChatMessage(
                         // Wrap in a one-step ChainOfThought scope so we can reuse the existing
                         // ExportedToolStep (a ChainOfThoughtScope receiver). Lists every underlying
                         // subagent_* tool call so the exported transcript stays informative.
+                        if (block.step.tools.isNotEmpty()) {
+                            ChainOfThought(
+                                steps = block.step.tools,
+                                collapsedVisibleCount = block.step.tools.size,
+                            ) { tool ->
+                                ExportedToolStep(tool = tool)
+                            }
+                        }
+                    }
+
+                    is MessagePartBlock.CouncilBlock -> {
                         if (block.step.tools.isNotEmpty()) {
                             ChainOfThought(
                                 steps = block.step.tools,

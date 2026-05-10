@@ -35,7 +35,7 @@ class ModelCouncilTools(
 
     private fun statusTool() = Tool(
         name = "model_council_status",
-        description = "Show Model Council experimental mode status, configured seats, limits, role presets, and active runs.",
+        description = "Show Model Council experimental mode status, configured seats, limits, role presets (split into core and lens layers), and active runs.",
         parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
         execute = {
             listOf(
@@ -43,8 +43,8 @@ class ModelCouncilTools(
                     buildJsonObject {
                         put("status", "ok")
                         put("runtime", manager.runtimeSummary())
-                        put("role_presets", buildJsonArray {
-                            ModelCouncilRolePresets.presets.forEach { preset ->
+                        put("core_seats", buildJsonArray {
+                            ModelCouncilRolePresets.coreSeats.forEach { preset ->
                                 add(
                                     buildJsonObject {
                                         put("id", preset.id)
@@ -54,7 +54,18 @@ class ModelCouncilTools(
                                 )
                             }
                         })
-                        put("notes", "Council members run as pure-text model calls with tools and memories disabled.")
+                        put("lens_presets", buildJsonArray {
+                            ModelCouncilRolePresets.lensPresets.forEach { preset ->
+                                add(
+                                    buildJsonObject {
+                                        put("id", preset.id)
+                                        put("name", preset.name)
+                                        put("prompt", preset.prompt)
+                                    }
+                                )
+                            }
+                        })
+                        put("notes", "Core seats (supporter/opponent/judge) are auto-injected on every run unless you pass an explicit `seats` array. Use `extra_lens: [\"product\", ...]` in model_council_start to add domain perspectives per topic. Members run as pure-text models with no tools or memories.")
                     }.toString()
                 )
             )
@@ -63,13 +74,13 @@ class ModelCouncilTools(
 
     private fun startTool() = Tool(
         name = "model_council_start",
-        description = "Start a Model Council compare or debate run. Members receive only the explicit task/context and cannot call tools.",
+        description = "Start a Model Council debate. The 3 core seats (supporter/opponent/judge) are ALWAYS included for adversarial deliberation + verdict. Add `extra_lens` to bring in domain perspectives chosen by topic. Heuristic: commercial decisions → product+marketing+pr; technical decisions → engineering+risk; UX decisions → ux+product; writing/judgment → no extras (just the core 3). Members run as pure-text models with no tools.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("task", buildJsonObject {
                         put("type", "object")
-                        put("description", "Task spec: mode(compare|debate), objective, context, output_format, evaluation_criteria, rounds, and optional seats.")
+                        put("description", "Task spec: mode(compare|debate), objective, context, output_format, evaluation_criteria, rounds, and optional explicit seats (rare — usually omit and let core+extra_lens handle composition).")
                     })
                     put("mode", enumProp("Optional shorthand mode when task is omitted.", listOf("compare", "debate")))
                     put("objective", stringProp("Question or decision to review. Required when task is omitted."))
@@ -77,9 +88,24 @@ class ModelCouncilTools(
                     put("output_format", stringProp("Desired output shape."))
                     put("evaluation_criteria", stringProp("Criteria for comparing answers."))
                     put("rounds", integerProp("Debate rounds. Compare always uses one round."))
+                    put("extra_lens", buildJsonObject {
+                        put("type", "array")
+                        put("description", "Domain lenses to include alongside the 3 core seats. Each entry is a lens id: product, marketing, pr, engineering, ux, risk. Order is preserved; duplicates and unknown ids are dropped.")
+                        put("items", buildJsonObject {
+                            put("type", "string")
+                            put("enum", buildJsonArray {
+                                add("product")
+                                add("marketing")
+                                add("pr")
+                                add("engineering")
+                                add("ux")
+                                add("risk")
+                            })
+                        })
+                    })
                     put("seats", buildJsonObject {
                         put("type", "array")
-                        put("description", "Optional temporary seats. Each seat needs seat_id/name/role/model_id and may include system_prompt/output_budget_chars.")
+                        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Each seat needs seat_id/name/role/model_id and may include system_prompt/output_budget_chars.")
                         put("items", buildJsonObject { put("type", "object") })
                     })
                 }

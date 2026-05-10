@@ -323,8 +323,15 @@ class RouteActivity : ComponentActivity() {
                         transitionSpec = {
                             if (backStack.size == 1) fadeIn() togetherWith fadeOut()
                             else {
-                                slideInHorizontally { it } togetherWith
-                                    slideOutHorizontally { -it / 2 } + scaleOut(targetScale = 0.7f) + fadeOut()
+                                // Standard push: previous page slides FULLY off-screen so the
+                                // two pages don't visually overlap mid-transition. The old
+                                // `-it / 2` (half-out) + scaleOut + fadeOut combo had the
+                                // outgoing page sit in the left half of the screen during the
+                                // transition (visible "torn" frame the user complained about),
+                                // and the three simultaneous animation properties (offset +
+                                // scale + alpha) were heavy enough to drop frames on
+                                // expensive entry pages like Stats.
+                                slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
                             }
                         },
                         popTransitionSpec = {

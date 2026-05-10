@@ -66,6 +66,18 @@ class SubAgentTools(
                     }
                     appendLine()
                 }
+                // Model Council uses a separate tool family (model_council_*), but conceptually
+                // it's a multi-model variant of @oracle. Surface it next to oracle when enabled so
+                // the orchestrator considers it for high-stakes calls. Mirrors the routingHint
+                // formatting of other built-in roles for tonal consistency.
+                if (subAgentManager.isModelCouncilEnabled()) {
+                    appendLine("@council (Model Council)")
+                    appendLine("- @oracle 的多模型加强版：3 个核心席位（支持者 / 反对者 / 裁判）+ 按议题挑选的领域 lens 并行辩论后综合。")
+                    appendLine("  何时调用：长期影响重大、单一 oracle 不够稳的关键决策 • 想要多视角对比 • 高风险/不可逆操作前的合议。")
+                    appendLine("  何时不要：常规深思（直接 @oracle）• 时间紧 • 答案已经很清楚 • 简单任务。")
+                    appendLine("  调用方式：model_council_start（用 extra_lens 数组按议题挑 lens：商业 → product/marketing/pr，技术 → engineering/risk，UX → ux/product，写作判断 → 不加 lens）→ model_council_wait → model_council_read。")
+                    appendLine()
+                }
             }
 
             // Full id set = built-ins + user-saved custom roles. Otherwise users get their custom

@@ -15,6 +15,17 @@ private val SUBAGENT_TASK_TOOLS = setOf(
     "subagent_cancel",
 )
 
+/** Tool names whose calls represent a single Model Council run and should be coalesced by run_id. */
+private val COUNCIL_TASK_TOOLS = setOf(
+    "model_council_start",
+    "model_council_wait",
+    "model_council_read",
+    "model_council_cancel",
+    // make_report writes a file; not strictly part of the run, but it's the same run_id and the
+    // user mentally groups it with the council card. Coalescing is fine.
+    "model_council_make_report",
+)
+
 /**
  * 思考步骤类型，用于分组 Reasoning 和 Tool
  */
@@ -42,6 +53,18 @@ sealed interface ThinkingStep {
         val anchor: UIMessagePart.Tool
             get() = tools.firstOrNull { it.toolName == "subagent_start" } ?: tools.first()
     }
+
+    /**
+     * One Model Council run: all of its `model_council_*` tool calls sharing one `run_id` folded
+     * into a single rendered card. Same identity/coalescing pattern as [SubAgentTaskStep].
+     */
+    data class CouncilTaskStep(
+        val runId: String,
+        val tools: List<UIMessagePart.Tool>,
+    ) : ThinkingStep {
+        val anchor: UIMessagePart.Tool
+            get() = tools.firstOrNull { it.toolName == "model_council_start" } ?: tools.first()
+    }
 }
 
 /**
@@ -57,6 +80,9 @@ sealed interface MessagePartBlock {
      * run sheet) even after the message finishes streaming.
      */
     data class SubAgentBlock(val step: ThinkingStep.SubAgentTaskStep) : MessagePartBlock
+
+    /** Same as [SubAgentBlock] but for Model Council runs. */
+    data class CouncilBlock(val step: ThinkingStep.CouncilTaskStep) : MessagePartBlock
 }
 
 /**
@@ -66,21 +92,30 @@ sealed interface MessagePartBlock {
  */
 private fun UIMessagePart.Tool.subagentRunId(): String? {
     if (toolName !in SUBAGENT_TASK_TOOLS) return null
-    return runCatching {
-        when (toolName) {
-            "subagent_start" -> {
-                val outputText = output.filterIsInstance<UIMessagePart.Text>()
-                    .firstOrNull()?.text ?: return null
-                JsonInstant.parseToJsonElement(outputText).jsonObject["run_id"]
-                    ?.jsonPrimitive?.contentOrNull
-            }
-            else -> {
-                JsonInstant.parseToJsonElement(input).jsonObject["run_id"]
-                    ?.jsonPrimitive?.contentOrNull
-            }
-        }
-    }.getOrNull()?.takeIf { it.isNotBlank() }
+    return extractRunId(startToolName = "subagent_start")
 }
+
+/** Same idea as [subagentRunId] but for `model_council_*` tool family. */
+private fun UIMessagePart.Tool.councilRunId(): String? {
+    if (toolName !in COUNCIL_TASK_TOOLS) return null
+    return extractRunId(startToolName = "model_council_start")
+}
+
+/**
+ * Shared run-id extraction logic for both subagent and council tool families. The "start" call
+ * gets its run_id from output (server-assigned); every other call carries it in its input.
+ */
+private fun UIMessagePart.Tool.extractRunId(startToolName: String): String? = runCatching {
+    if (toolName == startToolName) {
+        val outputText = output.filterIsInstance<UIMessagePart.Text>()
+            .firstOrNull()?.text ?: return@runCatching null
+        JsonInstant.parseToJsonElement(outputText).jsonObject["run_id"]
+            ?.jsonPrimitive?.contentOrNull
+    } else {
+        JsonInstant.parseToJsonElement(input).jsonObject["run_id"]
+            ?.jsonPrimitive?.contentOrNull
+    }
+}.getOrNull()?.takeIf { it.isNotBlank() }
 
 /**
  * Fold consecutive subagent_* tool steps that share a `run_id` into a single SubAgentTaskStep.
@@ -88,18 +123,42 @@ private fun UIMessagePart.Tool.subagentRunId(): String? {
  * Tools whose run_id can't be resolved (e.g. subagent_start with no result yet) stay as plain
  * ToolStep and will coalesce once the result arrives on the next render pass.
  */
-private fun coalesceSubAgentSteps(steps: List<ThinkingStep>): List<ThinkingStep> {
+private fun coalesceSubAgentSteps(steps: List<ThinkingStep>): List<ThinkingStep> =
+    coalesceTaskSteps(
+        steps = steps,
+        runIdOf = { it.subagentRunId() },
+        wrap = { runId, tools -> ThinkingStep.SubAgentTaskStep(runId, tools) },
+    )
+
+/** Same shape as [coalesceSubAgentSteps] but for `model_council_*` tools. */
+private fun coalesceCouncilSteps(steps: List<ThinkingStep>): List<ThinkingStep> =
+    coalesceTaskSteps(
+        steps = steps,
+        runIdOf = { it.councilRunId() },
+        wrap = { runId, tools -> ThinkingStep.CouncilTaskStep(runId, tools) },
+    )
+
+/**
+ * Generic coalesce: walks [steps], pulls each ToolStep through [runIdOf]; matching tools
+ * (same run_id) get folded into one wrapped step at the position of the first occurrence.
+ * Tools that don't match (runIdOf returns null) pass through unchanged.
+ */
+private inline fun coalesceTaskSteps(
+    steps: List<ThinkingStep>,
+    runIdOf: (UIMessagePart.Tool) -> String?,
+    wrap: (String, List<UIMessagePart.Tool>) -> ThinkingStep,
+): List<ThinkingStep> {
     val out = mutableListOf<ThinkingStep>()
     val acc = LinkedHashMap<String, MutableList<UIMessagePart.Tool>>()
     val placeholderIndex = HashMap<String, Int>()
 
     for (step in steps) {
         if (step is ThinkingStep.ToolStep) {
-            val runId = step.tool.subagentRunId()
+            val runId = runIdOf(step.tool)
             if (runId != null) {
                 val bucket = acc.getOrPut(runId) {
                     placeholderIndex[runId] = out.size
-                    out.add(ThinkingStep.SubAgentTaskStep(runId, emptyList()))
+                    out.add(wrap(runId, emptyList()))
                     mutableListOf()
                 }
                 bucket.add(step.tool)
@@ -110,7 +169,7 @@ private fun coalesceSubAgentSteps(steps: List<ThinkingStep>): List<ThinkingStep>
     }
     acc.forEach { (runId, tools) ->
         val pos = placeholderIndex.getValue(runId)
-        out[pos] = ThinkingStep.SubAgentTaskStep(runId, tools.toList())
+        out[pos] = wrap(runId, tools.toList())
     }
     return out
 }
@@ -127,9 +186,11 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
 
     fun flushThinkingSteps() {
         if (currentThinkingSteps.isEmpty()) return
-        val coalesced = coalesceSubAgentSteps(currentThinkingSteps)
-        // Split off SubAgentTaskStep into its own top-level block so it doesn't get hidden by
-        // ChainOfThought's collapse logic. Surrounding reasoning/tool steps remain grouped.
+        // Run both coalescers — order matters only because they walk the same list; either
+        // order would produce the same final fold (the two tool families don't overlap).
+        val coalesced = coalesceCouncilSteps(coalesceSubAgentSteps(currentThinkingSteps))
+        // Split off both task-step types into their own top-level blocks so they don't get
+        // hidden by ChainOfThought's collapse logic.
         var pending = mutableListOf<ThinkingStep>()
         fun flushPending() {
             if (pending.isNotEmpty()) {
@@ -138,11 +199,16 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
             }
         }
         for (step in coalesced) {
-            if (step is ThinkingStep.SubAgentTaskStep) {
-                flushPending()
-                result.add(MessagePartBlock.SubAgentBlock(step))
-            } else {
-                pending.add(step)
+            when (step) {
+                is ThinkingStep.SubAgentTaskStep -> {
+                    flushPending()
+                    result.add(MessagePartBlock.SubAgentBlock(step))
+                }
+                is ThinkingStep.CouncilTaskStep -> {
+                    flushPending()
+                    result.add(MessagePartBlock.CouncilBlock(step))
+                }
+                else -> pending.add(step)
             }
         }
         flushPending()

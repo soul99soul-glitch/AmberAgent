@@ -146,13 +146,10 @@ fun SettingExperimentalPage() {
                         title = stringResource(R.string.setting_subagent_title),
                         description = stringResource(R.string.setting_subagent_desc),
                     )
-                    ExperimentDivider()
-                    ExperimentFeatureRow(
-                        onClick = { navController.navigate(Screen.SettingExperimentalModelCouncil) },
-                        icon = { Icon(HugeIcons.File02, contentDescription = null) },
-                        title = stringResource(R.string.setting_model_council_title),
-                        description = stringResource(R.string.setting_model_council_desc),
-                    )
+                    // Model Council top-level entry removed — it's now reachable from inside the
+                    // SubAgent settings page as an "advanced" section (it's effectively a
+                    // multi-model variant of @oracle). Route Screen.SettingExperimentalModelCouncil
+                    // is preserved for the in-page jump button.
                 }
             }
         }
@@ -165,6 +162,8 @@ fun SettingExperimentalSubAgentPage(
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val subAgent = settings.agentRuntime.subAgent
+    val council = settings.agentRuntime.modelCouncil
+    val navController = LocalNavController.current
     val builtIns = remember { SubAgentDefinitions.builtIns }
     // Survives rotation/process death — users hate losing the open card.
     var expandedRoleId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -324,6 +323,55 @@ fun SettingExperimentalSubAgentPage(
                                 },
                             )
                         }
+                    }
+                }
+            }
+
+            // Advanced: Model Council — folded in as a "multi-model variant of @oracle".
+            // Top-level entry was removed; users get here through the SubAgent settings page.
+            item {
+                ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_advanced)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.setting_subagent_council_title),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = workspaceColors().ink,
+                            )
+                            Text(
+                                text = stringResource(R.string.setting_subagent_council_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = workspaceColors().muted,
+                            )
+                        }
+                        Switch(
+                            checked = council.enabled,
+                            onCheckedChange = { checked ->
+                                vm.updateSettings(
+                                    settings.copy(
+                                        agentRuntime = settings.agentRuntime.copy(
+                                            modelCouncil = council.copy(enabled = checked),
+                                        )
+                                    )
+                                )
+                            },
+                        )
+                    }
+                    ExperimentActionRow {
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_subagent_council_configure),
+                            enabled = true,
+                            onClick = {
+                                navController.navigate(Screen.SettingExperimentalModelCouncil)
+                            },
+                        )
                     }
                 }
             }
@@ -545,7 +593,9 @@ fun SettingExperimentalModelCouncilPage(
             .flatMap { provider -> provider.models }
             .filter { model -> model.type == ModelType.CHAT }
     }
-    val maxSeatOptions = listOf(2, 3, 4)
+    // Bumped to fit the new "3 core seats + up to 5 lens" model. Old code clamped at 4 which
+    // truncated user lens picks the moment they touched this row after upgrading.
+    val maxSeatOptions = listOf(3, 5, 6, 8)
     val roundOptions = listOf(1, 2, 3)
     val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L)
     val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000)
@@ -572,13 +622,17 @@ fun SettingExperimentalModelCouncilPage(
 
     fun addSeat() {
         val model = chatModels.firstOrNull() ?: return
-        val preset = ModelCouncilRolePresets.presets.getOrElse(council.defaultSeats.size) {
-            ModelCouncilRolePresets.presets.first()
-        }
+        // Pick a lens preset first — core seats (supporter/opponent/judge) are auto-injected
+        // at runtime, so users don't need to manually add them. Skip lenses already in use.
+        val usedRoleIds = council.defaultSeats.map {
+            ModelCouncilRolePresets.byName(it.role)?.id ?: it.role
+        }.toSet()
+        val preset = ModelCouncilRolePresets.lensPresets.firstOrNull { it.id !in usedRoleIds }
+            ?: ModelCouncilRolePresets.lensPresets.first()
         val seat = ModelCouncilSeat(
             seatId = Uuid.random().toString(),
             name = preset.name,
-            role = preset.name,
+            role = preset.id,  // store canonical id; byName tolerates legacy aliases
             modelId = model.id,
             systemPrompt = preset.prompt,
             outputBudgetChars = council.outputBudgetChars,
@@ -656,6 +710,7 @@ fun SettingExperimentalModelCouncilPage(
             }
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_model_council_seats_section)) {
+                    ExperimentNote(text = stringResource(R.string.setting_model_council_seats_explainer))
                     if (chatModels.isEmpty()) {
                         ExperimentNote(text = stringResource(R.string.setting_model_council_no_models), error = true)
                     } else if (council.defaultSeats.isEmpty()) {
@@ -671,7 +726,7 @@ fun SettingExperimentalModelCouncilPage(
                                 updateSeat(seat.seatId) {
                                     it.copy(
                                         name = preset.name,
-                                        role = preset.name,
+                                        role = preset.id,  // canonical id (M1: was preset.name → bypassed core dedup)
                                         systemPrompt = preset.prompt,
                                     )
                                 }
@@ -683,11 +738,20 @@ fun SettingExperimentalModelCouncilPage(
                             },
                         )
                     }
+                    // Disable add when all 6 lens presets are already used (we'd otherwise create
+                    // a duplicate of the first lens). Core seats are auto-injected at run time, so
+                    // they're not pickable from this UI.
+                    val usedRoleIds = council.defaultSeats.map {
+                        ModelCouncilRolePresets.byName(it.role)?.id ?: it.role
+                    }.toSet()
+                    val allLensTaken = ModelCouncilRolePresets.lensPresets.all { it.id in usedRoleIds }
                     ExperimentActionRow {
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_model_council_add_seat),
                             primary = council.defaultSeats.isEmpty(),
-                            enabled = chatModels.isNotEmpty() && council.defaultSeats.size < council.maxSeats,
+                            enabled = chatModels.isNotEmpty() &&
+                                council.defaultSeats.size < council.maxSeats &&
+                                !allLensTaken,
                             onClick = { addSeat() },
                         )
                     }
@@ -698,7 +762,7 @@ fun SettingExperimentalModelCouncilPage(
                     ModelCouncilSelectRow(
                         label = stringResource(R.string.setting_model_council_max_seats),
                         options = maxSeatOptions,
-                        selected = council.maxSeats.coerceIn(2, 4),
+                        selected = council.maxSeats.coerceIn(3, 8),
                         onSelected = { value ->
                             update { current ->
                                 current.copy(
