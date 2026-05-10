@@ -570,6 +570,14 @@ private fun ExportedChatMessage(
                                             tool = step.tool
                                         )
                                     }
+
+                                    is ThinkingStep.SubAgentTaskStep -> {
+                                        // Export each underlying tool call separately so the
+                                        // exported transcript still shows what happened.
+                                        step.tools.forEach { tool ->
+                                            ExportedToolStep(tool = tool)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -628,6 +636,20 @@ private fun ExportedChatMessage(
 
                             else -> {
                                 // Other parts are not rendered in image export for now
+                            }
+                        }
+                    }
+
+                    is MessagePartBlock.SubAgentBlock -> {
+                        // Wrap in a one-step ChainOfThought scope so we can reuse the existing
+                        // ExportedToolStep (a ChainOfThoughtScope receiver). Lists every underlying
+                        // subagent_* tool call so the exported transcript stays informative.
+                        if (block.step.tools.isNotEmpty()) {
+                            ChainOfThought(
+                                steps = block.step.tools,
+                                collapsedVisibleCount = block.step.tools.size,
+                            ) { tool ->
+                                ExportedToolStep(tool = tool)
                             }
                         }
                     }

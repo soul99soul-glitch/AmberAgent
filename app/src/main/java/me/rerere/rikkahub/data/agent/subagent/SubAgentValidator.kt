@@ -2,10 +2,13 @@ package me.rerere.rikkahub.data.agent.subagent
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.ai.core.ReasoningLevel
+import kotlin.uuid.Uuid
 
 object SubAgentValidator {
     private val genericNameParts = listOf(
@@ -54,8 +57,17 @@ object SubAgentValidator {
         availableToolNames: Set<String>,
     ): SubAgentValidationResult {
         input["subagent_id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { id ->
-            val builtIn = SubAgentDefinitions.find(id) ?: error("Unknown built-in subagent_id: $id")
-            return SubAgentValidationResult(builtIn.cappedBy(setting))
+            // Match against built-ins, then user-saved custom definitions, applying user overrides for built-ins.
+            // Use builtIn.id (canonical) for override lookup — `find()` allows name-fallback,
+            // but overrides map is keyed by canonical id only.
+            val builtIn = SubAgentDefinitions.find(id)
+            if (builtIn != null) {
+                return SubAgentValidationResult(builtIn.applyOverride(setting.overrides[builtIn.id]).cappedBy(setting))
+            }
+            val custom = setting.customDefinitions.firstOrNull {
+                it.id == id || it.name.equals(id, ignoreCase = true)
+            } ?: error("Unknown subagent_id: $id")
+            return SubAgentValidationResult(custom.cappedBy(setting))
         }
 
         val custom = input["custom_subagent"]?.jsonObject ?: error("subagent_id or custom_subagent is required")
@@ -79,6 +91,22 @@ object SubAgentValidator {
         }
         validateToolAllowlist(requestedTools, availableToolNames)
 
+        val modelIdRaw = custom["model_id"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        val parsedModelId = modelIdRaw?.let { raw ->
+            runCatching { Uuid.parse(raw) }.getOrElse {
+                error("custom_subagent.model_id is not a valid UUID: $raw")
+            }
+        }
+        val temperatureRaw = custom["temperature"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        val parsedTemperature = temperatureRaw?.let { raw ->
+            raw.toFloatOrNull() ?: error("custom_subagent.temperature is not a number: $raw")
+        }
+        val reasoningRaw = custom["reasoning_level"]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        val parsedReasoning = reasoningRaw?.let { value ->
+            ReasoningLevel.entries.firstOrNull { it.name.equals(value, ignoreCase = true) || it.toString() == value }
+                ?: error("custom_subagent.reasoning_level must be one of ${ReasoningLevel.entries.joinToString { it.name.lowercase() }}; got: $value")
+        }
+
         val definition = SubAgentDefinition(
             id = id,
             name = rawName,
@@ -89,6 +117,10 @@ object SubAgentValidator {
             timeoutMs = custom["timeout_ms"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: setting.timeoutMs,
             outputBudgetChars = custom["output_budget_chars"]?.jsonPrimitive?.intOrNull ?: setting.outputBudgetChars,
             dynamic = true,
+            modelId = parsedModelId,
+            temperature = parsedTemperature,
+            reasoningLevel = parsedReasoning,
+            routingHint = custom["routing_hint"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty(),
         )
         validateBudgets(definition, setting)
         return SubAgentValidationResult(definition)

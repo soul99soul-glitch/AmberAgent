@@ -1,22 +1,31 @@
 package me.rerere.rikkahub.data.agent.subagent
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Assistant
 
 interface SubAgentRunner {
+    /**
+     * Run a subagent task. [liveText] receives the running assistant text as it streams in;
+     * UI code can subscribe via [SubAgentManager.liveTextFlow] to render real-time output.
+     * Pass a no-op flow if you don't need live updates.
+     */
     suspend fun run(
         settings: Settings,
         definition: SubAgentDefinition,
         task: SubAgentTaskSpec,
         tools: List<Tool>,
+        liveText: MutableStateFlow<String>,
     ): SubAgentResult
 }
 
@@ -28,8 +37,14 @@ class GenerationSubAgentRunner(
         definition: SubAgentDefinition,
         task: SubAgentTaskSpec,
         tools: List<Tool>,
+        liveText: MutableStateFlow<String>,
     ): SubAgentResult {
-        val model = settings.getCurrentChatModel() ?: error("Current chat model is not configured")
+        // Per-role model: explicit override → fallback to current chat model.
+        // If the user removed/renamed the configured model after saving the override,
+        // fall through silently rather than failing the run.
+        val model = definition.modelId?.let { settings.findModelById(it) }
+            ?: settings.getCurrentChatModel()
+            ?: error("Current chat model is not configured")
         val assistant = settings.getCurrentAssistant().toSubAgentAssistant(definition)
         val messages = listOf(UIMessage.user(buildTaskPrompt(definition, task)))
         var latest = messages
@@ -47,6 +62,14 @@ class GenerationSubAgentRunner(
         ).collect { chunk ->
             if (chunk is GenerationChunk.Messages) {
                 latest = chunk.messages
+                // Stream the assistant's accumulated content to subscribers (UI live view).
+                // Include reasoning so the user has something to watch during the (often long)
+                // thinking phase — UIMessage.toText() skips Reasoning parts entirely, which would
+                // leave the sheet blank for reasoning-heavy models like deepseek-v4-pro.
+                val assistantContent = latest.lastOrNull { it.role == MessageRole.ASSISTANT }
+                    ?.let(::renderAssistantContentForLive)
+                    .orEmpty()
+                if (assistantContent != liveText.value) liveText.value = assistantContent
             }
         }
 
@@ -62,22 +85,56 @@ class GenerationSubAgentRunner(
         }
 
         val text = latest.lastOrNull()?.toText().orEmpty().take(definition.outputBudgetChars)
+        // Final write to liveText so a sheet opened/refreshed AFTER completion still shows the
+        // canonical answer (the in-loop renderer above includes reasoning prefix; once we know
+        // the run finished cleanly the user wants the clean text only).
+        if (text.isNotBlank()) liveText.value = text
         return SubAgentResult(
             status = SubAgentRunStatus.COMPLETED,
             summary = text.ifBlank { "Subagent completed without text output." },
         )
     }
 
+    /**
+     * Render an in-flight assistant message for the live-view sheet. Reasoning is shown above
+     * the answer in a Markdown blockquote so the user sees progress during long reasoning
+     * phases (deepseek-v4-pro, gpt-5 high, claude opus etc. can sit in reasoning for many
+     * seconds before producing any visible text).
+     */
+    private fun renderAssistantContentForLive(message: UIMessage): String {
+        val reasoning = message.parts.filterIsInstance<UIMessagePart.Reasoning>()
+            .joinToString("\n") { it.reasoning }
+            .trim()
+        val text = message.parts.filterIsInstance<UIMessagePart.Text>()
+            .joinToString("\n") { it.text }
+            .trim()
+        if (reasoning.isBlank() && text.isBlank()) return ""
+        return buildString {
+            if (reasoning.isNotBlank()) {
+                append("> 💭 ")
+                append(reasoning.replace("\n", "\n> "))
+                if (text.isNotBlank()) append("\n\n")
+            }
+            if (text.isNotBlank()) append(text)
+        }
+    }
+
     private fun Assistant.toSubAgentAssistant(definition: SubAgentDefinition) = copy(
         name = definition.name,
         systemPrompt = definition.systemPrompt,
-        streamOutput = false,
+        // streamOutput must be true so GenerationHandler emits per-token Messages chunks.
+        // Without it the underlying provider buffers the whole response and we get just one
+        // chunk at the end — UI live view stays empty until the run finishes, then jumps
+        // straight to the final text. Cost: per-chunk transformer pass, negligible.
+        streamOutput = true,
         contextMessageSize = 0,
         enableMemory = false,
         useGlobalMemory = false,
         enableRecentChatsReference = false,
         localTools = emptyList(),
         enabledSkills = emptySet(),
+        temperature = definition.temperature ?: temperature,
+        reasoningLevel = definition.reasoningLevel ?: reasoningLevel,
     )
 
     private fun buildTaskPrompt(definition: SubAgentDefinition, task: SubAgentTaskSpec): String = """

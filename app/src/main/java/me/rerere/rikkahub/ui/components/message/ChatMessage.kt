@@ -315,6 +315,9 @@ internal sealed interface ChatMessageVirtualItem {
         override val keySuffix: String = when (step) {
             is ThinkingStep.ReasoningStep -> "thinking-$blockIndex-reasoning-$stepIndex-${step.reasoning.createdAt}"
             is ThinkingStep.ToolStep -> "thinking-$blockIndex-tool-$stepIndex-${step.tool.toolCallId.ifBlank { step.tool.hashCode().toString() }}"
+            // Stable key by runId only — stepIndex/blockIndex shift when surrounding tools
+            // collapse during streaming, which would otherwise force the capsule to recreate.
+            is ThinkingStep.SubAgentTaskStep -> "thinking-subagent-${step.runId}"
         }
     }
 
@@ -323,6 +326,13 @@ internal sealed interface ChatMessageVirtualItem {
         val index: Int,
     ) : ChatMessageVirtualItem {
         override val keySuffix: String = "content-$index"
+    }
+
+    /** Standalone subagent task card — survives ChainOfThought collapse, always visible. */
+    data class SubAgent(
+        val block: MessagePartBlock.SubAgentBlock,
+    ) : ChatMessageVirtualItem {
+        override val keySuffix: String = "subagent-${block.step.runId}"
     }
 
     data class MarkdownChild(
@@ -434,6 +444,10 @@ internal fun buildChatMessageVirtualItems(
                         add(ChatMessageVirtualItem.Content(block, index))
                     }
                 }
+
+                is MessagePartBlock.SubAgentBlock -> {
+                    add(ChatMessageVirtualItem.SubAgent(block))
+                }
             }
         }
     }
@@ -505,10 +519,13 @@ internal fun ChatMessageVirtualItemContent(
                 MessagePartsBlock(
                     assistant = assistant,
                     role = message.role,
-                    parts = item.block.steps.map { step ->
+                    // SubAgentTaskStep is fanned back out to its underlying tools — MessagePartsBlock
+                    // calls groupMessageParts again and will re-coalesce them into one card.
+                    parts = item.block.steps.flatMap { step ->
                         when (step) {
-                            is ThinkingStep.ReasoningStep -> step.reasoning
-                            is ThinkingStep.ToolStep -> step.tool
+                            is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
+                            is ThinkingStep.ToolStep -> listOf(step.tool)
+                            is ThinkingStep.SubAgentTaskStep -> step.tools
                         }
                     },
                     annotations = emptyList(),
@@ -527,12 +544,11 @@ internal fun ChatMessageVirtualItemContent(
                 MessagePartsBlock(
                     assistant = assistant,
                     role = message.role,
-                    parts = listOf(
-                        when (val step = item.step) {
-                            is ThinkingStep.ReasoningStep -> step.reasoning
-                            is ThinkingStep.ToolStep -> step.tool
-                        }
-                    ),
+                    parts = when (val step = item.step) {
+                        is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
+                        is ThinkingStep.ToolStep -> listOf(step.tool)
+                        is ThinkingStep.SubAgentTaskStep -> step.tools
+                    },
                     annotations = emptyList(),
                     loading = loading,
                     model = model,
@@ -581,6 +597,15 @@ internal fun ChatMessageVirtualItemContent(
                     markdownChild = item,
                     showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
+                )
+            }
+        }
+
+        is ChatMessageVirtualItem.SubAgent -> {
+            ProvideTextStyle(textStyle) {
+                SubAgentTaskStepView(
+                    step = item.block.step,
+                    loading = loading,
                 )
             }
         }
@@ -1183,6 +1208,15 @@ private fun MessagePartsBlock(
                                     )
                                 }
                             }
+
+                            is ThinkingStep.SubAgentTaskStep -> {
+                                key(step.runId) {
+                                    SubAgentTaskStepView(
+                                        step = step,
+                                        loading = loading,
+                                    )
+                                }
+                            }
                         }
                     }
                     if (!hasVisibleWidgetContent) {
@@ -1422,6 +1456,13 @@ private fun MessagePartsBlock(
                         // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
                     }
                 }
+            }
+
+            is MessagePartBlock.SubAgentBlock -> key("subagent-${block.step.runId}") {
+                SubAgentTaskStepView(
+                    step = block.step,
+                    loading = loading,
+                )
             }
         }
     }

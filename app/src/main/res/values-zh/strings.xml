@@ -227,6 +227,7 @@
   <string name="chat_input_unsupported_file_type">不支持的文件类型：%s</string>
   <string name="chat_input_slash_command_empty">暂无命令</string>
   <string name="chat_input_slash_command_no_match">没有匹配命令</string>
+  <string name="chat_input_mention_no_match">没有匹配的子代理</string>
   <string name="chat_input_usage_sheet_title">Codex 用量</string>
   <string name="chat_input_usage_refresh">刷新</string>
   <string name="chat_input_usage_loading">正在加载用量…</string>
@@ -898,6 +899,16 @@
   <string name="setting_subagent_timeout_desc">单个子代理任务的最长运行时间。</string>
   <string name="setting_subagent_output_budget">输出预算</string>
   <string name="setting_subagent_output_budget_desc">返回给主 Agent 的结果文本上限。</string>
+  <string name="setting_subagent_section_roles">内置角色</string>
+  <string name="setting_subagent_roles_desc">每个角色是一个特化子代理，可单独选择模型，混搭快/便宜与强/慢。</string>
+  <string name="setting_subagent_section_custom">自定义角色</string>
+  <string name="setting_subagent_role_model">模型</string>
+  <string name="setting_subagent_role_reasoning">推理强度</string>
+  <string name="setting_subagent_role_routing">何时调用</string>
+  <string name="setting_subagent_role_reset">恢复默认</string>
+  <string name="setting_subagent_role_summary">模型：%1$s · 推理：%2$s</string>
+  <string name="setting_subagent_role_no_model_override">跟随主助手模型。</string>
+  <string name="setting_subagent_value_inherit">跟随</string>
   <string name="setting_model_council_title">多模型协作实验模式</string>
   <string name="setting_model_council_desc">让多个已配置聊天模型并行评审或有限轮辩论，同步比较分歧和证据。</string>
   <string name="setting_model_council_runtime_section">运行</string>

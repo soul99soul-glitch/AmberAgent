@@ -188,6 +188,8 @@ import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.utils.formatNumber
 import org.koin.compose.koinInject
@@ -2484,6 +2486,34 @@ private fun TextInputRow(
                 },
             )
         }
+        // @subagent mention: only when subagent experimental mode is on. Detection result is
+        // memoized on (text, selection) so we don't walk the string on every recomposition.
+        // Slash command takes precedence — a leading `/` shouldn't double-pop a mention panel.
+        val subAgentEnabled = settings.agentRuntime.subAgent.enabled
+        val mentionTextSnapshot = state.textContent.text.toString()
+        val mentionSelection = state.textContent.selection
+        val mentionState = remember(subAgentEnabled, slashQuery, mentionTextSnapshot, mentionSelection) {
+            if (!subAgentEnabled || slashQuery != null) null
+            else detectMentionContextFor(mentionTextSnapshot, mentionSelection.start)
+        }
+        if (isFocused && mentionState != null) {
+            val matches = remember(mentionState.query) {
+                if (mentionState.query.isBlank()) {
+                    SubAgentDefinitions.builtIns
+                } else {
+                    SubAgentDefinitions.builtIns.filter { role ->
+                        role.id.contains(mentionState.query, ignoreCase = true) ||
+                            role.name.contains(mentionState.query, ignoreCase = true)
+                    }
+                }
+            }
+            MentionPanel(
+                roles = matches,
+                onSelect = { role ->
+                    state.replaceMention(mentionState, role.id)
+                },
+            )
+        }
         TextField(
             state = state.textContent,
             modifier = Modifier
@@ -2779,6 +2809,121 @@ private fun String.slashCommandQuery(): String? {
     if (!startsWith("/")) return null
     val query = drop(1)
     return query.takeIf { it.none { char -> char.isWhitespace() } }
+}
+
+private const val MAX_MENTIONS = 9
+
+/** Position of an active `@xxx` mention context: the `@` index and the partial query after it. */
+private data class MentionContext(val atIndex: Int, val query: String)
+
+/**
+ * Pure variant: detect whether [cursor] is inside an `@xxx` token in [text]. Walks backwards
+ * until it hits an `@` (preceded by start-of-text or whitespace, to avoid emails/handles inside
+ * other text) or any whitespace (= not in mention context).
+ */
+private fun detectMentionContextFor(text: String, cursor: Int): MentionContext? {
+    val safeCursor = cursor.coerceIn(0, text.length)
+    if (safeCursor == 0) return null
+    var i = safeCursor - 1
+    while (i >= 0) {
+        val ch = text[i]
+        if (ch == '@') {
+            if (i == 0 || text[i - 1].isWhitespace()) {
+                return MentionContext(atIndex = i, query = text.substring(i + 1, safeCursor))
+            }
+            return null
+        }
+        if (ch.isWhitespace()) return null
+        i--
+    }
+    return null
+}
+
+/** Replace `@<query>` (under the current cursor) with `@<roleId> ` and place the cursor after it. */
+private fun ChatInputState.replaceMention(context: MentionContext, roleId: String) {
+    textContent.edit {
+        val replaceEnd = context.atIndex + 1 + context.query.length
+        replace(context.atIndex, replaceEnd, "@$roleId ")
+    }
+}
+
+@Composable
+private fun MentionPanel(
+    roles: List<SubAgentDefinition>,
+    onSelect: (SubAgentDefinition) -> Unit,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 1.dp,
+        color = workspace.paper,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            if (roles.isEmpty()) {
+                SlashCommandEmptyRow(text = stringResource(R.string.chat_input_mention_no_match))
+            } else {
+                val shown = roles.take(MAX_MENTIONS)
+                shown.forEachIndexed { index, role ->
+                    MentionRow(role = role, onClick = { onSelect(role) })
+                    if (index < shown.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 58.dp),
+                            color = workspace.hairline,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MentionRow(
+    role: SubAgentDefinition,
+    onClick: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(30.dp),
+                shape = RoundedCornerShape(6.dp),
+                color = workspace.row,
+                contentColor = workspace.muted,
+                border = BorderStroke(1.dp, workspace.hairline),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(text = "@", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "@${role.id}",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = role.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
 private fun QuickMessage.slashTitle(fallback: String): String =

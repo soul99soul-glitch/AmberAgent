@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,8 +55,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
@@ -76,6 +79,12 @@ import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
 import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
 import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentMonitor
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
+import me.rerere.rikkahub.data.agent.subagent.SubAgentOverride
+import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
+import me.rerere.rikkahub.data.agent.subagent.applyOverride
+import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.dao.FeishuDocDependencyDAO
 import me.rerere.rikkahub.data.db.dao.FeishuWatchedDocDAO
 import me.rerere.rikkahub.data.db.entity.FeishuDocDependencyEntity
@@ -156,12 +165,18 @@ fun SettingExperimentalSubAgentPage(
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val subAgent = settings.agentRuntime.subAgent
-    val concurrencyOptions = listOf(1, 2, 3)
+    val builtIns = remember { SubAgentDefinitions.builtIns }
+    // Survives rotation/process death — users hate losing the open card.
+    var expandedRoleId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val concurrencyOptions = listOf(1, 2, 3, 4, 5)
     val turnOptions = listOf(2, 4, 6, 8)
     val timeoutOptions = listOf(60_000L, 180_000L, DEFAULT_SUB_AGENT_TIMEOUT_MS, 600_000L)
     val budgetOptions = listOf(8_000, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS, 20_000, 40_000)
+    // null sentinel = "follow main assistant"; otherwise pick a specific reasoning level.
+    val reasoningOptions: List<ReasoningLevel?> = listOf(null) + ReasoningLevel.entries
 
-    fun update(block: (me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting) -> me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting) {
+    fun update(block: (SubAgentRuntimeSetting) -> SubAgentRuntimeSetting) {
         vm.updateSettings(
             settings.copy(
                 agentRuntime = settings.agentRuntime.copy(
@@ -171,101 +186,350 @@ fun SettingExperimentalSubAgentPage(
         )
     }
 
+    fun mutateOverride(roleId: String, mutate: (SubAgentOverride) -> SubAgentOverride) {
+        update { current ->
+            val cur = current.overrides[roleId] ?: SubAgentOverride()
+            val next = mutate(cur)
+            // Drop empty overrides so storage stays clean and "reset" is just `current.overrides - id`.
+            current.copy(
+                overrides = if (next == SubAgentOverride()) current.overrides - roleId
+                else current.overrides + (roleId to next)
+            )
+        }
+    }
+
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_subagent_title),
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                CardGroup(
-                    title = { Text(stringResource(R.string.setting_subagent_section_runtime)) },
-                ) {
-                    item(
-                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_enabled)) },
-                        supportingContent = { Text(stringResource(R.string.setting_subagent_enabled_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = subAgent.enabled,
-                                onCheckedChange = { checked -> update { it.copy(enabled = checked) } },
+                ExperimentHeroCard(
+                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                    title = stringResource(R.string.setting_subagent_title),
+                    description = stringResource(R.string.setting_subagent_desc),
+                    trailing = {
+                        Switch(
+                            checked = subAgent.enabled,
+                            onCheckedChange = { checked -> update { it.copy(enabled = checked) } },
+                        )
+                    },
+                )
+            }
+
+            item {
+                ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_runtime)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.setting_subagent_dynamic),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = workspaceColors().ink,
                             )
-                        },
+                            Text(
+                                text = stringResource(R.string.setting_subagent_dynamic_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = workspaceColors().muted,
+                            )
+                        }
+                        Switch(
+                            checked = subAgent.allowDynamicSubAgents,
+                            onCheckedChange = { checked -> update { it.copy(allowDynamicSubAgents = checked) } },
+                        )
+                    }
+                }
+            }
+
+            item {
+                ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_limits)) {
+                    SubAgentSelectRow(
+                        label = stringResource(R.string.setting_subagent_max_concurrent),
+                        options = concurrencyOptions,
+                        selected = subAgent.maxConcurrentRuns.coerceIn(1, 5),
+                        onSelected = { value -> update { it.copy(maxConcurrentRuns = value) } },
+                        optionToString = { it.toString() },
                     )
-                    item(
-                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_dynamic)) },
-                        supportingContent = { Text(stringResource(R.string.setting_subagent_dynamic_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = subAgent.allowDynamicSubAgents,
-                                onCheckedChange = { checked -> update { it.copy(allowDynamicSubAgents = checked) } },
-                            )
-                        },
+                    SubAgentSelectRow(
+                        label = stringResource(R.string.setting_subagent_max_turns),
+                        options = turnOptions,
+                        selected = subAgent.maxTurns.coerceIn(2, 8),
+                        onSelected = { value -> update { it.copy(maxTurns = value) } },
+                        optionToString = { it.toString() },
+                    )
+                    SubAgentSelectRow(
+                        label = stringResource(R.string.setting_subagent_timeout),
+                        options = timeoutOptions,
+                        selected = timeoutOptions.minBy { kotlin.math.abs(it - subAgent.timeoutMs) },
+                        onSelected = { value -> update { it.copy(timeoutMs = value) } },
+                        optionToString = { "${it / 60_000} min" },
+                    )
+                    SubAgentSelectRow(
+                        label = stringResource(R.string.setting_subagent_output_budget),
+                        options = budgetOptions,
+                        selected = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
+                        onSelected = { value -> update { it.copy(outputBudgetChars = value) } },
+                        optionToString = { "${it / 1000}k" },
                     )
                 }
             }
 
             item {
-                CardGroup(
-                    title = { Text(stringResource(R.string.setting_subagent_section_limits)) },
-                ) {
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_max_concurrent)) },
-                        supportingContent = { Text(stringResource(R.string.setting_subagent_max_concurrent_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = concurrencyOptions,
-                                selectedOption = subAgent.maxConcurrentRuns.coerceIn(1, 3),
-                                onOptionSelected = { value -> update { it.copy(maxConcurrentRuns = value) } },
-                                optionToString = { it.toString() },
-                                modifier = Modifier.width(96.dp),
-                            )
-                        },
+                ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_roles)) {
+                    Text(
+                        text = stringResource(R.string.setting_subagent_roles_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspaceColors().muted,
                     )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_max_turns)) },
-                        supportingContent = { Text(stringResource(R.string.setting_subagent_max_turns_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = turnOptions,
-                                selectedOption = subAgent.maxTurns.coerceIn(2, 8),
-                                onOptionSelected = { value -> update { it.copy(maxTurns = value) } },
-                                optionToString = { it.toString() },
-                                modifier = Modifier.width(96.dp),
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_timeout)) },
-                        supportingContent = { Text(stringResource(R.string.setting_subagent_timeout_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = timeoutOptions,
-                                selectedOption = timeoutOptions.minBy { kotlin.math.abs(it - subAgent.timeoutMs) },
-                                onOptionSelected = { value -> update { it.copy(timeoutMs = value) } },
-                                optionToString = { "${it / 60_000} min" },
-                                modifier = Modifier.width(96.dp),
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_output_budget)) },
-                        supportingContent = { Text(stringResource(R.string.setting_subagent_output_budget_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = budgetOptions,
-                                selectedOption = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
-                                onOptionSelected = { value -> update { it.copy(outputBudgetChars = value) } },
-                                optionToString = { "${it / 1000}k" },
-                                modifier = Modifier.width(96.dp),
-                            )
-                        },
-                    )
+                    builtIns.forEach { def ->
+                        SubAgentBuiltInRow(
+                            def = def,
+                            override = subAgent.overrides[def.id],
+                            providers = settings.providers,
+                            expanded = expandedRoleId == def.id,
+                            onToggleExpand = {
+                                expandedRoleId = if (expandedRoleId == def.id) null else def.id
+                            },
+                            onMutateOverride = { mutate -> mutateOverride(def.id) { mutate(it) } },
+                            onReset = {
+                                update { current -> current.copy(overrides = current.overrides - def.id) }
+                            },
+                            reasoningOptions = reasoningOptions,
+                        )
+                    }
                 }
             }
+
+            if (subAgent.customDefinitions.isNotEmpty()) {
+                item {
+                    ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_custom)) {
+                        subAgent.customDefinitions.forEach { def ->
+                            SubAgentCustomRow(
+                                def = def,
+                                onDelete = {
+                                    update { current ->
+                                        current.copy(
+                                            customDefinitions = current.customDefinitions.filterNot { it.id == def.id }
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> SubAgentSelectRow(
+    label: String,
+    options: List<T>,
+    selected: T,
+    onSelected: (T) -> Unit,
+    optionToString: @Composable (T) -> String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = workspaceColors().ink,
+        )
+        Select(
+            options = options,
+            selectedOption = selected,
+            onOptionSelected = onSelected,
+            optionToString = optionToString,
+            modifier = Modifier.width(112.dp),
+        )
+    }
+}
+
+@Composable
+private fun SubAgentBuiltInRow(
+    def: SubAgentDefinition,
+    override: SubAgentOverride?,
+    providers: List<ProviderSetting>,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onMutateOverride: ((SubAgentOverride) -> SubAgentOverride) -> Unit,
+    onReset: () -> Unit,
+    reasoningOptions: List<ReasoningLevel?>,
+) {
+    val ws = workspaceColors()
+    val effective = def.applyOverride(override)
+    val effectiveModel = effective.modelId?.let { providers.findModelById(it) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = ws.row,
+        border = BorderStroke(1.dp, ws.hairline),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggleExpand() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = def.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = ws.ink,
+                    )
+                    Text(
+                        text = def.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ws.muted,
+                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (def.supportsModelOverride) {
+                        val modelLabel = effectiveModel?.let { it.displayName.ifBlank { it.modelId } }
+                            ?: stringResource(R.string.setting_subagent_value_inherit)
+                        val reasoningLabel = (effective.reasoningLevel ?: ReasoningLevel.AUTO).name.lowercase()
+                        Text(
+                            text = stringResource(R.string.setting_subagent_role_summary, modelLabel, reasoningLabel),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ws.faint,
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(R.string.setting_subagent_role_no_model_override),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ws.faint,
+                        )
+                    }
+                }
+                Text(
+                    text = if (expanded) "−" else "›",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = ws.muted,
+                )
+            }
+            if (expanded) {
+                if (def.supportsModelOverride) {
+                    Text(
+                        text = stringResource(R.string.setting_subagent_role_model),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ws.faint,
+                    )
+                    ModelSelector(
+                        modelId = effective.modelId,
+                        providers = providers,
+                        type = ModelType.CHAT,
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        onSelect = { model -> onMutateOverride { it.copy(modelId = model.id) } },
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_subagent_role_reasoning),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = ws.ink,
+                        )
+                        Select(
+                            options = reasoningOptions,
+                            selectedOption = override?.reasoningLevel,
+                            onOptionSelected = { value -> onMutateOverride { it.copy(reasoningLevel = value) } },
+                            optionToString = { value ->
+                                value?.name?.lowercase()
+                                    ?: stringResource(R.string.setting_subagent_value_inherit)
+                            },
+                            modifier = Modifier.width(140.dp),
+                        )
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.setting_subagent_role_routing),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ws.faint,
+                )
+                Text(
+                    text = def.routingHint.ifBlank { def.description },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ws.muted,
+                )
+                ExperimentActionRow {
+                    if (override != null) {
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_subagent_role_reset),
+                            enabled = true,
+                            onClick = onReset,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubAgentCustomRow(
+    def: SubAgentDefinition,
+    onDelete: () -> Unit,
+) {
+    val ws = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = ws.row,
+        border = BorderStroke(1.dp, ws.hairline),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = def.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ws.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                ExperimentActionButton(
+                    text = stringResource(R.string.delete),
+                    enabled = true,
+                    onClick = onDelete,
+                )
+            }
+            Text(
+                text = def.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = ws.muted,
+            )
         }
     }
 }

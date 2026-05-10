@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.subagent
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 const val DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS = 2
@@ -17,6 +18,32 @@ data class SubAgentRuntimeSetting(
     val timeoutMs: Long = DEFAULT_SUB_AGENT_TIMEOUT_MS,
     val maxTurns: Int = DEFAULT_SUB_AGENT_MAX_TURNS,
     val outputBudgetChars: Int = DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+    /** Per built-in id user override: model / temperature / reasoning / budgets. */
+    val overrides: Map<String, SubAgentOverride> = emptyMap(),
+    /**
+     * User-defined persistent custom roles (vs ephemeral [SubAgentDefinition.dynamic] from main agent).
+     *
+     * SECURITY: Any UI/import path that writes here MUST run inputs through
+     * [SubAgentValidator.validateNarrowDynamicRole], [SubAgentValidator.validateToolAllowlist],
+     * and [SubAgentValidator.validateBudgets] first. Otherwise users could persist a custom role
+     * with an unbounded tool allowlist or budget, bypassing the runtime caps.
+     */
+    val customDefinitions: List<SubAgentDefinition> = emptyList(),
+)
+
+/**
+ * Partial override for a built-in role. Only non-null fields override the built-in default.
+ * Stored separately from [SubAgentDefinitions.builtIns] so that future built-in updates
+ * (new fields, prompt revisions) don't overwrite user's per-role tweaks.
+ */
+@Serializable
+data class SubAgentOverride(
+    val modelId: Uuid? = null,
+    val temperature: Float? = null,
+    val reasoningLevel: ReasoningLevel? = null,
+    val maxTurnsOverride: Int? = null,
+    val timeoutMsOverride: Long? = null,
+    val outputBudgetOverride: Int? = null,
 )
 
 @Serializable
@@ -30,7 +57,36 @@ data class SubAgentDefinition(
     val timeoutMs: Long = DEFAULT_SUB_AGENT_TIMEOUT_MS,
     val outputBudgetChars: Int = DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
     val dynamic: Boolean = false,
+    /** null = inherit current chat model. Resolved via [Settings.findModelById] at run time. */
+    val modelId: Uuid? = null,
+    /** null = inherit assistant temperature. */
+    val temperature: Float? = null,
+    /** null = inherit assistant reasoning level. */
+    val reasoningLevel: ReasoningLevel? = null,
+    /** Free-form "delegate when / don't delegate when" hint for the orchestrator (subagent_list output). */
+    val routingHint: String = "",
+    /** UI hint: hide the model selector for this role (scenario-bound roles). Runtime override still works. */
+    val supportsModelOverride: Boolean = true,
+    /**
+     * Short phase labels (each ≤4 Chinese chars) the UI cycles through while a run is in flight,
+     * to give the user a sense of progression. Purely cosmetic — not derived from the model's
+     * actual state. Empty = UI falls back to a generic "运行中..." label.
+     */
+    val phaseLabels: List<String> = emptyList(),
 )
+
+/** Apply a partial user override on top of a built-in definition. */
+fun SubAgentDefinition.applyOverride(o: SubAgentOverride?): SubAgentDefinition {
+    if (o == null) return this
+    return copy(
+        modelId = o.modelId ?: modelId,
+        temperature = o.temperature ?: temperature,
+        reasoningLevel = o.reasoningLevel ?: reasoningLevel,
+        maxTurns = o.maxTurnsOverride ?: maxTurns,
+        timeoutMs = o.timeoutMsOverride ?: timeoutMs,
+        outputBudgetChars = o.outputBudgetOverride ?: outputBudgetChars,
+    )
+}
 
 @Serializable
 data class SubAgentTaskSpec(

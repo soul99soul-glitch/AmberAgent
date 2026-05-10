@@ -92,6 +92,7 @@ fun HighlightCodeBlock(
         fontSize = 12.sp,
         lineHeight = 16.sp,
     ),
+    forceAutoWrap: Boolean = false,
 ) {
     val darkMode = LocalDarkMode.current
     val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
@@ -105,7 +106,7 @@ fun HighlightCodeBlock(
     var isExpanded by remember(settings.displaySetting.codeBlockAutoCollapse) {
         mutableStateOf(!settings.displaySetting.codeBlockAutoCollapse)
     }
-    val autoWrap = settings.displaySetting.codeBlockAutoWrap
+    val autoWrap = forceAutoWrap || settings.displaySetting.codeBlockAutoWrap
     val showLineNumbers = settings.displaySetting.showLineNumbers
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
@@ -282,13 +283,11 @@ private fun CodeBlockDefault(
     scrollState: ScrollState,
 ) {
     Row(
-        modifier = Modifier.then(
-            if (autoWrap) {
-                Modifier
-            } else {
-                Modifier.horizontalScroll(scrollState)
-            }
-        )
+        modifier = if (autoWrap) {
+            Modifier.fillMaxWidth()
+        } else {
+            Modifier.horizontalScroll(scrollState)
+        }
     ) {
         // 行号列
         if (showLineNumbers) {
@@ -311,8 +310,11 @@ private fun CodeBlockDefault(
             }
         }
 
-        // 代码列
-        SelectionContainer {
+        // 代码列：autoWrap 时占满剩余宽度，softWrap 才能在最大宽度处折行；
+        // 否则保持 wrap-content 让 horizontalScroll 生效。
+        SelectionContainer(
+            modifier = if (autoWrap) Modifier.weight(1f) else Modifier
+        ) {
             HighlightText(
                 code = displayCode,
                 language = language,

@@ -227,6 +227,7 @@
   <string name="chat_input_unsupported_file_type">Unsupported file type: %s</string>
   <string name="chat_input_slash_command_empty">No commands</string>
   <string name="chat_input_slash_command_no_match">No matching commands</string>
+  <string name="chat_input_mention_no_match">No matching subagent</string>
   <string name="chat_input_usage_sheet_title">Codex Usage</string>
   <string name="chat_input_usage_refresh">Refresh</string>
   <string name="chat_input_usage_loading">Loading usage…</string>
@@ -1367,6 +1368,16 @@
   <string name="setting_subagent_timeout_desc">Maximum wall-clock time for one subagent task.</string>
   <string name="setting_subagent_output_budget">Output budget</string>
   <string name="setting_subagent_output_budget_desc">Maximum result text returned to the main Agent.</string>
+  <string name="setting_subagent_section_roles">Built-in roles</string>
+  <string name="setting_subagent_roles_desc">Each role is a specialized subagent. Pick a model per role to mix cheap+fast and strong+slow.</string>
+  <string name="setting_subagent_section_custom">Custom roles</string>
+  <string name="setting_subagent_role_model">Model</string>
+  <string name="setting_subagent_role_reasoning">Reasoning</string>
+  <string name="setting_subagent_role_routing">When to use</string>
+  <string name="setting_subagent_role_reset">Reset to defaults</string>
+  <string name="setting_subagent_role_summary">Model: %1$s · Reasoning: %2$s</string>
+  <string name="setting_subagent_role_no_model_override">Uses the main assistant\'s model.</string>
+  <string name="setting_subagent_value_inherit">Inherit</string>
   <string name="setting_model_council_title">Model Council Experimental Mode</string>
   <string name="setting_model_council_desc">Compare or debate one question across multiple configured chat models without tool access.</string>
   <string name="setting_model_council_runtime_section">Runtime</string>
