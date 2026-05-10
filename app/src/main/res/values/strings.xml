@@ -892,8 +892,17 @@
   <string name="setting_provider_page_add_models_hint">Click the button below to add models</string>
   <string name="setting_provider_page_add_new_model">Add New Model</string>
   <string name="setting_provider_page_add_provider">Add Provider</string>
+  <!-- TODO: setting_provider_page_add_codex_oauth is unused after the template-picker refactor; keep one release for safety, then remove. -->
   <string name="setting_provider_page_add_codex_oauth">Codex OAuth</string>
   <string name="setting_provider_page_add_provider_override">Add Provider Override</string>
+  <string name="setting_provider_page_template_section_bundled">Built-in brands (deleted ones reappear here)</string>
+  <string name="setting_provider_page_template_section_custom">Custom</string>
+  <string name="setting_provider_page_template_custom_openai_title">OpenAI-compatible</string>
+  <string name="setting_provider_page_template_custom_openai_subtitle">Custom base URL</string>
+  <string name="setting_provider_page_template_custom_google_title">Google</string>
+  <string name="setting_provider_page_template_custom_google_subtitle">Gemini / Vertex AI</string>
+  <string name="setting_provider_page_template_custom_claude_title">Anthropic</string>
+  <string name="setting_provider_page_template_custom_claude_subtitle">Claude</string>
   <string name="setting_provider_page_advanced_settings">Advanced Settings</string>
   <string name="setting_provider_page_api_base_url">API Base Url</string>
   <string name="setting_provider_page_api_key">API Key</string>
@@ -948,6 +957,7 @@
   <string name="setting_provider_page_openai_auth_mode">Authentication</string>
   <string name="setting_provider_page_openai_auth_api_key">API Key</string>
   <string name="setting_provider_page_openai_auth_codex_oauth">Codex OAuth</string>
+  <string name="setting_provider_page_openai_auth_coding_plan">Coding Plan</string>
   <string name="setting_provider_page_codex_oauth_warning">Experimental ChatGPT/Codex OAuth channel. It is not equivalent to an OpenAI Platform API key, may be blocked or limited by account, region, Cloudflare, or scopes, and never falls back to API Key automatically.</string>
   <string name="setting_provider_page_codex_oauth_not_signed_in">Not signed in</string>
   <string name="setting_provider_page_codex_oauth_signed_in">Signed in</string>
@@ -1353,7 +1363,7 @@
   <string name="setting_experimental_ready">Ready</string>
   <string name="setting_experimental_missing">Missing</string>
   <string name="setting_subagent_title">Subagent Experimental Mode</string>
-  <string name="setting_subagent_desc">Let the main Agent launch narrow isolated subagents for bounded side tasks.</string>
+  <string name="setting_subagent_desc">Let the main Agent launch narrow isolated subagents for bounded side tasks. Includes Model Council (multi-model deliberation).</string>
   <string name="setting_subagent_section_runtime">Runtime</string>
   <string name="setting_subagent_enabled">Enable subagents</string>
   <string name="setting_subagent_enabled_desc">Expose subagent_* tools to the main Agent. Subagents stay depth-1 and isolated.</string>
@@ -1378,6 +1388,10 @@
   <string name="setting_subagent_role_summary">Model: %1$s · Reasoning: %2$s</string>
   <string name="setting_subagent_role_no_model_override">Uses the main assistant\'s model.</string>
   <string name="setting_subagent_value_inherit">Inherit</string>
+  <string name="setting_subagent_section_advanced">Advanced · Multi-model collaboration</string>
+  <string name="setting_subagent_council_title">Model Council</string>
+  <string name="setting_subagent_council_desc">Multi-model variant of @oracle: parallel debate among 3 core seats (supporter / opponent / judge) plus topic-specific lenses, then a synthesis. Best for high-stakes calls when one model isn\'t enough.</string>
+  <string name="setting_subagent_council_configure">Configure council seats</string>
   <string name="setting_model_council_title">Model Council Experimental Mode</string>
   <string name="setting_model_council_desc">Compare or debate one question across multiple configured chat models without tool access.</string>
   <string name="setting_model_council_runtime_section">Runtime</string>
@@ -1388,6 +1402,7 @@
   <string name="setting_model_council_seats_section">Default seats</string>
   <string name="setting_model_council_no_models">Add at least two chat models in Providers before enabling a default council.</string>
   <string name="setting_model_council_empty_seats">No default seats yet. Add 2-4 seats, or let the Agent pass temporary seats in the tool call.</string>
+  <string name="setting_model_council_seats_explainer">Core seats (supporter / opponent / judge) are always present at run time — you don\'t need to add them here. The seats below are domain lenses (product / marketing / pr / engineering / ux / risk) you want pre-staged; the main agent can also pick lenses dynamically per topic.</string>
   <string name="setting_model_council_add_seat">Add Seat</string>
   <string name="setting_model_council_seat_label">Seat %1$d · %2$s</string>
   <string name="setting_model_council_limits_section">Limits</string>

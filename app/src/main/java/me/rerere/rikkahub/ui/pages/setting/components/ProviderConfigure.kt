@@ -18,6 +18,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,9 +33,13 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.OpenAIAuthMode
+import me.rerere.ai.provider.OpenAIBrand
+import me.rerere.ai.provider.availableAuthModes
+import me.rerere.ai.provider.fixedBaseUrl
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
+import me.rerere.ai.provider.providers.defaultCodexOAuthModelList
 import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.providers.openai.OpenAICodexOAuthClient
@@ -57,8 +62,24 @@ import kotlin.reflect.KClass
 fun ProviderConfigure(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
-    onEdit: (provider: ProviderSetting) -> Unit
+    /**
+     * Immediate top-level commit — used by **async outcomes the user can't undo**, like a
+     * successful Codex OAuth login or a `listModels` refresh. Without this, those results
+     * only live in the local `internalProvider` and the user has to remember to hit Save
+     * before switching tabs, otherwise the Models tab shows blank.
+     *
+     * Null = no separate commit channel; commit calls fall through to [onEdit].
+     * Placed BEFORE `onEdit` so callers using trailing-lambda syntax (`ProviderConfigure(p) {}`)
+     * still bind that lambda to `onEdit`, not `onCommit`.
+     */
+    onCommit: ((provider: ProviderSetting) -> Unit)? = null,
+    /**
+     * Local edit — usually wired to `internalProvider = it` so the user can keep tweaking
+     * fields before pressing the Save button.
+     */
+    onEdit: (provider: ProviderSetting) -> Unit,
 ) {
+    val effectiveCommit = onCommit ?: onEdit
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = modifier
@@ -92,7 +113,11 @@ fun ProviderConfigure(
         // Provider Configure
         when (provider) {
             is ProviderSetting.OpenAI -> {
-                ProviderConfigureOpenAI(provider, onEdit)
+                ProviderConfigureOpenAI(
+                    provider = provider,
+                    onEdit = onEdit,
+                    onCommit = { effectiveCommit(it) },
+                )
             }
 
             is ProviderSetting.Google -> {
@@ -263,7 +288,9 @@ private val OFFICIAL_PROVIDER_HOSTS = setOf(
 @Composable
 private fun ColumnScope.ProviderConfigureOpenAI(
     provider: ProviderSetting.OpenAI,
-    onEdit: (provider: ProviderSetting.OpenAI) -> Unit
+    onEdit: (provider: ProviderSetting.OpenAI) -> Unit,
+    /** Top-level commit, used by Codex OAuth login / model refresh — see ProviderConfigure docs. */
+    onCommit: (provider: ProviderSetting.OpenAI) -> Unit = onEdit,
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
@@ -302,46 +329,107 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    Text(
-        text = stringResource(R.string.setting_provider_page_openai_auth_mode),
-        style = MaterialTheme.typography.labelLarge,
-    )
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        OpenAIAuthMode.entries.forEachIndexed { index, authMode ->
-            SegmentedButton(
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = OpenAIAuthMode.entries.size
-                ),
-                label = {
-                    Text(
-                        when (authMode) {
-                            OpenAIAuthMode.API_KEY -> stringResource(R.string.setting_provider_page_openai_auth_api_key)
-                            OpenAIAuthMode.CODEX_OAUTH -> stringResource(R.string.setting_provider_page_openai_auth_codex_oauth)
-                        }
-                    )
-                },
-                selected = provider.authMode == authMode,
-                onClick = {
-                    when (authMode) {
-                        OpenAIAuthMode.API_KEY -> onEdit(provider.copy(authMode = OpenAIAuthMode.API_KEY))
-                        OpenAIAuthMode.CODEX_OAUTH -> onEdit(
-                            provider.copy(
+    // Segment buttons for auth modes — filtered by the provider's brand. A DeepSeek provider
+    // doesn't show "Codex OAuth"; a Kimi provider shows "Coding Plan" instead. Hide the row
+    // entirely when the brand has only one available mode (saves a redundant row of UI).
+    val availableAuthModes = provider.brand.availableAuthModes()
+    if (availableAuthModes.size > 1) {
+        Text(
+            text = stringResource(R.string.setting_provider_page_openai_auth_mode),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            availableAuthModes.forEachIndexed { index, authMode ->
+                SegmentedButton(
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = availableAuthModes.size,
+                    ),
+                    label = {
+                        Text(
+                            when (authMode) {
+                                OpenAIAuthMode.API_KEY -> stringResource(R.string.setting_provider_page_openai_auth_api_key)
+                                OpenAIAuthMode.CODEX_OAUTH -> stringResource(R.string.setting_provider_page_openai_auth_codex_oauth)
+                                OpenAIAuthMode.ZHIPU_CODING_PLAN,
+                                OpenAIAuthMode.KIMI_CODING_PLAN,
+                                OpenAIAuthMode.MIMO_CODING_PLAN -> stringResource(R.string.setting_provider_page_openai_auth_coding_plan)
+                            }
+                        )
+                    },
+                    selected = provider.authMode == authMode,
+                    onClick = {
+                        // For modes with a fixed base URL (Codex / Coding Plans), pin baseUrl
+                        // and let the runtime use that. API_KEY restores the brand's user-
+                        // editable default — but only when the *current* baseUrl is itself a
+                        // pinned one (i.e. the user is leaving a Codex/Coding-Plan mode). If
+                        // they had a custom baseUrl typed in for vanilla API_KEY use, we leave
+                        // it alone so we don't clobber their edit.
+                        val pinned = authMode.fixedBaseUrl()
+                        val knownPinnedUrls = setOf(
+                            OpenAIAuthMode.CODEX_OAUTH.fixedBaseUrl(),
+                            OpenAIAuthMode.ZHIPU_CODING_PLAN.fixedBaseUrl(),
+                            OpenAIAuthMode.KIMI_CODING_PLAN.fixedBaseUrl(),
+                            OpenAIAuthMode.MIMO_CODING_PLAN.fixedBaseUrl(),
+                        )
+                        val newProvider = when (authMode) {
+                            OpenAIAuthMode.CODEX_OAUTH -> provider.copy(
                                 authMode = OpenAIAuthMode.CODEX_OAUTH,
-                                baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
+                                baseUrl = pinned ?: provider.baseUrl,
                                 useResponseApi = true,
                                 name = if (provider.name == "OpenAI") "OpenAI Codex OAuth" else provider.name,
                             )
-                        )
-                    }
-                }
-            )
+                            OpenAIAuthMode.ZHIPU_CODING_PLAN,
+                            OpenAIAuthMode.KIMI_CODING_PLAN,
+                            OpenAIAuthMode.MIMO_CODING_PLAN -> provider.copy(
+                                authMode = authMode,
+                                baseUrl = pinned ?: provider.baseUrl,
+                            )
+                            OpenAIAuthMode.API_KEY -> {
+                                val leavingPinnedMode = provider.baseUrl in knownPinnedUrls
+                                val restoredBaseUrl = if (leavingPinnedMode) {
+                                    (provider.resetBaseUrlToDefault() as ProviderSetting.OpenAI).baseUrl
+                                } else {
+                                    provider.baseUrl
+                                }
+                                // CODEX_OAUTH force-sets `useResponseApi = true` on entry.
+                                // When the user switches back to plain API_KEY we have to
+                                // unset it, otherwise the Response API checkbox stays ticked
+                                // for non-OpenAI hosts where the protocol isn't supported and
+                                // chats fail with no obvious cause.
+                                val restoredUseResponseApi = if (leavingPinnedMode) {
+                                    false
+                                } else {
+                                    provider.useResponseApi
+                                }
+                                provider.copy(
+                                    authMode = OpenAIAuthMode.API_KEY,
+                                    baseUrl = restoredBaseUrl,
+                                    useResponseApi = restoredUseResponseApi,
+                                )
+                            }
+                        }
+                        onEdit(newProvider)
+                    },
+                )
+            }
+        }
+    } else if (provider.authMode !in availableAuthModes) {
+        // Stored authMode is no longer valid for this brand (e.g. user-defined provider that
+        // somehow has CODEX_OAUTH stored from an older build). Silently reset to API_KEY so the
+        // form doesn't render in a broken state.
+        LaunchedEffect(provider.id, provider.brand) {
+            onEdit(provider.copy(authMode = OpenAIAuthMode.API_KEY))
         }
     }
 
-    if (provider.authMode == OpenAIAuthMode.API_KEY) {
+    val isCodingPlan = provider.authMode in setOf(
+        OpenAIAuthMode.ZHIPU_CODING_PLAN,
+        OpenAIAuthMode.KIMI_CODING_PLAN,
+        OpenAIAuthMode.MIMO_CODING_PLAN,
+    )
+    if (provider.authMode == OpenAIAuthMode.API_KEY || isCodingPlan) {
         OutlinedTextField(
             value = provider.apiKey,
             onValueChange = {
@@ -354,50 +442,58 @@ private fun ColumnScope.ProviderConfigureOpenAI(
             maxLines = 3,
         )
 
+        // baseUrl: editable for plain API_KEY, read-only when pinned by a Coding Plan mode.
+        // Without the read-only state the user could clobber the brand-specific URL and the
+        // request would silently 404 with no obvious cause.
         OutlinedTextField(
             value = provider.baseUrl,
             onValueChange = {
-                onEdit(provider.copy(baseUrl = it.trim()))
+                if (!isCodingPlan) onEdit(provider.copy(baseUrl = it.trim()))
             },
             label = {
                 Text(stringResource(id = R.string.setting_provider_page_api_base_url))
             },
             modifier = Modifier.fillMaxWidth(),
-            isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
+            enabled = !isCodingPlan,
+            isError = !isCodingPlan && provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
         )
 
-        if (!provider.useResponseApi) {
-            OutlinedTextField(
-                value = provider.chatCompletionsPath,
-                onValueChange = {
-                    onEdit(provider.copy(chatCompletionsPath = it.trim()))
-                },
-                label = {
-                    Text(stringResource(id = R.string.setting_provider_page_api_path))
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !provider.builtIn
-            )
-        }
+        // chatCompletionsPath / useResponseApi only relevant for vanilla API_KEY mode. Coding
+        // Plans hit a fixed endpoint, no need to expose the protocol knobs.
+        if (!isCodingPlan) {
+            if (!provider.useResponseApi) {
+                OutlinedTextField(
+                    value = provider.chatCompletionsPath,
+                    onValueChange = {
+                        onEdit(provider.copy(chatCompletionsPath = it.trim()))
+                    },
+                    label = {
+                        Text(stringResource(id = R.string.setting_provider_page_api_path))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !provider.builtIn
+                )
+            }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(stringResource(id = R.string.setting_provider_page_response_api), modifier = Modifier.weight(1f))
-            val responseAPIWarning = stringResource(id = R.string.setting_provider_page_response_api_warning)
-            Checkbox(
-                checked = provider.useResponseApi,
-                onCheckedChange = {
-                    onEdit(provider.copy(useResponseApi = it))
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stringResource(id = R.string.setting_provider_page_response_api), modifier = Modifier.weight(1f))
+                val responseAPIWarning = stringResource(id = R.string.setting_provider_page_response_api_warning)
+                Checkbox(
+                    checked = provider.useResponseApi,
+                    onCheckedChange = {
+                        onEdit(provider.copy(useResponseApi = it))
 
-                    if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
-                        toaster.show(
-                            message = responseAPIWarning,
-                            type = ToastType.Warning
-                        )
+                        if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
+                            toaster.show(
+                                message = responseAPIWarning,
+                                type = ToastType.Warning
+                            )
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     } else {
         Text(
@@ -492,19 +588,28 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                             oauthTokens = oauthClient.pollDeviceCode(provider.id, authorization)
                             oauthDeviceCode = null
                             oauthVerificationUrl = null
-                            val modelCount = runCatching {
-                                val fetchedModels = providerManager.getProviderByType(provider)
+                            // listModels MAY throw (network, OAuth race, server side problems).
+                            // Fall back to bundled defaults so the candidate pool is never empty.
+                            val fetchedModels = runCatching {
+                                providerManager.getProviderByType(provider)
                                     .listModels(provider.codexOAuthReadyCopy())
                                     .sortedBy { it.modelId }
-                                onEdit(provider.copy(models = provider.models.withoutCodexReviewModels().mergeByModelId(fetchedModels)))
-                                fetchedModels.size
-                            }.getOrNull()
+                            }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
+                            // Only seed `provider.models` with ONE default model on first login
+                            // (user has nothing selected yet). On subsequent logins / refreshes
+                            // we leave `provider.models` alone — the user picks from the
+                            // "available models" sheet (driven by listModels) themselves.
+                            // Earlier code merged ALL fetched models into provider.models, which
+                            // pre-selected everything and made the unselect-all action useless.
+                            val newSelection = if (provider.models.withoutCodexReviewModels().isEmpty()) {
+                                listOfNotNull(fetchedModels.firstOrNull())
+                            } else {
+                                provider.models.withoutCodexReviewModels()
+                            }
+                            onCommit(provider.copy(models = newSelection))
+                            val modelCount = fetchedModels.size
                             toaster.show(
-                                if (modelCount != null) {
-                                    context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, modelCount)
-                                } else {
-                                    context.getString(R.string.setting_provider_page_codex_oauth_login_success)
-                                },
+                                context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, modelCount),
                                 type = ToastType.Success,
                             )
                         } catch (e: Exception) {
@@ -530,10 +635,18 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                     scope.launch {
                         oauthBusy = true
                         try {
-                            val fetchedModels = providerManager.getProviderByType(provider)
-                                .listModels(provider.codexOAuthReadyCopy())
-                                .sortedBy { it.modelId }
-                            onEdit(provider.copy(models = provider.models.withoutCodexReviewModels().mergeByModelId(fetchedModels)))
+                            // Same fallback rationale as the login button above — guarantee a
+                            // non-empty model list lands in provider.models even if listModels fails.
+                            val fetchedModels = runCatching {
+                                providerManager.getProviderByType(provider)
+                                    .listModels(provider.codexOAuthReadyCopy())
+                                    .sortedBy { it.modelId }
+                            }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
+                            // Refresh: only filter out review models from the user's selection,
+                            // do NOT auto-add any of the fetched ones. Refresh updates the
+                            // candidate pool (modelList in ModelList composable, also driven by
+                            // listModels) — selection stays in the user's hands.
+                            onCommit(provider.copy(models = provider.models.withoutCodexReviewModels()))
                             toaster.show(
                                 context.getString(
                                     R.string.setting_provider_page_codex_oauth_models_loaded,

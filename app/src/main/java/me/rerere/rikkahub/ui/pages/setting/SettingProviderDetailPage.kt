@@ -100,6 +100,7 @@ import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.providers.defaultCodexOAuthModelList
 import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
@@ -301,9 +302,17 @@ private fun SettingProviderConfigPage(
     ) {
         ProviderConfigure(
             provider = internalProvider,
+            // Async outcomes (Codex OAuth login, listModels refresh) commit straight to the
+            // top-level settings — without this, the user has to remember to hit Save before
+            // switching to the Models tab, and we end up with "Codex login succeeded but Models
+            // tab shows empty" reports.
+            onCommit = { committed ->
+                internalProvider = committed  // keep local in sync so the UI doesn't snap back
+                onEdit(committed)
+            },
             onEdit = {
                 internalProvider = it
-            }
+            },
         )
 
         if (internalProvider is ProviderSetting.OpenAI) {
@@ -428,16 +437,14 @@ private fun ModelList(
             providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH &&
             providerSetting.models.any { it.isCodexOAuthReviewModel() }
         ) {
-            onUpdateProvider(providerSetting.copy(models = providerSetting.models.filterNot { it.isCodexOAuthReviewModel() }))
-            return@LaunchedEffect
-        }
-        if (
-            providerSetting is ProviderSetting.OpenAI &&
-            providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH &&
-            providerSetting.models.isEmpty() &&
-            modelList.isNotEmpty()
-        ) {
-            onUpdateProvider(providerSetting.copy(models = modelList))
+            // One-shot cleanup: drop review variants if any sneaked into the user's selection
+            // from an old Codex response. We do NOT touch the rest — and we explicitly DO NOT
+            // auto-fill on `models.isEmpty()` (an earlier version did, which made the
+            // "deselect all" gesture useless because the next compose pass refilled it).
+            // Keeping the user's empty selection empty is correct: the candidates live in
+            // `modelList` / the available-models sheet, and the user picks from there.
+            val filtered = providerSetting.models.filterNot { it.isCodexOAuthReviewModel() }
+            onUpdateProvider(providerSetting.copy(models = filtered))
         }
     }
     var expanded by rememberSaveable { mutableStateOf(true) }

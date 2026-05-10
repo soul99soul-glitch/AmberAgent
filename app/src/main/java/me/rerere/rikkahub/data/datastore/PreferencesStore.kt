@@ -280,11 +280,27 @@ class SettingsStore(
                 .map { provider ->
                     val defaultProvider = DEFAULT_PROVIDERS.find { it.id == provider.id }
                     if (defaultProvider != null) {
-                        provider.copyProvider(
+                        // Sync built-in metadata (description / brand) from the latest defaults.
+                        // Brand needs special handling: it's an OpenAI-only field on OpenAI
+                        // ProviderSetting, not part of the abstract copyProvider contract, so we
+                        // re-stamp it inline. Without this, an upgraded user's OpenAI / DeepSeek /
+                        // Moonshot providers deserialize to brand=GENERIC and lose the brand-
+                        // specific UI affordances (Codex OAuth, Coding Plan toggles).
+                        val withMeta = provider.copyProvider(
                             builtIn = defaultProvider.builtIn,
                             description = defaultProvider.description,
                             shortDescription = defaultProvider.shortDescription,
                         )
+                        if (
+                            withMeta is me.rerere.ai.provider.ProviderSetting.OpenAI &&
+                            defaultProvider is me.rerere.ai.provider.ProviderSetting.OpenAI &&
+                            withMeta.brand == me.rerere.ai.provider.OpenAIBrand.GENERIC &&
+                            defaultProvider.brand != me.rerere.ai.provider.OpenAIBrand.GENERIC
+                        ) {
+                            withMeta.copy(brand = defaultProvider.brand)
+                        } else {
+                            withMeta
+                        }
                     } else provider
                 }
             val assistants = it.assistants.ifEmpty { DEFAULT_ASSISTANTS }.toMutableList()

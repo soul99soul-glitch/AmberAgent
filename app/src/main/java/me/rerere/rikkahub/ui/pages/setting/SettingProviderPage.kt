@@ -65,9 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
-import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -79,6 +77,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.ProviderTemplatePickerSheet
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
@@ -120,7 +119,11 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             )
                         )
                     }
-                    AddButton {
+                    AddButton(
+                        existingProviderIds = remember(settings.providers) {
+                            settings.providers.map { it.id }.toSet()
+                        },
+                    ) {
                         vm.updateSettings(
                             settings.copy(
                                 providers = listOf(it) + settings.providers
@@ -432,17 +435,40 @@ private fun handleImageQRCode(
 
 
 @Composable
-private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
+private fun AddButton(
+    existingProviderIds: Set<Uuid>,
+    onAdd: (ProviderSetting) -> Unit,
+) {
+    // Two-step add flow:
+    //  1. Tap "+"  → open ProviderTemplatePickerSheet (bundled brands + custom types)
+    //  2. Pick row → close sheet, open the existing edit dialog pre-filled with that initial
+    //     ProviderSetting, then user reviews / fills in API key / hits "Add".
+    //
+    // The previous implementation immediately opened a blank `ProviderSetting.OpenAI()`
+    // editor with a hidden "Codex OAuth" shortcut tucked into the dismiss row. That made
+    // the brand-tagged providers (DeepSeek / Kimi / 智谱 / MiMo) impossible to add back
+    // once the user had deleted them, because nothing in the editor lets the user choose a
+    // brand directly. The picker sheet is now the single discovery point for both.
+    var showPicker by remember { mutableStateOf(false) }
     val dialogState = useEditState<ProviderSetting> {
         onAdd(it)
     }
 
     IconButton(
-        onClick = {
-            dialogState.open(ProviderSetting.OpenAI())
-        }
+        onClick = { showPicker = true }
     ) {
         Icon(HugeIcons.Add01, "Add")
+    }
+
+    if (showPicker) {
+        ProviderTemplatePickerSheet(
+            existingProviderIds = existingProviderIds,
+            onDismiss = { showPicker = false },
+            onPick = { initial ->
+                showPicker = false
+                dialogState.open(initial)
+            },
+        )
     }
 
     if (dialogState.isEditing) {
@@ -470,28 +496,12 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
                 }
             },
             dismissButton = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                TextButton(
+                    onClick = {
+                        dialogState.dismiss()
+                    }
                 ) {
-                    TextButton(
-                        onClick = {
-                            dialogState.currentState = ProviderSetting.OpenAI(
-                                name = "OpenAI Codex OAuth",
-                                baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
-                                useResponseApi = true,
-                                authMode = OpenAIAuthMode.CODEX_OAUTH,
-                            )
-                        }
-                    ) {
-                        Text(stringResource(R.string.setting_provider_page_add_codex_oauth))
-                    }
-                    TextButton(
-                        onClick = {
-                            dialogState.dismiss()
-                        }
-                    ) {
-                        Text(stringResource(R.string.cancel))
-                    }
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )

@@ -283,7 +283,15 @@ class OpenAIProvider(
         forceRefresh: Boolean,
     ): String {
         return when (providerSetting.authMode) {
-            OpenAIAuthMode.API_KEY -> keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+            // Coding Plan modes (Zhipu / Kimi / MiMo) authenticate exactly like API_KEY:
+            // user pastes a key, we send it as Bearer. The only difference vs vanilla API_KEY
+            // is the pinned base URL (handled at the settings layer when the user picks the
+            // mode). No special token negotiation here.
+            OpenAIAuthMode.API_KEY,
+            OpenAIAuthMode.ZHIPU_CODING_PLAN,
+            OpenAIAuthMode.KIMI_CODING_PLAN,
+            OpenAIAuthMode.MIMO_CODING_PLAN ->
+                keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             OpenAIAuthMode.CODEX_OAUTH -> oauthClient
                 ?.getValidAccessToken(providerSetting.id, forceRefresh)
                 ?: error("Codex OAuth requires an Android context-backed auth store.")
@@ -370,31 +378,37 @@ class OpenAIProvider(
         )
     }
 
-    private fun defaultCodexOAuthModels(): List<Model> {
-        return CODEX_OAUTH_FALLBACK_MODEL_IDS.map { id ->
-            Model(
-                modelId = id,
-                displayName = id,
-                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id),
-                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id),
-                abilities = ModelRegistry.MODEL_ABILITIES.getData(id),
-                contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(id),
-            )
-        }
-    }
+    private fun defaultCodexOAuthModels(): List<Model> = defaultCodexOAuthModelList()
+}
 
-    private companion object {
-        val CODEX_OAUTH_FALLBACK_MODEL_IDS = listOf(
-            "gpt-5.4",
-            "gpt-5.3-codex",
-            "gpt-5.3-codex-spark",
-            "gpt-5.2",
-            "gpt-5.1",
-            "gpt-5.1-codex",
-            "gpt-5.1-codex-max",
+/**
+ * Bundled fallback model list for OpenAI Codex OAuth. Public so the provider settings UI can
+ * write it into `provider.models` whenever a live `listModels` call returns nothing or throws —
+ * without this, an early failure in the OAuth login path leaves `provider.models` empty and the
+ * "available models" sheet shows blank with no obvious recovery.
+ */
+fun defaultCodexOAuthModelList(): List<Model> {
+    return OPENAI_CODEX_OAUTH_FALLBACK_MODEL_IDS.map { id ->
+        Model(
+            modelId = id,
+            displayName = id,
+            inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id),
+            outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id),
+            abilities = ModelRegistry.MODEL_ABILITIES.getData(id),
+            contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(id),
         )
     }
 }
+
+private val OPENAI_CODEX_OAUTH_FALLBACK_MODEL_IDS = listOf(
+    "gpt-5.4",
+    "gpt-5.3-codex",
+    "gpt-5.3-codex-spark",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-max",
+)
 
 fun Model.isCodexOAuthReviewModel(): Boolean {
     return modelId.contains("review", ignoreCase = true) ||

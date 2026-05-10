@@ -19,7 +19,70 @@ enum class OpenAIAuthMode {
     API_KEY,
 
     @SerialName("codex_oauth")
-    CODEX_OAUTH
+    CODEX_OAUTH,
+
+    @SerialName("zhipu_coding_plan")
+    ZHIPU_CODING_PLAN,
+
+    @SerialName("kimi_coding_plan")
+    KIMI_CODING_PLAN,
+
+    @SerialName("mimo_coding_plan")
+    MIMO_CODING_PLAN,
+}
+
+/**
+ * Brand-tag for OpenAI-compatible providers. Decides which auth modes are visible in the
+ * settings UI and which base URLs the Coding Plan modes should pin. Lets us avoid showing
+ * "OpenAI Codex OAuth" on a DeepSeek provider, etc.
+ *
+ *  - GENERIC : user-defined OpenAI-compatible (only API_KEY)
+ *  - OPENAI  : OpenAI official (API_KEY + CODEX_OAUTH)
+ *  - DEEPSEEK: DeepSeek (only API_KEY today; field reserved for future Coding Plan)
+ *  - ZHIPU   : 智谱 GLM (API_KEY + ZHIPU_CODING_PLAN)
+ *  - KIMI    : Kimi / Moonshot (API_KEY + KIMI_CODING_PLAN)
+ *  - MIMO    : 小米 MiMo (API_KEY + MIMO_CODING_PLAN)
+ */
+@Serializable
+enum class OpenAIBrand {
+    @SerialName("generic")
+    GENERIC,
+
+    @SerialName("openai")
+    OPENAI,
+
+    @SerialName("deepseek")
+    DEEPSEEK,
+
+    @SerialName("zhipu")
+    ZHIPU,
+
+    @SerialName("kimi")
+    KIMI,
+
+    @SerialName("mimo")
+    MIMO,
+}
+
+fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
+    OpenAIBrand.GENERIC, OpenAIBrand.DEEPSEEK -> listOf(OpenAIAuthMode.API_KEY)
+    OpenAIBrand.OPENAI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.CODEX_OAUTH)
+    OpenAIBrand.ZHIPU -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.ZHIPU_CODING_PLAN)
+    OpenAIBrand.KIMI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.KIMI_CODING_PLAN)
+    OpenAIBrand.MIMO -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.MIMO_CODING_PLAN)
+}
+
+/**
+ * Fixed base URL for "managed" auth modes (Codex OAuth, the various Coding Plans).
+ * Returns null for API_KEY (user-editable). When non-null, the UI auto-fills baseUrl on
+ * mode switch and disables the baseUrl text field.
+ */
+fun OpenAIAuthMode.fixedBaseUrl(): String? = when (this) {
+    OpenAIAuthMode.API_KEY -> null
+    OpenAIAuthMode.CODEX_OAUTH -> "https://chatgpt.com/backend-api/codex"
+    OpenAIAuthMode.ZHIPU_CODING_PLAN -> "https://open.bigmodel.cn/api/coding/paas/v4"
+    OpenAIAuthMode.KIMI_CODING_PLAN -> "https://api.kimi.com/coding/v1"
+    OpenAIAuthMode.MIMO_CODING_PLAN -> "https://token-plan-cn.xiaomimimo.com/v1"
 }
 
 @Serializable
@@ -65,6 +128,14 @@ sealed class ProviderSetting {
         var chatCompletionsPath: String = "/chat/completions",
         var useResponseApi: Boolean = false,
         var authMode: OpenAIAuthMode = OpenAIAuthMode.API_KEY,
+        /**
+         * Brand tag — see [OpenAIBrand]. Default GENERIC matches "user added a custom OpenAI-
+         * compatible provider". Bundled defaults set their own brand in DEFAULT_PROVIDERS.
+         * Old persisted JSON missing this field deserializes to GENERIC; PreferencesStore's
+         * load path then re-stamps the brand for matched default ids so existing OpenAI /
+         * DeepSeek / Moonshot providers don't lose their brand-specific UI affordances.
+         */
+        var brand: OpenAIBrand = OpenAIBrand.GENERIC,
     ) : ProviderSetting() {
         override fun addModel(model: Model): ProviderSetting {
             return copy(models = models + model)

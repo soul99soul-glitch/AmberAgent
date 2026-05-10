@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.datastore
 
 import me.rerere.ai.provider.BalanceOption
+import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
 import kotlin.uuid.Uuid
 
@@ -12,6 +13,11 @@ private val DeepSeekProviderId = Uuid.parse("f099ad5b-ef03-446d-8e78-7e36787f780
 private val OpenRouterProviderId = Uuid.parse("d5734028-d39b-4d41-9841-fd648d65440e")
 private val MoonshotProviderId = Uuid.parse("d6c4d8c6-3f62-4ca9-a6f3-7ade6b15ecc3")
 private val XAIProviderId = Uuid.parse("ff3cde7e-0f65-43d7-8fb2-6475c99f5990")
+// New brand-tagged providers added with the OpenAIBrand work. Use fresh UUIDs (not the old
+// removed-zhipu uuid) so users who explicitly removed the previous Zhipu entry don't get
+// it resurrected.
+private val ZhipuProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c01")
+private val MimoProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c02")
 
 val REMOVED_DEFAULT_PROVIDER_IDS = setOf(
     Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"), // AmberAgent / legacy RikkaHub
@@ -21,7 +27,7 @@ val REMOVED_DEFAULT_PROVIDER_IDS = setOf(
     Uuid.parse("da020a90-f7b3-4c29-b90e-c511a0630630"), // TokenPony
     Uuid.parse("f76cae46-069a-4334-ab8e-224e4979e58c"), // Alibaba Bailian
     Uuid.parse("3dfd6f9b-f9d9-417f-80c1-ff8d77184191"), // Volcengine
-    Uuid.parse("3bc40dc1-b11a-46fa-863b-6306971223be"), // Zhipu
+    Uuid.parse("3bc40dc1-b11a-46fa-863b-6306971223be"), // Zhipu (legacy id; new ZhipuProviderId is different)
     Uuid.parse("f4f8870e-82d3-495b-9b64-d58e508b3b2c"), // StepFun
     Uuid.parse("da93779f-3956-48cc-82ef-67bb482eaaf7"), // 302.AI
     Uuid.parse("ef5d149b-8e34-404b-818c-6ec242e5c3c5"), // Tencent Hunyuan
@@ -35,6 +41,7 @@ val DEFAULT_PROVIDERS = listOf(
         name = "OpenAI",
         baseUrl = "https://api.openai.com/v1",
         apiKey = "",
+        brand = OpenAIBrand.OPENAI,
     ),
     ProviderSetting.Google(
         id = GeminiProviderId,
@@ -52,6 +59,7 @@ val DEFAULT_PROVIDERS = listOf(
             apiPath = "/user/balance",
             resultPath = "balance_infos[0].total_balance",
         ),
+        brand = OpenAIBrand.DEEPSEEK,
     ),
     ProviderSetting.OpenAI(
         id = OpenRouterProviderId,
@@ -63,10 +71,12 @@ val DEFAULT_PROVIDERS = listOf(
             apiPath = "/credits",
             resultPath = "data.total_credits - data.total_usage",
         ),
+        // OpenRouter is a multi-provider gateway, not a brand with its own auth modes.
+        brand = OpenAIBrand.GENERIC,
     ),
     ProviderSetting.OpenAI(
         id = MoonshotProviderId,
-        name = "月之暗面",
+        name = "月之暗面 (Kimi)",
         baseUrl = "https://api.moonshot.cn/v1",
         apiKey = "",
         enabled = false,
@@ -75,6 +85,23 @@ val DEFAULT_PROVIDERS = listOf(
             apiPath = "/users/me/balance",
             resultPath = "data.available_balance",
         ),
+        brand = OpenAIBrand.KIMI,
+    ),
+    ProviderSetting.OpenAI(
+        id = ZhipuProviderId,
+        name = "智谱 GLM",
+        baseUrl = "https://open.bigmodel.cn/api/paas/v4",
+        apiKey = "",
+        enabled = false,
+        brand = OpenAIBrand.ZHIPU,
+    ),
+    ProviderSetting.OpenAI(
+        id = MimoProviderId,
+        name = "小米 MiMo",
+        baseUrl = "https://api.xiaomi.com/v1",  // placeholder API base; user can override
+        apiKey = "",
+        enabled = false,
+        brand = OpenAIBrand.MIMO,
     ),
     ProviderSetting.OpenAI(
         id = XAIProviderId,
