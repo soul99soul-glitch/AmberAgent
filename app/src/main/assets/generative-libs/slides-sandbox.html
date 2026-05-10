@@ -2,73 +2,198 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
-html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;touch-action:pan-y;}
+:root{
+  --slide-bg: #ffffff;
+  --text-primary: #111827;
+  --text-secondary: #1f2937;
+  --text-muted: #374151;
+  --text-faint: #6b7280;
+  --hairline: #e5e7eb;
+  --nav-bg: rgba(0,0,0,0.55);
+  --nav-bg-active: rgba(0,0,0,0.78);
+  --nav-fg: #ffffff;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --slide-bg: #1c1c1e;
+    --text-primary: #f4f4f5;
+    --text-secondary: #e4e4e7;
+    --text-muted: #d4d4d8;
+    --text-faint: #a1a1aa;
+    --hairline: #2e2e33;
+    --nav-bg: rgba(255,255,255,0.18);
+    --nav-bg-active: rgba(255,255,255,0.32);
+    --nav-fg: #ffffff;
+  }
+}
+html,body{margin:0;padding:0;height:100%;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
 *{box-sizing:border-box;}
-.deck{position:relative;width:100%;height:100%;overflow:hidden;}
-.slide{display:none;width:100%;height:100%;padding:32px;flex-direction:column;justify-content:center;}
-.slide.active{display:flex;}
-.slide h1{margin:0 0 16px;font-size:28px;font-weight:700;color:#111827;line-height:1.3;}
-.slide h2{margin:0 0 12px;font-size:22px;font-weight:600;color:#1f2937;line-height:1.3;}
-.slide p,.slide li{font-size:16px;color:#374151;line-height:1.6;margin:4px 0;}
-.slide ul,.slide ol{padding-left:24px;margin:8px 0;}
-.slide .subtitle{font-size:18px;color:#6b7280;margin-top:8px;}
-.nav{position:absolute;bottom:12px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:12px;z-index:10;}
-.nav button{border:none;background:#e5e7eb;color:#374151;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;}
-.nav button:active{background:#d1d5db;}
-.nav button:disabled{opacity:0.4;cursor:default;}
-.nav .indicator{font-size:12px;color:#6b7280;}
+.deck{
+  display:flex;
+  flex-direction:row;
+  overflow-x:auto;
+  overflow-y:hidden;
+  scroll-snap-type:x mandatory;
+  scroll-behavior:smooth;
+  width:100%;
+  height:100%;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+.deck::-webkit-scrollbar{display:none;}
+.slide{
+  flex:0 0 100%;
+  width:100%;
+  height:100%;
+  scroll-snap-align:start;
+  scroll-snap-stop:always;
+  padding:28px 24px 72px;
+  overflow-y:auto;
+  background:var(--slide-bg);
+  color:var(--text-muted);
+  display:block;
+  -webkit-overflow-scrolling:touch;
+}
+.slide::-webkit-scrollbar{width:0;}
+.slide h1{margin:0 0 14px;font-size:26px;font-weight:700;color:var(--text-primary);line-height:1.3;}
+.slide h2{margin:0 0 10px;font-size:20px;font-weight:600;color:var(--text-secondary);line-height:1.3;}
+.slide p,.slide li{font-size:15px;color:var(--text-muted);line-height:1.6;margin:4px 0;}
+.slide ul,.slide ol{padding-left:22px;margin:8px 0;}
+.slide .subtitle{font-size:16px;color:var(--text-faint);margin:0 0 8px;}
+.slide .notes{font-size:12px;color:var(--text-faint);margin-top:18px;padding-top:12px;border-top:1px solid var(--hairline);}
+.nav{
+  position:fixed;
+  bottom:14px;left:0;right:0;
+  display:none;
+  justify-content:center;align-items:center;gap:8px;
+  z-index:10;
+  pointer-events:none;
+}
+.nav > *{pointer-events:auto;}
+.nav button{
+  border:none;
+  background:var(--nav-bg);
+  color:var(--nav-fg);
+  padding:8px 16px;
+  border-radius:18px;
+  font-size:13px;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.nav button:active{background:var(--nav-bg-active);}
+.nav button:disabled{opacity:0.32;cursor:default;}
+.nav .indicator{
+  font-size:12px;
+  color:var(--nav-fg);
+  background:var(--nav-bg);
+  padding:6px 12px;
+  border-radius:18px;
+  min-width:54px;
+  text-align:center;
+}
 #error{display:none;padding:16px;color:#dc2626;font-size:14px;}
 </style>
 </head>
 <body>
 <div class="deck" id="deck"></div>
+<div class="nav" id="nav">
+  <button id="prev" type="button" aria-label="上一页">‹</button>
+  <span class="indicator" id="ind">1 / 1</span>
+  <button id="next" type="button" aria-label="下一页">›</button>
+</div>
 <div id="error"></div>
 <script>
 (function(){
   var currentSlide = 0;
   var totalSlides = 0;
-
-  function renderSlide(slide, index){
-    var div = document.createElement('div');
-    div.className = 'slide' + (index === 0 ? ' active' : '');
-    div.setAttribute('data-index', index);
-    var html = '';
-    if(slide.title) html += '<h1>' + esc(slide.title) + '</h1>';
-    if(slide.subtitle) html += '<p class="subtitle">' + esc(slide.subtitle) + '</p>';
-    if(slide.content){
-      if(Array.isArray(slide.content)){
-        html += '<ul>';
-        slide.content.forEach(function(item){ html += '<li>' + esc(String(item)) + '</li>'; });
-        html += '</ul>';
-      } else {
-        html += '<p>' + esc(String(slide.content)) + '</p>';
-      }
-    }
-    if(slide.notes) html += '<p style="font-size:12px;color:#9ca3af;margin-top:auto;padding-top:16px;">' + esc(slide.notes) + '</p>';
-    div.innerHTML = html;
-    return div;
-  }
+  var deckEl = null;
 
   function esc(s){
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  function showSlide(index){
-    var slides = document.querySelectorAll('.slide');
-    slides.forEach(function(s,i){ s.className = 'slide' + (i===index?' active':''); });
-    currentSlide = index;
-    updateNav();
+  function pickField(slide, keys){
+    for(var i=0;i<keys.length;i++){
+      var v = slide[keys[i]];
+      if(v != null && v !== '') return v;
+    }
+    return null;
   }
 
-  function updateNav(){
+  function renderSlide(slide){
+    var div = document.createElement('div');
+    div.className = 'slide';
+    var html = '';
+    if(slide == null || typeof slide !== 'object'){
+      div.innerHTML = '<p>' + esc(String(slide == null ? '' : slide)) + '</p>';
+      return div;
+    }
+    var title = pickField(slide, ['title','name','heading','h1','header']);
+    var subtitle = pickField(slide, ['subtitle','tagline','h2','subheading']);
+    var content = pickField(slide, ['content','body','items','bullets','text','description','points']);
+    var notes = pickField(slide, ['notes','note','footer','speaker_notes','speakerNotes']);
+
+    if(title) html += '<h1>' + esc(String(title)) + '</h1>';
+    if(subtitle) html += '<p class="subtitle">' + esc(String(subtitle)) + '</p>';
+    if(content){
+      if(Array.isArray(content)){
+        html += '<ul>';
+        content.forEach(function(item){
+          if(item != null && typeof item === 'object'){
+            html += '<li>' + esc(JSON.stringify(item)) + '</li>';
+          } else {
+            html += '<li>' + esc(String(item)) + '</li>';
+          }
+        });
+        html += '</ul>';
+      } else if(typeof content === 'object'){
+        html += '<pre style="white-space:pre-wrap;font-family:inherit;">' + esc(JSON.stringify(content, null, 2)) + '</pre>';
+      } else {
+        html += '<p>' + esc(String(content)) + '</p>';
+      }
+    }
+    if(notes) html += '<p class="notes">' + esc(String(notes)) + '</p>';
+
+    if(html === ''){
+      // Field-name fallback: model used unrecognized keys. Dump everything string-ish so the user sees SOMETHING instead of a blank slide.
+      var lines = [];
+      Object.keys(slide).forEach(function(key){
+        var val = slide[key];
+        if(val == null) return;
+        if(typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean'){
+          lines.push('<li><strong>' + esc(key) + ':</strong> ' + esc(String(val)) + '</li>');
+        } else if(Array.isArray(val) && val.every(function(x){ return typeof x !== 'object'; })){
+          lines.push('<li><strong>' + esc(key) + ':</strong> ' + esc(val.join(', ')) + '</li>');
+        }
+      });
+      if(lines.length > 0){
+        html = '<p class="subtitle">未识别的页面字段，按 key/value 显示：</p><ul>' + lines.join('') + '</ul>';
+      } else {
+        html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;">' + esc(JSON.stringify(slide, null, 2)) + '</pre>';
+      }
+    }
+
+    div.innerHTML = html;
+    return div;
+  }
+
+  function updateIndicator(){
+    var ind = document.getElementById('ind');
+    if(ind) ind.textContent = (currentSlide+1) + ' / ' + totalSlides;
     var prev = document.getElementById('prev');
     var next = document.getElementById('next');
-    var ind = document.getElementById('ind');
     if(prev) prev.disabled = currentSlide <= 0;
     if(next) next.disabled = currentSlide >= totalSlides - 1;
-    if(ind) ind.textContent = (currentSlide+1) + ' / ' + totalSlides;
+  }
+
+  function scrollToSlide(index){
+    if(!deckEl || index < 0 || index >= totalSlides) return;
+    var slides = deckEl.querySelectorAll('.slide');
+    var target = slides[index];
+    if(!target) return;
+    deckEl.scrollTo({ left: target.offsetLeft, behavior: 'smooth' });
   }
 
   window.__renderSlides = function(slidesJson){
@@ -78,24 +203,37 @@ html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple
         throw new Error('空幻灯片数据');
       }
       totalSlides = slides.length;
-      var deck = document.getElementById('deck');
-      deck.innerHTML = '';
-      slides.forEach(function(slide, i){
-        deck.appendChild(renderSlide(slide, i));
-      });
-      // Add nav if more than 1 slide
+      deckEl = document.getElementById('deck');
+      deckEl.innerHTML = '';
+      slides.forEach(function(slide){ deckEl.appendChild(renderSlide(slide)); });
+
+      var nav = document.getElementById('nav');
       if(totalSlides > 1){
-        var nav = document.createElement('div');
-        nav.className = 'nav';
-        nav.innerHTML = '<button id="prev" onclick="window.__prevSlide()">上一页</button>'
-          + '<span class="indicator" id="ind">1 / '+totalSlides+'</span>'
-          + '<button id="next" onclick="window.__nextSlide()">下一页</button>';
-        deck.appendChild(nav);
+        nav.style.display = 'flex';
+        document.getElementById('prev').onclick = function(){ scrollToSlide(currentSlide - 1); };
+        document.getElementById('next').onclick = function(){ scrollToSlide(currentSlide + 1); };
+      } else {
+        nav.style.display = 'none';
       }
+
       currentSlide = 0;
-      updateNav();
-      var h = Math.max(deck.scrollHeight, 360);
-      try{ AmberWidget.resize(Math.ceil(h)); }catch(e){}
+      updateIndicator();
+
+      var scrollDebounce = null;
+      deckEl.addEventListener('scroll', function(){
+        if(scrollDebounce) cancelAnimationFrame(scrollDebounce);
+        scrollDebounce = requestAnimationFrame(function(){
+          if(!deckEl.clientWidth) return;
+          var idx = Math.round(deckEl.scrollLeft / deckEl.clientWidth);
+          idx = Math.max(0, Math.min(totalSlides - 1, idx));
+          if(idx !== currentSlide){
+            currentSlide = idx;
+            updateIndicator();
+          }
+        });
+      }, { passive: true });
+
+      try{ AmberWidget.resize(Math.max(window.innerHeight, 360)); }catch(e){}
     }catch(e){
       document.getElementById('error').style.display='block';
       document.getElementById('error').textContent='幻灯片渲染失败: '+(e.message||e);
@@ -103,41 +241,36 @@ html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple
     }
   };
 
-  window.__prevSlide = function(){ if(currentSlide > 0) showSlide(currentSlide - 1); };
-  window.__nextSlide = function(){ if(currentSlide < totalSlides - 1) showSlide(currentSlide + 1); };
-
-  // Keyboard nav
   document.addEventListener('keydown', function(e){
-    if(e.key === 'ArrowRight' || e.key === 'ArrowDown') window.__nextSlide();
-    else if(e.key === 'ArrowLeft' || e.key === 'ArrowUp') window.__prevSlide();
+    if(e.key === 'ArrowRight' || e.key === 'PageDown') scrollToSlide(currentSlide + 1);
+    else if(e.key === 'ArrowLeft' || e.key === 'PageUp') scrollToSlide(currentSlide - 1);
   });
 
-  // Swipe nav — intercept horizontal gesture during touchmove to claim it
-  // before WebView or system gestures (back-swipe, fling) consume the event.
-  var startX = 0;
-  var startY = 0;
-  var moved = false;
-  document.addEventListener('touchstart', function(e){
-    if(e.touches.length !== 1) return;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    moved = false;
-  });
-  document.addEventListener('touchmove', function(e){
-    if(e.touches.length !== 1) return;
-    var dx = e.touches[0].clientX - startX;
-    var dy = e.touches[0].clientY - startY;
-    if(Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)){
-      e.preventDefault();
-      moved = true;
-    }
-  }, {passive: false});
-  document.addEventListener('touchend', function(e){
-    if(!moved) return;
-    var dx = e.changedTouches[0].clientX - startX;
-    if(dx < 0) window.__nextSlide();
-    else window.__prevSlide();
-  });
+  // Capture API for host-side per-slide screenshot export.
+  window.__getSlideCount = function(){ return totalSlides; };
+  window.__getCurrentSlide = function(){ return currentSlide; };
+  window.__beginCapture = function(){
+    var nav = document.getElementById('nav');
+    if(nav) nav.style.visibility = 'hidden';
+  };
+  window.__endCapture = function(){
+    var nav = document.getElementById('nav');
+    if(nav) nav.style.visibility = '';
+  };
+  window.__jumpToSlideInstant = function(index){
+    if(!deckEl) return;
+    var i = parseInt(index, 10);
+    if(isNaN(i) || i < 0 || i >= totalSlides) return;
+    var slides = deckEl.querySelectorAll('.slide');
+    var target = slides[i];
+    if(!target) return;
+    var prev = deckEl.style.scrollBehavior;
+    deckEl.style.scrollBehavior = 'auto';
+    deckEl.scrollLeft = target.offsetLeft;
+    deckEl.style.scrollBehavior = prev || '';
+    currentSlide = i;
+    updateIndicator();
+  };
 
   try{ AmberWidget.resize(360); }catch(e){}
 })();

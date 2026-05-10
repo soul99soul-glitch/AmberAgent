@@ -132,6 +132,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val message = node.messages[node.selectIndex]
@@ -183,6 +184,7 @@ fun ChatMessage(
                 model = model,
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
+                onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
             )
@@ -473,6 +475,7 @@ internal fun ChatMessageVirtualItemContent(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val message = node.currentMessage
@@ -513,6 +516,7 @@ internal fun ChatMessageVirtualItemContent(
                     model = model,
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
+                    onOpenWorkspaceFile = onOpenWorkspaceFile,
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
@@ -534,6 +538,7 @@ internal fun ChatMessageVirtualItemContent(
                     model = model,
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
+                    onOpenWorkspaceFile = onOpenWorkspaceFile,
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                 )
             }
@@ -560,6 +565,7 @@ internal fun ChatMessageVirtualItemContent(
                         model = model,
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
+                        onOpenWorkspaceFile = onOpenWorkspaceFile,
                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                     )
                 }
@@ -1111,6 +1117,7 @@ private fun MessagePartsBlock(
     loading: Boolean,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
@@ -1172,6 +1179,7 @@ private fun MessagePartsBlock(
                                         loading = loading && !step.tool.isExecuted,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
+                                        onOpenWorkspaceFile = onOpenWorkspaceFile,
                                     )
                                 }
                             }

@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanSource
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
+import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
 import me.rerere.rikkahub.data.memory.export.MemoryImportExportManager
 import me.rerere.rikkahub.data.memory.model.MemoryCandidateStatus
@@ -30,6 +31,7 @@ class SettingAgentMemoryVM(
     private val memoryDreamPlanner: MemoryDreamPlanner,
     private val memoryDreamApplier: MemoryDreamApplier,
     private val memoryDreamPlanStore: MemoryDreamPlanStore,
+    private val memoryDreamScheduler: MemoryDreamScheduler,
     private val memoryImportExportManager: MemoryImportExportManager,
 ) : ViewModel() {
     private val _memoryTaskRunning = MutableStateFlow(false)
@@ -98,6 +100,13 @@ class SettingAgentMemoryVM(
         viewModelScope.launch {
             val candidate = memoryRepository.getAllCandidates().firstOrNull { it.id == id } ?: return@launch
             memoryRepository.updateCandidate(candidate.copy(status = MemoryCandidateStatus.IGNORED))
+        }
+    }
+
+    fun triggerDreamNow() {
+        viewModelScope.launch {
+            memoryDreamScheduler.runOnce()
+            _operationMessage.value = "已触发一次 Daydream 后台整理（结果通过通知和上方「待审核」区域反馈）"
         }
     }
 

@@ -17,20 +17,20 @@ data class WorkspaceFileItem(
     val sizeBytes: Long?,
     val lastModified: Long,
     val extension: String,
-)
-
-data class WorkspaceGroup(
-    val label: String,
-    val dirPrefix: String,
-    val items: List<WorkspaceFileItem>,
-    val collapsed: Boolean = false,
+    val isDirectory: Boolean = false,
 )
 
 class WorkspaceFileVM(private val context: Context) : ViewModel() {
     private val mirrorDir get() = context.filesDir.resolve("amberagent/workspace-mirror")
 
-    private val _groups = MutableStateFlow<List<WorkspaceGroup>>(emptyList())
-    val groups: StateFlow<List<WorkspaceGroup>> = _groups.asStateFlow()
+    private val _recent = MutableStateFlow<List<WorkspaceFileItem>>(emptyList())
+    val recent: StateFlow<List<WorkspaceFileItem>> = _recent.asStateFlow()
+
+    private val _currentPath = MutableStateFlow("")
+    val currentPath: StateFlow<String> = _currentPath.asStateFlow()
+
+    private val _currentDirItems = MutableStateFlow<List<WorkspaceFileItem>>(emptyList())
+    val currentDirItems: StateFlow<List<WorkspaceFileItem>> = _currentDirItems.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -42,67 +42,66 @@ class WorkspaceFileVM(private val context: Context) : ViewModel() {
     fun refresh() {
         viewModelScope.launch {
             _loading.value = true
-            _groups.value = buildGroups()
+            _recent.value = buildRecent()
+            _currentDirItems.value = listDir(_currentPath.value)
             _loading.value = false
         }
     }
 
-    private suspend fun buildGroups(): List<WorkspaceGroup> = withContext(Dispatchers.IO) {
+    fun navigateTo(relativePath: String) {
+        _currentPath.value = relativePath
+        viewModelScope.launch {
+            _currentDirItems.value = listDir(relativePath)
+        }
+    }
+
+    fun navigateUp() {
+        val current = _currentPath.value
+        if (current.isEmpty()) return
+        val parent = current.substringBeforeLast('/', "").let {
+            if (it == current) "" else it
+        }
+        navigateTo(parent)
+    }
+
+    private suspend fun buildRecent(): List<WorkspaceFileItem> = withContext(Dispatchers.IO) {
         val root = mirrorDir
         if (!root.exists() || !root.isDirectory) return@withContext emptyList()
-
-        val allFiles = mutableListOf<WorkspaceFileItem>()
-        root.walkTopDown().forEach { file ->
-            if (file.isFile && !file.name.startsWith(".")) {
-                allFiles.add(
-                    WorkspaceFileItem(
-                        path = file.relativeTo(root).path,
-                        name = file.name,
-                        sizeBytes = file.length(),
-                        lastModified = file.lastModified(),
-                        extension = file.extension.lowercase(),
-                    )
+        root.walkTopDown()
+            .filter { it.isFile && !it.name.startsWith(".") }
+            .map { file ->
+                WorkspaceFileItem(
+                    path = file.relativeTo(root).invariantSeparatorsPath,
+                    name = file.name,
+                    sizeBytes = file.length(),
+                    lastModified = file.lastModified(),
+                    extension = file.extension.lowercase(),
+                    isDirectory = false,
                 )
             }
-        }
+            .sortedByDescending { it.lastModified }
+            .take(80)
+            .toList()
+    }
 
-        val groupDefs = listOf(
-            "notes" to "笔记",
-            "reports" to "报告",
-            "slides" to "幻灯片",
-            "ppt" to "幻灯片",
-            "officepro" to "飞书办公",
-            "downloads" to "下载",
-            "extracted" to "解压文件",
-            "previews" to "预览",
+    private suspend fun listDir(relativePath: String): List<WorkspaceFileItem> = withContext(Dispatchers.IO) {
+        val root = mirrorDir
+        if (!root.exists() || !root.isDirectory) return@withContext emptyList()
+        val target = if (relativePath.isEmpty()) root else root.resolve(relativePath)
+        if (!target.exists() || !target.isDirectory) return@withContext emptyList()
+        val entries = target.listFiles()?.filter { !it.name.startsWith(".") } ?: return@withContext emptyList()
+        entries.map { f ->
+            WorkspaceFileItem(
+                path = f.relativeTo(root).invariantSeparatorsPath,
+                name = f.name,
+                sizeBytes = if (f.isFile) f.length() else null,
+                lastModified = f.lastModified(),
+                extension = if (f.isFile) f.extension.lowercase() else "",
+                isDirectory = f.isDirectory,
+            )
+        }.sortedWith(
+            compareByDescending<WorkspaceFileItem> { it.isDirectory }
+                .thenBy { it.name.lowercase() }
         )
-
-        val knownDirs = groupDefs.map { it.first }.toSet()
-        val grouped = linkedMapOf<String, MutableList<WorkspaceFileItem>>()
-        val other = mutableListOf<WorkspaceFileItem>()
-
-        allFiles.sortedByDescending { it.lastModified }.forEach { file ->
-            val dir = file.path.substringBefore("/", "").lowercase()
-            if (dir in knownDirs) {
-                val key = groupDefs.first { it.first == dir }.second
-                grouped.getOrPut(key) { mutableListOf() }.add(file)
-            } else {
-                other.add(file)
-            }
-        }
-
-        val result = mutableListOf<WorkspaceGroup>()
-        groupDefs.map { it.second }.distinct().forEach { label ->
-            grouped[label]?.let { files ->
-                if (files.isNotEmpty()) {
-                    val prefix = files.first().path.substringBefore("/", "")
-                    result.add(WorkspaceGroup(label, prefix, files))
-                }
-            }
-        }
-        if (other.isNotEmpty()) {
-            result.add(WorkspaceGroup("其他", "other", other))
-        }
-        result
     }
 }

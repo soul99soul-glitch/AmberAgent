@@ -58,6 +58,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -83,9 +84,14 @@ import java.util.UUID
 
 private const val WIDGET_MIN_HEIGHT_DP = 160
 private const val WIDGET_FALLBACK_HEIGHT_DP = 320
-private const val WIDGET_MIN_PARTIAL_RENDER_CHARS = 40
+// Inline card starts rendering as soon as the partial widget code passes this length.
+// Was 40 — too high; users complained that opening the mid-card showed several drawn shapes
+// while the inline card was still blank. 16 lets even an "<svg viewBox=\"0 0 X Y\">" stub start
+// painting so the inline preview keeps pace with what the model is streaming.
+private const val WIDGET_MIN_PARTIAL_RENDER_CHARS = 16
 private const val MAX_WIDGET_URL_LENGTH = 2048
-private const val STREAM_WIDGET_DEBOUNCE_MS = 48L
+// Push interval during streaming. Was 48ms — perceptible lag on fast streams. 16ms ≈ 1 frame.
+private const val STREAM_WIDGET_DEBOUNCE_MS = 16L
 
 private val heightCache = object {
     private val map = java.util.LinkedHashMap<String, Int>(16, 0.75f, true)
@@ -129,6 +135,7 @@ fun GenerativeWidgetCard(
             html = sanitized.html,
             setting = settings,
             onDismissRequest = { showExpanded = false },
+            initialFullscreen = widget.renderer == "slides",
         )
     }
 
@@ -233,13 +240,18 @@ fun ExpandedGenerativeWidgetDialog(
     html: String,
     setting: GenerativeUiSetting,
     onDismissRequest: () -> Unit,
+    initialFullscreen: Boolean = false,
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var webView by remember { mutableStateOf<WebView?>(null) }
-    var isFullscreen by remember { mutableStateOf(false) }
+    // No more user-facing fullscreen toggle: slides always open fullscreen (initialFullscreen=true),
+    // SVG/HTML widgets always stay in mid-card. The two layouts had inconsistent backgrounds and
+    // button orders anyway — collapsing to one mode per renderer keeps things predictable.
+    val isFullscreen = initialFullscreen
     val isRichRenderer = widget.renderer in setOf("vchart", "slides")
+    val isSlidesRenderer = widget.renderer == "slides"
 
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -276,29 +288,25 @@ fun ExpandedGenerativeWidgetDialog(
                     modifier = Modifier.padding(if (isFullscreen) 0.dp else 12.dp),
                     verticalArrangement = Arrangement.spacedBy(if (isFullscreen) 0.dp else 10.dp),
                 ) {
+                    val headerCompact = isFullscreen && isSlidesRenderer
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = if (isFullscreen) 12.dp else 0.dp, vertical = if (isFullscreen) 6.dp else 0.dp),
+                            .padding(
+                                horizontal = if (headerCompact) 8.dp else if (isFullscreen) 12.dp else 0.dp,
+                                vertical = if (headerCompact) 2.dp else if (isFullscreen) 6.dp else 0.dp,
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = widget.title?.takeIf { it.isNotBlank() } ?: "可视化卡片",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = if (headerCompact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        IconButton(
-                            onClick = { isFullscreen = !isFullscreen },
-                        ) {
-                            Icon(
-                                if (isFullscreen) HugeIcons.Cancel01 else HugeIcons.ArrowExpand01,
-                                contentDescription = if (isFullscreen) "退出全屏" else "全屏",
-                            )
-                        }
                         IconButton(
                             onClick = {
                                 val activity = context.getActivity()
@@ -307,32 +315,45 @@ fun ExpandedGenerativeWidgetDialog(
                                     toaster.show("暂时无法保存这张卡片", type = ToastType.Error)
                                     return@IconButton
                                 }
-                                scope.launch {
-                                    toaster.show("正在保存 JPG")
-                                    val bitmap = withContext(Dispatchers.Main) {
-                                        target.captureWidgetBitmap()
+                                val isSlides = widget.renderer == "slides" &&
+                                    widget.specJson != null &&
+                                    setting.enableInteractiveCharts
+                                if (isSlides) {
+                                    scope.launch {
+                                        captureSlidesToJpg(
+                                            webView = target,
+                                            activity = activity,
+                                            context = context,
+                                            deckTitle = widget.title,
+                                            toaster = toaster,
+                                        )
                                     }
-                                    if (bitmap == null) {
-                                        toaster.show("卡片还没渲染完成", type = ToastType.Error)
-                                        return@launch
+                                } else {
+                                    scope.launch {
+                                        toaster.show("正在保存 JPG")
+                                        val bitmap = withContext(Dispatchers.Main) {
+                                            target.captureWidgetBitmap()
+                                        }
+                                        if (bitmap == null) {
+                                            toaster.show("卡片还没渲染完成", type = ToastType.Error)
+                                            return@launch
+                                        }
+                                        val saved = withContext(Dispatchers.IO) {
+                                            context.exportJpegImage(activity, bitmap)
+                                        }
+                                        bitmap.recycle()
+                                        toaster.show(
+                                            message = if (saved) "已保存 JPG 到相册" else "保存失败",
+                                            type = if (saved) ToastType.Success else ToastType.Error,
+                                        )
                                     }
-                                    val saved = withContext(Dispatchers.IO) {
-                                        context.exportJpegImage(activity, bitmap)
-                                    }
-                                    bitmap.recycle()
-                                    toaster.show(
-                                        message = if (saved) "已保存 JPG 到相册" else "保存失败",
-                                        type = if (saved) ToastType.Success else ToastType.Error,
-                                    )
                                 }
                             },
                         ) {
                             Icon(HugeIcons.Download01, contentDescription = "保存 JPG")
                         }
-                        if (!isFullscreen) {
-                            IconButton(onClick = onDismissRequest) {
-                                Icon(HugeIcons.Cancel01, contentDescription = "关闭")
-                            }
+                        IconButton(onClick = onDismissRequest) {
+                            Icon(HugeIcons.Cancel01, contentDescription = "关闭")
                         }
                     }
                     BoxWithConstraints(
@@ -353,12 +374,13 @@ fun ExpandedGenerativeWidgetDialog(
                                 html = html,
                                 setting = setting,
                                 streaming = false,
-                                modifier = Modifier.align(Alignment.TopCenter),
+                                modifier = Modifier.fillMaxSize(),
                                 widgetKey = "expanded-${widget.title.orEmpty()}-${widget.widgetCode.toStableWidgetKeyFragment()}",
                                 minHeightDp = 240,
                                 fallbackHeightDp = 520,
                                 maxHeightOverrideDp = maxHeight.value.toInt().coerceAtLeast(240),
                                 interactive = true,
+                                fillContainer = true,
                                 onWebViewReady = { webView = it },
                             )
                         }
@@ -435,6 +457,7 @@ private fun SafeGenerativeWidgetWebView(
     fallbackHeightDp: Int = WIDGET_FALLBACK_HEIGHT_DP,
     maxHeightOverrideDp: Int? = null,
     interactive: Boolean = false,
+    fillContainer: Boolean = false,
     onTap: (() -> Unit)? = null,
     onWebViewReady: (WebView?) -> Unit = {},
 ) {
@@ -455,15 +478,25 @@ private fun SafeGenerativeWidgetWebView(
     val cacheKey = remember(widgetKey) {
         widgetKey?.takeIf { it.isNotBlank() } ?: html.take(200).ifBlank { UUID.randomUUID().toString() }
     }
-    var activeWebView by remember(cacheKey) { mutableStateOf<WebView?>(null) }
+    // Do not key on cacheKey — see DisposableEffect comment below. Resetting this to null
+    // mid-stream creates a brief window where LaunchedEffect skips the push because
+    // activeWebView is momentarily null.
+    var activeWebView by remember { mutableStateOf<WebView?>(null) }
     val bridgeToken = remember { UUID.randomUUID().toString() }
-    var heightDp by remember(cacheKey) {
+    // Same reasoning as activeWebView above: cacheKey changes every chunk in early streaming
+    // (because widgetCode.take(120) keeps growing), and resetting heightDp to minHeightDp
+    // every time would clobber the height that ResizeObserver just reported, leaving the
+    // inline card stuck at 160dp until streaming finishes — which is exactly the symptom.
+    // The composable identity already changes when a real new widget mounts, so plain
+    // remember{} is enough. heightCache.get(cacheKey) is still consulted on first composition
+    // for warm-start sizing.
+    var heightDp by remember {
         mutableStateOf(
             heightCache.get(cacheKey)
                 ?: if (streaming) minHeightDp else fallbackHeightDp
         )
     }
-    var hasMeasuredHeight by remember(cacheKey) {
+    var hasMeasuredHeight by remember {
         mutableStateOf(heightCache.get(cacheKey) != null)
     }
     val animatedHeight by animateDpAsState(
@@ -479,6 +512,7 @@ private fun SafeGenerativeWidgetWebView(
         colorScheme.outlineVariant,
         colorScheme.primary,
         interactive,
+        fillContainer,
     ) {
         buildReceiverHtml(
             bridgeToken = bridgeToken,
@@ -488,6 +522,7 @@ private fun SafeGenerativeWidgetWebView(
             outline = colorScheme.outlineVariant.toCssHex(),
             primary = colorScheme.primary.toCssHex(),
             interactive = interactive,
+            fillContainer = fillContainer,
         )
     }
     LaunchedEffect(renderedHtml, streaming, activeWebView) {
@@ -499,7 +534,7 @@ private fun SafeGenerativeWidgetWebView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(animatedHeight)
+            .then(if (fillContainer) Modifier.fillMaxSize() else Modifier.height(animatedHeight))
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -576,7 +611,17 @@ private fun SafeGenerativeWidgetWebView(
         )
     }
 
-    DisposableEffect(cacheKey) {
+    // CRITICAL: do NOT key this effect on cacheKey. cacheKey changes every time the widget's
+    // streaming widgetCode passes the take(120) prefix boundary or accumulates more lines —
+    // i.e. constantly during the first second of streaming. If we key on cacheKey, every change
+    // calls onDispose → webView.destroy() → the chromium sandbox process gets killed
+    // (logcat shows "isolated not needed" + "Death received" within 3s of stream start).
+    // AndroidView keeps the same WebView instance across recompositions, so the destroyed
+    // WebView stays in the layout tree but is silently dead — every subsequent
+    // evaluateJavascript call no-ops, ResizeObserver never fires, the inline card stays blank.
+    // The mid-card seems to work because user opens it after streaming is mostly done, so
+    // its cacheKey is stable from the start.
+    DisposableEffect(Unit) {
         onDispose {
             activeWebView?.apply {
                 stopLoading()
@@ -614,6 +659,80 @@ private class WidgetBridge(
         if (token != bridgeToken) return
         main.post { onTap() }
     }
+}
+
+private suspend fun captureSlidesToJpg(
+    webView: WebView,
+    activity: android.app.Activity,
+    context: android.content.Context,
+    deckTitle: String?,
+    toaster: com.dokar.sonner.ToasterState,
+) {
+    toaster.show("正在保存幻灯片…")
+    val count = evaluateJsAwait(webView, "window.__getSlideCount && window.__getSlideCount()")
+        ?.toIntOrNull() ?: 0
+    if (count <= 0) {
+        toaster.show("幻灯片还没渲染完成", type = ToastType.Error)
+        return
+    }
+    val originalSlide = evaluateJsAwait(webView, "window.__getCurrentSlide && window.__getCurrentSlide()")
+        ?.toIntOrNull() ?: 0
+    withContext(Dispatchers.Main) {
+        webView.evaluateJavascript("window.__beginCapture && window.__beginCapture();", null)
+    }
+    val baseTime = System.currentTimeMillis()
+    val safeTitle = (deckTitle?.takeIf { it.isNotBlank() } ?: "deck")
+        .replace(Regex("[^\\p{L}\\p{N}_-]"), "_")
+        .take(40)
+        .ifBlank { "deck" }
+    var saved = 0
+    try {
+        for (i in 0 until count) {
+            withContext(Dispatchers.Main) {
+                webView.evaluateJavascript(
+                    "window.__jumpToSlideInstant && window.__jumpToSlideInstant($i);",
+                    null,
+                )
+            }
+            delay(160)
+            val bitmap = withContext(Dispatchers.Main) { webView.captureWidgetBitmap() } ?: continue
+            val ok = withContext(Dispatchers.IO) {
+                context.exportJpegImage(
+                    activity = activity,
+                    bitmap = bitmap,
+                    fileName = "AmberAgent_${safeTitle}_${baseTime}_p${i + 1}.jpg",
+                )
+            }
+            bitmap.recycle()
+            if (ok) saved++
+        }
+    } finally {
+        withContext(Dispatchers.Main) {
+            webView.evaluateJavascript("window.__endCapture && window.__endCapture();", null)
+            webView.evaluateJavascript(
+                "window.__jumpToSlideInstant && window.__jumpToSlideInstant($originalSlide);",
+                null,
+            )
+        }
+    }
+    when {
+        saved == count -> toaster.show("已保存 $count 页到相册", type = ToastType.Success)
+        saved > 0 -> toaster.show("仅保存 $saved/$count 页", type = ToastType.Warning)
+        else -> toaster.show("保存失败", type = ToastType.Error)
+    }
+}
+
+private suspend fun evaluateJsAwait(webView: WebView, js: String): String? {
+    val deferred = CompletableDeferred<String?>()
+    withContext(Dispatchers.Main) {
+        webView.evaluateJavascript(js) { raw ->
+            val cleaned = raw
+                ?.takeIf { it.isNotBlank() && it != "null" && it != "undefined" }
+                ?.removeSurrounding("\"")
+            deferred.complete(cleaned)
+        }
+    }
+    return deferred.await()
 }
 
 private fun WebView.captureWidgetBitmap(): Bitmap? {
@@ -693,6 +812,8 @@ private fun RichSandboxWebView(
             factory = { ctx ->
                 WebView(ctx).apply {
                     overScrollMode = android.view.View.OVER_SCROLL_NEVER
+                    isHorizontalScrollBarEnabled = false
+                    isVerticalScrollBarEnabled = renderer != "slides"
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
@@ -701,8 +822,8 @@ private fun RichSandboxWebView(
                     settings.setSupportZoom(renderer != "slides")
                     settings.builtInZoomControls = renderer != "slides"
                     settings.displayZoomControls = false
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = renderer != "slides"
+                    settings.loadWithOverviewMode = renderer != "slides"
                     settings.javaScriptCanOpenWindowsAutomatically = false
                     settings.cacheMode = WebSettings.LOAD_NO_CACHE
                     settings.blockNetworkLoads = true
@@ -811,17 +932,38 @@ private fun buildReceiverHtml(
     outline: String,
     primary: String,
     interactive: Boolean,
+    fillContainer: Boolean = false,
 ): String = """
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1${if (interactive) ",minimum-scale=0.5,maximum-scale=5,user-scalable=yes" else ""}">
+<script>
+// Defined eagerly in <head> so any host evaluateJavascript() that fires before the body
+// script runs gets queued instead of crashing with "is not a function".
+window.__amberWidgetPending = null;
+window.__amberWidgetReady = false;
+window.__amberWidgetSetHtml = function(html){
+  if (window.__amberWidgetReady && window.__amberWidgetSetHtmlReal) {
+    window.__amberWidgetSetHtmlReal(html);
+  } else {
+    window.__amberWidgetPending = { html: html, finalize: false };
+  }
+};
+window.__amberWidgetFinalizeHtml = function(html){
+  if (window.__amberWidgetReady && window.__amberWidgetFinalizeHtmlReal) {
+    window.__amberWidgetFinalizeHtmlReal(html);
+  } else {
+    window.__amberWidgetPending = { html: html, finalize: true };
+  }
+};
+</script>
 <style>
-html,body{margin:0;padding:0;background:$background;color:$foreground;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+html,body{margin:0;padding:0;background:$background;color:$foreground;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;${if (fillContainer) "height:100%;" else ""}}
 *{box-sizing:border-box;max-width:100%;}
-body{overflow:${if (interactive) "auto" else "hidden"};}
-#root{width:100%;min-height:1px;overflow:${if (interactive) "auto" else "hidden"};}
+body{overflow:${if (interactive) "auto" else "hidden"};${if (fillContainer) "-webkit-overflow-scrolling:touch;" else ""}}
+#root{width:100%;${if (fillContainer) "min-height:100%;" else "min-height:1px;"}overflow:${if (interactive) "auto" else "hidden"};}
 #root>*{max-width:100%!important;}
 svg{display:block;width:100%!important;max-width:100%;height:auto;overflow:hidden;}
 table{width:100%;border-collapse:collapse;}
@@ -844,14 +986,50 @@ a{color:$primary;text-decoration:none;}
       AmberWidget.resize(height);
     }, 16);
   }
-  window.__amberWidgetSetHtml=function(html){
-    if(root.innerHTML!==html){ root.innerHTML=html; }
+  function clampSvgOverflow(){
+    // 1) Force every SVG to clip to its viewBox.
+    // 2) Force SVG to have a real, responsive height. Without an explicit height attribute,
+    //    Chromium's CSS "height: auto" on SVG falls back to the replaced-element default of
+    //    150px — which compresses the entire viewBox into a tiny stripe. The inline card
+    //    (height-by-content) ends up only 150px tall while the mid-card (fillMaxSize) accidentally
+    //    looks correct because the parent already enforced a height. Computing aspect-ratio from
+    //    viewBox makes the SVG height responsive in BOTH layouts.
+    var svgs = root.getElementsByTagName('svg');
+    for (var i = 0; i < svgs.length; i++) {
+      var s = svgs[i];
+      s.setAttribute('overflow', 'hidden');
+      s.style.overflow = 'hidden';
+      var vb = s.getAttribute('viewBox');
+      if (vb) {
+        var parts = vb.split(/[\s,]+/);
+        if (parts.length === 4) {
+          var w = parseFloat(parts[2]);
+          var h = parseFloat(parts[3]);
+          if (w > 0 && h > 0) {
+            s.style.aspectRatio = w + ' / ' + h;
+            if (!s.getAttribute('width')) s.style.width = '100%';
+            s.style.height = 'auto';
+          }
+        }
+      }
+    }
+  }
+  window.__amberWidgetSetHtmlReal = function(html){
+    if(root.innerHTML!==html){ root.innerHTML=html; clampSvgOverflow(); }
     report();
   };
-  window.__amberWidgetFinalizeHtml=function(html){
-    if(root.innerHTML!==html){ root.innerHTML=html; }
+  window.__amberWidgetFinalizeHtmlReal = function(html){
+    if(root.innerHTML!==html){ root.innerHTML=html; clampSvgOverflow(); }
     setTimeout(report, 32);
   };
+  // Drain any push that landed before this script ran.
+  window.__amberWidgetReady = true;
+  if (window.__amberWidgetPending) {
+    var p = window.__amberWidgetPending;
+    window.__amberWidgetPending = null;
+    if (p.finalize) window.__amberWidgetFinalizeHtmlReal(p.html);
+    else window.__amberWidgetSetHtmlReal(p.html);
+  }
   new ResizeObserver(report).observe(root);
   document.addEventListener('click', function(event){
     if(!event.isTrusted) return;

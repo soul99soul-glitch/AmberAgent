@@ -36,8 +36,15 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 
+private const val MAX_MARKDOWN_RENDER_CHARS = 200_000
+private const val MAX_TEXT_PREVIEW_CHARS = 1_000_000
+
 sealed interface PreviewContent {
-    data class Text(val text: String) : PreviewContent
+    data class Text(
+        val text: String,
+        val forcePlain: Boolean = false,
+        val truncated: Boolean = false,
+    ) : PreviewContent
     data class Image(val bitmap: android.graphics.Bitmap) : PreviewContent
     data class Error(val message: String) : PreviewContent
 }
@@ -55,7 +62,15 @@ fun WorkspaceFilePreview(
         content = when (ext) {
             in setOf("md", "txt", "json", "html", "csv", "xml", "yml", "yaml", "log") -> {
                 runCatching {
-                    PreviewContent.Text(workspaceManager.readText(relativePath))
+                    val raw = workspaceManager.readText(relativePath)
+                    val truncated = raw.length > MAX_TEXT_PREVIEW_CHARS
+                    val text = if (truncated) raw.take(MAX_TEXT_PREVIEW_CHARS) else raw
+                    val forcePlain = ext != "md" || text.length > MAX_MARKDOWN_RENDER_CHARS
+                    PreviewContent.Text(
+                        text = text,
+                        forcePlain = forcePlain,
+                        truncated = truncated,
+                    )
                 }.getOrElse { PreviewContent.Error(it.message ?: "读取失败") }
             }
             in setOf("png", "jpg", "jpeg", "gif", "webp") -> {
@@ -91,13 +106,23 @@ fun WorkspaceFilePreview(
                     null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                     is PreviewContent.Text -> {
                         val scrollState = rememberScrollState()
-                        if (relativePath.endsWith(".md", ignoreCase = true)) {
-                            MarkdownBlock(c.text, Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 16.dp))
-                        } else {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (c.truncated || c.forcePlain && relativePath.endsWith(".md", ignoreCase = true)) {
+                                Text(
+                                    text = if (c.truncated) "文件过大，已截取前 ${MAX_TEXT_PREVIEW_CHARS / 1000}K 字符" else "内容超过渲染上限，已降级为纯文本",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                )
+                            }
+                            if (relativePath.endsWith(".md", ignoreCase = true) && !c.forcePlain) {
+                                MarkdownBlock(c.text, Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 16.dp))
+                            } else {
                                 SelectionContainer {
                                     Text(c.text, Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 16.dp),
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp))
                                 }
+                            }
                         }
                     }
                     is PreviewContent.Image -> Image(c.bitmap.asImageBitmap(), contentDescription = relativePath, modifier = Modifier.fillMaxSize())

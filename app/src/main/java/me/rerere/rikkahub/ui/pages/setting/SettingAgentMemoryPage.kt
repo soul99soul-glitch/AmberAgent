@@ -48,11 +48,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
-import me.rerere.ai.core.ReasoningLevel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Play
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
@@ -61,7 +61,6 @@ import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
 import me.rerere.rikkahub.data.memory.model.MemoryCandidate
 import me.rerere.rikkahub.data.memory.model.MemoryEvent
 import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
@@ -146,6 +145,16 @@ fun SettingAgentMemoryPage(
             TopAppBar(
                 title = { Text(pageTitle) },
                 navigationIcon = { BackButton() },
+                actions = {
+                    if (subpage == MemorySettingsSubpage.Worker) {
+                        IconButton(onClick = { vm.triggerDreamNow() }) {
+                            Icon(
+                                imageVector = HugeIcons.Play,
+                                contentDescription = "立即运行一次 Daydream",
+                            )
+                        }
+                    }
+                },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
@@ -419,44 +428,14 @@ private fun MemoryWorkerSubpage(
 ) {
     CardGroup {
         item(
-            headlineContent = { Text("记忆后台任务") },
-            supportingContent = { Text("生成结束后提取候选记忆，待审核 $pendingCandidateCount 条，最近事件 $eventCount 条。") },
-            trailingContent = {
-                Switch(
-                    checked = settings.agentRuntime.memoryWorker.enabled,
-                    onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(enabled = enabled)) }
-                    },
-                )
-            },
-        )
-        item(
-            headlineContent = { Text("对话结束后提取") },
-            supportingContent = { Text("高置信短期项目可自动写入短期记忆，其它进入候选审核。") },
-            trailingContent = {
-                Switch(
-                    checked = settings.agentRuntime.memoryWorker.extractionEnabled,
-                    onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(extractionEnabled = enabled)) }
-                    },
-                )
-            },
-        )
-        item(
-            headlineContent = { Text("跟随压缩模型") },
-            supportingContent = { Text("只控制对话结束后的记忆提取；Daydream 可在模型页单独指定更强模型。") },
-            trailingContent = {
-                Switch(
-                    checked = settings.agentRuntime.memoryWorker.followCompressModel,
-                    onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(followCompressModel = enabled)) }
-                    },
-                )
-            },
-        )
-        item(
             headlineContent = { Text("Daydream 自动整理") },
-            supportingContent = { Text("后台自动合并、提升、归档短期/长期记忆；核心记忆不会自动修改。") },
+            supportingContent = {
+                Text(
+                    "每 24 小时后台运行一次：合并、提升、归档短期/长期记忆；核心记忆不会自动修改。" +
+                        "需要联网，电量不低；不再受充电/空闲限制。\n" +
+                        "当前候选 $pendingCandidateCount 条，最近事件 $eventCount 条。"
+                )
+            },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.memoryWorker.dreamEnabled,
@@ -466,47 +445,13 @@ private fun MemoryWorkerSubpage(
                 )
             },
         )
-        item(
-            headlineContent = { Text("Daydream 推理强度") },
-            supportingContent = {
-                Text(
-                    "当前 ${settings.agentRuntime.memoryWorker.daydreamReasoningLevel.memoryReasoningLabel()}；建议用较高强度处理合并、提升和归档判断。"
-                )
-            },
-            trailingContent = {
-                ReasoningButton(
-                    onlyIcon = true,
-                    reasoningLevel = settings.agentRuntime.memoryWorker.daydreamReasoningLevel,
-                    onUpdateReasoningLevel = { level ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(daydreamReasoningLevel = level)) }
-                    },
-                )
-            },
-        )
-        item(
-            headlineContent = { Text("只在充电时运行") },
-            supportingContent = { Text("自动 Daydream 默认需要联网、电量不低、正在充电；每天最多 ${settings.agentRuntime.memoryWorker.dreamMaxDailyRuns} 次。") },
-            trailingContent = {
-                Switch(
-                    checked = settings.agentRuntime.memoryWorker.runOnlyOnCharging,
-                    onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnCharging = enabled)) }
-                    },
-                )
-            },
-        )
-        item(
-            headlineContent = { Text("只在设备空闲时运行") },
-            supportingContent = { Text("Android 6.0+ 交给系统 idle 约束决定运行时机，不是松手几秒后的即时触发。") },
-            trailingContent = {
-                Switch(
-                    checked = settings.agentRuntime.memoryWorker.runOnlyOnIdle,
-                    onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnIdle = enabled)) }
-                    },
-                )
-            },
-        )
+        // The following toggles were removed in favor of always-on defaults:
+        //   - 记忆后台任务 (worker.enabled)            → field kept ON
+        //   - 对话结束后提取 (worker.extractionEnabled) → field kept ON
+        //   - 跟随压缩模型 (worker.followCompressModel)  → moved to model settings page
+        //   - 只在充电时运行 (worker.runOnlyOnCharging)  → scheduler ignores; runs whenever
+        //   - 只在设备空闲时运行 (worker.runOnlyOnIdle)  → scheduler ignores; runs whenever
+        // Manual "立即运行一次" → moved to toolbar play icon.
     }
 
     DreamReviewSection(
@@ -1067,16 +1012,6 @@ private fun MemoryRecordsSection(
     }
 }
 
-@Composable
-private fun ReasoningLevel.memoryReasoningLabel(): String = when (this) {
-    ReasoningLevel.OFF -> stringResource(R.string.reasoning_off)
-    ReasoningLevel.AUTO -> stringResource(R.string.reasoning_auto)
-    ReasoningLevel.LOW -> stringResource(R.string.reasoning_light)
-    ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
-    ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
-    ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
-    ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
-}
 
 @Composable
 private fun MemoryItem(

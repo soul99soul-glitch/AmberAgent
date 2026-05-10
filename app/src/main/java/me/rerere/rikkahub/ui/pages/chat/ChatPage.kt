@@ -95,11 +95,6 @@ import me.rerere.rikkahub.ui.components.workspace.WorkspaceFilePreview
 import me.rerere.rikkahub.ui.components.workspace.WorkspaceFileSheet
 import me.rerere.rikkahub.ui.components.workspace.WorkspaceFileVM
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.agent.office.radar.SlidesPreviewBus
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizeStatus
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
-import me.rerere.rikkahub.ui.components.message.ExpandedGenerativeWidgetDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
@@ -129,11 +124,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     var showFavoritesLiveSheet by remember { mutableStateOf(false) }
     var previewFilePath by remember { mutableStateOf<String?>(null) }
     val workspaceManager: WorkspaceManager = koinInject()
-
-    // Clear any leftover slides preview when this chat page leaves composition
-    DisposableEffect(Unit) {
-        onDispose { SlidesPreviewBus.dismiss() }
-    }
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
@@ -307,6 +297,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
+                    onPreviewWorkspaceFile = { previewFilePath = it },
                 )
             }
         }
@@ -347,6 +338,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
+                    onPreviewWorkspaceFile = { previewFilePath = it },
                 )
             }
             BackHandler(drawerState.isOpen) {
@@ -367,30 +359,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         WorkspaceFileSheet(
             vm = workspaceVm,
             onDismiss = { showWorkspaceSheet = false },
-            onOpenFile = { path ->
-                if (path.endsWith(".json") || path.contains("/slides/") || path.contains("/ppt/")) {
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            val content = workspaceManager.readText(path)
-                            if (content.length > 60_000) return@launch
-                            if (content.trimStart().startsWith("[")) {
-                                val json = kotlinx.serialization.json.Json
-                                val parsed = json.parseToJsonElement(content)
-                                if (parsed is kotlinx.serialization.json.JsonArray && parsed.isNotEmpty()) {
-                                    val firstObj = parsed.firstOrNull()
-                                    val title = (firstObj as? kotlinx.serialization.json.JsonObject)
-                                        ?.get("title")
-                                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
-                                        ?: path.substringAfterLast('/')
-                                    SlidesPreviewBus.preview(title, content)
-                                    return@launch
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-                previewFilePath = path
-            },
+            onOpenFile = { path -> previewFilePath = path },
         )
     }
     if (showFavoritesLiveSheet) {
@@ -405,31 +374,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             workspaceManager = workspaceManager,
             onDismiss = { previewFilePath = null },
         )
-    }
-    val slidesRequest by SlidesPreviewBus.request.collectAsStateWithLifecycle()
-    slidesRequest?.let { req ->
-        val syntheticWidget = remember(req.title, req.specJson) {
-            val escapedTitle = req.title
-                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
-            GenerativeWidgetSegment.Widget(
-                title = req.title,
-                widgetCode = "<svg width=\"100%\" viewBox=\"0 0 680 100\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"100%\" height=\"100%\" fill=\"#f0fdf4\" rx=\"10\" stroke=\"#bbf7d0\"/><text x=\"340\" y=\"52\" text-anchor=\"middle\" font-size=\"16\" fill=\"#166534\">${escapedTitle}</text><text x=\"340\" y=\"78\" text-anchor=\"middle\" font-size=\"13\" fill=\"#86efac\">${req.specJson.length} 字符 · 点击展开浏览</text></svg>",
-                complete = true,
-                renderer = "slides",
-                specJson = req.specJson,
-            )
-        }
-        val sanitized = remember(req.specJson) {
-            GenerativeWidgetSanitizer.sanitize(syntheticWidget.widgetCode, setting.agentRuntime.generativeUi)
-        }
-        if (sanitized.status == GenerativeWidgetSanitizeStatus.READY) {
-            ExpandedGenerativeWidgetDialog(
-                widget = syntheticWidget,
-                html = sanitized.html,
-                setting = setting.agentRuntime.generativeUi,
-                onDismissRequest = { SlidesPreviewBus.dismiss() },
-            )
-        }
     }
 }
 
@@ -454,6 +398,7 @@ private fun ChatPageContent(
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
+    onPreviewWorkspaceFile: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -751,6 +696,9 @@ private fun ChatPageContent(
                 onToolAnswer = { toolCallId, answer ->
                     vm.handleToolAnswer(toolCallId, answer)
                 },
+                onOpenWorkspaceFile = { path ->
+                    onPreviewWorkspaceFile(path)
+                },
                 onToggleFavorite = { node ->
                     vm.toggleMessageFavorite(node)
                 },
@@ -989,15 +937,16 @@ private fun Conversation.deriveSandboxActivities(
     }
 
     return sandboxTools.mapIndexed { index, tool ->
-        val status = tool.activityStatus(loading)
         val outputJson = tool.outputJson()
+        val input = tool.inputAsJson()
+        val status = tool.activityStatus(loading, outputJson)
         SandboxActivityUiState(
             toolCallId = tool.toolCallId,
             toolName = tool.toolName,
-            title = tool.sandboxTitle(),
+            title = tool.sandboxTitle(input),
             status = status,
             conversationId = id.toString(),
-            inputPreview = tool.inputPreview(),
+            inputPreview = tool.inputPreview(input),
             outputTail = tool.outputTail(outputJson),
             runtime = outputJson.getStringContent("runtime") ?: tool.defaultRuntime(),
             workspace = outputJson.getStringContent("workspace") ?: tool.defaultWorkspace(),
@@ -1081,17 +1030,19 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
             "vlm_task",
         )
 
-private fun UIMessagePart.Tool.activityStatus(loading: Boolean): ToolActivityStatus = when {
+private fun UIMessagePart.Tool.activityStatus(
+    loading: Boolean,
+    outputJson: JsonObject,
+): ToolActivityStatus = when {
     approvalState is ToolApprovalState.Pending -> ToolActivityStatus.WAITING_FOR_PERMISSION
     approvalState is ToolApprovalState.Denied -> ToolActivityStatus.CANCELLED
     !isExecuted && loading -> ToolActivityStatus.RUNNING
     !isExecuted -> ToolActivityStatus.RUNNING
-    hasFailure() -> ToolActivityStatus.FAILED
+    outputJson.indicatesFailure() -> ToolActivityStatus.FAILED
     else -> ToolActivityStatus.SUCCEEDED
 }
 
-private fun UIMessagePart.Tool.sandboxTitle(): String {
-    val input = inputAsJson()
+private fun UIMessagePart.Tool.sandboxTitle(input: kotlinx.serialization.json.JsonElement = inputAsJson()): String {
     return when (toolName) {
         "search_web" -> "网页搜索 ${input.getFirstStringContent("query", "q", "keyword", "keywords").orEmpty().compactSandboxText(20)}"
         "scrape_web" -> "打开网页 ${input.getFirstStringContent("url", "link", "uri").orEmpty().compactSandboxText(24)}"
@@ -1133,8 +1084,7 @@ private fun UIMessagePart.Tool.sandboxTitle(): String {
     }
 }
 
-private fun UIMessagePart.Tool.inputPreview(): String {
-    val input = inputAsJson()
+private fun UIMessagePart.Tool.inputPreview(input: kotlinx.serialization.json.JsonElement = inputAsJson()): String {
     return when (toolName) {
         "search_web" -> input.getFirstStringContent("query", "q", "keyword", "keywords")
         "scrape_web" -> input.getFirstStringContent("url", "link", "uri")
@@ -1179,12 +1129,11 @@ private fun UIMessagePart.Tool.defaultWorkspace(): String = when {
     else -> ""
 }
 
-private fun UIMessagePart.Tool.hasFailure(): Boolean {
-    val outputJson = outputJson()
-    val exitCode = outputJson["exit_code"]?.jsonPrimitiveOrNull?.intOrNull
-    val error = outputJson.getStringContent("error")
-    val status = outputJson["status"]?.jsonPrimitiveOrNull?.contentOrNull?.lowercase()
-    val failed = outputJson["failed"]?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == true
+private fun JsonObject.indicatesFailure(): Boolean {
+    val exitCode = this["exit_code"]?.jsonPrimitiveOrNull?.intOrNull
+    val error = getStringContent("error")
+    val status = this["status"]?.jsonPrimitiveOrNull?.contentOrNull?.lowercase()
+    val failed = this["failed"]?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == true
     return !error.isNullOrBlank() ||
         (exitCode != null && exitCode != 0) ||
         failed ||

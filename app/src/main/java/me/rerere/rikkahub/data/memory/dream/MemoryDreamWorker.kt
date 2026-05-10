@@ -23,7 +23,18 @@ class MemoryDreamWorker(
 
         if (!workerSetting.enabled || !workerSetting.dreamEnabled) {
             notifier.cancel()
+            // Don't reschedule when disabled — user explicitly turned it off.
             return Result.success()
+        }
+
+        // Always reschedule the next nightly run before doing anything else, so the loop
+        // continues even if this run early-exits or fails. (We use OneTimeWorkRequest with
+        // initialDelay rather than PeriodicWorkRequest so the next slot lands cleanly inside
+        // tomorrow's 00:00–06:00 window in the user's local timezone.) Skip rescheduling for
+        // manual runs — those should only fire once.
+        val isManualRun = tags.contains(MemoryDreamScheduler.MANUAL_RUN_NAME)
+        if (!isManualRun) {
+            get<MemoryDreamScheduler>().scheduleNextNightRun()
         }
 
         val todayStart = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()

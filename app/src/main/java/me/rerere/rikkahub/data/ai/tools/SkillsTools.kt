@@ -125,14 +125,56 @@ fun createSkillTools(
                     } else {
                         val target = skillManager.resolveSkillFile(name, path)
                             ?: error("Path '$path' is outside the skill directory")
-                        require(target.exists()) { "File '$path' not found in skill '$name'" }
+                        if (!target.exists()) {
+                            val available = listSkillFilesShort(skillManager, name)
+                            val hint = if (available.isNotBlank()) {
+                                "This skill only ships with these files: $available. Do not retry with other paths from SKILL.md links — those reference files were not bundled. Re-read SKILL.md (omit the path argument) and follow its inline instructions directly."
+                            } else {
+                                "This skill ships with only SKILL.md. Re-read it (omit the path argument) and follow its inline instructions without fetching sub-files."
+                            }
+                            error("File '$path' not found in skill '$name'. $hint")
+                        }
                         target.readText()
                     }
-                    listOf(UIMessagePart.Text(content))
+                    listOf(UIMessagePart.Text(wrapSkillForMobileRuntime(name, path, content)))
                 }
             )
         )
     }
+}
+
+private fun wrapSkillForMobileRuntime(skillName: String, filePath: String?, body: String): String {
+    val pathLabel = filePath?.takeIf { it.isNotBlank() } ?: "SKILL.md"
+    return buildString {
+        appendLine("[AmberAgent Mobile Runtime — applies to the skill content below]")
+        appendLine("You are running inside AmberAgent on an Android phone/tablet — NOT desktop Claude Code, NOT Codex, NOT a CLI environment.")
+        appendLine("These mobile constraints OVERRIDE any conflicting instruction in the skill body:")
+        appendLine("- The user has no physical keyboard, no mouse, no system shell. Never write \"press ← →\", \"F for fullscreen\", \"S for speaker mode\", \"Ctrl+C to quit\", or any keyboard/mouse hint into your visible reply or into widget content.")
+        appendLine("- There is no system browser to open .html / .pdf / .pptx files for preview. Anything visual must render inside the chat as a show-widget block (SVG, HTML, vchart, slides) so it appears as a card in the conversation timeline.")
+        appendLine("- For multi-page presentations / decks / PPT / 幻灯片 / 演示文稿, you MUST use renderer \"slides\" with a JSON spec array (each slide object uses literal keys: title, subtitle, content, notes). Do NOT generate a .html / .pptx file as the deliverable; do NOT pack a multi-page deck into a single SVG grid.")
+        appendLine("- Do NOT recommend running npm/pip/curl/python or installing desktop tooling unless the skill explicitly invokes the in-app terminal_execute tool (Alpine sandbox).")
+        appendLine("- File outputs go to /workspace via file_write; users browse them through the in-app file sheet, not through Finder/Explorer.")
+        appendLine("- If the skill describes a desktop-only workflow, translate it into the mobile equivalent: replace \"open in PowerPoint\" with \"emit a renderer:slides widget\", \"open in browser\" with \"emit a widget_code SVG/HTML widget\", etc.")
+        appendLine("- IMPORTANT about use_skill paths: many skills installed via download only ship the SKILL.md file — the references/, scripts/, assets/ subfolders mentioned in the SKILL.md links may NOT exist locally. Do NOT chain a second use_skill(path=...) call just because SKILL.md links to it; treat SKILL.md as self-contained instructions and only retry with a path if a previous call confirms that file exists.")
+        appendLine()
+        appendLine("Skill: $skillName  ($pathLabel)")
+        appendLine("--- skill content begins ---")
+        append(body)
+        if (!body.endsWith("\n")) appendLine()
+        appendLine("--- skill content ends ---")
+        appendLine()
+        appendLine("Reminder: the mobile constraints above take priority. If the skill says \"open in a browser\" or \"add keyboard shortcuts\", you ignore that part and use the AmberAgent-native equivalent.")
+    }
+}
+
+private fun listSkillFilesShort(skillManager: SkillManager, name: String, max: Int = 20): String {
+    val dir = skillManager.getSkillDir(name) ?: return ""
+    if (!dir.exists() || !dir.isDirectory) return ""
+    return dir.walkTopDown()
+        .filter { it.isFile }
+        .map { it.relativeTo(dir).invariantSeparatorsPath }
+        .take(max)
+        .joinToString(", ")
 }
 
 private fun skillValidateTool(skillManager: SkillManager, workspaceManager: WorkspaceManager) = Tool(

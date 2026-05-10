@@ -141,11 +141,14 @@ object GenerativeWidgetParser {
 
     private fun parseWidgetJson(jsonText: String): GenerativeWidgetSegment.Widget? {
         val parsed = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
-        val renderer = parsed?.stringOrNull("renderer")?.lowercase()?.takeIf {
+        val rendererRaw = parsed?.stringOrNull("renderer")
+        val renderer = rendererRaw?.lowercase()?.takeIf {
             it in setOf("html", "chart", "diagram", "vchart", "slides")
         }
-        // Reject unknown renderers instead of silently coercing to "html"
-        if (renderer == null && parsed?.stringOrNull("renderer") != null) return null
+        // If renderer field is present but unrecognized (e.g. model emits "svg" / "structure" /
+        // "flowchart"), fall back to rendering widget_code as plain html instead of rejecting the
+        // whole widget. The sanitizer still strips unsafe content; rejecting outright leaves the
+        // user staring at raw JSON in a code block.
         val renderedCode = GenerativeWidgetRenderer.render(renderer, parsed?.get("spec"))
         val rawWidgetCode = parsed?.stringOrNull("widget_code")
             ?: extractJsonStringValue(jsonText, "widget_code", allowUnclosed = false)

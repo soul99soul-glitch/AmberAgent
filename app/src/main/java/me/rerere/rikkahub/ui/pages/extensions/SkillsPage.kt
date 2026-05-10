@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,8 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,7 +47,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -62,6 +60,7 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.navigateToChatPage
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
@@ -124,6 +123,12 @@ fun SkillsPage() {
                     enabledCount = skills.count { it.name in enabledSkillNames },
                     disabledCount = skills.count { it.name !in enabledSkillNames },
                     issueCount = skillIssues.size,
+                    onOptimizeAll = {
+                        navigateToChatPage(
+                            navigator = navController,
+                            initText = buildOptimizeAllPrompt(skills.map { it.name }),
+                        )
+                    },
                 )
             }
 
@@ -165,6 +170,12 @@ fun SkillsPage() {
                     skill = skill,
                     enabled = skill.name in enabledSkillNames,
                     onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
+                    onOptimize = {
+                        navigateToChatPage(
+                            navigator = navController,
+                            initText = buildOptimizeSkillPrompt(skill.name),
+                        )
+                    },
                     onDelete = { deleteTarget = skill },
                 )
             }
@@ -222,6 +233,7 @@ private fun SkillLibraryStatusCard(
     enabledCount: Int,
     disabledCount: Int,
     issueCount: Int,
+    onOptimizeAll: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -254,6 +266,23 @@ private fun SkillLibraryStatusCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (installedCount > 0) {
+                FilledTonalButton(
+                    onClick = onOptimizeAll,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.MagicWand01,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = "全量规整化为移动端",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
             }
         }
     }
@@ -302,10 +331,9 @@ private fun SkillCard(
     skill: SkillMetadata,
     enabled: Boolean,
     onClick: () -> Unit,
+    onOptimize: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -364,35 +392,59 @@ private fun SkillCard(
                     }
                 }
             }
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(
-                        imageVector = HugeIcons.MoreVertical,
-                        contentDescription = stringResource(R.string.skills_page_more_actions),
-                    )
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = HugeIcons.Delete01,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onDelete()
-                        },
-                    )
-                }
+            IconButton(onClick = onOptimize) {
+                Icon(
+                    imageVector = HugeIcons.MagicWand01,
+                    contentDescription = "规整化为移动端",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = HugeIcons.Delete01,
+                    contentDescription = stringResource(R.string.delete),
+                    tint = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
+}
+
+private fun buildOptimizeSkillPrompt(skillName: String): String = """
+请规整化 skill「$skillName」让它适配 AmberAgent 移动端运行环境。
+
+工作流程（按顺序执行）：
+1. 调用 use_skill('skill-creator')，学习 AmberAgent 官方 skill 范式（文件结构、frontmatter、不写 README/CHANGELOG 等约定）
+2. 调用 use_skill('$skillName')，读取当前 SKILL.md 内容（系统会自动附加移动端运行时提示）
+3. 列出问题清单：
+   - 桌面端假设：CLI 命令（npx/pip/curl/cd）、键盘快捷键提示（"← → 翻页"/"F 全屏"/"S 演讲者模式"等）、浏览器/桌面 app 打开预览（open xxx / 在浏览器打开 / .pptx 文件）、生成 .pptx / .html / .pdf 文件作为最终交付
+   - 不存在的子文件链接：references/、scripts/、assets/ 下的 markdown link，但设备上很可能只有 SKILL.md
+   - frontmatter 缺失或不规范：name、description（含触发关键词 / "when to use" 描述）
+   - 冗余文件提示：README / CHANGELOG / INSTALLATION_GUIDE
+4. 输出规整化后的完整 SKILL.md 内容，用 ```markdown 代码块包好
+5. 不要调用任何写文件工具，只输出建议供我审阅、由我手动复制保存
+
+每条问题都标记为「已修复」「保留原状」「无此问题」之一，方便我对照。
+""".trimIndent()
+
+private fun buildOptimizeAllPrompt(skillNames: List<String>): String {
+    val list = skillNames.joinToString("\n") { "- $it" }
+    return """
+请逐个规整化下面这些已安装的 skill，让它们适配 AmberAgent 移动端运行环境：
+
+$list
+
+工作流程：
+1. 先调用一次 use_skill('skill-creator')，学习 AmberAgent 官方 skill 范式
+2. 对清单里每个 skill 依次处理：
+   a. use_skill('<name>') 读取 SKILL.md
+   b. 给出问题清单 + 规整化后的完整 SKILL.md（```markdown 代码块）
+   c. 用「### Skill: <name>」作为该 skill 的分节标题
+3. 不要调用任何写文件工具，只输出建议给我审阅
+4. 如果某个 skill 已经 mobile-friendly 无需变更，直接写「无需变更」并简述理由
+
+按清单顺序处理，处理完一个再下一个；如果回复太长可以分批，每批告诉我处理到哪个。
+""".trimIndent()
 }
 
 @Composable

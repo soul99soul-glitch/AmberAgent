@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.ui.components.workspace
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,22 +23,30 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.Refresh
+import me.rerere.hugeicons.stroke.Refresh01
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,9 +55,12 @@ fun WorkspaceFileSheet(
     onDismiss: () -> Unit,
     onOpenFile: (String) -> Unit,
 ) {
-    val groups by vm.groups.collectAsStateWithLifecycle()
+    val recent by vm.recent.collectAsStateWithLifecycle()
+    val currentPath by vm.currentPath.collectAsStateWithLifecycle()
+    val currentItems by vm.currentDirItems.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -57,48 +70,58 @@ fun WorkspaceFileSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.7f)
-                .padding(horizontal = 16.dp),
+                .height(androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.78f),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Workspace 文件", style = MaterialTheme.typography.titleLarge)
-                Row {
-                    IconButton(onClick = { vm.refresh() }) {
-                        Icon(HugeIcons.Refresh, contentDescription = "刷新")
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(HugeIcons.Cancel01, contentDescription = "关闭")
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            HeaderRow(
+                onRefresh = { vm.refresh() },
+                onDismiss = onDismiss,
+            )
 
-            if (loading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-            } else if (groups.isEmpty()) {
-                Text(
-                    text = "还没有文件。让 Amber 帮你生成报告或分析。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 32.dp),
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color.Transparent,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = {
+                        Text(
+                            text = "最近文件",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                        )
+                    },
                 )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    groups.forEach { group ->
-                        item(key = "header-${group.label}") {
-                            WorkspaceGroupRow(group = group)
-                        }
-                        items(group.items, key = { it.path }) { file ->
-                            WorkspaceFileRow(file = file, onClick = { onOpenFile(file.path) })
-                        }
-                    }
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Text(
+                            text = "目录结构",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                        )
+                    },
+                )
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                when {
+                    loading && recent.isEmpty() && currentItems.isEmpty() ->
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
+                    selectedTab == 0 -> RecentFilesList(recent, onOpenFile)
+                    else -> DirectoryBrowser(
+                        currentPath = currentPath,
+                        items = currentItems,
+                        onNavigate = { vm.navigateTo(it) },
+                        onNavigateUp = { vm.navigateUp() },
+                        onOpenFile = onOpenFile,
+                    )
                 }
             }
         }
@@ -106,52 +129,318 @@ fun WorkspaceFileSheet(
 }
 
 @Composable
-private fun WorkspaceGroupRow(group: WorkspaceGroup) {
-    var collapsed by remember { mutableStateOf(false) }
-    Surface(
+private fun HeaderRow(onRefresh: () -> Unit, onDismiss: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { collapsed = !collapsed },
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(8.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Text(
+            text = "Workspace 文件",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Icon(HugeIcons.Folder01, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(group.label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-            Text("${group.items.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onClick = onRefresh, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    HugeIcons.Refresh01,
+                    contentDescription = "刷新",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    HugeIcons.Cancel01,
+                    contentDescription = "关闭",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun WorkspaceFileRow(file: WorkspaceFileItem, onClick: () -> Unit) {
-    val extColor = when (file.extension) {
-        "md" -> MaterialTheme.colorScheme.primary
-        "json" -> MaterialTheme.colorScheme.tertiary
-        "png", "jpg", "jpeg", "gif", "webp" -> MaterialTheme.colorScheme.secondary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun RecentFilesList(
+    files: List<WorkspaceFileItem>,
+    onOpenFile: (String) -> Unit,
+) {
+    if (files.isEmpty()) {
+        EmptyState(message = "还没有最近修改的文件")
+        return
     }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(files, key = { it.path }) { file ->
+            RecentFileRow(file = file, onClick = { onOpenFile(file.path) })
+        }
+    }
+}
+
+@Composable
+private fun DirectoryBrowser(
+    currentPath: String,
+    items: List<WorkspaceFileItem>,
+    onNavigate: (String) -> Unit,
+    onNavigateUp: () -> Unit,
+    onOpenFile: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Breadcrumb(
+            currentPath = currentPath,
+            onNavigate = onNavigate,
+            onNavigateUp = onNavigateUp,
+        )
+        if (items.isEmpty()) {
+            EmptyState(message = if (currentPath.isEmpty()) "Workspace 还没有文件" else "此文件夹是空的")
+            return
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            items(items, key = { it.path }) { entry ->
+                if (entry.isDirectory) {
+                    FolderRow(folder = entry, onClick = { onNavigate(entry.path) })
+                } else {
+                    FileRow(file = entry, onClick = { onOpenFile(entry.path) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Breadcrumb(
+    currentPath: String,
+    onNavigate: (String) -> Unit,
+    onNavigateUp: () -> Unit,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(buildMeta(file), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (currentPath.isNotEmpty()) {
+            IconButton(onClick = onNavigateUp, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = HugeIcons.ArrowLeft01,
+                    contentDescription = "返回上级",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(2.dp))
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        Surface(shape = RoundedCornerShape(4.dp), color = extColor.copy(alpha = 0.12f)) {
-            Text(file.extension.uppercase().take(4), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = extColor)
+        Surface(
+            modifier = Modifier
+                .clickable(enabled = currentPath.isNotEmpty()) { onNavigate("") }
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            color = Color.Transparent,
+        ) {
+            Text(
+                text = "/",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = if (currentPath.isEmpty())
+                    MaterialTheme.colorScheme.onSurface
+                else
+                    MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (currentPath.isNotEmpty()) {
+            val parts = currentPath.split('/').filter { it.isNotEmpty() }
+            parts.forEachIndexed { index, name ->
+                Text(
+                    text = " / ",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val pathSoFar = parts.subList(0, index + 1).joinToString("/")
+                val isCurrent = index == parts.lastIndex
+                Surface(
+                    modifier = Modifier
+                        .clickable(enabled = !isCurrent) { onNavigate(pathSoFar) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    color = Color.Transparent,
+                ) {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                        ),
+                        color = if (isCurrent)
+                            MaterialTheme.colorScheme.onSurface
+                        else
+                            MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun FolderRow(folder: WorkspaceFileItem, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = HugeIcons.Folder01,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = folder.name,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = formatTime(folder.lastModified),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun FileRow(file: WorkspaceFileItem, onClick: () -> Unit) {
+    val extColor = extColor(file.extension)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = HugeIcons.File02,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildMeta(file),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        ExtBadge(file.extension, extColor)
+    }
+}
+
+@Composable
+private fun RecentFileRow(file: WorkspaceFileItem, onClick: () -> Unit) {
+    val extColor = extColor(file.extension)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = HugeIcons.File02,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildRecentMeta(file),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        ExtBadge(file.extension, extColor)
+    }
+}
+
+@Composable
+private fun ExtBadge(extension: String, color: androidx.compose.ui.graphics.Color) {
+    if (extension.isBlank()) return
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = color.copy(alpha = 0.12f),
+    ) {
+        Text(
+            text = extension.uppercase().take(4),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+            color = color,
+        )
+    }
+}
+
+@Composable
+private fun EmptyState(message: String) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 48.dp),
+        )
+    }
+}
+
+@Composable
+private fun extColor(extension: String): androidx.compose.ui.graphics.Color = when (extension) {
+    "md" -> MaterialTheme.colorScheme.primary
+    "json" -> MaterialTheme.colorScheme.tertiary
+    "html", "htm" -> MaterialTheme.colorScheme.secondary
+    "png", "jpg", "jpeg", "gif", "webp" -> MaterialTheme.colorScheme.secondary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 private fun buildMeta(file: WorkspaceFileItem): String {
     val parts = mutableListOf<String>()
+    file.sizeBytes?.let { parts.add(formatSize(it)) }
+    if (file.lastModified > 0) parts.add(formatTime(file.lastModified))
+    return parts.joinToString(" · ")
+}
+
+private fun buildRecentMeta(file: WorkspaceFileItem): String {
+    val parent = file.path.substringBeforeLast('/', "").ifEmpty { "/" }
+    val parts = mutableListOf(parent)
     file.sizeBytes?.let { parts.add(formatSize(it)) }
     if (file.lastModified > 0) parts.add(formatTime(file.lastModified))
     return parts.joinToString(" · ")
@@ -172,3 +461,4 @@ private fun formatTime(epochMs: Long): String {
         else -> java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(epochMs))
     }
 }
+

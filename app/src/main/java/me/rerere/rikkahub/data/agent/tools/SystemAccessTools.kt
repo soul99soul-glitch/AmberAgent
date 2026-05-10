@@ -654,7 +654,10 @@ class SystemAccessTools(
 
     private val shareFileTool = Tool(
         name = "share_file",
-        description = "Share a file from /workspace through Android share sheet. The file is copied to app cache and shared by FileProvider.",
+        description = "Share a file from /workspace through the Android share sheet (e.g. send to WeChat, save to Drive). " +
+            "Use only when the user explicitly asks to share/send/export/forward the file to another app or person. " +
+            "Do NOT use this when the user just wants to preview/open/browse the artifact inside AmberAgent — for that, " +
+            "re-emit the artifact as a show-widget block in your reply (see widget guidance).",
         parameters = {
             obj(
                 "path" to stringProp("Workspace-relative file path."),

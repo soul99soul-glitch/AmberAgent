@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,11 +25,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,6 +40,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -67,6 +73,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -500,6 +508,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     loading: Boolean = false,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
 ) {
     val isAskUser = tool.toolName == ToolNames.ASK_USER
 
@@ -531,6 +540,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val status = toolStatusFromMessagePart(tool = tool, loading = loading, content = content)
     val workspace = workspaceColors()
 
+    val workspaceFilePath = remember(tool.toolName, status, content, arguments) {
+        if (status != AgentToolStatus.SUCCEEDED) return@remember null
+        if (tool.toolName !in setOf("file_write", "file_edit", "file_read")) return@remember null
+        val candidate = content.getStringContent("path")
+            ?: arguments.getStringContent("path")
+        candidate?.takeIf { it.isNotBlank() && !it.startsWith("/") }
+    }
     val hasExtraContent = isDenied || images.isNotEmpty()
 
     Column(
@@ -579,6 +595,45 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 null
             },
         )
+
+        if (workspaceFilePath != null && onOpenWorkspaceFile != null) {
+            Surface(
+                modifier = Modifier
+                    .padding(start = 32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpenWorkspaceFile(workspaceFilePath) },
+                shape = RoundedCornerShape(8.dp),
+                color = workspace.row,
+                contentColor = workspace.ink,
+                border = BorderStroke(1.dp, workspace.hairline),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.File02,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = workspace.muted,
+                    )
+                    Text(
+                        text = workspaceFilePath,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        text = "点击预览",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.faint,
+                    )
+                }
+            }
+        }
 
         if (hasExtraContent) {
             Surface(
@@ -1008,7 +1063,18 @@ private fun ChainOfThoughtScope.AskUserToolStep(
 ) {
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isAnswered = tool.approvalState is ToolApprovalState.Answered
-    val arguments = tool.inputAsJson()
+    val arguments = remember(tool.input) { tool.inputAsJson() }
+    val answeredAnswers = remember(tool.approvalState) {
+        val state = tool.approvalState
+        if (state is ToolApprovalState.Answered) {
+            runCatching {
+                JsonInstant.parseToJsonElement(state.answer)
+                    .jsonObject["answers"]?.jsonObject
+            }.getOrNull()
+        } else {
+            null
+        }
+    }
 
     // Parse questions from arguments
     val questions = remember(arguments) {
@@ -1033,6 +1099,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     val firstQuestion = questions.firstOrNull()?.question ?: "..."
 
     var expanded by remember { mutableStateOf(true) }
+    val workspace = workspaceColors()
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
@@ -1044,8 +1111,8 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                 Icon(
                     imageVector = HugeIcons.BubbleChatQuestion,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = LocalContentColor.current.copy(alpha = 0.7f)
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
         },
@@ -1055,8 +1122,8 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                     R.string.chat_message_tool_ask_questions,
                     questions.size
                 ),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.shimmer(isLoading = loading),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -1064,63 +1131,57 @@ private fun ChainOfThoughtScope.AskUserToolStep(
         },
         content = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                questions.forEach { q ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                questions.forEachIndexed { index, q ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                            thickness = 0.5.dp,
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = q.question,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                             color = MaterialTheme.colorScheme.onSurface,
                         )
 
                         if (isPending && onToolAnswer != null) {
                             when (q.selectionType) {
                                 "single" -> {
-                                    // Single select: chips only, no text input
                                     if (q.options.isNotEmpty()) {
                                         FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
                                             q.options.forEach { option ->
-                                                FilterChip(
+                                                AskOptionChip(
                                                     selected = answers[q.id] == option,
+                                                    label = option,
                                                     onClick = { answers[q.id] = option },
-                                                    label = {
-                                                        Text(
-                                                            text = option,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                        )
-                                                    },
                                                 )
                                             }
                                         }
                                     }
                                 }
                                 "multi" -> {
-                                    // Multi select: chips only, multiple can be selected
                                     if (q.options.isNotEmpty()) {
                                         FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
                                             q.options.forEach { option ->
                                                 val selectedSet = multiAnswers[q.id] ?: emptySet()
-                                                FilterChip(
+                                                AskOptionChip(
                                                     selected = selectedSet.contains(option),
+                                                    label = option,
                                                     onClick = {
                                                         val current = selectedSet.toMutableSet()
                                                         if (current.contains(option)) current.remove(option)
                                                         else current.add(option)
                                                         multiAnswers[q.id] = current
-                                                    },
-                                                    label = {
-                                                        Text(
-                                                            text = option,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                        )
                                                     },
                                                 )
                                             }
@@ -1128,95 +1189,223 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                                     }
                                 }
                                 else -> {
-                                    // Text (default): optional option chips + free text input
                                     if (q.options.isNotEmpty()) {
                                         FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
                                             q.options.forEach { option ->
-                                                FilterChip(
+                                                AskOptionChip(
                                                     selected = answers[q.id] == option,
+                                                    label = option,
                                                     onClick = { answers[q.id] = option },
-                                                    label = {
-                                                        Text(
-                                                            text = option,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                        )
-                                                    },
                                                 )
                                             }
                                         }
                                     }
-
-                                    // Free text input
                                     OutlinedTextField(
                                         value = answers[q.id] ?: "",
                                         onValueChange = { answers[q.id] = it },
                                         modifier = Modifier.fillMaxWidth(),
-                                        textStyle = MaterialTheme.typography.bodySmall,
+                                        textStyle = MaterialTheme.typography.bodyMedium,
+                                        placeholder = {
+                                            Text(
+                                                text = "在此输入回答…",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                            )
+                                        },
                                         singleLine = false,
-                                        minLines = 1,
-                                        maxLines = 3,
+                                        minLines = 2,
+                                        maxLines = 6,
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                            unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
+                                            focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                        ),
                                     )
                                 }
                             }
                         } else if (isAnswered) {
-                            // Show the user's answer
                             val answeredState = tool.approvalState as ToolApprovalState.Answered
-                            val answerJson = runCatching {
-                                JsonInstant.parseToJsonElement(answeredState.answer)
-                            }.getOrNull()
-                            val answerText = answerJson?.jsonObject?.get("answers")
-                                ?.jsonObject?.get(q.id)?.jsonPrimitive?.contentOrNull
-                                ?: answeredState.answer
-                            Text(
-                                text = answerText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
+                            val answerJson = answeredAnswers?.get(q.id)
+                            val answerText = when {
+                                answerJson is JsonArray -> answerJson.mapNotNull { it.jsonPrimitiveOrNull?.contentOrNull }
+                                    .joinToString(" · ")
+                                answerJson != null -> answerJson.jsonPrimitiveOrNull?.contentOrNull
+                                    ?: answeredState.answer
+                                else -> answeredState.answer
+                            }
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                                border = BorderStroke(
+                                    0.5.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    ) {
+                                        Text(
+                                            text = "A",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        )
+                                    }
+                                    Text(
+                                        text = answerText,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                // Submit button
                 if (isPending && onToolAnswer != null) {
-                    FilledTonalButton(
-                        onClick = {
-                            val answerPayload = buildJsonObject {
-                                put("answers", buildJsonObject {
-                                    questions.forEach { q ->
-                                        when (q.selectionType) {
-                                            "multi" -> put(q.id, JsonPrimitive(multiAnswers[q.id]?.joinToString(", ") ?: ""))
-                                            else -> put(q.id, JsonPrimitive(answers[q.id] ?: ""))
-                                        }
-                                    }
-                                })
-                            }
-                            onToolAnswer(tool.toolCallId, answerPayload.toString())
-                        },
-                        enabled = questions.all { q ->
-                            when (q.selectionType) {
-                                "multi" -> !multiAnswers[q.id].isNullOrEmpty()
-                                else -> !answers[q.id].isNullOrBlank()
-                            }
-                        },
-                        modifier = Modifier.align(Alignment.End),
+                    val anyAnswered = answers.values.any { it.isNotBlank() } ||
+                        multiAnswers.values.any { it.isNotEmpty() }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.chat_message_tool_submit),
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
+                        if (anyAnswered) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        answers.clear()
+                                        multiAnswers.clear()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Refresh01,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                )
+                                Text(
+                                    text = "清空",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Button(
+                            onClick = {
+                                val answerPayload = buildJsonObject {
+                                    put("answers", buildJsonObject {
+                                        questions.forEach { q ->
+                                            when (q.selectionType) {
+                                                "multi" -> put(
+                                                    q.id,
+                                                    buildJsonArray {
+                                                        multiAnswers[q.id].orEmpty().forEach { add(JsonPrimitive(it)) }
+                                                    }
+                                                )
+                                                else -> put(q.id, JsonPrimitive(answers[q.id] ?: ""))
+                                            }
+                                        }
+                                    })
+                                }
+                                onToolAnswer(tool.toolCallId, answerPayload.toString())
+                            },
+                            enabled = questions.all { q ->
+                                when (q.selectionType) {
+                                    "multi" -> !multiAnswers[q.id].isNullOrEmpty()
+                                    else -> !answers[q.id].isNullOrBlank()
+                                }
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Tick01,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                text = stringResource(R.string.chat_message_tool_submit),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
                     }
                 }
             }
         },
     )
+}
+
+@Composable
+private fun AskOptionChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Surface(
+        onClick = onClick,
+        shape = shape,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+        },
+        contentColor = if (selected) {
+            MaterialTheme.colorScheme.onPrimary
+        } else {
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+        },
+        border = if (selected) {
+            null
+        } else {
+            BorderStroke(
+                width = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+            )
+        },
+        tonalElevation = 0.dp,
+        shadowElevation = if (selected) 1.dp else 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            if (selected) {
+                Icon(
+                    imageVector = HugeIcons.Tick01,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                ),
+            )
+        }
+    }
 }
 
 private data class AskUserQuestion(

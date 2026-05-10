@@ -302,6 +302,17 @@ class OpenAIProvider(
     }
 
     private suspend fun listCodexModels(providerSetting: ProviderSetting.OpenAI): List<Model> {
+        // Wrap the entire fetch in runCatching so token errors / network errors / OAuth client
+        // not yet ready don't propagate as exceptions to the caller. The caller (ModelList in
+        // SettingProviderDetailPage) only handles the HTTP-failure return path; an uncaught
+        // exception leaves modelList = emptyList and the "可用模型" sheet shows blank with
+        // no recovery path. Falling back to the bundled defaults guarantees the user can
+        // always pick something.
+        return runCatching { fetchCodexModelsOrThrow(providerSetting) }
+            .getOrElse { defaultCodexOAuthModels() }
+    }
+
+    private suspend fun fetchCodexModelsOrThrow(providerSetting: ProviderSetting.OpenAI): List<Model> {
         val token = resolveBearerToken(providerSetting, forceRefresh = false)
         val tokens = oauthClient?.getCached(providerSetting.id)
         val request = Request.Builder()

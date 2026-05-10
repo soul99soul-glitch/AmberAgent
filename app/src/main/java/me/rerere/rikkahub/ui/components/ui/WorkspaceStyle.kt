@@ -259,30 +259,31 @@ fun WorkspaceTextButton(
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
-    val contentColor = when (tone) {
-        WorkspaceTone.Neutral -> colors.muted
-        WorkspaceTone.Accent -> colors.blue
-        WorkspaceTone.Success -> colors.green
-        WorkspaceTone.Warning -> colors.amber
-        WorkspaceTone.Danger -> colors.red
+    val (container, contentColor) = when (tone) {
+        WorkspaceTone.Neutral -> colors.row to colors.muted
+        WorkspaceTone.Accent -> colors.blueContainer to colors.blue
+        WorkspaceTone.Success -> colors.greenContainer to colors.green
+        WorkspaceTone.Warning -> colors.amberContainer to colors.amber
+        WorkspaceTone.Danger -> colors.redContainer to colors.red
     }
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(CircleShape)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
-        color = colors.paper,
+        shape = CircleShape,
+        color = container,
         contentColor = contentColor,
-        border = workspaceBorder(),
+        border = BorderStroke(1.dp, contentColor.copy(alpha = 0.13f)),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

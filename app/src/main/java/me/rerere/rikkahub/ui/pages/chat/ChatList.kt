@@ -29,6 +29,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -428,6 +429,7 @@ fun ChatList(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onCancelPendingMessage: (String) -> Unit = {},
     onOpenQueue: () -> Unit = {},
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     AnimatedContent(
@@ -476,6 +478,7 @@ fun ChatList(
                 onToggleFavorite = onToggleFavorite,
                 onCancelPendingMessage = onCancelPendingMessage,
                 onOpenQueue = onOpenQueue,
+                onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
             )
         }
@@ -512,6 +515,7 @@ private fun ChatListNormal(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onCancelPendingMessage: (String) -> Unit = {},
     onOpenQueue: () -> Unit = {},
+    onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
@@ -699,15 +703,19 @@ private fun ChatListNormal(
                 )
             }
         } else {
+            // After a fling/scroll ends, keep follow paused regardless of whether the user
+            // happened to land within the bottom buffer. Auto-resuming here is the root cause
+            // of "I touched the screen and it yanked back to bottom" — a tiny scroll often
+            // ends within bufferPx, so the old code would re-arm follow and the next stream
+            // chunk would scroll the user away from what they were trying to read.
+            // The 30s idle-resume timer (autoFollowResumeToken) plus explicit user gestures
+            // (sending a new message, pressing the jump-to-bottom button) are the only paths
+            // back to FollowingBottom now.
             if (activeGenerationState && !programmaticScrollInProgress) {
-                if (state.isAtTimelineBottom(bottomFollowBufferPx)) {
-                    resumeBottomFollow()
-                } else {
-                    pauseAutoFollowTemporarily(
-                        mode = TimelineFollowMode.PausedForUser,
-                        scheduleIdleReturn = true,
-                    )
-                }
+                pauseAutoFollowTemporarily(
+                    mode = TimelineFollowMode.PausedForUser,
+                    scheduleIdleReturn = true,
+                )
             }
             delay(1500)
             isRecentScroll = false
@@ -726,13 +734,17 @@ private fun ChatListNormal(
             followMode != TimelineFollowMode.FollowingBottom
         ) {
             val token = autoFollowResumeToken
-            delay(8_000)
+            // Was 8s, but users complained that tapping the screen barely pauses follow before
+            // it yanks back to bottom. Give them 30s of breathing room before auto-resuming;
+            // they can still re-arm follow manually by scrolling to the bottom.
+            delay(30_000)
             if (
                 token == autoFollowResumeToken &&
                 activeGenerationState &&
                 followMode != TimelineFollowMode.Idle &&
                 followMode != TimelineFollowMode.FollowingBottom &&
-                !state.isScrollInProgress
+                !state.isScrollInProgress &&
+                state.isAtTimelineBottom(bottomFollowBufferPx)
             ) {
                 resumeBottomFollow()
                 scrollToTimelineBottom()
@@ -853,10 +865,13 @@ private fun ChatListNormal(
                 )
                 .pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        // Only pause follow on sustained press (drag intent), not quick taps
-                        val up = withTimeoutOrNull(150) { waitForUpOrCancellation() }
-                        if (up == null && activeGenerationState && settings.displaySetting.enableAutoScroll) {
+                        // Use Initial pass so we see the touch BEFORE the LazyColumn scroll
+                        // handler does. Pause auto-follow on every finger-down (no 150ms wait,
+                        // no "sustained press" requirement) — the user touching the screen is
+                        // intent enough. The 30s resume timer below gives streaming a chance
+                        // to catch up if the user just tapped and walked away.
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        if (activeGenerationState && settings.displaySetting.enableAutoScroll) {
                             pauseAutoFollowTemporarily(
                                 mode = TimelineFollowMode.PausedForUser,
                                 scheduleIdleReturn = true,
@@ -951,6 +966,7 @@ private fun ChatListNormal(
                                     onClearTranslation = onClearTranslation,
                                     onToolApproval = onToolApproval,
                                     onToolAnswer = onToolAnswer,
+                                    onOpenWorkspaceFile = onOpenWorkspaceFile,
                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                                     lastMessage = isLastMessage,
                                 )
@@ -1033,6 +1049,7 @@ private fun ChatListNormal(
                                         onClearTranslation = onClearTranslation,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
+                                        onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                                         lastMessage = isLastMessage,
                                     )

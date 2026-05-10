@@ -95,12 +95,10 @@ fun SettingAgentExtensionsPage() {
                         supportingContent = { Text(stringResource(R.string.setting_page_cron_tasks_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_cron_tasks)) },
                     )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingAgentRuntimeTasks) },
-                        leadingContent = { Icon(HugeIcons.Clock02, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_runtime_tasks_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_runtime_tasks)) },
-                    )
+                    // "Agent 运行时任务" entry intentionally hidden from end users — that page
+                    // is a developer-facing harness debug view (审批原因 / 并发批次 / 能力快照
+                    // / 提前执行只读工具 / 完整生成历史). The page itself is kept and reachable
+                    // by route in case we want to surface it again later behind a hidden gesture.
                 }
             }
         }
