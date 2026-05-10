@@ -69,6 +69,10 @@ private const val TAG = "GenerationHandler"
 private const val STREAM_UI_FLUSH_INTERVAL_MS = 50L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS = 5_000L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS = 800
+// "Did the model produce real prose?" threshold for skipping the local fallback widget
+// after a retry. ~30 chars is "looks like a real sentence in either CN or EN", below
+// that we treat the response as effectively empty and let the skeleton widget kick in.
+private const val MEANINGFUL_TEXT_MIN_CHARS = 30
 
 private class GenerativeUiReasoningOnlyStreamException : RuntimeException(
     "Generative UI stream emitted only hidden reasoning without visible content"
@@ -534,7 +538,18 @@ class GenerationHandler(
                             guardReasoningOnly = false,
                             requireWidget = false,
                         )
-                        if (!messages.hasVisibleWidgetFence()) {
+                        // Only force-inject the local fallback widget when the retry
+                        // ALSO produced no meaningful visible text. Previously we
+                        // injected unconditionally on "no widget fence", which meant a
+                        // model that legitimately decided "this question doesn't need a
+                        // visualisation, here's a normal answer" had a synthetic
+                        // skeleton widget appended to its perfectly good text — visible
+                        // as the "widget keeps appearing on every reply" loop the user
+                        // reported.
+                        if (
+                            !messages.hasVisibleWidgetFence() &&
+                            !messages.hasMeaningfulVisibleAssistantText()
+                        ) {
                             messages = messages.withLocalGenerativeUiFallbackWidget(
                                 baseMessages = baseMessages,
                                 model = model,
@@ -659,6 +674,27 @@ class GenerationHandler(
             ?.parts
             ?.filterIsInstance<UIMessagePart.Text>()
             ?.any { GenerativeWidgetParser.hasRenderableWidget(it.text) } == true
+
+    /**
+     * "Did the retry give a real answer?" — joined visible Text parts of the last
+     * assistant message, with the widget fence stripped, must contain non-trivial
+     * prose. Used to decide whether the local-fallback skeleton widget should still
+     * be appended after the second pass.
+     */
+    private fun List<UIMessage>.hasMeaningfulVisibleAssistantText(): Boolean {
+        val text = lastOrNull { it.role == MessageRole.ASSISTANT }
+            ?.parts
+            ?.filterIsInstance<UIMessagePart.Text>()
+            ?.joinToString("\n") { it.text }
+            .orEmpty()
+        // Strip any ```show-widget``` fence so the check measures *prose*, not the
+        // widget JSON the model may have already produced.
+        val withoutWidget = text.replace(
+            Regex("```\\s*(?:show-widget|widget|generative-ui)[\\s\\S]*?```"),
+            "",
+        ).trim()
+        return withoutWidget.length >= MEANINGFUL_TEXT_MIN_CHARS
+    }
 
     private fun List<UIMessage>.withGenerativeUiVisibleFallbackPrompt(): List<UIMessage> {
         val instruction = UIMessage.system(

@@ -110,8 +110,21 @@ class PermissionDecisionResolver {
         if (tool.toolName == ASK_USER_TOOL_NAME && policy.needsApproval) {
             return decision(PermissionDecisionAction.ASK, "ask_user always needs a human answer.", "hitl", policy)
         }
-        if (invocationContext == ToolInvocationContext.SubAgent && policy.requiresSubAgentApproval()) {
-            return decision(PermissionDecisionAction.ASK, "Sub Agent context cannot silently run this tool.", "subagent", policy)
+        if (invocationContext == ToolInvocationContext.SubAgent) {
+            if (tool.toolName in HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT) {
+                // Historian subagent's whole job is reading history; it has no channel
+                // back to the user to ask for approval, so a Sensitive-risk session_read
+                // would otherwise hang the run. Pre-approved here.
+                return decision(
+                    PermissionDecisionAction.ALLOW,
+                    "Historian subagent pre-approved for read-only history tool.",
+                    "subagent_history",
+                    policy,
+                )
+            }
+            if (policy.requiresSubAgentApproval()) {
+                return decision(PermissionDecisionAction.ASK, "Sub Agent context cannot silently run this tool.", "subagent", policy)
+            }
         }
         if (!policy.needsApproval) {
             return decision(PermissionDecisionAction.ALLOW, "Tool is read-only for this invocation.", "policy", policy)
@@ -148,6 +161,17 @@ class PermissionDecisionResolver {
     private fun ToolInvocationPolicy.requiresSubAgentApproval(): Boolean =
         mutates || risk != ToolRisk.Normal || category in setOf("screen", "terminal", "system", "external_file", "office")
 }
+
+/**
+ * Tools the historian subagent must be able to run silently — Sensitive risk in normal
+ * context (PII exposure of historical chat) but the subagent's whole purpose is reading
+ * past sessions and it has no way to ask the user for approval. Main-agent calls still
+ * flow through the regular Sensitive-risk approval path.
+ */
+private val HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT = setOf(
+    "session_read",
+    "session_expand",
+)
 
 enum class ToolInvocationContext {
     Normal,

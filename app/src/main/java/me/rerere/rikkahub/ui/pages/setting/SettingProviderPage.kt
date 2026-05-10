@@ -9,7 +9,6 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Edit01
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -553,16 +552,9 @@ private fun ProviderItem(
                     }
                 }
             }
-            // Inline Edit + Delete; card tap also fires onEdit for row-tap discoverability.
-            // Glyphs at 20dp keep the touch target at the IconButton-default 40dp while
-            // visually shedding weight to match the new compact card vocabulary.
-            IconButton(onClick = onEdit) {
-                Icon(
-                    imageVector = HugeIcons.Edit01,
-                    contentDescription = stringResource(R.string.edit),
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            // Card tap already enters edit (onClick = onEdit at the Card root), so the
+            // Edit IconButton was redundant noise next to the brand logo and Tags. Only
+            // the destructive-and-not-otherwise-reachable Delete stays visible.
             IconButton(onClick = onDelete) {
                 Icon(
                     imageVector = HugeIcons.Delete01,

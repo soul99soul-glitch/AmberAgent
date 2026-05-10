@@ -260,5 +260,59 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
     }
     flushText()
     flushThinkingSteps()
-    return result
+    return result.mergeDuplicateRunBlocks()
+}
+
+/**
+ * Coalesce SubAgent/Council blocks that share a `runId` into a single block, preserving the
+ * position of the first occurrence and concatenating their tool calls. Without this pass a
+ * subagent run whose calls are split by an intervening Text part would emit two
+ * `SubAgentBlock`s (one per `flushThinkingSteps` invocation) — both keyed on the same
+ * `subagent-${runId}`, which crashes LazyColumn with `IllegalArgumentException: Key …
+ * was already used`.
+ */
+private fun List<MessagePartBlock>.mergeDuplicateRunBlocks(): List<MessagePartBlock> {
+    val subAgentIndex = HashMap<String, Int>()
+    val councilIndex = HashMap<String, Int>()
+    val merged = mutableListOf<MessagePartBlock>()
+    forEach { block ->
+        when (block) {
+            is MessagePartBlock.SubAgentBlock -> {
+                val runId = block.step.runId
+                val existing = subAgentIndex[runId]
+                if (existing == null) {
+                    subAgentIndex[runId] = merged.size
+                    merged.add(block)
+                } else {
+                    val prior = merged[existing] as MessagePartBlock.SubAgentBlock
+                    merged[existing] = MessagePartBlock.SubAgentBlock(
+                        step = ThinkingStep.SubAgentTaskStep(
+                            runId = runId,
+                            tools = prior.step.tools + block.step.tools,
+                        )
+                    )
+                }
+            }
+
+            is MessagePartBlock.CouncilBlock -> {
+                val runId = block.step.runId
+                val existing = councilIndex[runId]
+                if (existing == null) {
+                    councilIndex[runId] = merged.size
+                    merged.add(block)
+                } else {
+                    val prior = merged[existing] as MessagePartBlock.CouncilBlock
+                    merged[existing] = MessagePartBlock.CouncilBlock(
+                        step = ThinkingStep.CouncilTaskStep(
+                            runId = runId,
+                            tools = prior.step.tools + block.step.tools,
+                        )
+                    )
+                }
+            }
+
+            else -> merged.add(block)
+        }
+    }
+    return merged
 }
