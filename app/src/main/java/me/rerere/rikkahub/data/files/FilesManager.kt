@@ -214,9 +214,20 @@ class FilesManager(
         }
 
     fun deleteChatFiles(uris: List<Uri>) {
+        // Files under the workspace mirror are user-visible to Agent tools as
+        // `/workspace/uploads/<name>` (and may have been moved/renamed inside the
+        // workspace by the user or the Agent itself). Conversation deletion or
+        // attachment removal must NOT drag those files into the bin — leave them in
+        // place and let the user manage workspace storage explicitly.
+        val workspaceMirrorPrefix = context.filesDir
+            .resolve("amberagent/workspace-mirror")
+            .absolutePath + "/"
         val relativePaths = mutableSetOf<String>()
         uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
             val file = uri.toFile()
+            if (file.absolutePath.startsWith(workspaceMirrorPrefix)) {
+                return@forEach
+            }
             getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
             if (file.exists()) {
                 file.delete()
@@ -463,6 +474,16 @@ class FilesManager(
             }.onFailure {
                 Log.w(TAG, "getFileMimeType: Failed to resolve MIME for $uri", it)
             }.getOrNull()
+            // file:// URIs (workspace-staged shares, audio picker output, anything we
+            // already copied into our own filesDir) used to silently return null and
+            // fall through to the Document branch in ChatPage — so an audio file landed
+            // in chat with a generic doc icon and the wrong mime tag. Resolve via the
+            // path's extension instead.
+            "file" -> {
+                val ext = uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase()
+                ext?.takeIf { it.isNotEmpty() }
+                    ?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
+            }
             else -> null
         }
     }

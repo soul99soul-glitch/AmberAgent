@@ -206,6 +206,65 @@ class WorkspaceManager(private val context: Context) {
         "Using POSIX mirror workspace at ${root.absolutePath}. SAF sync was not required for this terminal job."
     }
 
+    /**
+     * Stages a content URI (typically a file shared from the system Share menu) into the
+     * POSIX mirror under `uploads/`, so the Agent's terminal tools can find it at
+     * `/workspace/uploads/<displayName>` instead of the previously dead-end
+     * `filesDir/upload/<uuid>` path.
+     *
+     * Filename is preserved so the user-visible name matches what `ls` reports. Collisions
+     * append a `(1)`, `(2)` suffix before the extension. The mirror dir is created on
+     * demand — works even when the SAF workspace has never been authorized; in that case
+     * the file lives only in the private mirror, but the Agent still sees it via
+     * `/workspace/uploads/`. (When SAF is configured, the next `withMirrorSync` round-trip
+     * surfaces it back to the user-visible workspace too.)
+     */
+    suspend fun copyUriToUploads(sourceUri: Uri, displayName: String): Uri = withContext(Dispatchers.IO) {
+        mirrorMutex.withLock {
+            val uploadsDir = mirrorDir.resolve("uploads").also { it.mkdirs() }
+            val target = pickUniqueUploadFile(uploadsDir, displayName.ifBlank { "file" })
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: error("Unable to open input stream for $sourceUri")
+            Uri.fromFile(target)
+        }
+    }
+
+    /**
+     * Delete a single file under the workspace mirror by its relative path. Holds the
+     * same `mirrorMutex` as `withMirrorSync` and `copyUriToUploads`, so a delete
+     * triggered from the file sheet cannot race with an in-flight terminal-job sync
+     * (which would otherwise either re-copy the file from SAF or leave a partial
+     * write). Refuses paths that escape the mirror via `..`. Returns true only when an
+     * actual file was removed.
+     */
+    suspend fun deleteWorkspaceFile(relativePath: String): Boolean = withContext(Dispatchers.IO) {
+        if (relativePath.isBlank()) return@withContext false
+        mirrorMutex.withLock {
+            val rootCanonical = mirrorDir.canonicalFile
+            val target = mirrorDir.resolve(relativePath).canonicalFile
+            if (!target.path.startsWith(rootCanonical.path + File.separator)) {
+                return@withLock false
+            }
+            if (!target.exists() || !target.isFile) return@withLock false
+            runCatching { target.delete() }.getOrDefault(false)
+        }
+    }
+
+    private fun pickUniqueUploadFile(dir: File, name: String): File {
+        val candidate = dir.resolve(name)
+        if (!candidate.exists()) return candidate
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var index = 1
+        while (true) {
+            val attempt = dir.resolve("$base ($index)$ext")
+            if (!attempt.exists()) return attempt
+            index++
+        }
+    }
+
     suspend fun syncFromMirror(): String = withContext(Dispatchers.IO) {
         mirrorMutex.withLock {
             syncFromMirrorLocked()

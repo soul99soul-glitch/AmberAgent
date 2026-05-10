@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.workspace
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import java.io.File
 
 data class WorkspaceFileItem(
@@ -20,8 +22,11 @@ data class WorkspaceFileItem(
     val isDirectory: Boolean = false,
 )
 
-class WorkspaceFileVM(private val context: Context) : ViewModel() {
-    private val mirrorDir get() = context.filesDir.resolve("amberagent/workspace-mirror")
+class WorkspaceFileVM(
+    private val context: Context,
+    private val workspaceManager: WorkspaceManager,
+) : ViewModel() {
+    private val mirrorDir get() = workspaceManager.mirrorDir
 
     private val _recent = MutableStateFlow<List<WorkspaceFileItem>>(emptyList())
     val recent: StateFlow<List<WorkspaceFileItem>> = _recent.asStateFlow()
@@ -62,6 +67,31 @@ class WorkspaceFileVM(private val context: Context) : ViewModel() {
             if (it == current) "" else it
         }
         navigateTo(parent)
+    }
+
+    /**
+     * Delete a single file inside the workspace mirror. Folders are intentionally not
+     * supported here — deleting a folder full of files via long-press would be a
+     * surprising amount of damage from one gesture; route through the terminal/file
+     * tools for that. Returns silently on failure (permission, missing, etc.) and just
+     * refreshes the listings, so a stale row disappears either way.
+     */
+    fun deleteFile(relativePath: String) {
+        if (relativePath.isBlank()) return
+        viewModelScope.launch {
+            // Routed through WorkspaceManager so the delete acquires the same mirrorMutex
+            // that withMirrorSync / copyUriToUploads use — otherwise an in-flight terminal
+            // sync could re-copy the file from SAF immediately after we deleted it, or
+            // overwrite a partial state. Failures are logged silently here; the refresh()
+            // below will re-list the dir so the user sees whether the file is gone.
+            val ok = runCatching { workspaceManager.deleteWorkspaceFile(relativePath) }
+                .onFailure { Log.w("WorkspaceFileVM", "deleteFile($relativePath) threw", it) }
+                .getOrDefault(false)
+            if (!ok) {
+                Log.w("WorkspaceFileVM", "deleteFile($relativePath) returned false (missing or refused)")
+            }
+            refresh()
+        }
     }
 
     private suspend fun buildRecent(): List<WorkspaceFileItem> = withContext(Dispatchers.IO) {

@@ -75,7 +75,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.BuildConfig
@@ -102,6 +102,8 @@ import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
@@ -283,8 +285,12 @@ private fun rememberChatMessageTextStyle(): androidx.compose.ui.text.TextStyle {
         lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
         fontFamily = when (settings.chatFontFamily) {
             ChatFontFamily.DEFAULT -> FontFamily.Default
-            ChatFontFamily.SERIF -> FontFamily.Serif
-            ChatFontFamily.MONOSPACE -> FontFamily.Monospace
+            // SERIF: project-bundled Noto Serif SC (covers SC + ASCII). On non-SC scripts
+            // it falls back to the platform serif chain.
+            ChatFontFamily.SERIF -> NotoSerifSC
+            // MONOSPACE: project-bundled JetBrains Mono covers ASCII; CJK glyphs fall back
+            // to the system Mono (Noto Sans Mono CJK if installed, otherwise the default).
+            ChatFontFamily.MONOSPACE -> JetbrainsMono
         }
     )
 }
@@ -1372,8 +1378,19 @@ private fun MessagePartsBlock(
                     }
 
                     is UIMessagePart.Audio -> {
+                        // Mirror the Document chip layout (icon + filename in a tonal pill)
+                        // — previously this was just a bare music-note icon with no
+                        // filename, which looked like a broken render rather than an
+                        // attachment. Falls back to URL last-segment for old persisted
+                        // Audio parts that don't carry fileName. Color-wise we use the
+                        // workspace blue chip recipe (matches Select / Tag.INFO across
+                        // the app) instead of Material `secondaryContainer`, which our
+                        // theme tints peach-grey and reads as a generic "sender" colour.
+                        val displayName = part.fileName.ifBlank {
+                            part.url.toUri().lastPathSegment.orEmpty().ifBlank { "audio" }
+                        }
+                        val workspace = workspaceColors()
                         Surface(
-                            tonalElevation = 2.dp,
                             onClick = {
                                 val intent = Intent(Intent.ACTION_VIEW)
                                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -1387,7 +1404,9 @@ private fun MessagePartsBlock(
                             },
                             modifier = Modifier,
                             shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.secondaryContainer
+                            color = workspace.blueContainer.copy(alpha = 0.72f),
+                            contentColor = workspace.blue,
+                            border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.12f)),
                         ) {
                             ProvideTextStyle(MaterialTheme.typography.labelSmall) {
                                 Row(
@@ -1396,9 +1415,15 @@ private fun MessagePartsBlock(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = HugeIcons.MusicNote03,
+                                        imageVector = HugeIcons.MusicNote01,
                                         contentDescription = null,
                                         modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = displayName,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 200.dp)
                                     )
                                 }
                             }

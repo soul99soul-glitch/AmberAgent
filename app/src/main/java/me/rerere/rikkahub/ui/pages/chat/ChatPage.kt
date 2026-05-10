@@ -175,7 +175,22 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {
         if (files.isNotEmpty()) {
-            val localFiles = filesManager.createChatFilesByContents(files)
+            // Skip re-copying URIs that are already file:// inside the workspace mirror.
+            // ShareHandlerPage stages shared files there directly (so the Agent's tools
+            // can find them under /workspace/uploads/) — running them through
+            // createChatFilesByContents would duplicate the bytes into filesDir/upload/.
+            // Trailing "/" in the prefix prevents matching a sibling like
+            // `…/workspace-mirror-backup/…` against `…/workspace-mirror`.
+            val mirrorPrefix = workspaceManager.mirrorDir.absolutePath + "/"
+            val localFiles = files.map { uri ->
+                val alreadyStaged = uri.scheme == "file" &&
+                    uri.path?.startsWith(mirrorPrefix) == true
+                if (alreadyStaged) {
+                    uri
+                } else {
+                    filesManager.createChatFilesByContents(listOf(uri)).firstOrNull() ?: uri
+                }
+            }
             val contentTypes = files.map { file ->
                 filesManager.getFileMimeType(file)
             }
@@ -191,7 +206,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     } else if (type?.startsWith("video/") == true) {
                         add(UIMessagePart.Video(url = file.toString()))
                     } else if (type?.startsWith("audio/") == true) {
-                        add(UIMessagePart.Audio(url = file.toString()))
+                        add(
+                            UIMessagePart.Audio(
+                                url = file.toString(),
+                                fileName = fileName,
+                            )
+                        )
                     } else {
                         add(
                             UIMessagePart.Document(
@@ -348,11 +368,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
     if (showWorkspaceSheet) {
         val workspaceCtx = LocalContext.current
+        val workspaceMgrForVm = workspaceManager
         val workspaceVm = viewModel<WorkspaceFileVM>(
             factory = object : ViewModelProvider.Factory {
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     @Suppress("UNCHECKED_CAST")
-                    return WorkspaceFileVM(workspaceCtx) as T
+                    return WorkspaceFileVM(workspaceCtx, workspaceMgrForVm) as T
                 }
             }
         )

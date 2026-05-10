@@ -151,7 +151,7 @@ import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.hugeicons.stroke.Zap
@@ -437,7 +437,13 @@ fun ChatInput(
     val audioPickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
             if (selectedUris.isNotEmpty()) {
-                state.addAudios(filesManager.createChatFilesByContents(selectedUris))
+                // Capture display names from the SAF URIs *before* the copy mangles them
+                // into UUID-prefixed cache files; without this the chat-message Audio chip
+                // would only have the UUID to show.
+                val originalNames = selectedUris.map {
+                    filesManager.getFileNameFromUri(it) ?: it.lastPathSegment.orEmpty()
+                }
+                state.addAudios(filesManager.createChatFilesByContents(selectedUris), originalNames)
                 dismissExpand()
             }
         }
@@ -3019,7 +3025,7 @@ private fun MediaFileInputRow(
                             displayNameByRelativePath = displayNameByRelativePath,
                             displayNameByFileName = displayNameByFileName
                         ),
-                        leading = { AttachmentLeadingIcon(icon = HugeIcons.MusicNote03) },
+                        leading = { AttachmentLeadingIcon(icon = HugeIcons.MusicNote01) },
                         onRemove = { removePart(part, part.url) }
                     )
                 }
@@ -3368,7 +3374,7 @@ fun VideoPickButton(onClick: () -> Unit = {}) {
 @Composable
 fun AudioPickButton(onClick: () -> Unit = {}) {
     BigIconTextButton(icon = {
-        Icon(HugeIcons.MusicNote03, null)
+        Icon(HugeIcons.MusicNote01, null)
     }, text = {
         Text(stringResource(R.string.audio))
     }) {

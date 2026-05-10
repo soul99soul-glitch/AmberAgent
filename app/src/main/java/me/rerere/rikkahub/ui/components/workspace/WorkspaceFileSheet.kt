@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.ui.components.workspace
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -26,10 +29,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -61,6 +66,9 @@ fun WorkspaceFileSheet(
     val loading by vm.loading.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // Long-press a file row → set pendingDelete → confirm dialog. State hoisted here
+    // so a single dialog instance handles both tabs and survives row recompositions.
+    var pendingDelete by remember { mutableStateOf<WorkspaceFileItem?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -114,17 +122,43 @@ fun WorkspaceFileSheet(
                 when {
                     loading && recent.isEmpty() && currentItems.isEmpty() ->
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
-                    selectedTab == 0 -> RecentFilesList(recent, onOpenFile)
+                    selectedTab == 0 -> RecentFilesList(
+                        files = recent,
+                        onOpenFile = onOpenFile,
+                        onLongPressFile = { pendingDelete = it },
+                    )
                     else -> DirectoryBrowser(
                         currentPath = currentPath,
                         items = currentItems,
                         onNavigate = { vm.navigateTo(it) },
                         onNavigateUp = { vm.navigateUp() },
                         onOpenFile = onOpenFile,
+                        onLongPressFile = { pendingDelete = it },
                     )
                 }
             }
         }
+    }
+
+    pendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除文件") },
+            text = {
+                Text("将从 workspace 中永久删除「${target.name}」，无法撤销。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.deleteFile(target.path)
+                        pendingDelete = null
+                    }
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -168,6 +202,7 @@ private fun HeaderRow(onRefresh: () -> Unit, onDismiss: () -> Unit) {
 private fun RecentFilesList(
     files: List<WorkspaceFileItem>,
     onOpenFile: (String) -> Unit,
+    onLongPressFile: (WorkspaceFileItem) -> Unit,
 ) {
     if (files.isEmpty()) {
         EmptyState(message = "还没有最近修改的文件")
@@ -178,7 +213,11 @@ private fun RecentFilesList(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         items(files, key = { it.path }) { file ->
-            RecentFileRow(file = file, onClick = { onOpenFile(file.path) })
+            RecentFileRow(
+                file = file,
+                onClick = { onOpenFile(file.path) },
+                onLongClick = { onLongPressFile(file) },
+            )
         }
     }
 }
@@ -190,6 +229,7 @@ private fun DirectoryBrowser(
     onNavigate: (String) -> Unit,
     onNavigateUp: () -> Unit,
     onOpenFile: (String) -> Unit,
+    onLongPressFile: (WorkspaceFileItem) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Breadcrumb(
@@ -209,7 +249,11 @@ private fun DirectoryBrowser(
                 if (entry.isDirectory) {
                     FolderRow(folder = entry, onClick = { onNavigate(entry.path) })
                 } else {
-                    FileRow(file = entry, onClick = { onOpenFile(entry.path) })
+                    FileRow(
+                        file = entry,
+                        onClick = { onOpenFile(entry.path) },
+                        onLongClick = { onLongPressFile(entry) },
+                    )
                 }
             }
         }
@@ -222,9 +266,14 @@ private fun Breadcrumb(
     onNavigate: (String) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
+    // Whole row is the back-to-parent target; per-segment Surfaces below have their own
+    // clickable that consumes the tap before it bubbles, so jumping to a specific
+    // ancestor still works. The previous design only made the small ArrowLeft icon
+    // tappable, which is a tiny target on a wide bar.
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(enabled = currentPath.isNotEmpty(), onClick = onNavigateUp)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -240,8 +289,12 @@ private fun Breadcrumb(
             Spacer(Modifier.width(2.dp))
         }
         Surface(
+            // Always enable the inner clickable so the tap is consumed even when this
+            // segment IS the current path — otherwise it bubbles to the outer Row's
+            // back-to-parent click and tapping a path label silently navigates up. When
+            // already at this level the onClick is a no-op.
             modifier = Modifier
-                .clickable(enabled = currentPath.isNotEmpty()) { onNavigate("") }
+                .clickable { if (currentPath.isNotEmpty()) onNavigate("") }
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             color = Color.Transparent,
         ) {
@@ -265,8 +318,12 @@ private fun Breadcrumb(
                 val pathSoFar = parts.subList(0, index + 1).joinToString("/")
                 val isCurrent = index == parts.lastIndex
                 Surface(
+                    // Same as the "/" segment above — keep clickable enabled so the
+                    // tap is consumed even when isCurrent (otherwise it bubbles to the
+                    // outer Row's onNavigateUp). On the current segment the onClick is
+                    // a no-op.
                     modifier = Modifier
-                        .clickable(enabled = !isCurrent) { onNavigate(pathSoFar) }
+                        .clickable { if (!isCurrent) onNavigate(pathSoFar) }
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                     color = Color.Transparent,
                 ) {
@@ -320,14 +377,19 @@ private fun FolderRow(folder: WorkspaceFileItem, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileRow(file: WorkspaceFileItem, onClick: () -> Unit) {
+private fun FileRow(
+    file: WorkspaceFileItem,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val extColor = extColor(file.extension)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -356,14 +418,19 @@ private fun FileRow(file: WorkspaceFileItem, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecentFileRow(file: WorkspaceFileItem, onClick: () -> Unit) {
+private fun RecentFileRow(
+    file: WorkspaceFileItem,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val extColor = extColor(file.extension)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

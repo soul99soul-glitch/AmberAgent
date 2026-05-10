@@ -103,10 +103,12 @@ class ChatInputState {
         messageContent = newMessage
     }
 
-    fun addAudios(uris: List<Uri>) {
+    fun addAudios(uris: List<Uri>, fileNames: List<String> = emptyList()) {
         val newMessage = messageContent.toMutableList()
-        uris.forEach { uri ->
-            newMessage.add(UIMessagePart.Audio(uri.toString()))
+        uris.forEachIndexed { index, uri ->
+            val name = fileNames.getOrNull(index)?.takeIf { it.isNotBlank() }
+                ?: uri.lastPathSegment.orEmpty()
+            newMessage.add(UIMessagePart.Audio(url = uri.toString(), fileName = name))
         }
         messageContent = newMessage
     }
