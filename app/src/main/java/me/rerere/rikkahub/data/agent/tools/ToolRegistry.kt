@@ -242,6 +242,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("webview_") -> "webview"
     name.startsWith("wm_") -> "webmount"
     name.startsWith("hn_") -> "webmount_hackernews"
+    name.startsWith("reddit_") -> "webmount_reddit"
     name.startsWith("screen_") || name == "vlm_task" -> "screen"
     name.startsWith("sms_") || name.startsWith("contacts_") || name.startsWith("calendar_") ||
         name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
