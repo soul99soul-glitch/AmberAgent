@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
 import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
+import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
 
 /**
  * Browser Primitives tool catalog (M1.3).
@@ -52,6 +53,7 @@ class WebMountPrimitiveTools(
         tabListTool,
         tabNewTool,
         tabCloseTool,
+        screenshotTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -726,6 +728,73 @@ class WebMountPrimitiveTools(
                     put("reason", reason)
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
+            }
+        },
+    )
+
+    // ---------------------------------------------------------- wm_screenshot
+
+    private val screenshotTool = Tool(
+        name = "wm_screenshot",
+        description = """
+            Capture the current page of a WebMount session as a PNG (or JPEG) and return it as a
+            base64 string. `full_page=false` (default) captures the visible viewport; `full_page=true`
+            scrolls + stitches up to ~16384px tall. Uses native Android Bitmap rendering with a
+            software-rendering fallback for hardware-accelerated WebViews. Output base64 can be sent
+            directly to the model as an image — heads up that big full-page PNGs blow up the agent's
+            context, prefer JPEG with quality=75-85 for those.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                    put("full_page", booleanProp("Stitch scrolled slices (default false)."))
+                    put("format", stringProp("'png' (default) | 'jpeg'."))
+                    put("quality", integerProp("JPEG quality 1-100, default 85. PNG ignores this."))
+                },
+                required = listOf("session_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_screenshot", "WebMount 截图", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val fullPage = input.boolean("full_page") ?: false
+                val format = when (input.string("format")?.lowercase()) {
+                    "jpeg", "jpg" -> WebViewScreenshot.Format.JPEG
+                    else -> WebViewScreenshot.Format.PNG
+                }
+                val quality = (input.long("quality") ?: 85L).coerceIn(1L, 100L).toInt()
+                val result = WebViewScreenshot.capture(handle, fullPage, format, quality)
+                when (result) {
+                    is WebViewScreenshot.Result.Success -> {
+                        val metadata = buildJsonObject {
+                            put("session_id", sessionId)
+                            put("ok", true)
+                            put("width", result.width)
+                            put("height", result.height)
+                            put("format", result.format)
+                            put("size_bytes", result.sizeBytes)
+                            put("full_page", fullPage)
+                        }
+                        // Return the image as a separate UIMessagePart.Image so it
+                        // flows to the model's multimodal channel instead of
+                        // bloating the text budget. The metadata Text part lets
+                        // the agent reason about dimensions / size.
+                        val mime = if (result.format == "jpeg") "image/jpeg" else "image/png"
+                        listOf(
+                            UIMessagePart.Text(metadata.toString()),
+                            UIMessagePart.Image(url = "data:$mime;base64,${result.base64}"),
+                        )
+                    }
+                    is WebViewScreenshot.Result.Failed -> {
+                        listOf(UIMessagePart.Text(buildJsonObject {
+                            put("session_id", sessionId)
+                            put("ok", false)
+                            put("error", result.message)
+                        }.toString()))
+                    }
+                }
             }
         },
     )
