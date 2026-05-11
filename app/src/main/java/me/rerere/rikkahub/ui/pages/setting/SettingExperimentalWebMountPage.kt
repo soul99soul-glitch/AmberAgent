@@ -75,6 +75,7 @@ fun SettingExperimentalWebMountPage(
     oauthClient: WebMountOAuthClient = koinInject(),
     oauthStore: WebMountOAuthTokenStore = koinInject(),
     profileRegistry: ProfileRegistry = koinInject(),
+    cookieProvider: me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
@@ -272,6 +273,13 @@ fun SettingExperimentalWebMountPage(
                                     state = state,
                                     registry = profileRegistry,
                                 ),
+                                onSignOut = signOutLauncherFor(
+                                    state = state,
+                                    registry = profileRegistry,
+                                    webMountManager = webMountManager,
+                                    cookieProvider = cookieProvider,
+                                    toaster = toaster,
+                                ),
                             )
                             if (index != stationStates.lastIndex) {
                                 ExperimentDivider()
@@ -302,6 +310,7 @@ private fun WebMountStationRow(
     onProbe: () -> Unit,
     onWriteProbe: () -> Unit,
     onSignIn: (() -> Unit)? = null,
+    onSignOut: (() -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
     val canWriteProbe =
@@ -388,6 +397,13 @@ private fun WebMountStationRow(
                     primary = !hasConfigureTarget,
                     enabled = !busy,
                     onClick = onSignIn,
+                )
+            }
+            if (onSignOut != null) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.setting_webmount_sign_out),
+                    enabled = !busy,
+                    onClick = onSignOut,
                 )
             }
             ExperimentActionButton(
@@ -641,6 +657,48 @@ private fun signInLauncherFor(
         if (activity != null) {
             activity.startActivity(InlineLoginActivity.newIntent(activity, state.id))
         }
+    }
+}
+
+/**
+ * Phase 2 follow-up — "Sign out" action for cookie stations. Clears every
+ * cookie associated with the station's known URLs (profile origins +
+ * adapter endpoint URLs) and refreshes the station state so the UI
+ * immediately reflects the logged-out state. Returns null for OAuth /
+ * anonymous stations (those don't have cookie-based sessions to clear —
+ * OAuth has its own Disconnect button under OAuth providers).
+ */
+@Composable
+private fun signOutLauncherFor(
+    state: WebMountStationState,
+    registry: ProfileRegistry,
+    webMountManager: WebMountManager,
+    cookieProvider: me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider,
+    toaster: com.dokar.sonner.ToasterState,
+): (() -> Unit)? {
+    if (WebMountAuthMethod.COOKIE !in state.authMethods) return null
+    val signedOutTemplate = stringResource(R.string.setting_webmount_signed_out_toast)
+    val noCookiesMessage = stringResource(R.string.setting_webmount_signed_out_nothing)
+    return {
+        // Gather every URL we know about for this station: profile.origins
+        // + the adapter's declared cookieUrls / loginUrl / origin / apiBase.
+        // Together these cover every host the station might have set cookies on.
+        val profile = registry.byId(state.id)?.profile
+        val adapter = webMountManager.adapterOf(state.id)
+        val urls = buildSet {
+            profile?.origins?.let { addAll(it) }
+            adapter?.endpoints?.forEach { endpoint ->
+                add(endpoint.origin)
+                add(endpoint.apiBase)
+                add(endpoint.loginUrl)
+                addAll(endpoint.cookieUrls)
+            }
+        }.filter { it.isNotBlank() }.distinct()
+        val cleared = cookieProvider.clearCookiesFor(urls)
+        toaster.show(
+            if (cleared > 0) signedOutTemplate.format(state.displayName, cleared)
+            else noCookiesMessage.format(state.displayName)
+        )
     }
 }
 

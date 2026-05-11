@@ -55,6 +55,39 @@ class WebMountCookieProvider {
         return matched.ifEmpty { endpoints }
     }
 
+    /**
+     * Clear every cookie the system has for the given URLs. Used by the
+     * WebMount Stations panel's per-station "Sign out" action.
+     *
+     * Android's [CookieManager] has no per-origin removeAll; the standard
+     * trick is to enumerate the cookies for each URL and overwrite each
+     * one with an empty value + past expiry. Calls `flush()` at the end
+     * so the changes are persisted to disk.
+     *
+     * Returns the count of cookies expired across all URLs.
+     */
+    fun clearCookiesFor(urls: List<String>): Int {
+        val cookieManager = CookieManager.getInstance()
+        var cleared = 0
+        urls.distinct().forEach { url ->
+            val raw = cookieManager.getCookie(url) ?: return@forEach
+            raw.split(";").map { it.trim() }.forEach { cookie ->
+                val name = cookie.substringBefore("=").trim()
+                if (name.isNotBlank()) {
+                    // Several Path variants — Android won't match a clear
+                    // with the wrong path. We can't enumerate paths so we
+                    // try Path=/ which covers the common case + the empty
+                    // value form for cookies set without an explicit path.
+                    cookieManager.setCookie(url, "$name=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+                    cookieManager.setCookie(url, "$name=; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+                    cleared++
+                }
+            }
+        }
+        cookieManager.flush()
+        return cleared
+    }
+
     companion object {
         internal fun mergeCookieHeaderInto(raw: String, target: MutableMap<String, String>) {
             raw.split(";")

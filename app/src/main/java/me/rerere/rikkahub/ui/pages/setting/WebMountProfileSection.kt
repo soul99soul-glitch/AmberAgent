@@ -16,6 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,7 @@ fun WebMountProfileSection(
 
     var importPreview by remember { mutableStateOf<ProfileImportPreview?>(null) }
     var expandedId by remember { mutableStateOf<String?>(null) }
+    var customSiteDialogOpen by remember { mutableStateOf(false) }
 
     val importedToast = stringResource(R.string.setting_webmount_profile_imported_toast)
     val removedToast = stringResource(R.string.setting_webmount_profile_removed_toast)
@@ -116,12 +118,35 @@ fun WebMountProfileSection(
         }
         ExperimentActionRow {
             ExperimentActionButton(
-                text = stringResource(R.string.setting_webmount_profile_import),
+                text = stringResource(R.string.setting_webmount_profile_add_custom),
                 enabled = true,
                 primary = true,
+                onClick = { customSiteDialogOpen = true },
+            )
+            ExperimentActionButton(
+                text = stringResource(R.string.setting_webmount_profile_import),
+                enabled = true,
                 onClick = { launcher.launch(arrayOf("application/json", "text/json", "*/*")) },
             )
         }
+    }
+
+    if (customSiteDialogOpen) {
+        CustomSiteDialog(
+            onDismiss = { customSiteDialogOpen = false },
+            onAdd = { name, url, cookieName ->
+                val result = registry.importJson(buildCustomSiteJson(name, url, cookieName))
+                when (result) {
+                    is ImportResult.Imported -> {
+                        onToast(importedToast.format(result.profile.name))
+                        customSiteDialogOpen = false
+                    }
+                    is ImportResult.ConflictWithBuiltIn -> onToast(conflictTemplate.format(result.id))
+                    is ImportResult.ParseError -> onToast(parseErrorTemplate.format(result.message))
+                    is ImportResult.ValidationError -> onToast(parseErrorTemplate.format(result.message))
+                }
+            },
+        )
     }
 
     importPreview?.let { preview ->
@@ -373,6 +398,153 @@ private fun profileDisplayNameRes(profileId: String): Int? = when (profileId) {
     "zhihu" -> R.string.station_zhihu_name
     "feishu_docs" -> R.string.station_feishu_docs_name
     else -> null
+}
+
+/**
+ * Phase 2 post-review UX fix: minimal "Add custom site" dialog so users
+ * don't need to write profile JSON by hand. Three fields: a display
+ * name, the site's homepage URL, and an optional login-cookie name.
+ *
+ * Submit triggers a regular [ProfileRegistry.importJson] with an
+ * auto-generated manifest under the `user_<slug>` id namespace — so it
+ * lives alongside imported profiles and inherits the same L4 trust
+ * downgrade (read-only by default).
+ */
+@Composable
+private fun CustomSiteDialog(
+    onDismiss: () -> Unit,
+    onAdd: (name: String, url: String, cookieName: String?) -> Unit,
+) {
+    var nameInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf("") }
+    var cookieInput by remember { mutableStateOf("") }
+    val nameLabel = stringResource(R.string.setting_webmount_custom_name_label)
+    val urlLabel = stringResource(R.string.setting_webmount_custom_url_label)
+    val cookieLabel = stringResource(R.string.setting_webmount_custom_cookie_label)
+    val title = stringResource(R.string.setting_webmount_custom_dialog_title)
+    val helper = stringResource(R.string.setting_webmount_custom_dialog_helper)
+    val nameError = nameInput.isNotEmpty() && nameInput.isBlank()
+    val urlError = urlInput.isNotEmpty() &&
+        !(urlInput.startsWith("http://") || urlInput.startsWith("https://"))
+    val canSubmit = nameInput.isNotBlank() && !urlError && urlInput.startsWith("http")
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { androidx.compose.material3.Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Text(
+                    helper,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { androidx.compose.material3.Text(nameLabel) },
+                    singleLine = true,
+                    isError = nameError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { androidx.compose.material3.Text(urlLabel) },
+                    placeholder = { androidx.compose.material3.Text("https://weibo.com") },
+                    singleLine = true,
+                    isError = urlError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = cookieInput,
+                    onValueChange = { cookieInput = it },
+                    label = { androidx.compose.material3.Text(cookieLabel) },
+                    placeholder = { androidx.compose.material3.Text("SUB") },
+                    singleLine = true,
+                    supportingText = {
+                        androidx.compose.material3.Text(
+                            stringResource(R.string.setting_webmount_custom_cookie_supporting),
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                enabled = canSubmit,
+                onClick = { onAdd(nameInput.trim(), urlInput.trim(), cookieInput.trim().ifBlank { null }) },
+            ) { androidx.compose.material3.Text(stringResource(R.string.setting_webmount_custom_confirm)) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                androidx.compose.material3.Text(stringResource(R.string.setting_webmount_profile_import_dialog_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * Build a minimal SiteProfile JSON from the custom-site dialog inputs.
+ * Naming: `user_<slug-of-name>` so user-added entries are easy to spot
+ * in the list and can't collide with built-in ids ([a-z0-9_]+ ≥ 5 chars).
+ *
+ * The origin is the URL's scheme + host (port if present). Path /
+ * query / fragment are stripped.
+ */
+private fun buildCustomSiteJson(
+    name: String,
+    url: String,
+    cookieName: String?,
+): String {
+    val origin = extractOriginForCustomSite(url) ?: error("invalid URL: $url")
+    val slug = name.trim()
+        .lowercase(java.util.Locale.ROOT)
+        .replace(Regex("[^a-z0-9]+"), "_")
+        .trim('_')
+        .ifBlank { "site" }
+        .take(40)
+    val id = "user_$slug"
+    val cookiePerm = cookieName?.takeIf { it.isNotBlank() }
+        ?.let { "\"read_cookie:$it\",\n    \"detect_login\"" }
+    val hints = if (cookieName.isNullOrBlank()) {
+        "{}"
+    } else {
+        """
+        {
+            "login_cookie": ${escapeJsonString(cookieName)}
+          }
+        """.trimIndent()
+    }
+    val perms = if (cookieName.isNullOrBlank()) "" else cookiePerm.orEmpty()
+    return """
+    {
+      "id": ${escapeJsonString(id)},
+      "name": ${escapeJsonString(name.trim())},
+      "version": 1,
+      "origins": [${escapeJsonString(origin)}],
+      "capabilities": ["read"],
+      "hints": $hints,
+      "permissions": [$perms],
+      "notes": "User-added via the WebMount Stations panel."
+    }
+    """.trimIndent()
+}
+
+private fun extractOriginForCustomSite(url: String): String? {
+    val match = Regex("^(https?://[^/?#]+)", RegexOption.IGNORE_CASE).find(url.trim()) ?: return null
+    val raw = match.groupValues[1]
+    val schemeEnd = raw.indexOf("://")
+    if (schemeEnd < 0) return raw.lowercase(java.util.Locale.ROOT)
+    val scheme = raw.substring(0, schemeEnd).lowercase(java.util.Locale.ROOT)
+    val hostAndPort = raw.substring(schemeEnd + 3).lowercase(java.util.Locale.ROOT)
+    return "$scheme://$hostAndPort"
+}
+
+private fun escapeJsonString(s: String): String {
+    val escaped = s.replace("\\", "\\\\").replace("\"", "\\\"")
+    return "\"$escaped\""
 }
 
 private data class ProfileImportPreview(

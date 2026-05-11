@@ -802,6 +802,9 @@
   <string name="setting_webmount_probe">探测</string>
   <string name="setting_webmount_write_probe">探测写入</string>
   <string name="setting_webmount_sign_in">登录</string>
+  <string name="setting_webmount_sign_out">退出登录</string>
+  <string name="setting_webmount_signed_out_toast">已退出 %1$s —— 清除了 %2$d 个 cookie。</string>
+  <string name="setting_webmount_signed_out_nothing">%1$s 没有可清除的 cookie。</string>
   <string name="setting_webmount_last_updated">最后更新</string>
   <string name="setting_webmount_status_read_write">读写已就绪</string>
   <string name="setting_webmount_status_read_only">仅可读</string>
@@ -840,7 +843,15 @@
   <string name="setting_webmount_no_profiles">尚未加载任何 Profile。</string>
   <string name="setting_webmount_profile_trust_builtin">内置</string>
   <string name="setting_webmount_profile_trust_user">用户导入</string>
-  <string name="setting_webmount_profile_import">导入 Profile</string>
+  <string name="setting_webmount_profile_import">导入 JSON</string>
+  <string name="setting_webmount_profile_add_custom">+ 添加网站</string>
+  <string name="setting_webmount_custom_dialog_title">添加自定义网站</string>
+  <string name="setting_webmount_custom_dialog_helper">输入任意网站 URL 即可添加。添加后 agent 就能用 wm_open 打开它并读取内容。如果网站需要登录,把登录后种下的 cookie 名字也填上,agent 就能识别登录态。</string>
+  <string name="setting_webmount_custom_name_label">站点名称</string>
+  <string name="setting_webmount_custom_url_label">主页 URL</string>
+  <string name="setting_webmount_custom_cookie_label">登录 cookie 名 (可选)</string>
+  <string name="setting_webmount_custom_cookie_supporting">例如 B 站填 SESSDATA、知乎填 z_c0。公开网站留空即可。</string>
+  <string name="setting_webmount_custom_confirm">添加</string>
   <string name="setting_webmount_profile_remove">移除</string>
   <string name="setting_webmount_profile_origins">Origin</string>
   <string name="setting_webmount_profile_permissions">权限</string>
