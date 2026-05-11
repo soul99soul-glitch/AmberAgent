@@ -1,0 +1,105 @@
+package me.rerere.rikkahub.data.agent.board
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/** Default trigger anchors in 24h local time. Users can toggle these on/off individually. */
+val DEFAULT_TODAY_BOARD_TRIGGER_HOURS = listOf("08:00", "12:00", "18:00")
+
+/**
+ * Cutoff hour for nightly cleanup. Items from previous days' boards are archived at this
+ * hour local time so the next day's surface starts fresh. Chose 04:00 over midnight so
+ * late-night users don't have their just-generated board wiped while they're still using
+ * the app.
+ */
+const val TODAY_BOARD_DAY_CUTOFF_HOUR = 4
+
+/** Signals scoring at or below this threshold are treated as hard-muted. */
+const val TODAY_BOARD_HARD_MUTE_WEIGHT = -10
+
+/** Number of consecutive dismisses before auto-mute kicks in. */
+const val TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT = 3
+
+@Serializable
+enum class TodayBoardDensity(val wireName: String) {
+    @SerialName("compact")
+    COMPACT("compact"),
+
+    @SerialName("standard")
+    STANDARD("standard"),
+
+    @SerialName("rich")
+    RICH("rich");
+
+    companion object {
+        fun fromWireName(raw: String?): TodayBoardDensity =
+            entries.firstOrNull { it.wireName == raw } ?: STANDARD
+    }
+}
+
+/** Controls how the scheduler behaves when device constraints change. */
+@Serializable
+enum class TodayBoardBackgroundStrategy(val wireName: String) {
+    /** WiFi + battery not low, scheduled runs still fire on cellular. Default. */
+    @SerialName("smart")
+    SMART("smart"),
+
+    @SerialName("wifi_only")
+    WIFI_ONLY("wifi_only"),
+
+    /** Board only refreshes while app is in the foreground — useful for privacy-minded users. */
+    @SerialName("foreground_only")
+    FOREGROUND_ONLY("foreground_only");
+
+    companion object {
+        fun fromWireName(raw: String?): TodayBoardBackgroundStrategy =
+            entries.firstOrNull { it.wireName == raw } ?: SMART
+    }
+}
+
+/**
+ * Canonical source types for BoardSignalEntity.sourceType. Kept as string constants rather
+ * than an enum to allow future collectors (mail / github / rss) to be added without DB
+ * schema churn — the column stays TEXT.
+ */
+object BoardSignalSourceType {
+    const val NOTIFICATION = "notification"
+    const val CALENDAR = "calendar"
+    const val FEISHU_MSG = "feishu_msg"
+    const val FEISHU_DOC = "feishu_doc"
+    const val CHAT_HISTORY = "chat_history"
+    const val TIME = "time"
+
+    val MVP_SOURCES: Set<String> = setOf(
+        NOTIFICATION,
+        CALENDAR,
+        FEISHU_MSG,
+        FEISHU_DOC,
+        CHAT_HISTORY,
+        TIME,
+    )
+}
+
+/**
+ * All data-source toggles and trigger policy live here. Intentionally flat and small —
+ * we'd rather ship a thin config surface and extend it as features land than pre-bake a
+ * settings UI that mostly sits empty.
+ *
+ * [boardModelId] is nullable on purpose: when null the board inherits the user's main
+ * chat model, mirroring the SubAgent "follow main model" convention. Setting a specific
+ * model id here lets privacy / cost-sensitive users route board runs to a cheaper model.
+ *
+ * [enabledSources] uses BoardSignalSourceType string keys. New sources added later don't
+ * require a schema migration — default-off via absence from the set.
+ */
+@Serializable
+data class TodayBoardSetting(
+    val enabled: Boolean = false,
+    val boardModelId: String? = null,
+    val enabledSources: Set<String> = BoardSignalSourceType.MVP_SOURCES,
+    val triggerHours: List<String> = DEFAULT_TODAY_BOARD_TRIGGER_HOURS,
+    val incrementalSignalThreshold: Int = 5,
+    val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
+    val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,
+    val foregroundCompensationGapMs: Long = 2 * 60 * 60 * 1000L,
+)

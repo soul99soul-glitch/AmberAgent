@@ -35,6 +35,7 @@ import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.agent.live.LiveModeSetting
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
+import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.ai.GenerationRetrySetting
@@ -638,6 +639,7 @@ data class AgentRuntimeSetting(
     val terminalOutputTailChars: Int = 256 * 1024,
     val terminalInstallTimeoutMs: Long = 15 * 60_000L,
     val feishuOfficeEnhancement: FeishuOfficeEnhancementSetting = FeishuOfficeEnhancementSetting(),
+    val todayBoard: TodayBoardSetting = TodayBoardSetting(),
     val contextCompaction: ContextCompactionSetting = ContextCompactionSetting(),
     val memoryRecall: MemoryRecallSetting = MemoryRecallSetting(),
     val memoryWorker: MemoryWorkerSetting = MemoryWorkerSetting(),

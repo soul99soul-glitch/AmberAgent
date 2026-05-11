@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.di
 
+import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -45,5 +46,9 @@ val repositoryModule = module {
 
     single {
         SkillManager(get(), get())
+    }
+
+    single {
+        BoardRepository(get(), get(), get(), get())
     }
 }

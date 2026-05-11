@@ -209,7 +209,10 @@ fun ChatDrawerContent(
                 }
             }
 
-            DrawerActions(navController = navController)
+            DrawerActions(
+                navController = navController,
+                todayBoardEnabled = settings.agentRuntime.todayBoard.enabled,
+            )
             WorkspaceDivider(modifier = Modifier.padding(horizontal = 2.dp, vertical = 6.dp))
 
             ConversationList(
@@ -329,7 +332,7 @@ fun ChatDrawerContent(
 }
 
 @Composable
-private fun DrawerActions(navController: Navigator) {
+private fun DrawerActions(navController: Navigator, todayBoardEnabled: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         DrawerNavRow(
             icon = HugeIcons.Search01,
@@ -337,6 +340,13 @@ private fun DrawerActions(navController: Navigator) {
             onClick = { navController.navigate(Screen.MessageSearch) },
             tone = WorkspaceTone.Accent,
         )
+        if (todayBoardEnabled) {
+            DrawerNavRow(
+                icon = HugeIcons.Sparkles,
+                label = "今日看板",
+                onClick = { navController.navigate(Screen.TodayBoard) },
+            )
+        }
         DrawerNavRow(
             icon = HugeIcons.TransactionHistory,
             label = stringResource(R.string.chat_page_history),

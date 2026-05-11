@@ -146,6 +146,13 @@ fun SettingExperimentalPage() {
                         title = stringResource(R.string.setting_subagent_title),
                         description = stringResource(R.string.setting_subagent_desc),
                     )
+                    ExperimentDivider()
+                    ExperimentFeatureRow(
+                        onClick = { navController.navigate(Screen.SettingTodayBoard) },
+                        icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        title = "今日看板",
+                        description = "Agent 主动整理每日信号，生成待办与关注项",
+                    )
                     // Model Council top-level entry removed — it's now reachable from inside the
                     // SubAgent settings page as an "advanced" section (it's effectively a
                     // multi-model variant of @oracle). Route Screen.SettingExperimentalModelCouncil
@@ -1876,7 +1883,7 @@ private fun OfficeProSwitchRow(
 }
 
 @Composable
-private fun ExperimentSectionCard(
+internal fun ExperimentSectionCard(
     title: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -2009,7 +2016,7 @@ private fun ExperimentFeatureRow(
 }
 
 @Composable
-private fun ExperimentDivider() {
+internal fun ExperimentDivider() {
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier
@@ -2138,7 +2145,7 @@ private fun ExperimentNote(
 }
 
 @Composable
-private fun ExperimentalSettingsScaffold(
+internal fun ExperimentalSettingsScaffold(
     title: String,
     content: @Composable (PaddingValues) -> Unit,
 ) {

@@ -9,6 +9,10 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.ConversationCompactDAO
 import me.rerere.rikkahub.data.db.dao.ConversationContextEventDAO
+import me.rerere.rikkahub.data.db.dao.BoardFocusRuleDAO
+import me.rerere.rikkahub.data.db.dao.BoardItemDAO
+import me.rerere.rikkahub.data.db.dao.BoardSignalDAO
+import me.rerere.rikkahub.data.db.dao.BoardWeightDAO
 import me.rerere.rikkahub.data.db.dao.FeishuDocChangeDAO
 import me.rerere.rikkahub.data.db.dao.FeishuDocDependencyDAO
 import me.rerere.rikkahub.data.db.dao.FeishuDocSnapshotDAO
@@ -24,6 +28,10 @@ import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
 import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
+import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
+import me.rerere.rikkahub.data.db.entity.BoardItemEntity
+import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
+import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocChangeEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocDependencyEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocSnapshotEntity
@@ -57,8 +65,12 @@ import me.rerere.rikkahub.utils.JsonInstant
         FeishuDocSnapshotEntity::class,
         FeishuDocChangeEntity::class,
         FeishuDocDependencyEntity::class,
+        BoardSignalEntity::class,
+        BoardItemEntity::class,
+        BoardFocusRuleEntity::class,
+        BoardWeightEntity::class,
     ],
-    version = 22,
+    version = 23,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -105,6 +117,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun feishuDocChangeDao(): FeishuDocChangeDAO
 
     abstract fun feishuDocDependencyDao(): FeishuDocDependencyDAO
+
+    abstract fun boardSignalDao(): BoardSignalDAO
+
+    abstract fun boardItemDao(): BoardItemDAO
+
+    abstract fun boardFocusRuleDao(): BoardFocusRuleDAO
+
+    abstract fun boardWeightDao(): BoardWeightDAO
 }
 
 object TokenUsageConverter {

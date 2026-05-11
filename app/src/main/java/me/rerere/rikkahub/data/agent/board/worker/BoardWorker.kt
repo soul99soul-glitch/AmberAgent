@@ -1,0 +1,104 @@
+package me.rerere.rikkahub.data.agent.board.worker
+
+import android.content.Context
+import androidx.work.CoroutineWorker
+import androidx.work.WorkerParameters
+import me.rerere.rikkahub.data.agent.board.BoardRepository
+import me.rerere.rikkahub.data.agent.board.agent.BoardAgent
+import me.rerere.rikkahub.data.agent.board.agent.BoardRunResult
+import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.get
+import java.time.LocalDate
+import java.time.ZoneId
+
+/**
+ * Worker that executes one full board update cycle:
+ *   1. Collect fresh signals from all pull-based collectors (via [SignalAggregator.collectAll]).
+ *   2. Read unprocessed + scored signals from the aggregator.
+ *   3. Invoke [BoardAgent] to generate items for today's board.
+ *   4. Mark used signals as processed so the next run doesn't reconsider them.
+ *   5. Prune stale items from previous days.
+ *   6. Reschedule the next anchor run (only when dispatched as an anchor; manual and
+ *      incremental runs don't reschedule themselves to avoid drift).
+ */
+class BoardWorker(
+    appContext: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(appContext, params), KoinComponent {
+
+    override suspend fun doWork(): Result {
+        val settings = get<SettingsStore>().settingsFlow.value
+        val board = settings.agentRuntime.todayBoard
+        if (!board.enabled) return Result.success()
+
+        val aggregator = get<SignalAggregator>()
+        val repository = get<BoardRepository>()
+        val agent = get<BoardAgent>()
+        val notifier = get<BoardNotifier>()
+        val scheduler = get<BoardScheduler>()
+
+        // Reschedule upfront so anchor loop continues even if this run fails. Manual /
+        // incremental runs shouldn't touch the anchor cadence.
+        val isAnchor = tags.contains(BoardScheduler.TAG_ANCHOR)
+        if (isAnchor) {
+            runCatching { scheduler.rescheduleNextAnchor() }
+        }
+
+        val boardDate = repository.resolveBoardDate()
+
+        runCatching {
+            aggregator.collectAll()
+        }
+
+        val scored = aggregator.getFilteredSignals(limit = 200)
+        if (scored.isEmpty()) return Result.success()
+
+        val rules = repository.getActiveFocusRules()
+        val result = agent.run(
+            scoredSignals = scored,
+            focusRules = rules,
+            boardDate = boardDate,
+        )
+
+        when (result) {
+            is BoardRunResult.Success -> {
+                repository.markSignalsProcessed(scored.map { it.signal.id })
+                notifier.notifySuccess(
+                    itemCount = result.itemCount,
+                    summary = result.summary,
+                )
+                pruneOldItems(repository, boardDate)
+                return Result.success()
+            }
+
+            BoardRunResult.Empty -> {
+                repository.markSignalsProcessed(scored.map { it.signal.id })
+                pruneOldItems(repository, boardDate)
+                return Result.success()
+            }
+
+            is BoardRunResult.Failed -> {
+                notifier.notifyFailure(result.reason)
+                // Distinguish permanent failures (auth/config) from transient ones.
+                // "model call failed" typically means no provider configured or invalid
+                // API key — retrying won't help and just burns quota.
+                if (result.reason.contains("model call failed")) return Result.failure()
+                if (runAttemptCount >= 3) return Result.failure()
+                return Result.retry()
+            }
+        }
+    }
+
+    private suspend fun pruneOldItems(repository: BoardRepository, currentBoardDate: String) {
+        runCatching {
+            // Keep only today's board - earlier dates are archived at 04:00 cutoff.
+            val today = LocalDate.parse(currentBoardDate)
+            repository.purgeItemsBefore(today.toString())
+            // Also prune old processed signals (> 7 days) to bound signal table growth.
+            val weekAgoMs = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
+            repository.pruneProcessedSignalsBefore(weekAgoMs)
+        }
+    }
+}

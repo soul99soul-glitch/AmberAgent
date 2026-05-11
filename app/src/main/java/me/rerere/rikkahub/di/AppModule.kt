@@ -52,6 +52,18 @@ import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeAnalyzer
 import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
 import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentFetcher
 import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentMonitor
+import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
+import me.rerere.rikkahub.data.agent.board.agent.BoardAgent
+import me.rerere.rikkahub.ui.pages.board.BoardViewModel
+import me.rerere.rikkahub.data.agent.board.collector.BoardSignalCollector
+import me.rerere.rikkahub.data.agent.board.collector.CalendarSignalCollector
+import me.rerere.rikkahub.data.agent.board.collector.ChatHistorySignalCollector
+import me.rerere.rikkahub.data.agent.board.collector.FeishuDocSignalCollector
+import me.rerere.rikkahub.data.agent.board.collector.FeishuMessageSignalCollector
+import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
+import me.rerere.rikkahub.data.agent.board.collector.TimeAnchorSignalCollector
+import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
+import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.data.memory.extraction.MemoryCandidateFilter
 import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
 import me.rerere.rikkahub.data.memory.export.MemoryFrontmatterCodec
@@ -287,6 +299,85 @@ val appModule = module {
 
     single {
         FeishuDocumentMonitor(get(), get())
+    }
+
+    // Today Board
+    single {
+        CalendarSignalCollector(get())
+    }
+
+    single {
+        ChatHistorySignalCollector(get())
+    }
+
+    single {
+        FeishuDocSignalCollector(get(), get())
+    }
+
+    single {
+        FeishuMessageSignalCollector(get())
+    }
+
+    single {
+        TimeAnchorSignalCollector {
+            get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+              .settingsFlow.value.agentRuntime.todayBoard.triggerHours
+        }
+    }
+
+    single {
+        val collectors: List<BoardSignalCollector> = listOf(
+            get<CalendarSignalCollector>(),
+            get<ChatHistorySignalCollector>(),
+            get<FeishuDocSignalCollector>(),
+            get<FeishuMessageSignalCollector>(),
+            get<TimeAnchorSignalCollector>(),
+        )
+        SignalAggregator(
+            boardRepository = get(),
+            collectors = collectors,
+            settingProvider = {
+                get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+                    .settingsFlow.value.agentRuntime.todayBoard
+            },
+            onThresholdReached = { get<BoardScheduler>().runIncremental() },
+        )
+    }
+
+    single {
+        BoardScheduler(
+            context = get(),
+            settingsStore = get(),
+        )
+    }
+
+    single {
+        BoardNotifier(get())
+    }
+
+    single {
+        NotificationSignalCollector(
+            context = get(),
+            aggregator = get(),
+            ioScope = get<me.rerere.rikkahub.AppScope>(),
+        )
+    }
+
+    single {
+        BoardAgent(
+            settingsStore = get(),
+            providerManager = get(),
+            boardRepository = get(),
+        )
+    }
+
+    factory {
+        BoardViewModel(
+            boardRepository = get(),
+            settingsStore = get(),
+            scheduler = get(),
+            appScope = get(),
+        )
     }
 
     single {

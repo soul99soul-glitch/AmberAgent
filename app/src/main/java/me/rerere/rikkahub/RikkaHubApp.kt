@@ -37,6 +37,8 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
+import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
+import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -55,6 +57,7 @@ const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
 const val FEISHU_DOC_CHANGE_CHANNEL_ID = "feishu_doc_change"
+const val BOARD_NOTIFICATION_CHANNEL_ID = "today_board"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -99,6 +102,12 @@ class RikkaHubApp : Application() {
 
         // Keep Daydream background review aligned with memory settings.
         syncMemoryDreamTasks()
+
+        // Start Today Board notification collector if enabled.
+        startBoardNotificationCollector()
+
+        // Sync Today Board scheduler with settings + foreground-compensation hook.
+        syncTodayBoardScheduler()
 
         // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
         registerChatServiceCleanup()
@@ -221,6 +230,70 @@ class RikkaHubApp : Application() {
         }
     }
 
+    private fun startBoardNotificationCollector() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            val settingsStore = get<SettingsStore>()
+            val collector = get<NotificationSignalCollector>()
+            settingsStore.settingsFlow
+                .map { it.agentRuntime.todayBoard.enabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (enabled) {
+                        collector.start()
+                    } else {
+                        collector.stop()
+                    }
+                }
+        }
+    }
+
+    /**
+     * Keep the BoardScheduler aligned with user settings. Also wires foreground
+     * compensation: when the app returns to the foreground after a long gap (>= the
+     * configured threshold), trigger a one-shot board run so users don't see stale
+     * content after leaving the app for a while.
+     */
+    private fun syncTodayBoardScheduler() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            val settingsStore = get<SettingsStore>()
+            val scheduler = get<BoardScheduler>()
+            settingsStore.settingsFlow
+                .map { it.agentRuntime.todayBoard }
+                .distinctUntilChanged()
+                .collect {
+                    runCatching { scheduler.sync(settingsStore.settingsFlow.value) }
+                        .onFailure { Log.e(TAG, "syncTodayBoardScheduler failed", it) }
+                }
+        }
+
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : LifecycleEventObserver {
+                private val lastForegroundCompensationMs = java.util.concurrent.atomic.AtomicLong(0L)
+
+                override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
+                    if (event != Lifecycle.Event.ON_START) return
+                    get<AppScope>().launch(Dispatchers.IO) {
+                        runCatching {
+                            val board = get<SettingsStore>().settingsFlow.value.agentRuntime.todayBoard
+                            if (!board.enabled) return@runCatching
+                            // FOREGROUND_ONLY users explicitly chose no background work —
+                            // respect that even for app-start compensation.
+                            if (board.backgroundStrategy ==
+                                me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy.FOREGROUND_ONLY
+                            ) return@runCatching
+                            val now = System.currentTimeMillis()
+                            val last = lastForegroundCompensationMs.get()
+                            if (now - last < board.foregroundCompensationGapMs) return@runCatching
+                            // CAS guards against two rapid ON_START events passing the gap check.
+                            if (!lastForegroundCompensationMs.compareAndSet(last, now)) return@runCatching
+                            get<BoardScheduler>().runOnce()
+                        }.onFailure { Log.e(TAG, "foreground compensation failed", it) }
+                    }
+                }
+            },
+        )
+    }
+
     private fun createNotificationChannel() {
         val notificationManager = NotificationManagerCompat.from(this)
         val chatCompletedChannel = NotificationChannelCompat
@@ -273,6 +346,14 @@ class RikkaHubApp : Application() {
             .setVibrationEnabled(true)
             .build()
         notificationManager.createNotificationChannel(feishuDocChangeChannel)
+
+        val boardChannel = NotificationChannelCompat
+            .Builder(BOARD_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName("今日看板")
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(boardChannel)
     }
 
     override fun onTerminate() {

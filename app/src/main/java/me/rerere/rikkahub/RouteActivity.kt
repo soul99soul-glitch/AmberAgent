@@ -120,6 +120,9 @@ import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalModelCouncilPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalOfficeProPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalSubAgentPage
+import me.rerere.rikkahub.ui.pages.board.TodayBoardPage
+import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
+import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
@@ -243,6 +246,9 @@ class RouteActivity : ComponentActivity() {
         if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
             navStack?.add(Screen.SettingAgentMemory)
         }
+        if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
+            navStack?.add(Screen.TodayBoard)
+        }
         newIntentHandler?.invoke(intent)
     }
 
@@ -264,6 +270,9 @@ class RouteActivity : ComponentActivity() {
         val startScreen = remember {
             if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
                 return@remember Screen.SettingAgentMemory
+            }
+            if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
+                return@remember Screen.TodayBoard
             }
             val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
                 readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
@@ -535,6 +544,14 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingExperimentalModelCouncil> {
                                 SettingExperimentalModelCouncilPage()
+                            }
+
+                            entry<Screen.TodayBoard> {
+                                TodayBoardPage()
+                            }
+
+                            entry<Screen.SettingTodayBoard> {
+                                SettingTodayBoardPage()
                             }
 
                             entry<Screen.SettingSystemAccess> {
@@ -829,4 +846,10 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Stats : Screen
+
+    @Serializable
+    data object TodayBoard : Screen
+
+    @Serializable
+    data object SettingTodayBoard : Screen
 }
