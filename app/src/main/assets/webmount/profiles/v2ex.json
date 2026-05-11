@@ -1,0 +1,24 @@
+{
+  "id": "v2ex",
+  "name": "V2EX",
+  "version": 1,
+  "origins": [
+    "https://www.v2ex.com",
+    "https://v2ex.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "A2",
+    "interactive_selectors": {
+      "topic_title": "h1",
+      "topic_content": ".topic_content",
+      "reply": ".reply_content",
+      "node_link": "a.node"
+    }
+  },
+  "permissions": [
+    "read_cookie:A2",
+    "detect_login"
+  ],
+  "notes": "Pure profile — no native adapter. Agent can use wm_open + wm_extract to read topics; the profile points at V2EX's stable class names."
+}

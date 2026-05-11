@@ -48,6 +48,7 @@ import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
+import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -62,6 +63,7 @@ fun SettingExperimentalWebMountPage(
     webMountManager: WebMountManager = koinInject(),
     oauthClient: WebMountOAuthClient = koinInject(),
     oauthStore: WebMountOAuthTokenStore = koinInject(),
+    profileRegistry: ProfileRegistry = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
@@ -165,6 +167,12 @@ fun SettingExperimentalWebMountPage(
                         }
                     }
                 }
+            }
+            item {
+                WebMountProfileSection(
+                    registry = profileRegistry,
+                    onToast = { toaster.show(it) },
+                )
             }
             item {
                 ExperimentSectionCard(

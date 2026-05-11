@@ -1,0 +1,28 @@
+{
+  "id": "zhihu",
+  "name": "知乎",
+  "version": 1,
+  "origins": [
+    "https://www.zhihu.com",
+    "https://zhuanlan.zhihu.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "z_c0",
+    "interactive_selectors": {
+      "answer_content": "div.RichContent-inner, .Post-RichTextContainer",
+      "question_title": "h1.QuestionHeader-title",
+      "author_name": ".AuthorInfo-name a"
+    },
+    "rate_limit": {
+      "body_pattern": "AntiSpiderShield",
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:z_c0",
+    "detect_login",
+    "detect_rate_limit"
+  ],
+  "notes": "x-zse-93/96 request signing lands in M2.2 — at that point this profile gains a `scripts.sign_request` entry."
+}

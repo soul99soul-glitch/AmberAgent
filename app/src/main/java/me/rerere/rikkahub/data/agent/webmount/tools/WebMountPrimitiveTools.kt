@@ -16,9 +16,12 @@ import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
+import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
+import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
+import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfileEntry
 
 /**
  * Browser Primitives tool catalog.
@@ -44,7 +47,50 @@ class WebMountPrimitiveTools(
     private val pool: WebViewPool,
     private val activityStore: AgentToolActivityStore,
     private val manager: WebMountManager,
+    private val profileRegistry: ProfileRegistry,
+    private val cookieProvider: WebMountCookieProvider,
 ) {
+
+    /**
+     * Build a `applicable_profile` JSON object for the given URL, or null if
+     * no profile matches. Encapsulates the lookup + login-cookie probe so
+     * `wm_open` / `wm_state` outputs stay consistent. Shape is intentionally
+     * conservative — only [SiteProfile] data the agent might reason over.
+     */
+    private fun applicableProfileJson(url: String): JsonObject? {
+        val entry: SiteProfileEntry = profileRegistry.forUrl(url) ?: return null
+        val profile = entry.profile
+        // Login probe: profile says "look at cookie X"; check the cookie via
+        // the cookieProvider with no endpoint (urls form is enough). If the
+        // bundle contains the named cookie, we're logged in.
+        val loginCookie = profile.hints.loginCookie
+        val loggedIn = if (loginCookie != null) {
+            val bundle = cookieProvider.getCookies(endpoints = emptyList(), extraUrls = profile.origins)
+            bundle.value(loginCookie) != null
+        } else null
+        return buildJsonObject {
+            put("id", profile.id)
+            put("name", profile.name)
+            put("trust", entry.trust.name.lowercase())
+            put("capabilities", buildJsonArray {
+                profile.effectiveCapabilities().forEach { add(JsonPrimitive(it)) }
+            })
+            loginCookie?.let { put("login_cookie_hint", it) }
+            loggedIn?.let { put("logged_in", it) }
+            if (profile.hints.interactiveSelectors.isNotEmpty()) {
+                put("interactive_selectors", buildJsonObject {
+                    profile.hints.interactiveSelectors.forEach { (k, v) -> put(k, v) }
+                })
+            }
+            profile.hints.rateLimit?.let { rl ->
+                put("rate_limit_hint", buildJsonObject {
+                    rl.httpStatus?.let { put("http_status", it) }
+                    rl.bodyPattern?.let { put("body_pattern", it) }
+                    put("map_to", rl.mapTo)
+                })
+            }
+        }
+    }
 
     /**
      * Phase 2 M2.0.2: `wm_eval` is now gated by a separate
@@ -109,6 +155,7 @@ class WebMountPrimitiveTools(
                     .coerceIn(1_000L, 60_000L)
                 val sessionId = input.string("session_id")
                 val handle = if (sessionId != null) pool.acquire(sessionId) else pool.acquireNew()
+                val profile = applicableProfileJson(url)
                 val payload: JsonObject = if (wait == "none") {
                     // Issue load but don't wait. Still routes through SessionHandle
                     // so _loadState is flipped to LOADING synchronously — without
@@ -121,6 +168,7 @@ class WebMountPrimitiveTools(
                         put("url", state.currentUrl ?: url)
                         put("requested_url", url)
                         put("waited", false)
+                        profile?.let { put("applicable_profile", it) }
                     }
                 } else {
                     val state = handle.loadUrl(url, timeoutMs)
@@ -133,6 +181,7 @@ class WebMountPrimitiveTools(
                         put("load_progress", state.progress)
                         put("error", state.error)
                         put("waited", true)
+                        profile?.let { put("applicable_profile", it) }
                     }
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
@@ -189,6 +238,8 @@ class WebMountPrimitiveTools(
                     }
                 val ls = handle.loadState.value
                 val networkSnap = handle.networkLog.snapshot(networkSince, networkMax)
+                val currentUrl = ls.currentUrl
+                val profile = if (currentUrl != null) applicableProfileJson(currentUrl) else null
                 val merged = buildJsonObject {
                     put("session_id", sessionId)
                     put("status", ls.status.wireName)
@@ -200,6 +251,7 @@ class WebMountPrimitiveTools(
                     put("page", bridgePayload)
                     put("network", networkSnap)
                     put("network_total_events", handle.networkLog.totalEvents)
+                    profile?.let { put("applicable_profile", it) }
                 }
                 listOf(UIMessagePart.Text(merged.toString()))
             }
@@ -897,6 +949,12 @@ class WebMountPrimitiveTools(
                         "stations",
                         buildJsonArray {
                             states.forEach { s ->
+                                // Phase 2 M2.1: profile lookup by station id (built-in profiles
+                                // share ids with their native adapters: hackernews, reddit, juejin,
+                                // github, bilibili, zhihu, feishu_docs). Stations without a
+                                // matching profile (e.g. an iCloud-style standalone) still show
+                                // up here with has_profile=false.
+                                val profileEntry = profileRegistry.byId(s.id)
                                 add(buildJsonObject {
                                     put("id", s.id)
                                     put("display_name", s.displayName)
@@ -908,10 +966,20 @@ class WebMountPrimitiveTools(
                                     })
                                     s.message?.let { put("message", it) }
                                     if (s.updatedAtMillis > 0) put("updated_at_ms", s.updatedAtMillis)
-                                    // Phase 2 M2.1 reservations — agents can already key on
-                                    // these without breaking when profiles land.
-                                    put("has_profile", false)
-                                    put("applicable_profile_id", JsonNull)
+                                    put("has_profile", profileEntry != null)
+                                    if (profileEntry != null) {
+                                        put("applicable_profile_id", profileEntry.profile.id)
+                                        put(
+                                            "profile_capabilities",
+                                            buildJsonArray {
+                                                profileEntry.profile.effectiveCapabilities()
+                                                    .forEach { add(JsonPrimitive(it)) }
+                                            }
+                                        )
+                                        put("profile_trust", profileEntry.trust.name.lowercase())
+                                    } else {
+                                        put("applicable_profile_id", JsonNull)
+                                    }
                                 })
                             }
                         }

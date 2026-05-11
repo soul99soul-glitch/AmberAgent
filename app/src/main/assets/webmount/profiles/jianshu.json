@@ -1,0 +1,27 @@
+{
+  "id": "jianshu",
+  "name": "简书",
+  "version": 1,
+  "origins": [
+    "https://www.jianshu.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "remember_user_token",
+    "interactive_selectors": {
+      "article_title": "h1.title, ._2zeTMs",
+      "article_body": "article._2rhmJa, article",
+      "author_name": ".name a"
+    },
+    "rate_limit": {
+      "http_status": 403,
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:remember_user_token",
+    "detect_login",
+    "detect_rate_limit"
+  ],
+  "notes": "Pure profile — no native adapter."
+}

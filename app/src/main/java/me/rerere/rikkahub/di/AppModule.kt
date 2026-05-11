@@ -19,6 +19,8 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
+import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
+import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliTools
@@ -291,7 +293,21 @@ val appModule = module {
     }
 
     single {
-        WebMountPrimitiveTools(pool = get(), activityStore = get(), manager = get())
+        ProfileRegistry(context = get())
+    }
+
+    single {
+        ProfileBridge()
+    }
+
+    single {
+        WebMountPrimitiveTools(
+            pool = get(),
+            activityStore = get(),
+            manager = get(),
+            profileRegistry = get(),
+            cookieProvider = get(),
+        )
     }
 
     single {

@@ -1,0 +1,20 @@
+{
+  "id": "feishu_docs",
+  "name": "飞书云文档",
+  "version": 1,
+  "origins": [
+    "https://www.feishu.cn",
+    "https://feishu.cn",
+    "https://open.feishu.cn",
+    "https://bytedance.feishu.cn"
+  ],
+  "capabilities": ["read", "write"],
+  "hints": {
+    "interactive_selectors": {
+      "doc_title": ".doc-title, .docs-doc-title",
+      "doc_block": ".block, [data-block-id]",
+      "block_text": ".text-editor-inner"
+    }
+  },
+  "notes": "The feishu_docs_* adapter uses official OAuth + REST API and is the primary path for reads/writes. This profile only adds DOM hints for cases where wm_extract is reasoning over the web UI directly."
+}

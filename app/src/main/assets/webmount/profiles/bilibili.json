@@ -1,0 +1,29 @@
+{
+  "id": "bilibili",
+  "name": "Bilibili",
+  "version": 1,
+  "origins": [
+    "https://www.bilibili.com",
+    "https://api.bilibili.com",
+    "https://passport.bilibili.com"
+  ],
+  "capabilities": ["read"],
+  "hints": {
+    "login_cookie": "SESSDATA",
+    "interactive_selectors": {
+      "video_title": "h1.video-title, .video-title-cur",
+      "uploader": ".up-name, a.up-name__text",
+      "danmu_box": ".bpx-player-dm-input"
+    },
+    "rate_limit": {
+      "http_status": 412,
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:SESSDATA",
+    "detect_login",
+    "detect_rate_limit"
+  ],
+  "notes": "WBI signing (for endpoints that require it) is wired in by M2.2 — at that point this profile gains a `scripts.sign_request` entry and `call_page_fn:__amberBiliWbi` permission."
+}
