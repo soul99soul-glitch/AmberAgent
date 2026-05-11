@@ -140,6 +140,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_create", "飞书 新建文档", input) {
                 val token = requireToken(oauth)
@@ -154,28 +155,34 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
     private fun appendBlockTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
         name = "feishu_docs_append_block",
         description = """
-            Append a paragraph of plain text to the end of a 飞书 docx document. Rich block trees
-            (headings, tables, callouts) are out of Phase 1 scope; build text content by calling
-            this multiple times. The agent is responsible for any newlines inside `text`.
+            Append a paragraph of plain text to a 飞书 docx document. `parent_block_id` selects
+            which block to append under — omit it and the tool resolves the document's root
+            (page-level) block automatically by listing blocks once. Rich block trees (headings,
+            tables, callouts) are out of Phase 1 scope; build text content by calling this
+            multiple times. The agent is responsible for any newlines inside `text`.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("document_id", stringProp("Target document id"))
                     put("text", stringProp("Plain text to append as one paragraph"))
+                    put("parent_block_id", stringProp("Parent block id (optional; defaults to document root)"))
                 },
                 required = listOf("document_id", "text"),
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_append_block", "飞书 追加段落", input) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
-                val response = client.appendTextBlock(token, docId, text)
+                val parentBlockId = input.string("parent_block_id")
+                val response = client.appendTextBlock(token, docId, text, parentBlockId)
                 listOf(UIMessagePart.Text(buildJsonObject {
                     put("document_id", docId)
+                    parentBlockId?.let { put("parent_block_id", it) }
                     put("ok", true)
                     put("response", response)
                 }.toString()))

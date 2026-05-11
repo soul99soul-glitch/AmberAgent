@@ -113,13 +113,26 @@ class FeishuDocsClient(
     }
 
     /**
-     * Append a single text block at the end of a document. The agent can call
-     * this repeatedly to build up content; rich block trees (tables, callouts)
-     * are deferred to Phase 2.
+     * Append a single text block as a child of [parentBlockId] (or the document's
+     * root block if null). The agent can call this repeatedly to build up
+     * content; rich block trees (tables, callouts) are deferred to Phase 2.
+     *
+     * 飞书's docx API endpoint is `/documents/<document_id>/blocks/<block_id>/children`
+     * where the second segment is the **parent block id**, not the document id.
+     * When [parentBlockId] is null we resolve the root block id via
+     * GET /documents/<document_id>/blocks?page_size=1 — the first entry is the
+     * page-level root, and using its id is the documented contract.
      */
-    suspend fun appendTextBlock(accessToken: String, documentId: String, text: String): JsonObject {
+    suspend fun appendTextBlock(
+        accessToken: String,
+        documentId: String,
+        text: String,
+        parentBlockId: String? = null,
+    ): JsonObject {
         require(documentId.isNotBlank()) { "document_id is required" }
         require(text.isNotEmpty()) { "text is required" }
+        val resolvedParent = parentBlockId?.takeIf { it.isNotBlank() }
+            ?: resolveRootBlockId(accessToken, documentId)
         // 飞书 docx text-block shape: block_type=2 (text), with text.elements[].text_run.content.
         val block = buildJsonObject {
             put("block_type", 2)
@@ -134,7 +147,7 @@ class FeishuDocsClient(
                 put("style", buildJsonObject {})
             })
         }
-        val response = http.post("$DOCX_BASE/v1/documents/$documentId/blocks/$documentId/children") {
+        val response = http.post("$DOCX_BASE/v1/documents/$documentId/blocks/$resolvedParent/children") {
             applyHeaders(accessToken)
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
@@ -143,6 +156,21 @@ class FeishuDocsClient(
             }.toString())
         }
         return parseFeishu(response, "append block").data ?: buildJsonObject {}
+    }
+
+    /**
+     * Look up the document's root block id by listing its blocks. The first
+     * returned block (parent_id == "") is the page-level root.
+     */
+    private suspend fun resolveRootBlockId(accessToken: String, documentId: String): String {
+        val response = http.get("$DOCX_BASE/v1/documents/$documentId/blocks") {
+            applyHeaders(accessToken)
+            parameter("page_size", 1)
+        }
+        val data = parseFeishu(response, "list blocks").data ?: error("Failed to resolve root block")
+        val first = (data["items"] as? JsonArray)?.firstOrNull() as? JsonObject
+            ?: error("Document has no blocks (unexpected)")
+        return first.s("block_id") ?: error("Root block missing block_id")
     }
 
     suspend fun search(accessToken: String, query: String, count: Int): List<FeishuDocSummary> {

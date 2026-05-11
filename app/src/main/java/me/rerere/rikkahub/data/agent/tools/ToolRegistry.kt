@@ -369,6 +369,14 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
     // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
     // are best taken as JPEG.
     "wm_screenshot" -> 1_200_000
+    // WebMount adapters whose Tool ctor advertises a >80k max_chars cap. Without
+    // these overrides, the registry truncates them at 80k right after the tool
+    // produces the larger payload — pure waste. Cap each at "claimed max +
+    // small overhead for envelope JSON".
+    "feishu_docs_read" -> 220_000
+    "github_file_read" -> 220_000
+    "zhihu_answer_read" -> 90_000
+    "zhihu_question_read" -> 100_000
     else -> DEFAULT_TOOL_OUTPUT_BUDGET_CHARS
 }
 
