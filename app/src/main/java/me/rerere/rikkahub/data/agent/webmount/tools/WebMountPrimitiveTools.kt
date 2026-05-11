@@ -59,18 +59,23 @@ class WebMountPrimitiveTools(
      * no profile matches. Encapsulates the lookup + login-cookie probe so
      * `wm_open` / `wm_state` outputs stay consistent. Shape is intentionally
      * conservative — only [SiteProfile] data the agent might reason over.
+     *
+     * Phase 2 M2.3.1: surfaces `needs_login` and `login_helper` (deep-link
+     * intent + visible login URL) when the profile declares a `login_cookie`
+     * but the cookie is missing. Agent UI renders the helper intent as a
+     * one-tap "Sign in" button.
      */
     private fun applicableProfileJson(url: String): JsonObject? {
         val entry: SiteProfileEntry = profileRegistry.forUrl(url) ?: return null
         val profile = entry.profile
-        // Login probe: profile says "look at cookie X"; check the cookie via
-        // the cookieProvider with no endpoint (urls form is enough). If the
-        // bundle contains the named cookie, we're logged in.
         val loginCookie = profile.hints.loginCookie
         val loggedIn = if (loginCookie != null) {
             val bundle = cookieProvider.getCookies(endpoints = emptyList(), extraUrls = profile.origins)
             bundle.value(loginCookie) != null
         } else null
+        val station = manager.adapterOf(profile.id)
+        val loginUrl = station?.primaryLoginUrl()
+        val needsLogin = loginCookie != null && loggedIn == false
         return buildJsonObject {
             put("id", profile.id)
             put("name", profile.name)
@@ -80,6 +85,15 @@ class WebMountPrimitiveTools(
             })
             loginCookie?.let { put("login_cookie_hint", it) }
             loggedIn?.let { put("logged_in", it) }
+            if (needsLogin) {
+                put("needs_login", true)
+                put("login_helper", buildJsonObject {
+                    put("station_id", profile.id)
+                    put("intent", "amberagent://webmount/login?station=${profile.id}")
+                    loginUrl?.let { put("login_url", it) }
+                    put("label", profile.name)
+                })
+            }
             if (profile.hints.interactiveSelectors.isNotEmpty()) {
                 put("interactive_selectors", buildJsonObject {
                     profile.hints.interactiveSelectors.forEach { (k, v) -> put(k, v) }
@@ -1073,6 +1087,16 @@ class WebMountPrimitiveTools(
                                 // matching profile (e.g. an iCloud-style standalone) still show
                                 // up here with has_profile=false.
                                 val profileEntry = profileRegistry.byId(s.id)
+                                val loginCookie = profileEntry?.profile?.hints?.loginCookie
+                                val loggedIn = if (loginCookie != null) {
+                                    cookieProvider.getCookies(
+                                        endpoints = emptyList(),
+                                        extraUrls = profileEntry.profile.origins,
+                                    ).value(loginCookie) != null
+                                } else null
+                                val station = manager.adapterOf(s.id)
+                                val loginUrl = station?.primaryLoginUrl()
+                                val needsLogin = loginCookie != null && loggedIn == false
                                 add(buildJsonObject {
                                     put("id", s.id)
                                     put("display_name", s.displayName)
@@ -1097,6 +1121,16 @@ class WebMountPrimitiveTools(
                                         put("profile_trust", profileEntry.trust.name.lowercase())
                                     } else {
                                         put("applicable_profile_id", JsonNull)
+                                    }
+                                    loggedIn?.let { put("logged_in", it) }
+                                    if (needsLogin) {
+                                        put("needs_login", true)
+                                        put("login_helper", buildJsonObject {
+                                            put("station_id", s.id)
+                                            put("intent", "amberagent://webmount/login?station=${s.id}")
+                                            loginUrl?.let { put("login_url", it) }
+                                            put("label", s.displayName)
+                                        })
                                     }
                                 })
                             }

@@ -27,7 +27,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import android.app.Activity
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -37,7 +39,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.BubbleChatQuestion
+import me.rerere.hugeicons.stroke.Comment01
+import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.Globe02
+import me.rerere.hugeicons.stroke.Idea
+import me.rerere.hugeicons.stroke.News01
+import me.rerere.hugeicons.stroke.Note01
+import me.rerere.hugeicons.stroke.PlayCircle02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountAuthMethod
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
@@ -46,6 +55,7 @@ import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthProvider
+import me.rerere.rikkahub.data.agent.webmount.login.InlineLoginActivity
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
@@ -205,6 +215,10 @@ fun SettingExperimentalWebMountPage(
                                         busyStations = busyStations - state.id
                                     }
                                 },
+                                onSignIn = signInLauncherFor(
+                                    state = state,
+                                    registry = profileRegistry,
+                                ),
                             )
                             if (index != stationStates.lastIndex) {
                                 ExperimentDivider()
@@ -234,6 +248,7 @@ private fun WebMountStationRow(
     onConfigure: () -> Unit,
     onProbe: () -> Unit,
     onWriteProbe: () -> Unit,
+    onSignIn: (() -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
     val canWriteProbe =
@@ -267,7 +282,9 @@ private fun WebMountStationRow(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
-                    text = state.displayName,
+                    text = stationDisplayNameRes(state.id)
+                        ?.let { stringResource(it) }
+                        ?: state.displayName,
                     style = MaterialTheme.typography.bodyLarge,
                     color = workspace.ink,
                     maxLines = 1,
@@ -306,6 +323,18 @@ private fun WebMountStationRow(
                     primary = true,
                     enabled = !busy,
                     onClick = onConfigure,
+                )
+            }
+            // Phase 2 M2.3.5: surface a "Sign in" action on cookie stations
+            // where login is missing. Opens the InlineLoginActivity for that
+            // station so the user doesn't have to chase the deep link from
+            // an agent tool response.
+            if (onSignIn != null) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.setting_webmount_sign_in),
+                    primary = !hasConfigureTarget,
+                    enabled = !busy,
+                    onClick = onSignIn,
                 )
             }
             ExperimentActionButton(
@@ -532,7 +561,68 @@ private fun OAuthProviderRow(
     }
 }
 
-private fun iconForStation(stationId: String) = HugeIcons.Globe02
+/**
+ * Phase 2 M2.3.5 — return an `onSignIn` handler if this station is cookie-
+ * auth, has a primary login URL, and is currently not signed in. Returns
+ * null otherwise so the "Sign in" button doesn't render.
+ */
+@Composable
+private fun signInLauncherFor(
+    state: WebMountStationState,
+    registry: ProfileRegistry,
+): (() -> Unit)? {
+    val context = LocalContext.current
+    if (WebMountAuthMethod.COOKIE !in state.authMethods) return null
+    val profile = registry.byId(state.id)?.profile ?: return null
+    val loginCookie = profile.hints.loginCookie ?: return null
+    val cookies = android.webkit.CookieManager.getInstance()
+    val loggedIn = profile.origins.any { origin ->
+        cookies.getCookie(origin)
+            ?.split(";")
+            ?.map { it.trim() }
+            ?.any { it.startsWith("$loginCookie=") && it.length > "$loginCookie=".length } == true
+    }
+    if (loggedIn) return null
+    return {
+        val activity = context as? Activity
+        if (activity != null) {
+            activity.startActivity(InlineLoginActivity.newIntent(activity, state.id))
+        }
+    }
+}
+
+/**
+ * Phase 2 M2.3.4 — per-station Compose icons. Built-in station ids map to
+ * topical HugeIcons; unknown stations fall back to the generic Globe02.
+ */
+private fun iconForStation(stationId: String) = when (stationId) {
+    "hackernews" -> HugeIcons.News01
+    "reddit" -> HugeIcons.Comment01
+    "github" -> HugeIcons.Github
+    "bilibili" -> HugeIcons.PlayCircle02
+    "juejin" -> HugeIcons.Idea
+    "zhihu" -> HugeIcons.BubbleChatQuestion
+    "feishu_docs" -> HugeIcons.Note01
+    else -> HugeIcons.Globe02
+}
+
+/**
+ * Phase 2 M2.3.3 — localized display-name resource per station id.
+ * The data layer's [me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter.displayName]
+ * is kept as a static label for non-UI consumers (logs, agent tool output);
+ * the settings UI calls this to render in the user's current locale.
+ */
+@androidx.annotation.StringRes
+private fun stationDisplayNameRes(stationId: String): Int? = when (stationId) {
+    "hackernews" -> R.string.station_hackernews_name
+    "reddit" -> R.string.station_reddit_name
+    "github" -> R.string.station_github_name
+    "bilibili" -> R.string.station_bilibili_name
+    "juejin" -> R.string.station_juejin_name
+    "zhihu" -> R.string.station_zhihu_name
+    "feishu_docs" -> R.string.station_feishu_docs_name
+    else -> null
+}
 
 @Suppress("UNUSED_PARAMETER")
 private fun stationIdKey(stationId: String): Int = R.string.setting_webmount_station_generic_desc

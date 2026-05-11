@@ -1274,6 +1274,7 @@
   <string name="setting_webmount_configure">Configure</string>
   <string name="setting_webmount_probe">Probe</string>
   <string name="setting_webmount_write_probe">Write probe</string>
+  <string name="setting_webmount_sign_in">Sign in</string>
   <string name="setting_webmount_last_updated">Last updated</string>
   <string name="setting_webmount_status_read_write">Read/Write</string>
   <string name="setting_webmount_status_read_only">Read-only</string>
@@ -1329,6 +1330,20 @@
   <string name="setting_webmount_profile_import_dialog_cancel">Cancel</string>
   <string name="setting_webmount_profile_grant_toggle_label">Enable signing/signed-fetch permissions</string>
   <string name="setting_webmount_profile_grant_toggle_hint">User-imported profile — opt in to higher-trust permissions individually.</string>
+  <!-- Inline login (Phase 2 M2.3.2) -->
+  <string name="webmount_inline_login_title">Sign in</string>
+  <string name="webmount_inline_login_done">Done</string>
+  <string name="webmount_inline_login_status_loading">Loading %1$s sign-in page…</string>
+  <string name="webmount_inline_login_status_waiting">Waiting for the \'%1$s\' cookie to appear after sign-in.</string>
+  <string name="webmount_inline_login_status_signed_in">Signed in — %1$s captured. Tap Done to return to the agent.</string>
+  <!-- Per-station localized display names (Phase 2 M2.3.3) -->
+  <string name="station_hackernews_name">Hacker News</string>
+  <string name="station_reddit_name">Reddit</string>
+  <string name="station_github_name">GitHub</string>
+  <string name="station_bilibili_name">Bilibili</string>
+  <string name="station_juejin_name">Juejin</string>
+  <string name="station_zhihu_name">Zhihu</string>
+  <string name="station_feishu_docs_name">Feishu Docs</string>
   <string name="setting_officepro_section">Feishu Office Enhancement</string>
   <string name="setting_officepro_title">Feishu Office Enhancement Mode</string>
   <string name="setting_officepro_desc">Read visible screens, notifications, and usage signals to build a workspace context.</string>

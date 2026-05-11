@@ -792,6 +792,7 @@
   <string name="setting_webmount_configure">配置</string>
   <string name="setting_webmount_probe">探测</string>
   <string name="setting_webmount_write_probe">探测写入</string>
+  <string name="setting_webmount_sign_in">登录</string>
   <string name="setting_webmount_last_updated">最后更新</string>
   <string name="setting_webmount_status_read_write">读写已就绪</string>
   <string name="setting_webmount_status_read_only">仅可读</string>
@@ -847,6 +848,20 @@
   <string name="setting_webmount_profile_import_dialog_cancel">取消</string>
   <string name="setting_webmount_profile_grant_toggle_label">启用签名 / 签名请求权限</string>
   <string name="setting_webmount_profile_grant_toggle_hint">用户导入 Profile —— 高权限项需要逐个手动启用。</string>
+  <!-- Inline login (Phase 2 M2.3.2) -->
+  <string name="webmount_inline_login_title">登录</string>
+  <string name="webmount_inline_login_done">完成</string>
+  <string name="webmount_inline_login_status_loading">正在加载 %1$s 登录页…</string>
+  <string name="webmount_inline_login_status_waiting">等待 \'%1$s\' cookie 在登录后出现。</string>
+  <string name="webmount_inline_login_status_signed_in">已登录 —— 捕获到 %1$s。点完成返回 Agent。</string>
+  <!-- Per-station localized display names (Phase 2 M2.3.3) -->
+  <string name="station_hackernews_name">Hacker News</string>
+  <string name="station_reddit_name">Reddit</string>
+  <string name="station_github_name">GitHub</string>
+  <string name="station_bilibili_name">Bilibili</string>
+  <string name="station_juejin_name">掘金</string>
+  <string name="station_zhihu_name">知乎</string>
+  <string name="station_feishu_docs_name">飞书云文档</string>
   <string name="setting_officepro_section">飞书办公增强模式</string>
   <string name="setting_officepro_title">飞书办公增强模式</string>
   <string name="setting_officepro_desc">读取可见屏幕、通知和使用情况信号，生成 workspace 工作上下文。</string>

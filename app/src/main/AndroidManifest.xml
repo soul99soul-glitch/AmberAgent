@@ -180,6 +180,26 @@
       android:name="com.yalantis.ucrop.UCropActivity"
       android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+    <!-- Phase 2 M2.3.2 — WebMount inline login (cookie-auth stations) -->
+    <activity
+      android:name=".data.agent.webmount.login.InlineLoginActivity"
+      android:configChanges="keyboardHidden|orientation|screenSize"
+      android:exported="true"
+      android:label="@string/webmount_inline_login_title"
+      android:theme="@style/Theme.Rikkahub"
+      android:windowSoftInputMode="adjustResize">
+      <intent-filter android:autoVerify="false">
+        <action android:name="android.intent.action.VIEW" />
+
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+
+        <data
+          android:host="webmount"
+          android:scheme="amberagent" />
+      </intent-filter>
+    </activity>
+
     <receiver
       android:name=".data.agent.AgentNotificationActionReceiver"
       android:exported="false" />
