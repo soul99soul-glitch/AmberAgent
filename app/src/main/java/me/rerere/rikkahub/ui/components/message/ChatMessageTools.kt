@@ -233,7 +233,20 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "vlm_task"
     ) -> HugeIcons.FullScreen
 
-    else -> if (toolName.startsWith("mcp__")) HugeIcons.Package else HugeIcons.Tools
+    else -> when {
+        toolName.startsWith("mcp__") -> HugeIcons.Package
+        // Phase 2 WebMount: primitives + adapter tools use the web/search
+        // icon so they're visually grouped with webview_* tools.
+        toolName.startsWith("wm_") ||
+            toolName.startsWith("hn_") ||
+            toolName.startsWith("reddit_") ||
+            toolName.startsWith("juejin_") ||
+            toolName.startsWith("github_") ||
+            toolName.startsWith("bilibili_") ||
+            toolName.startsWith("zhihu_") ||
+            toolName.startsWith("feishu_docs_") -> HugeIcons.GlobalSearch
+        else -> HugeIcons.Tools
+    }
 }
 
 private fun getToolKind(toolName: String) = when {
@@ -273,6 +286,15 @@ private fun getToolKind(toolName: String) = when {
         toolName == "webview_open" ||
         toolName == "webview_wait_for_load" ||
         toolName == "webview_read" -> AgentToolKind.WEB
+    // Phase 2 WebMount: primitives + adapter tools all live under "网页".
+    toolName.startsWith("wm_") ||
+        toolName.startsWith("hn_") ||
+        toolName.startsWith("reddit_") ||
+        toolName.startsWith("juejin_") ||
+        toolName.startsWith("github_") ||
+        toolName.startsWith("bilibili_") ||
+        toolName.startsWith("zhihu_") ||
+        toolName.startsWith("feishu_docs_") -> AgentToolKind.WEB
     toolName.startsWith("icloud_") -> AgentToolKind.FILE
     toolName == ToolNames.MEMORY -> AgentToolKind.MEMORY
     toolName.startsWith("mcp__") -> AgentToolKind.MCP
@@ -343,7 +365,11 @@ private fun toolKindLabel(kind: AgentToolKind, toolName: String): String = when 
     AgentToolKind.SCREEN -> "屏幕"
     AgentToolKind.WEB -> "网页"
     AgentToolKind.MEMORY -> "记忆"
-    AgentToolKind.GENERIC -> toolName
+    // Generic fallback used to return toolName itself, which produced the
+    // ugly "$toolName · $toolName" duplicate subtitle for any tool not in
+    // one of the categorized buckets. Plain "工具" reads cleaner and the
+    // tool name still shows on the right of the dot.
+    AgentToolKind.GENERIC -> "工具"
 }
 
 @Composable
