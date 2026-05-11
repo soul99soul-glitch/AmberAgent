@@ -37,6 +37,7 @@ class SessionHandle internal constructor(
     internal val webView: WebView,
     internal val jsBridge: JsBridge,
     private val bridgeBootstrapJs: String,
+    val networkLog: NetworkLog = NetworkLog(),
 ) {
     private val _loadState = MutableStateFlow(LoadState.idle())
     val loadState: StateFlow<LoadState> = _loadState.asStateFlow()

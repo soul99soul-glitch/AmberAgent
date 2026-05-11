@@ -128,8 +128,10 @@ class WebMountPrimitiveTools(
         name = "wm_state",
         description = """
             Snapshot the live state of a WebMount session: URL, title, document.readyState, viewport,
-            scroll position, and a tail of console messages. Useful for polling after `wm_open wait="none"`
-            or for checking whether a page has finished loading.
+            scroll position, console message tail, and (since M1.4.4) the per-session network event log.
+            Pass `network_since` = the highest `seq` you've already seen to receive only newer entries;
+            use this to poll for XHR/fetch traffic after wm_click or page navigation. Useful for adapter
+            authors mapping page actions to backend endpoints.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
@@ -137,6 +139,8 @@ class WebMountPrimitiveTools(
                     put("session_id", stringProp("Session id returned by wm_open."))
                     put("include_console", booleanProp("Include recent console messages (default true)."))
                     put("console_tail", integerProp("How many console entries to include. Default 16, max 64."))
+                    put("network_since", integerProp("Return network events with seq > this. Default 0 = include everything in the ring."))
+                    put("network_max", integerProp("Cap on network events returned. Default 50, hard cap 200."))
                 },
                 required = listOf("session_id"),
             )
@@ -148,6 +152,8 @@ class WebMountPrimitiveTools(
                     ?: error("session not found: $sessionId")
                 val includeConsole = input.boolean("include_console") ?: true
                 val consoleTail = (input.long("console_tail") ?: 16L).coerceIn(0L, 64L).toInt()
+                val networkSince = (input.long("network_since") ?: 0L).coerceAtLeast(0L)
+                val networkMax = (input.long("network_max") ?: 50L).coerceIn(0L, 200L).toInt()
                 val args = buildJsonObject {
                     put("include_console", includeConsole)
                     put("console_tail", consoleTail)
@@ -164,6 +170,7 @@ class WebMountPrimitiveTools(
                         }
                     }
                 val ls = handle.loadState.value
+                val networkSnap = handle.networkLog.snapshot(networkSince, networkMax)
                 val merged = buildJsonObject {
                     put("session_id", sessionId)
                     put("status", ls.status.wireName)
@@ -173,6 +180,8 @@ class WebMountPrimitiveTools(
                     put("error", ls.error)
                     put("updated_at_ms", ls.updatedAtMs)
                     put("page", bridgePayload)
+                    put("network", networkSnap)
+                    put("network_total_events", handle.networkLog.totalEvents)
                 }
                 listOf(UIMessagePart.Text(merged.toString()))
             }

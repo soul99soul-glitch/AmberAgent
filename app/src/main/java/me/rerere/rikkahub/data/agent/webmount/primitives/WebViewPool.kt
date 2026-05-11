@@ -140,12 +140,14 @@ class WebViewPool(
             // size doesn't matter — the WebView is never attached to a window.
             layout(0, 0, VIRTUAL_VIEWPORT_W, VIRTUAL_VIEWPORT_H)
         }
-        val jsBridge = JsBridge(sessionId)
+        val networkLog = NetworkLog()
+        val jsBridge = JsBridge(sessionId, NetworkLogObserver(networkLog))
         val handle = SessionHandle(
             sessionId = sessionId,
             webView = webView,
             jsBridge = jsBridge,
             bridgeBootstrapJs = bridgeBootstrapJs,
+            networkLog = networkLog,
         )
         webView.addJavascriptInterface(jsBridge, "AmberWM")
         webView.webViewClient = WebMountWebViewClient(handle)

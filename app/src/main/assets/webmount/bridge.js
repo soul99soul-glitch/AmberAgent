@@ -440,6 +440,131 @@
     return payload;
   }
 
+  // --------------------------------------------------------------- network
+
+  // Monkey-patch XMLHttpRequest and fetch so the agent can replay POST bodies
+  // and inspect response payloads — Android's WebViewClient.shouldInterceptRequest
+  // can't see POST bodies, so we capture them client-side. Best effort: the
+  // shim is injected on every page load via reinjectBridge, but page bundle JS
+  // may fire requests *before* our re-injection — those early requests are
+  // missed. Documented in the M1.4 plan.
+  if (!window.__amberWmNetShimInstalled) {
+    window.__amberWmNetShimInstalled = true;
+    var netSeq = { n: 0 };
+
+    function bodyToString(body) {
+      if (body == null) return null;
+      try {
+        if (typeof body === 'string') return body.length > 256000 ? (body.substring(0, 256000) + '…[truncated]') : body;
+        if (body instanceof FormData) {
+          var entries = [];
+          // body.entries() may be unavailable in some old WebViews — guard.
+          if (typeof body.entries === 'function') {
+            try {
+              var it = body.entries();
+              while (true) {
+                var step = it.next();
+                if (step.done) break;
+                entries.push([String(step.value[0]), step.value[1] instanceof Blob ? ('<blob ' + step.value[1].size + ' bytes>') : String(step.value[1])]);
+                if (entries.length >= 100) break;
+              }
+            } catch (_) { /* ignore */ }
+          }
+          return JSON.stringify({ __form: entries });
+        }
+        if (body instanceof Blob) return '<blob ' + body.size + ' bytes>';
+        if (body instanceof ArrayBuffer) return '<arraybuffer ' + body.byteLength + ' bytes>';
+        if (body.toString) return body.toString();
+      } catch (_) { /* ignore */ }
+      return '<unserializable>';
+    }
+
+    function trimResponse(t) {
+      if (t == null) return null;
+      return t.length > 65536 ? (t.substring(0, 65536) + '…[truncated]') : t;
+    }
+
+    function sendNet(evt) {
+      try {
+        AmberWM.onNetworkEvent(JSON.stringify(evt));
+      } catch (e) { /* bridge gone — ignore */ }
+    }
+
+    // ---- XHR ----
+    var XHR_OPEN = XMLHttpRequest.prototype.open;
+    var XHR_SEND = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      this.__amberWm = {
+        id: ++netSeq.n,
+        method: String(method).toUpperCase(),
+        url: String(url),
+        ts: Date.now(),
+      };
+      return XHR_OPEN.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function (body) {
+      var meta = this.__amberWm;
+      if (meta) {
+        meta.body_preview = bodyToString(body);
+        sendNet({
+          type: 'xhr_send', req_id: meta.id, method: meta.method, url: meta.url,
+          ts: meta.ts, body_preview: meta.body_preview,
+        });
+        var self = this;
+        this.addEventListener('loadend', function () {
+          sendNet({
+            type: 'xhr_done', req_id: meta.id, method: meta.method, url: meta.url,
+            status: self.status, response_preview: trimResponse(self.responseText),
+            response_chars: self.responseText ? self.responseText.length : 0,
+            ts: Date.now(),
+          });
+        });
+      }
+      return XHR_SEND.apply(this, arguments);
+    };
+
+    // ---- fetch ----
+    var ORIG_FETCH = window.fetch;
+    if (typeof ORIG_FETCH === 'function') {
+      window.fetch = function (input, init) {
+        var reqId = ++netSeq.n;
+        var url = (typeof input === 'string') ? input : (input && input.url) || '';
+        var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        var body = init && init.body ? bodyToString(init.body) : null;
+        sendNet({
+          type: 'fetch_send', req_id: reqId, method: method, url: String(url),
+          body_preview: body, ts: Date.now(),
+        });
+        return ORIG_FETCH.apply(this, arguments).then(function (resp) {
+          // Tee the response so the page still gets it.
+          var clone;
+          try { clone = resp.clone(); } catch (_) { clone = null; }
+          if (clone) {
+            clone.text().then(function (t) {
+              sendNet({
+                type: 'fetch_done', req_id: reqId, method: method, url: String(url),
+                status: resp.status, response_preview: trimResponse(t),
+                response_chars: t ? t.length : 0, ts: Date.now(),
+              });
+            }).catch(function () { /* body already consumed; ignore */ });
+          } else {
+            sendNet({
+              type: 'fetch_done', req_id: reqId, method: method, url: String(url),
+              status: resp.status, response_preview: null, response_chars: 0, ts: Date.now(),
+            });
+          }
+          return resp;
+        }, function (err) {
+          sendNet({
+            type: 'fetch_error', req_id: reqId, method: method, url: String(url),
+            error: String(err && err.message || err), ts: Date.now(),
+          });
+          throw err;
+        });
+      };
+    }
+  }
+
   // --------------------------------------------------------------- navigation
 
   function performScroll(args) {
