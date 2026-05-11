@@ -16,7 +16,6 @@ import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
-import me.rerere.rikkahub.data.agent.webmount.adapters.icloud.IcloudWebMountAdapter
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
@@ -118,10 +117,10 @@ val appModule = module {
         ICloudDriveTools(get(), get())
     }
 
-    // WebMount Stations (experimental, Phase 1 M1.1).
-    // iCloud is wrapped here as the first station; existing ICloudDrive*
-    // classes above keep owning iCloud-specific state and tools — this layer
-    // surfaces a generalized view for the unified panel.
+    // WebMount Stations (experimental, Phase 1).
+    // Independent from the iCloud experimental feature above — iCloud keeps
+    // its own standalone panel. WebMount is a separate framework that will
+    // host the new sites added in M1.6 (Feishu Docs, GitHub, Bilibili, etc.).
     single {
         WebMountCookieProvider()
     }
@@ -131,16 +130,7 @@ val appModule = module {
     }
 
     single {
-        IcloudWebMountAdapter(
-            driveManager = get(),
-            appScope = get(),
-        )
-    }
-
-    single {
-        val adapters: List<WebMountAdapter> = listOf(
-            get<IcloudWebMountAdapter>(),
-        )
+        val adapters: List<WebMountAdapter> = emptyList() // populated in M1.6
         WebMountManager(
             context = get(),
             adapters = adapters,

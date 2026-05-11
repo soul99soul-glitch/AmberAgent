@@ -806,7 +806,6 @@
   <string name="setting_webmount_auth_cookie">Cookie 登录</string>
   <string name="setting_webmount_auth_oauth">OAuth</string>
   <string name="setting_webmount_auth_anonymous">匿名</string>
-  <string name="setting_webmount_station_icloud_desc">Apple iCloud Drive · 用于 Obsidian / 笔记 / 文档</string>
   <string name="setting_webmount_station_generic_desc">Web 站点</string>
   <string name="setting_officepro_section">飞书办公增强模式</string>
   <string name="setting_officepro_title">飞书办公增强模式</string>

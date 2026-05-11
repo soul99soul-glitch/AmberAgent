@@ -32,9 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Globe02
-import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountAuthMethod
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
@@ -122,14 +120,14 @@ fun SettingExperimentalWebMountPage(
 }
 
 /**
- * Detail page for the station, if one exists. Wrapping adapters reuse their
- * legacy detail pages so users can keep configuring adapter-specific things
- * (iCloud vault path, ...).
+ * Detail page for a station, if it has one. Returns null for stations whose
+ * configuration is fully inline in the station card (login + probe buttons).
+ *
+ * Phase 1 M1.6 onwards: sites with extra config (e.g. Feishu app credentials,
+ * GitHub default org) get their own per-station detail page added here.
  */
-private fun configureFor(stationId: String): Screen? = when (stationId) {
-    "icloud" -> Screen.SettingExperimentalICloud
-    else -> null
-}
+@Suppress("UNUSED_PARAMETER")
+private fun configureFor(stationId: String): me.rerere.rikkahub.Screen? = null
 
 @Composable
 private fun WebMountStationRow(
@@ -306,15 +304,11 @@ private fun WebMountAuthPill(method: WebMountAuthMethod) {
     }
 }
 
-private fun iconForStation(stationId: String) = when (stationId) {
-    "icloud" -> HugeIcons.ServerStack01
-    else -> HugeIcons.Globe02
-}
+@Suppress("UNUSED_PARAMETER")
+private fun iconForStation(stationId: String) = HugeIcons.Globe02
 
-private fun stationIdKey(stationId: String): Int = when (stationId) {
-    "icloud" -> R.string.setting_webmount_station_icloud_desc
-    else -> R.string.setting_webmount_station_generic_desc
-}
+@Suppress("UNUSED_PARAMETER")
+private fun stationIdKey(stationId: String): Int = R.string.setting_webmount_station_generic_desc
 
 private fun formatTimestamp(ms: Long): String =
     if (ms <= 0L) {

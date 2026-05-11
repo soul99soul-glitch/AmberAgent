@@ -1284,7 +1284,6 @@
   <string name="setting_webmount_auth_cookie">cookie login</string>
   <string name="setting_webmount_auth_oauth">OAuth</string>
   <string name="setting_webmount_auth_anonymous">anonymous</string>
-  <string name="setting_webmount_station_icloud_desc">Apple iCloud Drive · used for Obsidian / Notes / Docs</string>
   <string name="setting_webmount_station_generic_desc">Web station</string>
   <string name="setting_officepro_section">Feishu Office Enhancement</string>
   <string name="setting_officepro_title">Feishu Office Enhancement Mode</string>
