@@ -20,6 +20,53 @@ class SkillPathsTest {
     }
 
     @Test
+    fun `ensure description replaces pipe placeholder from body`() {
+        val content = """
+            ---
+            name: get-notes
+            description: |
+            ---
+
+            Use when the user wants to capture or retrieve notes from a conversation.
+        """.trimIndent()
+
+        val updated = SkillFrontmatterParser.ensureDescription(content, "get-notes")
+        val frontmatter = SkillFrontmatterParser.parse(updated)
+
+        assertEquals(
+            "Use when the user wants to capture or retrieve notes from a conversation.",
+            frontmatter["description"],
+        )
+    }
+
+    @Test
+    fun `ensure description inserts fallback for empty frontmatter description`() {
+        val content = """
+            ---
+            name: 高德地图
+            description: "..."
+            ---
+
+        """.trimIndent()
+
+        val updated = SkillFrontmatterParser.ensureDescription(content, "高德地图")
+        val frontmatter = SkillFrontmatterParser.parse(updated)
+
+        assertEquals("用于处理「高德地图」相关任务。", frontmatter["description"])
+    }
+
+    @Test
+    fun `ensure description adds frontmatter when missing`() {
+        val content = "用于查询地图路线、地点搜索和导航建议。"
+
+        val updated = SkillFrontmatterParser.ensureDescription(content, "高德地图")
+        val frontmatter = SkillFrontmatterParser.parse(updated)
+
+        assertEquals("高德地图", frontmatter["name"])
+        assertEquals("用于查询地图路线、地点搜索和导航建议。", frontmatter["description"])
+    }
+
+    @Test
     fun `resolve skill dir rejects traversal and nested names`() {
         val skillsRoot = Files.createTempDirectory("skills-root").toFile()
 

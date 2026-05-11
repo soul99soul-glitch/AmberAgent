@@ -400,7 +400,10 @@ fun MarkdownBlock(
                 ) {
                     data.astTree.children.fastForEach { child ->
                         MarkdownNode(
-                            node = child, content = data.preprocessed, onClickCitation = onClickCitation
+                            node = child,
+                            content = data.preprocessed,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClickCitation = onClickCitation,
                         )
                     }
                 }
@@ -489,7 +492,10 @@ private fun MarkdownNode(
                 else -> 8.dp
             }
             ProvideTextStyle(value = style) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FlowRow(
+                    modifier = modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     node.children.fastForEach { node ->
                         if (node.type == MarkdownTokenTypes.ATX_CONTENT) {
                             Paragraph(
@@ -777,7 +783,9 @@ private fun UnorderedListNode(
     }
 
     Column(
-        modifier = modifier.padding(start = (level * 8).dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = (level * 8).dp)
     ) {
         node.children.fastForEach { child ->
             if (child.type == MarkdownElementTypes.LIST_ITEM) {
@@ -801,7 +809,11 @@ private fun OrderedListNode(
     onClickCitation: (String) -> Unit = {},
     level: Int = 0
 ) {
-    Column(modifier.padding(start = (level * 8).dp)) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = (level * 8).dp)
+    ) {
         var index = 1
         node.children.fastForEach { child ->
             if (child.type == MarkdownElementTypes.LIST_ITEM) {
@@ -824,18 +836,23 @@ private fun OrderedListNode(
 private fun ListItemNode(
     node: ASTNode, content: String, bulletText: String, onClickCitation: (String) -> Unit = {}, level: Int
 ) {
-    Column {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
         // 分离列表项的直接内容和嵌套列表
         val (directContent, nestedLists) = separateContentAndLists(node)
         // directContent 渲染处理
         if (directContent.isNotEmpty()) {
-            Row {
+            Row(
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(
                     text = bulletText,
                     modifier = Modifier.alignByBaseline(),
                     color = MaterialTheme.colorScheme.primary,
                 )
                 FlowRow(
+                    modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -843,6 +860,7 @@ private fun ListItemNode(
                         MarkdownNode(
                             node = contentChild,
                             content = content,
+                            modifier = Modifier.fillMaxWidth(),
                             onClickCitation = onClickCitation,
                             listLevel = level,
                         )
@@ -887,7 +905,7 @@ private fun Paragraph(
 ) {
     // dumpAst(node, content)
     if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
-        FlowRow(modifier = modifier) {
+        FlowRow(modifier = modifier.fillMaxWidth()) {
             node.children.fastForEach { child ->
                 MarkdownNode(
                     node = child, content = content, onClickCitation = onClickCitation
@@ -909,10 +927,12 @@ private fun Paragraph(
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
     FlowRow(
-        modifier = modifier.then(
-            if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
-            else Modifier
-        )
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
+                else Modifier
+            )
     ) {
         val annotatedString = remember(content, enableLatexRendering) {
             buildAnnotatedString {
@@ -933,7 +953,7 @@ private fun Paragraph(
         }
         Text(
             text = annotatedString,
-            modifier = Modifier,
+            modifier = Modifier.fillMaxWidth(),
             inlineContent = inlineContents,
             softWrap = true,
             overflow = TextOverflow.Visible,

@@ -421,9 +421,9 @@ private fun buildOptimizeSkillPrompt(skillName: String): String = """
 3. 列出问题清单：
    - 桌面端假设：CLI 命令（npx/pip/curl/cd）、键盘快捷键提示（"← → 翻页"/"F 全屏"/"S 演讲者模式"等）、浏览器/桌面 app 打开预览（open xxx / 在浏览器打开 / .pptx 文件）、生成 .pptx / .html / .pdf 文件作为最终交付
    - 不存在的子文件链接：references/、scripts/、assets/ 下的 markdown link，但设备上很可能只有 SKILL.md
-   - frontmatter 缺失或不规范：name、description（含触发关键词 / "when to use" 描述）
+   - frontmatter 缺失或不规范：name、description（必须是可读的触发条件 / "when to use" 描述，不能为空、不能是 |/｜/.../TODO 占位）
    - 冗余文件提示：README / CHANGELOG / INSTALLATION_GUIDE
-4. 输出规整化后的完整 SKILL.md 内容，用 ```markdown 代码块包好
+4. 输出规整化后的完整 SKILL.md 内容，用 ```markdown 代码块包好；frontmatter 必须包含非占位的 description，格式类似 `description: "Use when ..."` 或 `description: "用于..."`
 5. 不要调用任何写文件工具，只输出建议供我审阅、由我手动复制保存
 
 每条问题都标记为「已修复」「保留原状」「无此问题」之一，方便我对照。
@@ -440,7 +440,7 @@ $list
 1. 先调用一次 use_skill('skill-creator')，学习 AmberAgent 官方 skill 范式
 2. 对清单里每个 skill 依次处理：
    a. use_skill('<name>') 读取 SKILL.md
-   b. 给出问题清单 + 规整化后的完整 SKILL.md（```markdown 代码块）
+   b. 给出问题清单 + 规整化后的完整 SKILL.md（```markdown 代码块）；如果 description 缺失或是 |/｜/.../TODO，占位必须自动补成一句可读的触发条件描述
    c. 用「### Skill: <name>」作为该 skill 的分节标题
 3. 不要调用任何写文件工具，只输出建议给我审阅
 4. 如果某个 skill 已经 mobile-friendly 无需变更，直接写「无需变更」并简述理由

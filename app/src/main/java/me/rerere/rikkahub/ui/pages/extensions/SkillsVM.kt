@@ -119,6 +119,7 @@ class SkillsVM(
     }
 
     private suspend fun refreshSkills() {
+        skillManager.repairMissingDescriptions()
         _skills.value = skillManager.listSkills()
         _skillIssues.value = skillManager.listSkillIssues()
     }
