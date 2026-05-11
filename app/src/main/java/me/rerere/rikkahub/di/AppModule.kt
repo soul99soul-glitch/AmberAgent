@@ -22,6 +22,9 @@ import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
 import me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs.FeishuDocsAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs.FeishuDocsClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs.FeishuDocsTools
+import me.rerere.rikkahub.data.agent.webmount.adapters.github.GithubAdapter
+import me.rerere.rikkahub.data.agent.webmount.adapters.github.GithubClient
+import me.rerere.rikkahub.data.agent.webmount.adapters.github.GithubTools
 import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinTools
@@ -210,12 +213,25 @@ val appModule = module {
     }
 
     single {
+        GithubClient(http = get())
+    }
+
+    single {
+        GithubTools(client = get())
+    }
+
+    single {
+        GithubAdapter(tools = get(), oauthStore = get())
+    }
+
+    single {
         val adapters: List<WebMountAdapter> = listOf(
             get<HnAdapter>(),
             get<RedditAdapter>(),
             get<JuejinAdapter>(),
             get<FeishuDocsAdapter>(),
-            // M1.6 will append: GitHub, Bilibili, Zhihu
+            get<GithubAdapter>(),
+            // M1.6 will append: Bilibili, Zhihu
         )
         WebMountManager(
             context = get(),
