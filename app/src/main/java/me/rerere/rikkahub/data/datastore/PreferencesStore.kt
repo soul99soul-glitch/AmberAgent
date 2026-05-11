@@ -663,6 +663,8 @@ data class GenerativeUiSetting(
     val enableActions: Boolean = true,
     val enableStructuredRenderers: Boolean = true,
     val enableInteractiveCharts: Boolean = true,
+    val slidesMagazineFontPack: String = "source-han-serif-sc-regular",
+    val slidesSwissFontPack: String = "source-han-sans-sc-regular",
 )
 
 @Serializable

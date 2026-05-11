@@ -14,6 +14,7 @@ import android.os.Build
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -69,6 +70,7 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToasterState
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CompletableDeferred
@@ -85,6 +87,7 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
 import me.rerere.rikkahub.data.ai.generative.VChartSpecValidator
 import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
+import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -93,6 +96,7 @@ import me.rerere.rikkahub.utils.getActivity
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toCssHex
 import org.json.JSONObject
+import org.koin.compose.koinInject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -134,8 +138,15 @@ fun GenerativeWidgetCard(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val settings = LocalSettings.current.agentRuntime.generativeUi
+    val fontRepository = koinInject<SlidesFontRepository>()
+    val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
     val sanitized = remember(widget.widgetCode, settings) {
         GenerativeWidgetSanitizer.sanitize(widget.widgetCode, settings)
+    }
+    val slidesFontHint = remember(widget.renderer, widget.specJson, settings, fontStates) {
+        widget.specJson
+            ?.takeIf { widget.renderer == "slides" }
+            ?.let { fontRepository.resolveSlidesFontHint(it, settings) }
     }
     val widgetKey = remember(widget.title, widget.widgetCode.take(120)) {
         listOfNotNull(
@@ -181,6 +192,26 @@ fun GenerativeWidgetCard(
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            slidesFontHint?.let { hint ->
+                Surface(
+                    onClick = {
+                        toaster.show(
+                            "当前预览使用系统字体，可在 Slides 字体资源中下载 ${
+                                hint.pack?.displayName ?: hint.requestedPackId
+                            }",
+                        )
+                    },
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Text(
+                        text = "使用系统字体 · 下载字体",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
             when (sanitized.status) {
                 GenerativeWidgetSanitizeStatus.READY -> {
@@ -417,6 +448,7 @@ fun ExpandedGenerativeWidgetDialog(
                             RichSandboxWebView(
                                 renderer = widget.renderer,
                                 specJson = widget.specJson,
+                                setting = setting,
                                 modifier = Modifier.align(Alignment.TopCenter),
                                 maxHeightDp = maxHeight.value.toInt().coerceAtLeast(240),
                                 onWebViewReady = { webView = it },
@@ -815,14 +847,15 @@ private fun createSlidesDeckArchive(
         ?.filter { it.isFile && now - it.lastModified() > 2 * 24 * 60 * 60 * 1000L }
         ?.forEach { it.delete() }
     val archive = File(dir, "AmberAgent_${safeTitle}_$now.zip")
-    val normalizedSlides = VChartSpecValidator.normalizeSlidesSpecJson(specJson)
+    val normalizedSlides = VChartSpecValidator.normalizeSlidesDeckSpecJson(specJson)
         ?: error("幻灯片数据格式不正确，无法分享")
     val validation = VChartSpecValidator.validateSlidesSpec(normalizedSlides)
     if (!validation.valid) {
         error("幻灯片数据不安全或过大，无法分享: ${validation.reason.orEmpty()}")
     }
-    val prettySlides = org.json.JSONArray(normalizedSlides).toString(2)
-    val slideCount = org.json.JSONArray(normalizedSlides).length()
+    val deckObject = JSONObject(normalizedSlides)
+    val prettySlides = deckObject.toString(2)
+    val slideCount = deckObject.getJSONArray("slides").length()
     ZipOutputStream(FileOutputStream(archive)).use { zip ->
         zip.writeTextEntry(
             name = "manifest.json",
@@ -834,15 +867,18 @@ private fun createSlidesDeckArchive(
                 .toString(2),
         )
         zip.writeTextEntry("slides.json", prettySlides)
-        zip.writeTextEntry("index.html", buildStandaloneSlidesHtml(title, normalizedSlides))
+        zip.writeTextEntry("theme.json", buildSlidesThemeJson(deckObject))
+        zip.writeTextEntry("index.html", buildStandaloneSlidesHtml(context, title, normalizedSlides))
         zip.writeTextEntry(
             "README.md",
             """
             # ${title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides"}
 
             - `index.html`: 离线预览页面，解压后用浏览器打开。
-            - `slides.json`: AmberAgent slides renderer 使用的原始结构化内容。
+            - `slides.json`: AmberAgent slides renderer 使用的原始结构化内容，包含 style/accent/fontPack。
+            - `theme.json`: 当前 deck 的主题与字体 fallback 信息。
             - `cover.svg`: 如果存在，是聊天内联预览封面。
+            - 默认不内嵌大型中文字体；离线预览会使用系统 fallback 字体。
             """.trimIndent(),
         )
         val cover = coverHtml.trim()
@@ -853,70 +889,37 @@ private fun createSlidesDeckArchive(
     return archive
 }
 
+private fun buildSlidesThemeJson(deckObject: JSONObject): String =
+    JSONObject()
+        .put("style", deckObject.optString("style", "system"))
+        .put("accent", deckObject.optString("accent", "#1F5EFF"))
+        .put("fontPack", deckObject.optString("fontPack", ""))
+        .put("fontEmbedding", "not_included_large_cjk_fonts_use_system_fallback")
+        .toString(2)
+
 private fun ZipOutputStream.writeTextEntry(name: String, text: String) {
     putNextEntry(ZipEntry(name))
     write(text.toByteArray(Charsets.UTF_8))
     closeEntry()
 }
 
-private fun buildStandaloneSlidesHtml(title: String?, specJson: String): String {
+private fun buildStandaloneSlidesHtml(context: Context, title: String?, specJson: String): String {
     val safeTitle = htmlEscape(title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
     val slidesLiteral = JSONObject.quote(specJson.toScriptSafeJsonString())
-    return """
-        <!doctype html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-        <title>$safeTitle</title>
-        <style>
-        :root{--accent:#002FA7;--serif-zh:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;--serif-en:"Playfair Display","Source Serif 4",Georgia,serif;--sans:"Inter","Helvetica Neue","Helvetica","Roboto",system-ui,-apple-system,sans-serif;--sans-zh:"PingFang SC","Noto Sans SC","Microsoft YaHei UI",sans-serif;--mono:"JetBrains Mono","IBM Plex Mono","SF Mono",ui-monospace,monospace}
-        *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:var(--sans),var(--sans-zh);background:#f6f7f9;color:#111827}
-        .deck{height:100%;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
-        .slide{flex:0 0 100%;height:100%;padding:34px 24px 86px;overflow-y:auto;scroll-snap-align:start;background:#fff;position:relative}
-        h1{font-size:30px;line-height:1.15;margin:0 0 16px}h2{font-size:17px;color:#64748b;margin:0 0 22px;font-weight:500}
-        li,p{font-size:17px;line-height:1.65}ul{padding-left:22px}.notes{margin-top:24px;padding-top:14px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:13px}
-        .kicker{font-family:var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-size:12px;margin:0 0 14px}
-        .slide.magazine{background:#f1efea;color:#18181a}.slide.magazine h1{font-family:var(--serif-zh);font-weight:700}.slide.magazine h2{font-family:var(--serif-zh)}.slide.magazine li,.slide.magazine p{font-family:var(--sans-zh)}
-        .slide.swiss{background:#fafaf8;color:#0a0a0a}.slide.swiss:before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(10,10,10,.15) 1px,transparent 1px);background-size:12px 12px;opacity:.26;pointer-events:none}.slide.swiss>*{position:relative}.slide.swiss h1{font-family:var(--sans),var(--sans-zh);font-size:34px;font-weight:300;letter-spacing:-.025em;line-height:.98}.slide.swiss h1:before{content:"";display:block;width:54px;height:4px;background:var(--accent);margin-bottom:18px}.slide.swiss li::marker{color:var(--accent)}
-        .nav{position:fixed;left:0;right:0;bottom:18px;display:flex;justify-content:center;gap:10px;align-items:center}
-        button,.count{border:0;border-radius:999px;background:rgba(17,24,39,.76);color:white;padding:10px 16px;font-size:14px}.count{min-width:72px;text-align:center}
-        </style>
-        </head>
-        <body>
-        <main id="deck" class="deck"></main>
-        <nav class="nav"><button id="prev">‹</button><span id="count" class="count">1 / 1</span><button id="next">›</button></nav>
-        <script>
-        const slides = JSON.parse($slidesLiteral);
-        const deck = document.getElementById('deck');
-        const count = document.getElementById('count');
-        let index = 0;
-        function esc(s){return String(s ?? '').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-        function styleOf(s){const v=String(s.style||s.theme||'').toLowerCase();return v.includes('swiss')||v.includes('瑞士')?'swiss':(v.includes('magazine')||v.includes('杂志')||v.includes('serif')?'magazine':'');}
-        function safeColor(v){v=String(v||'').trim();return /^#[0-9a-fA-F]{3,8}${'$'}/.test(v)?v:null;}
-        function renderContent(c){
-          if(Array.isArray(c)) return '<ul>'+c.map(x=>'<li>'+esc(typeof x==='object'?JSON.stringify(x):x)+'</li>').join('')+'</ul>';
-          if(c && typeof c==='object') return '<pre>'+esc(JSON.stringify(c,null,2))+'</pre>';
-          return c ? '<p>'+esc(c)+'</p>' : '';
-        }
-        slides.forEach((raw,i)=>{
-          const s=(raw && typeof raw==='object') ? raw : {title:String(raw ?? '')};
-          const el=document.createElement('section'); el.className='slide '+styleOf(s);
-          const accent=safeColor(s.accent||s.accentColor||s.color); if(accent) el.style.setProperty('--accent',accent);
-          el.innerHTML=(s.kicker?'<p class="kicker">'+esc(s.kicker)+'</p>':'')+
-            '<h1>'+esc(s.title || ('Slide '+(i+1)))+'</h1>'+(s.subtitle?'<h2>'+esc(s.subtitle)+'</h2>':'')+
-            renderContent(s.content || s.body || s.items || s.bullets || s.text || '')+
-            (s.notes?'<p class="notes">'+esc(s.notes)+'</p>':'');
-          deck.appendChild(el);
-        });
-        function update(){index=Math.max(0,Math.min(slides.length-1,Math.round(deck.scrollLeft/deck.clientWidth)));count.textContent=(index+1)+' / '+slides.length;}
-        function jump(delta){deck.scrollTo({left:(index+delta)*deck.clientWidth,behavior:'smooth'});}
-        document.getElementById('prev').onclick=()=>jump(-1);document.getElementById('next').onclick=()=>jump(1);
-        deck.addEventListener('scroll',()=>requestAnimationFrame(update),{passive:true});update();
-        </script>
-        </body>
-        </html>
-    """.trimIndent()
+    val sandbox = context.assets.open("generative-libs/slides-sandbox.html")
+        .use { it.reader(Charsets.UTF_8).readText() }
+    return sandbox
+        .replace("<head>", "<head>\n<title>$safeTitle</title>")
+        .replace(
+            "</body>",
+            """
+            <script>
+            window.__setAmberFontCss && window.__setAmberFontCss("");
+            window.__renderSlides && window.__renderSlides($slidesLiteral);
+            </script>
+            </body>
+            """.trimIndent(),
+        )
 }
 
 private fun safeArchiveName(value: String?): String =
@@ -1034,12 +1037,14 @@ private fun isSafeExternalWidgetUrl(url: String): Boolean {
 private fun RichSandboxWebView(
     renderer: String,
     specJson: String,
+    setting: GenerativeUiSetting,
     modifier: Modifier = Modifier,
     maxHeightDp: Int = 720,
     onWebViewReady: (WebView?) -> Unit = {},
 ) {
+    val fontRepository = koinInject<SlidesFontRepository>()
     val normalizedSpecJson = remember(specJson, renderer) {
-        if (renderer == "slides") VChartSpecValidator.normalizeSlidesSpecJson(specJson) else specJson
+        if (renderer == "slides") VChartSpecValidator.normalizeSlidesDeckSpecJson(specJson) else specJson
     }
     val validated = remember(normalizedSpecJson, renderer) {
         when (renderer) {
@@ -1054,6 +1059,9 @@ private fun RichSandboxWebView(
     // Strip U+2028/U+2029 (line/paragraph separators) — JSON allows them,
     // but evaluateJavascript treats them as line terminators and silently fails.
     val safeJson = normalizedSpecJson.orEmpty().replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    val fontCss = remember(safeJson, renderer, setting) {
+        if (renderer == "slides") fontRepository.buildSlidesFontCss(safeJson, setting) else ""
+    }
     val animatedHeight by animateDpAsState(
         targetValue = heightDp.coerceIn(240, maxHeightDp).dp,
         animationSpec = tween(durationMillis = 200),
@@ -1107,7 +1115,7 @@ private fun RichSandboxWebView(
                     settings.loadWithOverviewMode = renderer != "slides"
                     settings.javaScriptCanOpenWindowsAutomatically = false
                     settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                    settings.blockNetworkLoads = true
+                    settings.blockNetworkLoads = renderer != "slides"
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     settings.setSupportMultipleWindows(false)
                     addJavascriptInterface(
@@ -1127,9 +1135,24 @@ private fun RichSandboxWebView(
                             request: WebResourceRequest?,
                         ): Boolean = true
 
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): WebResourceResponse? {
+                            fontRepository.interceptFontRequest(request)?.let { return it }
+                            val scheme = request?.url?.scheme?.lowercase()
+                            if (scheme == "http" || scheme == "https") {
+                                return WebResourceResponse("text/plain", "utf-8", "".byteInputStream())
+                            }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             view?.evaluateJavascript(
-                                "window.$renderFunction(${JSONObject.quote(safeJson)});",
+                                """
+                                window.__setAmberFontCss && window.__setAmberFontCss(${JSONObject.quote(fontCss)});
+                                window.$renderFunction(${JSONObject.quote(safeJson)});
+                                """.trimIndent(),
                                 null,
                             )
                         }

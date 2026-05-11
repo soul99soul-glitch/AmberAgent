@@ -188,7 +188,7 @@ class GenerativeWidgetParserTest {
         val segments = GenerativeWidgetParser.parse(
             """
             ```show-widget
-            {"title":"Deck","renderer":"slides","spec":{"slides":[{"title":"A","content":["B"]}]}}
+            {"title":"Deck","renderer":"slides","spec":{"schemaVersion":2,"style":"magazine","accent":"#123456","fontPack":"source-han-serif-sc-regular","slides":[{"layout":"cover","title":"A","content":["B"]}]}}
             ```
             """.trimIndent(),
             streaming = false,
@@ -196,7 +196,10 @@ class GenerativeWidgetParserTest {
 
         val widget = segments.single() as GenerativeWidgetSegment.Widget
         assertEquals("slides", widget.renderer)
-        assertEquals("""[{"title":"A","content":["B"]}]""", widget.specJson)
+        assertEquals(
+            """{"schemaVersion":2,"style":"magazine","accent":"#123456","fontPack":"source-han-serif-sc-regular","slides":[{"layout":"cover","title":"A","content":["B"]}]}""",
+            widget.specJson,
+        )
         assertTrue(widget.widgetCode.contains("A"))
     }
 
@@ -213,7 +216,7 @@ class GenerativeWidgetParserTest {
 
         val widget = segments.single() as GenerativeWidgetSegment.Widget
         assertEquals("slides", widget.renderer)
-        assertEquals("""[{"title":"Mobile","content":["Readable"]}]""", widget.specJson)
+        assertEquals("""{"schemaVersion":2,"style":"system","slides":[{"title":"Mobile","content":["Readable"]}]}""", widget.specJson)
         assertTrue(widget.widgetCode.contains("Mobile"))
     }
 
@@ -223,5 +226,28 @@ class GenerativeWidgetParserTest {
 
         assertTrue(result.valid)
         assertEquals("""[{"title":"A","content":["B"]}]""", VChartSpecValidator.normalizeSlidesSpecJson("""{"slides":[{"title":"A","content":["B"]}]}"""))
+        assertEquals(
+            """{"schemaVersion":2,"style":"system","slides":[{"title":"A","content":["B"]}]}""",
+            VChartSpecValidator.normalizeSlidesDeckSpecJson("""{"slides":[{"title":"A","content":["B"]}]}"""),
+        )
+    }
+
+    @Test
+    fun validatesSlidesSpecV2LayoutAndFontPack() {
+        val spec = """
+            {"schemaVersion":2,"style":"swiss","accent":"#1F5EFF","fontPack":"source-han-sans-sc-regular","slides":[{"layout":"metrics","title":"A","metrics":[{"label":"速度","value":"2x"}]}]}
+        """.trimIndent()
+
+        assertTrue(VChartSpecValidator.validateSlidesSpec(spec).valid)
+        assertTrue(VChartSpecValidator.normalizeSlidesDeckSpecJson(spec)!!.contains("source-han-sans-sc-regular"))
+    }
+
+    @Test
+    fun rejectsUnsupportedSlidesLayout() {
+        val result = VChartSpecValidator.validateSlidesSpec(
+            """{"slides":[{"layout":"desktop-html","title":"A"}]}"""
+        )
+
+        assertFalse(result.valid)
     }
 }

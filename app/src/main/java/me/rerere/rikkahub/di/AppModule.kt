@@ -43,6 +43,7 @@ import me.rerere.rikkahub.data.context.AgentCapabilitySnapshotBuilder
 import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
@@ -154,6 +155,10 @@ val appModule = module {
 
     single {
         WorkspaceArtifactTools(get(), get(), get())
+    }
+
+    single {
+        SlidesFontRepository(context = get(), client = get(), json = get())
     }
 
     single {

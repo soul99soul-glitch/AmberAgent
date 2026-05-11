@@ -131,6 +131,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingProviderDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSandboxPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
+import me.rerere.rikkahub.ui.pages.setting.SettingSlidesFontPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSystemAccessPage
 import me.rerere.rikkahub.ui.pages.setting.SettingTTSPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
@@ -486,6 +487,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingAgentExtensionsPage()
                             }
 
+                            entry<Screen.SettingSlidesFonts> {
+                                SettingSlidesFontPage()
+                            }
+
                             entry<Screen.SettingCronTasks> {
                                 SettingCronTasksPage()
                             }
@@ -765,6 +770,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingAgentExtensions : Screen
+
+    @Serializable
+    data object SettingSlidesFonts : Screen
 
     @Serializable
     data object SettingCronTasks : Screen

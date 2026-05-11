@@ -151,6 +151,8 @@ object GenerativeWidgetParser {
         // user staring at raw JSON in a code block.
         val specElement = if (parsed == null) {
             null
+        } else if (renderer == "slides" && parsed["spec"] == null && (parsed["slides"] != null || parsed["pages"] != null)) {
+            parsed
         } else {
             parsed["spec"] ?: if (renderer == "slides") parsed["slides"] ?: parsed["pages"] else null
         }
@@ -160,7 +162,7 @@ object GenerativeWidgetParser {
         val title = parsed?.stringOrNull("title")
             ?: extractJsonStringValue(jsonText, "title", allowUnclosed = false)
         val specJson = when (renderer) {
-            "slides" -> specElement?.let { VChartSpecValidator.normalizeSlidesSpecJson(it.toString()) }
+            "slides" -> specElement?.let { VChartSpecValidator.normalizeSlidesDeckSpecJson(it.toString()) }
             else -> specElement?.toString()
         }
         val code = when (renderer) {

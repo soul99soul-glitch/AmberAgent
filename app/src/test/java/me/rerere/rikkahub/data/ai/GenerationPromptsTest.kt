@@ -52,7 +52,9 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains("Do not call eval_javascript"))
         assertTrue(prompt.contains("guizang-ppt-skill"))
         assertTrue(prompt.contains("Convert the story into the native slides spec"))
-        assertTrue(prompt.contains("""style" ("magazine" or "swiss")"""))
+        assertTrue(prompt.contains("Slides Spec V2"))
+        assertTrue(prompt.contains("cover, section, quote, split, metrics, timeline"))
+        assertTrue(prompt.contains("fontPack"))
         assertTrue(prompt.contains("Noto Serif SC"))
     }
 

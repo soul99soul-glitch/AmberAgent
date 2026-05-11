@@ -108,6 +108,12 @@ fun SettingAgentExtensionsPage() {
                         supportingContent = { Text(stringResource(R.string.setting_page_cron_tasks_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_cron_tasks)) },
                     )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingSlidesFonts) },
+                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        supportingContent = { Text("下载中文字体包，提高生成式幻灯片的还原度") },
+                        headlineContent = { Text("Slides 字体资源") },
+                    )
                     // "Agent 运行时任务" entry intentionally hidden from end users — that page
                     // is a developer-facing harness debug view (审批原因 / 并发批次 / 能力快照
                     // / 提前执行只读工具 / 完整生成历史). The page itself is kept and reachable
