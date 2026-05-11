@@ -802,6 +802,9 @@
   <string name="setting_webmount_probe">探测</string>
   <string name="setting_webmount_write_probe">探测写入</string>
   <string name="setting_webmount_sign_in">登录</string>
+  <string name="setting_webmount_login_dialog_title">登录 %1$s</string>
+  <string name="setting_webmount_login_dialog_signed_in">已登录 —— 捕获到 %1$s 的 cookie。</string>
+  <string name="setting_webmount_login_dialog_not_ready">尚未检测到 %1$s 的登录态 —— 完成网页登录后再次点击"登录"。</string>
   <string name="setting_webmount_sign_out">退出登录</string>
   <string name="setting_webmount_signed_out_toast">已退出 %1$s —— 清除了 %2$d 个 cookie。</string>
   <string name="setting_webmount_signed_out_nothing">%1$s 没有可清除的 cookie。</string>

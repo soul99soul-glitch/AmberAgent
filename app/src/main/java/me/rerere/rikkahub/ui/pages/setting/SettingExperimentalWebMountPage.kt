@@ -3,6 +3,10 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,9 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import android.app.Activity
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -41,6 +43,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
+import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Comment01
 import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.Globe02
@@ -56,11 +59,12 @@ import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthProvider
-import me.rerere.rikkahub.data.agent.webmount.login.InlineLoginActivity
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+import me.rerere.rikkahub.ui.components.webview.WebView
+import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.plus
@@ -91,6 +95,7 @@ fun SettingExperimentalWebMountPage(
     }
     val globalEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
     val evalEnabled by webMountManager.evalEnabledFlow.collectAsStateWithLifecycle()
+    var loginDialogStationId by remember { mutableStateOf<String?>(null) }
     val appIdRequiredMessage = stringResource(R.string.setting_webmount_oauth_app_id_required)
     val connectedTemplate = stringResource(R.string.setting_webmount_oauth_connected_toast)
     val disconnectedTemplate = stringResource(R.string.setting_webmount_oauth_disconnected_toast)
@@ -269,10 +274,9 @@ fun SettingExperimentalWebMountPage(
                                         busyStations = busyStations - state.id
                                     }
                                 },
-                                onSignIn = signInLauncherFor(
-                                    state = state,
-                                    registry = profileRegistry,
-                                ),
+                                onSignIn = if (isCookieAuthStation(state)) {
+                                    { loginDialogStationId = state.id }
+                                } else null,
                                 onSignOut = signOutLauncherFor(
                                     state = state,
                                     registry = profileRegistry,
@@ -286,6 +290,126 @@ fun SettingExperimentalWebMountPage(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Per-user-feedback fix: iCloud-style login card (was a broken
+    // full-screen Activity). The 90%-height Surface inside a 16dp-padded
+    // Box mirrors ICloudLoginDialog exactly so the visual matches the
+    // reference screenshot.
+    loginDialogStationId?.let { stationId ->
+        val adapter = webMountManager.adapterOf(stationId)
+        val loginUrl = adapter?.primaryLoginUrl()
+        if (adapter == null || loginUrl.isNullOrBlank()) {
+            // Station has no login URL — nothing we can do. Dismiss silently.
+            loginDialogStationId = null
+            return@let
+        }
+        val stationName = states[stationId]?.displayName ?: adapter.displayName
+        val signedInTemplate = stringResource(R.string.setting_webmount_login_dialog_signed_in)
+        val notReadyTemplate = stringResource(R.string.setting_webmount_login_dialog_not_ready)
+        WebMountLoginDialog(
+            url = loginUrl,
+            title = stationName,
+            onDismiss = {
+                loginDialogStationId = null
+                // Probe the configured login cookie across the profile's
+                // origins. If found, toast success; otherwise the user may
+                // not have completed login.
+                val profile = profileRegistry.byId(stationId)?.profile
+                val cookieName = profile?.hints?.loginCookie
+                val urls = buildList {
+                    profile?.origins?.let { addAll(it) }
+                    adapter.endpoints.forEach { addAll(it.cookieUrls); add(it.origin); add(it.apiBase) }
+                }.filter { it.isNotBlank() }.distinct()
+                val captured = cookieName != null && urls.isNotEmpty() &&
+                    cookieProvider.getCookies(emptyList(), urls).value(cookieName) != null
+                toaster.show(
+                    if (captured) signedInTemplate.format(stationName)
+                    else notReadyTemplate.format(stationName)
+                )
+            },
+        )
+    }
+}
+
+/**
+ * Per-user-feedback — iCloud-style login card. Mirrors
+ * `ICloudLoginDialog` in [SettingExperimentalPage]: a 16dp-inset Box
+ * containing a 90%-height extraLarge-shape Surface with a header row
+ * (title + X close) and the WebView filling the rest.
+ *
+ * The headless WebView pool already enables third-party cookies (M2.3
+ * holistic review W-2 fix). This Dialog's user-facing WebView does the
+ * same explicitly in onCreated so SSO redirects (e.g. passport.* →
+ * www.*) persist their Set-Cookie hops into the process-global jar
+ * that the agent's headless sessions read from.
+ */
+@Composable
+private fun WebMountLoginDialog(
+    url: String,
+    title: String,
+    onDismiss: () -> Unit,
+) {
+    val state = rememberWebViewState(
+        url = url,
+        settings = {
+            domStorageEnabled = true
+            builtInZoomControls = true
+            displayZoomControls = false
+        },
+    )
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.9f),
+                shape = MaterialTheme.shapes.extraLarge,
+                tonalElevation = 6.dp,
+                shadowElevation = 12.dp,
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, top = 12.dp, end = 12.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_webmount_login_dialog_title, title),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = HugeIcons.Cancel01,
+                                contentDescription = stringResource(R.string.update_card_close),
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                    WebView(
+                        state = state,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        onCreated = { webView ->
+                            val cookieManager = android.webkit.CookieManager.getInstance()
+                            cookieManager.setAcceptCookie(true)
+                            cookieManager.setAcceptThirdPartyCookies(webView, true)
+                        },
+                    )
                 }
             }
         }
@@ -636,29 +760,16 @@ private fun OAuthProviderRow(
  * null otherwise so the "Sign in" button doesn't render.
  */
 /**
- * Phase 2 post-review UX fix: the per-station "Sign in" button is now
- * ALWAYS visible for cookie-auth stations (was: only when login cookie
- * absent). Users couldn't discover the entry point when they had never
- * logged in OR when they were already logged in and wanted to switch
- * accounts. Always-on makes "WebView login" reachable in one tap.
+ * Per-user-feedback fix: clicking the per-station "Sign in" button now
+ * triggers an iCloud-style Compose Dialog (see [WebMountLoginDialog])
+ * rather than launching the full-screen [InlineLoginActivity]. The
+ * Activity used to render blank and lacked the X-close affordance.
+ *
+ * Returns null for non-cookie stations (OAuth has its own Connect button
+ * in the OAuth providers section).
  */
-@Composable
-private fun signInLauncherFor(
-    state: WebMountStationState,
-    registry: ProfileRegistry,
-): (() -> Unit)? {
-    val context = LocalContext.current
-    if (WebMountAuthMethod.COOKIE !in state.authMethods) return null
-    // Profile is optional — even sites without a profile can still expose
-    // a "Sign in" entry point that opens the station's primary login URL.
-    registry.byId(state.id)?.profile
-    return {
-        val activity = context as? Activity
-        if (activity != null) {
-            activity.startActivity(InlineLoginActivity.newIntent(activity, state.id))
-        }
-    }
-}
+private fun isCookieAuthStation(state: WebMountStationState): Boolean =
+    WebMountAuthMethod.COOKIE in state.authMethods
 
 /**
  * Phase 2 follow-up — "Sign out" action for cookie stations. Clears every
