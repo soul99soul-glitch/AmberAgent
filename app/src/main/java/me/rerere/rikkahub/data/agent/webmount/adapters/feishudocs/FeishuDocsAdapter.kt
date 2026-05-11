@@ -49,7 +49,7 @@ class FeishuDocsAdapter(
         val token = runCatching { oauthClient.getValidAccessToken("feishu") }
             .getOrElse { return WebMountProbeResult.failed("OAuth token lookup failed: ${it.message}", it) }
             ?: return WebMountProbeResult.loginRequired(
-                "未连接飞书 OAuth — 在 WebMount Stations OAuth providers 区域点 Connect."
+                "未连接飞书 OAuth —— 在 WebMount Stations 设置页找到「飞书云文档」一行,先点「编辑凭据」填好 App ID / Secret,再点「Connect」。"
             )
         return runCatching {
             val ok = tools.probe(token)

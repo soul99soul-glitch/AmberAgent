@@ -205,6 +205,28 @@ fun SettingExperimentalWebMountPage(
                 ExperimentSectionCard(
                     title = stringResource(R.string.setting_webmount_section_sites),
                 ) {
+                    // Per-user feedback: keep [+ 添加网站] / [恢复示例] anchored
+                    // to the top of the section so they don't get pushed off
+                    // screen as the list grows.
+                    ExperimentActionRow {
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_webmount_add_site),
+                            enabled = true,
+                            primary = true,
+                            onClick = { addSiteDialogOpen = true },
+                        )
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_webmount_restore_seed),
+                            enabled = true,
+                            onClick = {
+                                val added = userSiteRegistry.restoreMissingSeeds()
+                                toaster.show(
+                                    if (added > 0) restoredTemplate.format(added)
+                                    else nothingToRestore
+                                )
+                            },
+                        )
+                    }
                     if (sites.isEmpty()) {
                         ExperimentNote(text = stringResource(R.string.setting_webmount_sites_empty))
                     } else {
@@ -295,29 +317,7 @@ fun SettingExperimentalWebMountPage(
                             if (index != sites.lastIndex) ExperimentDivider()
                         }
                     }
-                    ExperimentActionRow {
-                        ExperimentActionButton(
-                            text = stringResource(R.string.setting_webmount_add_site),
-                            enabled = true,
-                            primary = true,
-                            onClick = { addSiteDialogOpen = true },
-                        )
-                        ExperimentActionButton(
-                            text = stringResource(R.string.setting_webmount_restore_seed),
-                            enabled = true,
-                            onClick = {
-                                val added = userSiteRegistry.restoreMissingSeeds()
-                                toaster.show(
-                                    if (added > 0) restoredTemplate.format(added)
-                                    else nothingToRestore
-                                )
-                            },
-                        )
-                    }
                 }
-            }
-            item {
-                ExperimentNote(text = stringResource(R.string.setting_webmount_about_note))
             }
         }
     }

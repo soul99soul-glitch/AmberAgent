@@ -359,7 +359,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
 
     private suspend fun requireToken(oauth: WebMountOAuthClient): String =
         oauth.getValidAccessToken("feishu")
-            ?: error("飞书 OAuth not connected — connect via WebMount Stations → OAuth providers first")
+            ?: error("飞书 OAuth 未连接 —— 在 WebMount Stations 设置页找到「飞书云文档」一行,先点「编辑凭据」配好 App ID / Secret,再点「Connect」。")
 
     private fun summaryJson(s: FeishuDocSummary): JsonObject = buildJsonObject {
         put("token", s.token)
