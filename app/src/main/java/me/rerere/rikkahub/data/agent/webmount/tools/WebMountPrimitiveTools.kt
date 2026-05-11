@@ -79,12 +79,15 @@ class WebMountPrimitiveTools(
                 val sessionId = input.string("session_id")
                 val handle = if (sessionId != null) pool.acquire(sessionId) else pool.acquireNew()
                 val payload: JsonObject = if (wait == "none") {
-                    // Issue load but don't wait.
-                    handle.webView.post { handle.webView.loadUrl(url) }
+                    // Issue load but don't wait. Still routes through SessionHandle
+                    // so _loadState is flipped to LOADING synchronously — without
+                    // this, a follow-up wm_state would briefly see stale "ready"
+                    // state from the prior navigation.
+                    val state = handle.loadUrlNoWait(url)
                     buildJsonObject {
                         put("session_id", handle.sessionId)
-                        put("status", SessionHandle.LoadStatus.LOADING.wireName)
-                        put("url", url)
+                        put("status", state.status.wireName)
+                        put("url", state.currentUrl ?: url)
                         put("requested_url", url)
                         put("waited", false)
                     }
@@ -372,6 +375,7 @@ class WebMountPrimitiveTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             track("wm_eval", "WebMount JS 执行", input.safeEvalPreview()) {
                 val sessionId = input.requiredString("session_id")

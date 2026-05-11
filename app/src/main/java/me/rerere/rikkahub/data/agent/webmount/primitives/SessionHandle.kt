@@ -55,10 +55,58 @@ class SessionHandle internal constructor(
      */
     suspend fun loadUrl(url: String, timeoutMs: Long = DEFAULT_LOAD_TIMEOUT_MS): LoadState {
         ensureAlive()
+        val loadId = startLoad(url)
+        val completion = pendingLoad.get()?.completion
+            ?: error("startLoad failed to install completion")
+        try {
+            withContext(Dispatchers.Main) { webView.loadUrl(url) }
+            withTimeoutOrNull(timeoutMs) { completion.await() }
+        } finally {
+            // Drop the completion if it's still ours; mark FAILED on timeout so
+            // a stuck LOADING state doesn't linger forever.
+            val current = pendingLoad.get()
+            if (current?.loadId == loadId && !completion.isCompleted) {
+                pendingLoad.compareAndSet(current, null)
+                completion.completeExceptionally(JsBridge.JsBridgeException("loadUrl timed out / cancelled"))
+                if (_loadState.value.loadId == loadId && _loadState.value.status == LoadStatus.LOADING) {
+                    _loadState.value = _loadState.value.copy(
+                        status = LoadStatus.FAILED,
+                        error = "load timed out after ${timeoutMs}ms",
+                        updatedAtMs = System.currentTimeMillis(),
+                    )
+                }
+            }
+        }
+        lastActivityMs.set(System.currentTimeMillis())
+        return _loadState.value
+    }
+
+    /**
+     * Issue a load without waiting for it to finish, while still updating
+     * `_loadState` so the next `wm_state` call sees the new requested URL.
+     * Used by `wm_open` with `wait="none"`.
+     */
+    suspend fun loadUrlNoWait(url: String): LoadState {
+        ensureAlive()
+        startLoad(url)
+        withContext(Dispatchers.Main) { webView.loadUrl(url) }
+        lastActivityMs.set(System.currentTimeMillis())
+        return _loadState.value
+    }
+
+    /**
+     * Synchronously bump the load sequence, install a fresh pendingLoad,
+     * cancel any prior in-flight load, and seed [_loadState] with the
+     * LOADING placeholder. Used by both [loadUrl] and [loadUrlNoWait] so
+     * state updates always happen before the WebView actually starts loading.
+     */
+    private fun startLoad(url: String): Long {
         val loadId = loadSeq.incrementAndGet()
         val completion = CompletableDeferred<Unit>()
-        pendingLoad.set(LoadCompletion(loadId, completion))
-
+        val prior = pendingLoad.getAndSet(LoadCompletion(loadId, completion))
+        prior?.completion?.completeExceptionally(
+            JsBridge.JsBridgeException("superseded by load #$loadId")
+        )
         _loadState.value = LoadState(
             loadId = loadId,
             requestedUrl = url,
@@ -70,14 +118,7 @@ class SessionHandle internal constructor(
             error = null,
             updatedAtMs = System.currentTimeMillis(),
         )
-
-        withContext(Dispatchers.Main) {
-            webView.loadUrl(url)
-        }
-
-        withTimeoutOrNull(timeoutMs) { completion.await() }
-        lastActivityMs.set(System.currentTimeMillis())
-        return _loadState.value
+        return loadId
     }
 
     /**
@@ -155,6 +196,7 @@ class SessionHandle internal constructor(
     }
 
     internal fun onPageFinished(url: String, title: String?) {
+        val expectedLoadId = _loadState.value.loadId
         _loadState.value = _loadState.value.copy(
             currentUrl = url,
             title = title,
@@ -162,17 +204,30 @@ class SessionHandle internal constructor(
             progress = 100,
             updatedAtMs = System.currentTimeMillis(),
         )
-        // Resolve any awaiting loadUrl call.
-        pendingLoad.getAndSet(null)?.completion?.complete(Unit)
+        // Resolve the awaiting load only if it corresponds to the current
+        // load id — guards against stale onPageFinished from a redirect chain
+        // for a previous navigation.
+        val pending = pendingLoad.get()
+        if (pending != null && pending.loadId == expectedLoadId) {
+            if (pendingLoad.compareAndSet(pending, null)) {
+                pending.completion.complete(Unit)
+            }
+        }
     }
 
     internal fun onReceivedError(code: Int, message: String) {
+        val expectedLoadId = _loadState.value.loadId
         _loadState.value = _loadState.value.copy(
             status = LoadStatus.FAILED,
             error = "$code: $message",
             updatedAtMs = System.currentTimeMillis(),
         )
-        pendingLoad.getAndSet(null)?.completion?.complete(Unit)
+        val pending = pendingLoad.get()
+        if (pending != null && pending.loadId == expectedLoadId) {
+            if (pendingLoad.compareAndSet(pending, null)) {
+                pending.completion.complete(Unit)
+            }
+        }
     }
 
     /** Pool-only. Tears down the WebView; subsequent calls throw. */

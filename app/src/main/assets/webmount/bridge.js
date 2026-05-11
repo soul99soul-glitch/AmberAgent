@@ -414,17 +414,30 @@
   function performEval(args) {
     var expr = args.expression;
     if (typeof expr !== 'string') throw new Error('eval requires expression string');
-    // Wrap so we always have a return value path.
-    var fn;
-    try { fn = new Function('return (' + expr + ');'); }
-    catch (_) {
-      try { fn = new Function(expr); } catch (e) { throw e; }
+    // Two passes:
+    //  1. Try wrapping as a single expression: `return (expr)`. Fast path
+    //     for one-liners like `document.title` or `1+2`.
+    //  2. Fall back to multi-statement: just `new Function(expr)`. This
+    //     returns undefined unless the script contains its own `return`;
+    //     we surface that as a note so the agent knows why result is null.
+    var result;
+    var multiStatement = false;
+    try {
+      var fn1 = new Function('return (' + expr + ');');
+      result = fn1();
+    } catch (_) {
+      multiStatement = true;
+      var fn2 = new Function(expr);  // may throw — propagated.
+      result = fn2();
     }
-    var result = fn();
     var serialized;
     try { serialized = JSON.parse(JSON.stringify(result === undefined ? null : result)); }
     catch (_) { serialized = String(result); }
-    return { ok: true, result: serialized };
+    var payload = { ok: true, result: serialized, multi_statement: multiStatement };
+    if (multiStatement && result === undefined) {
+      payload.note = 'Multi-statement script ran but had no explicit return. Wrap in (() => { /* ... */ return value; })() to capture a value.';
+    }
+    return payload;
   }
 
   // --------------------------------------------------------------- dispatch

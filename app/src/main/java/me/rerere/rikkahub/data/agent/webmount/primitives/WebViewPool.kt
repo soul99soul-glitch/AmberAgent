@@ -42,6 +42,8 @@ class WebViewPool(
     private val lru = LinkedHashSet<String>()      // protected by [lruLock]
     private val lruLock = Any()
     private val bridgeBootstrapJs: String by lazy { loadBridgeBootstrap() }
+    @Volatile
+    private var bridgeBootstrapError: Throwable? = null
 
     init {
         if (webContentsDebugging) {
@@ -53,23 +55,47 @@ class WebViewPool(
         }
     }
 
-    /** Acquire by id (returns existing if present). */
+    /**
+     * Acquire by id (returns existing live session if present, otherwise
+     * creates a fresh one). Defensively skips and re-creates if the cached
+     * handle is in the middle of being evicted/destroyed — the LRU eviction
+     * marks `destroyed = true` synchronously before the WebView actually
+     * tears down, so a stale read here would return a handle whose next
+     * call throws "session ... already destroyed".
+     */
     suspend fun acquire(sessionId: String): SessionHandle {
-        sessions[sessionId]?.let {
+        assertBridgeReady()
+        val existing = sessions[sessionId]
+        if (existing != null && !existing.destroyed) {
             touch(sessionId)
-            return it
+            return existing
+        }
+        if (existing != null && existing.destroyed) {
+            // Drop the stale entry; ignore race where someone else already removed it.
+            sessions.remove(sessionId, existing)
+            synchronized(lruLock) { lru.remove(sessionId) }
         }
         return createSession(sessionId)
     }
 
     /** Acquire with a freshly generated id. */
     suspend fun acquireNew(): SessionHandle {
+        assertBridgeReady()
         val id = "wm_" + UUID.randomUUID().toString().substring(0, 12)
         return createSession(id)
     }
 
-    /** Look up an existing session without creating one. */
-    fun peek(sessionId: String): SessionHandle? = sessions[sessionId]?.also { touch(sessionId) }
+    /** Look up an existing live session without creating one. */
+    fun peek(sessionId: String): SessionHandle? {
+        val handle = sessions[sessionId] ?: return null
+        if (handle.destroyed) {
+            sessions.remove(sessionId, handle)
+            synchronized(lruLock) { lru.remove(sessionId) }
+            return null
+        }
+        touch(sessionId)
+        return handle
+    }
 
     /** Destroy and remove a single session. */
     suspend fun release(sessionId: String, reason: String = "released") {
@@ -169,10 +195,24 @@ class WebViewPool(
             appContext.assets.open(BRIDGE_ASSET).bufferedReader().use { it.readText() }
         }.getOrElse { error ->
             Log.e(TAG, "Failed to load $BRIDGE_ASSET", error)
-            // Last-ditch inline fallback so the rest of the framework still
-            // compiles/runs; bridge.js itself prints its own no-op when missing.
-            "console.error('AmberWM bridge bootstrap missing');"
+            bridgeBootstrapError = error
+            // Force-fail any subsequent bridge call rather than silently
+            // letting it time out. The JS we inject just throws.
+            "throw new Error('AmberWM bridge bootstrap asset missing: $BRIDGE_ASSET');"
         }
+
+    /** Throws if [BRIDGE_ASSET] failed to load — tools call this before issuing bridge RPCs. */
+    fun assertBridgeReady() {
+        // Trigger the lazy load so `bridgeBootstrapError` is populated.
+        @Suppress("UNUSED_VARIABLE")
+        val unused = bridgeBootstrapJs
+        bridgeBootstrapError?.let {
+            throw IllegalStateException(
+                "WebMount bridge asset failed to load: $BRIDGE_ASSET. Agent bridge calls will fail.",
+                it,
+            )
+        }
+    }
 
     // ------------------------------------------------------ webview client
 
