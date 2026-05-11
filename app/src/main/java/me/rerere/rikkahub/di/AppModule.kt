@@ -22,6 +22,7 @@ import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
 import me.rerere.rikkahub.data.agent.webmount.profile.HostShimRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
+import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliTools
@@ -298,6 +299,10 @@ val appModule = module {
     }
 
     single {
+        UserSiteRegistry(context = get())
+    }
+
+    single {
         HostShimRegistry(context = get())
     }
 
@@ -313,6 +318,7 @@ val appModule = module {
             profileRegistry = get(),
             cookieProvider = get(),
             profileBridge = get(),
+            userSiteRegistry = get(),
         )
     }
 
@@ -429,7 +435,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

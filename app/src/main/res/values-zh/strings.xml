@@ -805,6 +805,32 @@
   <string name="setting_webmount_login_dialog_title">登录 %1$s</string>
   <string name="setting_webmount_login_dialog_signed_in">已登录 —— 捕获到 %1$s 的 cookie。</string>
   <string name="setting_webmount_login_dialog_not_ready">尚未检测到 %1$s 的登录态 —— 完成网页登录后再次点击"登录"。</string>
+  <!-- Plan v2 网站统一列表字符串 -->
+  <string name="setting_webmount_section_sites">我的网站</string>
+  <string name="setting_webmount_sites_empty">还没有网站。点 "+ 添加网站" 或 "恢复示例" 开始。</string>
+  <string name="setting_webmount_add_site">+ 添加网站</string>
+  <string name="setting_webmount_restore_seed">恢复示例</string>
+  <string name="setting_webmount_restore_seed_toast">已恢复 %1$d 个示例网站。</string>
+  <string name="setting_webmount_restore_seed_none">所有示例已在列表中。</string>
+  <string name="setting_webmount_test">测试</string>
+  <string name="setting_webmount_delete_site">删除</string>
+  <string name="setting_webmount_site_deleted_toast">已删除 %1$s。</string>
+  <string name="setting_webmount_site_added_toast">已添加 %1$s。</string>
+  <string name="setting_webmount_add_site_duplicate">已存在同 id 的网站。</string>
+  <string name="setting_webmount_site_no_native_test_hint">自定义网站暂不支持连接测试 —— 直接让 agent 打开看看吧。</string>
+  <string name="setting_webmount_sign_in_again">重新登录</string>
+  <string name="setting_webmount_oauth_edit_credentials">编辑凭据</string>
+  <string name="setting_webmount_oauth_edit_title">%1$s 的 OAuth 凭据</string>
+  <!-- 状态徽章 -->
+  <string name="setting_webmount_pill_public">公开</string>
+  <string name="setting_webmount_pill_signed_in">已登录</string>
+  <string name="setting_webmount_pill_signed_out">未登录</string>
+  <string name="setting_webmount_pill_connected">已连接</string>
+  <string name="setting_webmount_pill_ready">已配置</string>
+  <string name="setting_webmount_pill_needs_setup">未配置</string>
+  <string name="setting_webmount_pill_rate_limited">限流中</string>
+  <string name="setting_webmount_pill_error">错误</string>
+  <string name="setting_webmount_pill_unknown">—</string>
   <string name="setting_webmount_sign_out">退出登录</string>
   <string name="setting_webmount_signed_out_toast">已退出 %1$s —— 清除了 %2$d 个 cookie。</string>
   <string name="setting_webmount_signed_out_nothing">%1$s 没有可清除的 cookie。</string>

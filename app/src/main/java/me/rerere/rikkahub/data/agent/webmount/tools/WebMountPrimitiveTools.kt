@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfileEntry
+import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 
 /**
  * Browser Primitives tool catalog.
@@ -52,6 +53,7 @@ class WebMountPrimitiveTools(
     private val profileRegistry: ProfileRegistry,
     private val cookieProvider: WebMountCookieProvider,
     private val profileBridge: ProfileBridge,
+    private val userSiteRegistry: UserSiteRegistry,
 ) {
 
     /**
@@ -1066,8 +1068,13 @@ class WebMountPrimitiveTools(
                     .toSet()
                 val statusFilter = rawFilter?.takeIf { it in validStatuses }
                 val unknownFilter = rawFilter != null && statusFilter == null
+                // Plan v2: only list stations whose UserSite is still in the
+                // user's list. Removing a site from the WebMount Stations
+                // panel makes its station vanish from the agent's view too.
+                val activeIds = userSiteRegistry.activeNativeAdapterIds()
                 val states = manager.states.value.values
                     .asSequence()
+                    .filter { it.id in activeIds }
                     .filter { includeDisabled || it.enabled }
                     .filter { statusFilter == null || it.status.wireName == statusFilter }
                     .toList()

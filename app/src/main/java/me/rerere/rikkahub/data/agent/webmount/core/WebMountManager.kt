@@ -159,8 +159,8 @@ class WebMountManager(
      * runs every chat turn, so rebuilding ~50 `Tool` objects + their hook
      * envelopes per turn is pure waste.
      */
-    private val cachedTools: List<Tool> by lazy {
-        adapters.flatMap { adapter ->
+    private val cachedToolsByAdapter: Map<String, List<Tool>> by lazy {
+        adapters.associate { adapter ->
             val hooks = WebMountToolHooks(
                 activityStore = activityStore,
                 stationId = adapter.id,
@@ -173,11 +173,23 @@ class WebMountManager(
                 cookieProvider = cookieProvider,
                 endpoints = adapter.endpoints,
             )
-            adapter.tools(hooks)
+            adapter.id to adapter.tools(hooks)
         }
     }
 
+    private val cachedTools: List<Tool> by lazy {
+        cachedToolsByAdapter.values.flatten()
+    }
+
     fun allTools(): List<Tool> = cachedTools
+
+    /**
+     * Phase 2 Plan v2 — adapter id → adapter's tools. LocalTools uses this
+     * with [UserSiteRegistry.activeNativeAdapterIds] so removing a site
+     * from the user's list immediately drops its adapter's tools from the
+     * agent catalog.
+     */
+    fun allToolsByAdapter(): Map<String, List<Tool>> = cachedToolsByAdapter
 
     // ---- internals ----------------------------------------------------------
 

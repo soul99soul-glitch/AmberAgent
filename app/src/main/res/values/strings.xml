@@ -1287,6 +1287,32 @@
   <string name="setting_webmount_login_dialog_title">Sign in to %1$s</string>
   <string name="setting_webmount_login_dialog_signed_in">Signed in — %1$s cookie captured.</string>
   <string name="setting_webmount_login_dialog_not_ready">%1$s login not yet detected — finish signing in and tap Sign in again.</string>
+  <!-- Plan v2 unified-list strings -->
+  <string name="setting_webmount_section_sites">My sites</string>
+  <string name="setting_webmount_sites_empty">No sites yet. Tap "+ Add site" or "Restore examples" to start.</string>
+  <string name="setting_webmount_add_site">+ Add site</string>
+  <string name="setting_webmount_restore_seed">Restore examples</string>
+  <string name="setting_webmount_restore_seed_toast">Restored %1$d example site(s).</string>
+  <string name="setting_webmount_restore_seed_none">All example sites are already in the list.</string>
+  <string name="setting_webmount_test">Test</string>
+  <string name="setting_webmount_delete_site">Delete</string>
+  <string name="setting_webmount_site_deleted_toast">Deleted %1$s.</string>
+  <string name="setting_webmount_site_added_toast">Added %1$s.</string>
+  <string name="setting_webmount_add_site_duplicate">A site with this id already exists.</string>
+  <string name="setting_webmount_site_no_native_test_hint">No connection test for custom sites yet — try asking the agent to open the URL.</string>
+  <string name="setting_webmount_sign_in_again">Sign in again</string>
+  <string name="setting_webmount_oauth_edit_credentials">Edit credentials</string>
+  <string name="setting_webmount_oauth_edit_title">OAuth credentials for %1$s</string>
+  <!-- Status pills -->
+  <string name="setting_webmount_pill_public">Public</string>
+  <string name="setting_webmount_pill_signed_in">Signed in</string>
+  <string name="setting_webmount_pill_signed_out">Not signed in</string>
+  <string name="setting_webmount_pill_connected">Connected</string>
+  <string name="setting_webmount_pill_ready">Ready</string>
+  <string name="setting_webmount_pill_needs_setup">Needs setup</string>
+  <string name="setting_webmount_pill_rate_limited">Rate-limited</string>
+  <string name="setting_webmount_pill_error">Error</string>
+  <string name="setting_webmount_pill_unknown">—</string>
   <string name="setting_webmount_sign_out">Sign out</string>
   <string name="setting_webmount_signed_out_toast">Signed out of %1$s — cleared %2$d cookie(s).</string>
   <string name="setting_webmount_signed_out_nothing">No cookies to clear for %1$s.</string>

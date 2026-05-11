@@ -1,0 +1,204 @@
+package me.rerere.rikkahub.data.agent.webmount.usersites
+
+import android.content.Context
+import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+
+/**
+ * Phase 2 Plan v2 — persistent user-facing site list.
+ *
+ * Acts as the **single source of truth for the WebMount settings UI**:
+ *  - Seeds 7 example sites on first launch (the same sites that ship
+ *    as native adapters today).
+ *  - Lets the user add / remove any entry, including the seeds —
+ *    "predefined" is just data, not a special category.
+ *  - Persists to a SharedPreferences file separate from
+ *    [me.rerere.rikkahub.data.agent.webmount.core.WebMountManager]'s
+ *    station-state file, so removing a site never wipes its login
+ *    cookies (those live in the process-global CookieManager) and
+ *    re-adding it picks up where the user left off.
+ *
+ * The 7 native adapters keep running in the background. When a site
+ * with `nativeAdapterId != null` is in the user's list, the adapter's
+ * tools appear in the agent's catalog; remove the site → tools
+ * disappear (LocalTools.getTools consults this registry).
+ *
+ * Thread-safe via `@Synchronized` on mutators.
+ */
+class UserSiteRegistry(context: Context) {
+
+    private val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private val _sites = MutableStateFlow(loadOrSeed())
+    val sites: StateFlow<List<UserSite>> = _sites.asStateFlow()
+
+    /** Synchronous accessor for callers outside coroutine scopes. */
+    val current: List<UserSite> get() = _sites.value
+
+    /** True iff a site with this id is currently in the user list. */
+    fun contains(id: String): Boolean = current.any { it.id == id }
+
+    fun byId(id: String): UserSite? = current.firstOrNull { it.id == id }
+
+    /** All native-adapter sites currently in the list (drives agent tool catalog). */
+    fun activeNativeAdapterIds(): Set<String> =
+        current.mapNotNull { it.nativeAdapterId }.toSet()
+
+    @Synchronized
+    fun add(site: UserSite): Boolean {
+        if (current.any { it.id == site.id }) return false
+        val next = current + site.copy(addedAtMs = System.currentTimeMillis())
+        _sites.value = next
+        persist(next)
+        return true
+    }
+
+    @Synchronized
+    fun remove(id: String): Boolean {
+        val current = _sites.value
+        if (current.none { it.id == id }) return false
+        val next = current.filterNot { it.id == id }
+        _sites.value = next
+        persist(next)
+        return true
+    }
+
+    /**
+     * Add back any seed sites the user has deleted. Returns the count of
+     * sites added. Doesn't touch existing entries even if their fields
+     * have drifted from the seed (e.g. user might have renamed one).
+     */
+    @Synchronized
+    fun restoreMissingSeeds(): Int {
+        val current = _sites.value
+        val existingIds = current.map { it.id }.toSet()
+        val missing = SEED_SITES.filterNot { it.id in existingIds }
+        if (missing.isEmpty()) return 0
+        val next = current + missing.map { it.copy(addedAtMs = System.currentTimeMillis()) }
+        _sites.value = next
+        persist(next)
+        return missing.size
+    }
+
+    /** For testing / migration: clear all entries (no UI exposure). */
+    @Synchronized
+    internal fun clear() {
+        _sites.value = emptyList()
+        prefs.edit().remove(KEY_SITES).putBoolean(KEY_SEEDED, true).apply()
+    }
+
+    // ----------------------------------------------------------------------
+
+    private fun loadOrSeed(): List<UserSite> {
+        val raw = prefs.getString(KEY_SITES, null)
+        val seeded = prefs.getBoolean(KEY_SEEDED, false)
+        if (raw != null) {
+            return runCatching {
+                json.decodeFromString(ListSerializer(UserSite.serializer()), raw)
+            }.getOrElse {
+                Log.w(TAG, "Failed to decode user sites — falling back to seeds", it)
+                seedOnce()
+            }
+        }
+        if (!seeded) return seedOnce()
+        // Marked seeded already but raw is missing — user cleared everything.
+        return emptyList()
+    }
+
+    private fun seedOnce(): List<UserSite> {
+        val now = System.currentTimeMillis()
+        val seeds = SEED_SITES.map { it.copy(addedAtMs = now) }
+        prefs.edit()
+            .putString(KEY_SITES, json.encodeToString(ListSerializer(UserSite.serializer()), seeds))
+            .putBoolean(KEY_SEEDED, true)
+            .apply()
+        return seeds
+    }
+
+    private fun persist(sites: List<UserSite>) {
+        prefs.edit()
+            .putString(KEY_SITES, json.encodeToString(ListSerializer(UserSite.serializer()), sites))
+            .putBoolean(KEY_SEEDED, true)
+            .apply()
+    }
+
+    companion object {
+        private const val TAG = "WebMountUserSiteRegistry"
+        private const val PREFS_FILE = "amberagent_webmount_user_sites"
+        private const val KEY_SITES = "sites"
+        private const val KEY_SEEDED = "seeded"
+
+        /**
+         * The 7 sites users see by default. Their ids match the matching
+         * [me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter.id]
+         * values so the UI can join with adapter state at runtime.
+         */
+        val SEED_SITES: List<UserSite> = listOf(
+            UserSite(
+                id = "hackernews",
+                displayName = "Hacker News",
+                homepageUrl = "https://news.ycombinator.com",
+                authKind = AuthKind.ANONYMOUS,
+                nativeAdapterId = "hackernews",
+                iconKey = "hackernews",
+            ),
+            UserSite(
+                id = "reddit",
+                displayName = "Reddit",
+                homepageUrl = "https://www.reddit.com",
+                authKind = AuthKind.ANONYMOUS,
+                nativeAdapterId = "reddit",
+                iconKey = "reddit",
+            ),
+            UserSite(
+                id = "github",
+                displayName = "GitHub",
+                homepageUrl = "https://github.com/login",
+                authKind = AuthKind.COOKIE,
+                loginCookieName = "user_session",
+                nativeAdapterId = "github",
+                iconKey = "github",
+            ),
+            UserSite(
+                id = "bilibili",
+                displayName = "Bilibili",
+                homepageUrl = "https://passport.bilibili.com/login",
+                authKind = AuthKind.COOKIE,
+                loginCookieName = "SESSDATA",
+                nativeAdapterId = "bilibili",
+                iconKey = "bilibili",
+            ),
+            UserSite(
+                id = "juejin",
+                displayName = "掘金",
+                homepageUrl = "https://juejin.cn/login",
+                authKind = AuthKind.COOKIE,
+                loginCookieName = "passport_csrf_token",
+                nativeAdapterId = "juejin",
+                iconKey = "juejin",
+            ),
+            UserSite(
+                id = "zhihu",
+                displayName = "知乎",
+                homepageUrl = "https://www.zhihu.com/signin",
+                authKind = AuthKind.COOKIE,
+                loginCookieName = "z_c0",
+                nativeAdapterId = "zhihu",
+                iconKey = "zhihu",
+            ),
+            UserSite(
+                id = "feishu_docs",
+                displayName = "飞书云文档",
+                homepageUrl = "https://www.feishu.cn",
+                authKind = AuthKind.OAUTH,
+                nativeAdapterId = "feishu_docs",
+                iconKey = "feishu_docs",
+            ),
+        )
+    }
+}

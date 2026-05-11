@@ -127,6 +127,7 @@ class LocalTools(
     private val agentCronTools: AgentCronTools,
     private val webMountPrimitiveTools: WebMountPrimitiveTools,
     private val webMountManager: WebMountManager,
+    private val userSiteRegistry: me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry,
     private val settingsStore: SettingsStore,
 ) {
     val javascriptTool by lazy {
@@ -1186,8 +1187,17 @@ class LocalTools(
             // override (one assistant can have eval even when the global is off).
             val includeEval = webMountManager.evalEnabled || options.contains(LocalToolOption.WebMountEval)
             tools.addAll(webMountPrimitiveTools.getTools(includeEval = includeEval))
-            // Adapter-contributed tools (hn_*, github_*, bilibili_*, ...).
-            tools.addAll(webMountManager.allTools())
+            // Plan v2: adapter tools are gated by the user's site list.
+            // If the user deleted a site (e.g. removed Bilibili), its adapter's
+            // tools (`bilibili_*`) drop out of the agent catalog automatically.
+            // The 7 seed sites are present by default after first launch, so
+            // existing behaviour is preserved.
+            val activeAdapterIds = userSiteRegistry.activeNativeAdapterIds()
+            val gatedAdapterTools = webMountManager.allToolsByAdapter().asSequence()
+                .filter { (adapterId, _) -> adapterId in activeAdapterIds }
+                .flatMap { it.value.asSequence() }
+                .toList()
+            tools.addAll(gatedAdapterTools)
         }
         tools.add(permissionsStatusTool)
         tools.addAll(agentCronTools.getTools())

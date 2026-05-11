@@ -1,16 +1,15 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.webkit.CookieManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.material3.IconButton
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -18,12 +17,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +40,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -52,50 +57,73 @@ import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.PlayCircle02
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountAuthMethod
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
+import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
-import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
-import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
+import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
+import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
+import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
-import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.plus
 import org.koin.compose.koinInject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
+/**
+ * Phase 2 Plan v2 — unified WebMount Stations setting page.
+ *
+ * One concept on screen: **网站**. The old triple of "OAuth providers /
+ * Site Profiles / Available stations" has been collapsed into a single
+ * editable list sourced from [UserSiteRegistry]. Profile JSON import is
+ * gone (no user ever needs it); OAuth credentials are edited via a
+ * dialog launched from the relevant site row.
+ *
+ * Hero toggle controls whether the agent has any WebMount capability at
+ * all; per-site rows handle login / sign-out / delete.
+ */
 @Composable
 fun SettingExperimentalWebMountPage(
     webMountManager: WebMountManager = koinInject(),
     oauthClient: WebMountOAuthClient = koinInject(),
     oauthStore: WebMountOAuthTokenStore = koinInject(),
-    profileRegistry: ProfileRegistry = koinInject(),
-    cookieProvider: me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider = koinInject(),
+    userSiteRegistry: UserSiteRegistry = koinInject(),
+    cookieProvider: WebMountCookieProvider = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
+    val sites by userSiteRegistry.sites.collectAsStateWithLifecycle()
+    val globalEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
+    val evalEnabled by webMountManager.evalEnabledFlow.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
-    val navController = LocalNavController.current
-    // Track which station ids are currently probing so the same probe button
-    // can be disabled per-station while leaving siblings interactive.
+
+    // Per-site UI state.
     var busyStations by remember { mutableStateOf<Set<String>>(emptySet()) }
-    // Bump on every TokenStore update — triggers OAuth section recomposition.
+    var loginDialogSite by remember { mutableStateOf<UserSite?>(null) }
+    var oauthEditDialog by remember { mutableStateOf<UserSite?>(null) }
+    var addSiteDialogOpen by remember { mutableStateOf(false) }
+
+    // Forces OAuth section to recompose when token store updates.
     var oauthRevision by remember { mutableStateOf(0) }
     LaunchedEffect(oauthStore) {
         oauthStore.updates.collectLatest { oauthRevision++ }
     }
-    val globalEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
-    val evalEnabled by webMountManager.evalEnabledFlow.collectAsStateWithLifecycle()
-    var loginDialogStationId by remember { mutableStateOf<String?>(null) }
+
+    val signedInTemplate = stringResource(R.string.setting_webmount_login_dialog_signed_in)
+    val notReadyTemplate = stringResource(R.string.setting_webmount_login_dialog_not_ready)
+    val signedOutTemplate = stringResource(R.string.setting_webmount_signed_out_toast)
+    val noCookiesMessage = stringResource(R.string.setting_webmount_signed_out_nothing)
+    val deletedTemplate = stringResource(R.string.setting_webmount_site_deleted_toast)
+    val addedTemplate = stringResource(R.string.setting_webmount_site_added_toast)
+    val duplicateMessage = stringResource(R.string.setting_webmount_add_site_duplicate)
+    val noNativeTestHint = stringResource(R.string.setting_webmount_site_no_native_test_hint)
+    val restoredTemplate = stringResource(R.string.setting_webmount_restore_seed_toast)
+    val nothingToRestore = stringResource(R.string.setting_webmount_restore_seed_none)
     val appIdRequiredMessage = stringResource(R.string.setting_webmount_oauth_app_id_required)
     val connectedTemplate = stringResource(R.string.setting_webmount_oauth_connected_toast)
     val disconnectedTemplate = stringResource(R.string.setting_webmount_oauth_disconnected_toast)
@@ -168,184 +196,372 @@ fun SettingExperimentalWebMountPage(
                 }
             }
             item {
-                ExperimentNote(text = stringResource(R.string.setting_webmount_about_note))
-            }
-            item {
                 ExperimentSectionCard(
-                    title = stringResource(R.string.setting_webmount_section_oauth),
+                    title = stringResource(R.string.setting_webmount_section_sites),
                 ) {
-                    val providers = oauthClient.providers().toList()
-                    if (providers.isEmpty()) {
-                        ExperimentNote(text = stringResource(R.string.setting_webmount_no_oauth_providers))
+                    if (sites.isEmpty()) {
+                        ExperimentNote(text = stringResource(R.string.setting_webmount_sites_empty))
                     } else {
-                        providers.forEachIndexed { index, provider ->
-                            // Read fresh each recomposition so saves/disconnects update the UI.
+                        sites.forEachIndexed { index, site ->
+                            // Recompose OAuth-dependent state when token store updates.
                             @Suppress("UNUSED_EXPRESSION") oauthRevision
-                            val credentials = oauthStore.getCredentials(provider.id)
-                            val token = oauthStore.getToken(provider.id)
-                            OAuthProviderRow(
-                                provider = provider,
-                                hasCredentials = credentials != null,
-                                hasToken = token != null,
-                                tokenExpiresAtMs = token?.expiresAtMs ?: 0L,
-                                initialAppId = credentials?.appId.orEmpty(),
-                                initialAppSecret = credentials?.appSecret.orEmpty(),
-                                initialScope = credentials?.scope.orEmpty(),
-                                onSaveCredentials = { appId, appSecret, scope ->
-                                    if (appId.isBlank()) {
-                                        toaster.show(appIdRequiredMessage)
-                                    } else {
-                                        oauthStore.putCredentials(
-                                            provider.id,
-                                            OAuthAppCredentials(
-                                                provider = provider.id,
-                                                appId = appId.trim(),
-                                                appSecret = appSecret.trim().ifBlank { null },
-                                                scope = scope.trim().ifBlank { null },
-                                            ),
+                            UserSiteCard(
+                                site = site,
+                                stationState = states[site.id],
+                                cookieProvider = cookieProvider,
+                                oauthStore = oauthStore,
+                                busy = site.id in busyStations,
+                                onSignIn = if (site.authKind == AuthKind.COOKIE) {
+                                    { loginDialogSite = site }
+                                } else null,
+                                onSignOut = if (site.authKind == AuthKind.COOKIE) {
+                                    {
+                                        val urls = collectKnownUrlsFor(site, webMountManager)
+                                        val cleared = cookieProvider.clearCookiesFor(urls)
+                                        toaster.show(
+                                            if (cleared > 0) signedOutTemplate.format(site.displayName, cleared)
+                                            else noCookiesMessage.format(site.displayName)
                                         )
                                     }
-                                },
-                                onConnect = {
-                                    scope.launch {
-                                        runCatching {
-                                            val result = oauthClient.connect(provider.id)
-                                            when (result) {
-                                                is WebMountOAuthClient.ConnectResult.Success ->
-                                                    toaster.show(
-                                                        connectedTemplate.format(provider.displayName)
-                                                    )
-                                                is WebMountOAuthClient.ConnectResult.NotConfigured ->
-                                                    toaster.show(result.reason)
-                                                is WebMountOAuthClient.ConnectResult.Failed ->
-                                                    toaster.show(
-                                                        failedTemplate.format(result.reason)
-                                                    )
-                                            }
-                                        }.onFailure { toaster.show(it.message ?: it.toString()) }
-                                    }
-                                },
-                                onDisconnect = {
-                                    oauthClient.disconnect(provider.id)
-                                    toaster.show(
-                                        disconnectedTemplate.format(provider.displayName)
-                                    )
-                                },
-                            )
-                            if (index != providers.lastIndex) ExperimentDivider()
-                        }
-                    }
-                }
-            }
-            item {
-                WebMountProfileSection(
-                    registry = profileRegistry,
-                    onToast = { toaster.show(it) },
-                )
-            }
-            item {
-                ExperimentSectionCard(
-                    title = stringResource(R.string.setting_webmount_section_stations),
-                ) {
-                    val stationStates = states.values.toList()
-                    if (stationStates.isEmpty()) {
-                        ExperimentNote(text = stringResource(R.string.setting_webmount_no_stations))
-                    } else {
-                        stationStates.forEachIndexed { index, state ->
-                            WebMountStationRow(
-                                state = state,
-                                busy = state.id in busyStations,
-                                onConfigure = {
-                                    configureFor(state.id)?.let { navController.navigate(it) }
-                                },
-                                onProbe = {
-                                    busyStations = busyStations + state.id
-                                    scope.launch {
-                                        runCatching { webMountManager.probe(state.id) }
-                                            .onFailure { toaster.show(it.message ?: it.toString()) }
-                                        busyStations = busyStations - state.id
-                                    }
-                                },
-                                onWriteProbe = {
-                                    busyStations = busyStations + state.id
-                                    scope.launch {
-                                        runCatching { webMountManager.runWriteProbe(state.id) }
-                                            .onFailure { toaster.show(it.message ?: it.toString()) }
-                                        busyStations = busyStations - state.id
-                                    }
-                                },
-                                onSignIn = if (isCookieAuthStation(state)) {
-                                    { loginDialogStationId = state.id }
                                 } else null,
-                                onSignOut = signOutLauncherFor(
-                                    state = state,
-                                    registry = profileRegistry,
-                                    webMountManager = webMountManager,
-                                    cookieProvider = cookieProvider,
-                                    toaster = toaster,
-                                ),
+                                onConnect = if (site.authKind == AuthKind.OAUTH) {
+                                    {
+                                        scope.launch {
+                                            runCatching {
+                                                val result = oauthClient.connect(site.id)
+                                                when (result) {
+                                                    is WebMountOAuthClient.ConnectResult.Success ->
+                                                        toaster.show(connectedTemplate.format(site.displayName))
+                                                    is WebMountOAuthClient.ConnectResult.NotConfigured ->
+                                                        toaster.show(result.reason)
+                                                    is WebMountOAuthClient.ConnectResult.Failed ->
+                                                        toaster.show(failedTemplate.format(result.reason))
+                                                }
+                                            }.onFailure { toaster.show(it.message ?: it.toString()) }
+                                        }
+                                    }
+                                } else null,
+                                onDisconnect = if (site.authKind == AuthKind.OAUTH) {
+                                    {
+                                        oauthClient.disconnect(site.id)
+                                        toaster.show(disconnectedTemplate.format(site.displayName))
+                                    }
+                                } else null,
+                                onEditOAuth = if (site.authKind == AuthKind.OAUTH) {
+                                    { oauthEditDialog = site }
+                                } else null,
+                                onTest = {
+                                    if (site.nativeAdapterId != null) {
+                                        busyStations = busyStations + site.id
+                                        scope.launch {
+                                            runCatching { webMountManager.probe(site.id) }
+                                                .onFailure { toaster.show(it.message ?: it.toString()) }
+                                            busyStations = busyStations - site.id
+                                        }
+                                    } else {
+                                        toaster.show(noNativeTestHint)
+                                    }
+                                },
+                                onDelete = {
+                                    if (userSiteRegistry.remove(site.id)) {
+                                        toaster.show(deletedTemplate.format(site.displayName))
+                                    }
+                                },
                             )
-                            if (index != stationStates.lastIndex) {
-                                ExperimentDivider()
-                            }
+                            if (index != sites.lastIndex) ExperimentDivider()
                         }
                     }
+                    ExperimentActionRow {
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_webmount_add_site),
+                            enabled = true,
+                            primary = true,
+                            onClick = { addSiteDialogOpen = true },
+                        )
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_webmount_restore_seed),
+                            enabled = true,
+                            onClick = {
+                                val added = userSiteRegistry.restoreMissingSeeds()
+                                toaster.show(
+                                    if (added > 0) restoredTemplate.format(added)
+                                    else nothingToRestore
+                                )
+                            },
+                        )
+                    }
                 }
+            }
+            item {
+                ExperimentNote(text = stringResource(R.string.setting_webmount_about_note))
             }
         }
     }
 
-    // Per-user-feedback fix: iCloud-style login card (was a broken
-    // full-screen Activity). The 90%-height Surface inside a 16dp-padded
-    // Box mirrors ICloudLoginDialog exactly so the visual matches the
-    // reference screenshot.
-    loginDialogStationId?.let { stationId ->
-        val adapter = webMountManager.adapterOf(stationId)
-        val loginUrl = adapter?.primaryLoginUrl()
-        if (adapter == null || loginUrl.isNullOrBlank()) {
-            // Station has no login URL — nothing we can do. Dismiss silently.
-            loginDialogStationId = null
-            return@let
-        }
-        val stationName = states[stationId]?.displayName ?: adapter.displayName
-        val signedInTemplate = stringResource(R.string.setting_webmount_login_dialog_signed_in)
-        val notReadyTemplate = stringResource(R.string.setting_webmount_login_dialog_not_ready)
+    // Dialogs --------------------------------------------------------------
+
+    loginDialogSite?.let { site ->
         WebMountLoginDialog(
-            url = loginUrl,
-            title = stationName,
+            url = site.homepageUrl,
+            title = site.displayName,
             onDismiss = {
-                loginDialogStationId = null
-                // Probe the configured login cookie across the profile's
-                // origins. If found, toast success; otherwise the user may
-                // not have completed login.
-                val profile = profileRegistry.byId(stationId)?.profile
-                val cookieName = profile?.hints?.loginCookie
-                val urls = buildList {
-                    profile?.origins?.let { addAll(it) }
-                    adapter.endpoints.forEach { addAll(it.cookieUrls); add(it.origin); add(it.apiBase) }
-                }.filter { it.isNotBlank() }.distinct()
-                val captured = cookieName != null && urls.isNotEmpty() &&
+                loginDialogSite = null
+                val captured = site.loginCookieName?.let { cookieName ->
+                    val urls = collectKnownUrlsFor(site, webMountManager)
                     cookieProvider.getCookies(emptyList(), urls).value(cookieName) != null
+                } == true
                 toaster.show(
-                    if (captured) signedInTemplate.format(stationName)
-                    else notReadyTemplate.format(stationName)
+                    if (captured) signedInTemplate.format(site.displayName)
+                    else notReadyTemplate.format(site.displayName)
                 )
+            },
+        )
+    }
+
+    oauthEditDialog?.let { site ->
+        val provider = oauthClient.provider(site.id)
+        if (provider == null) {
+            oauthEditDialog = null
+        } else {
+            @Suppress("UNUSED_EXPRESSION") oauthRevision
+            val existing = oauthStore.getCredentials(site.id)
+            OAuthEditDialog(
+                siteName = site.displayName,
+                initialAppId = existing?.appId.orEmpty(),
+                initialAppSecret = existing?.appSecret.orEmpty(),
+                initialScope = existing?.scope.orEmpty(),
+                providerHint = provider.setupHint(),
+                onDismiss = { oauthEditDialog = null },
+                onSave = { appId, appSecret, scopeText ->
+                    if (appId.isBlank()) {
+                        toaster.show(appIdRequiredMessage)
+                    } else {
+                        oauthStore.putCredentials(
+                            site.id,
+                            OAuthAppCredentials(
+                                provider = site.id,
+                                appId = appId.trim(),
+                                appSecret = appSecret.trim().ifBlank { null },
+                                scope = scopeText.trim().ifBlank { null },
+                            ),
+                        )
+                        oauthEditDialog = null
+                    }
+                },
+            )
+        }
+    }
+
+    if (addSiteDialogOpen) {
+        AddCustomSiteDialog(
+            onDismiss = { addSiteDialogOpen = false },
+            onAdd = { name, url, cookieName ->
+                val ok = userSiteRegistry.add(
+                    UserSite(
+                        id = "user_" + slugify(name),
+                        displayName = name,
+                        homepageUrl = url,
+                        authKind = if (cookieName.isNullOrBlank()) AuthKind.ANONYMOUS else AuthKind.COOKIE,
+                        loginCookieName = cookieName?.takeIf { it.isNotBlank() },
+                        nativeAdapterId = null,
+                        iconKey = null,
+                    )
+                )
+                if (ok) {
+                    addSiteDialogOpen = false
+                    toaster.show(addedTemplate.format(name))
+                } else {
+                    toaster.show(duplicateMessage)
+                }
             },
         )
     }
 }
 
+// ----------------------------------------------------------------------------
+// One site row — the entire user-facing model of a website
+// ----------------------------------------------------------------------------
+
+@Composable
+private fun UserSiteCard(
+    site: UserSite,
+    stationState: WebMountStationState?,
+    cookieProvider: WebMountCookieProvider,
+    oauthStore: WebMountOAuthTokenStore,
+    busy: Boolean,
+    onSignIn: (() -> Unit)?,
+    onSignOut: (() -> Unit)?,
+    onConnect: (() -> Unit)?,
+    onDisconnect: (() -> Unit)?,
+    onEditOAuth: (() -> Unit)?,
+    onTest: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    // Compute display status from station state + cookie probe + token state.
+    val loggedIn = remember(site.id, site.loginCookieName) {
+        site.loginCookieName?.let { name ->
+            cookieProvider.getCookies(emptyList(), listOf(site.homepageUrl)).value(name) != null
+        }
+    }
+    val hasToken = if (site.authKind == AuthKind.OAUTH) {
+        oauthStore.getToken(site.id) != null
+    } else false
+    val hasCredentials = if (site.authKind == AuthKind.OAUTH) {
+        oauthStore.getCredentials(site.id) != null
+    } else false
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(34.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = workspace.row,
+                contentColor = workspace.muted,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(iconForIconKey(site.iconKey), contentDescription = null)
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = site.displayName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = site.homepageUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.faint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            SiteStatusPill(
+                authKind = site.authKind,
+                stationState = stationState,
+                loggedIn = loggedIn,
+                hasToken = hasToken,
+                hasCredentials = hasCredentials,
+            )
+        }
+
+        stationState?.message?.takeIf { it.isNotBlank() }?.let { msg ->
+            ExperimentNote(text = msg)
+        }
+
+        ExperimentActionRow {
+            if (onSignIn != null) {
+                ExperimentActionButton(
+                    text = stringResource(
+                        if (loggedIn == true) R.string.setting_webmount_sign_in_again
+                        else R.string.setting_webmount_sign_in
+                    ),
+                    primary = true,
+                    enabled = !busy,
+                    onClick = onSignIn,
+                )
+            }
+            if (onSignOut != null && loggedIn == true) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.setting_webmount_sign_out),
+                    enabled = !busy,
+                    onClick = onSignOut,
+                )
+            }
+            if (onConnect != null && !hasToken) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.setting_webmount_oauth_connect),
+                    primary = true,
+                    enabled = !busy && hasCredentials,
+                    onClick = onConnect,
+                )
+            }
+            if (onDisconnect != null && hasToken) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.setting_webmount_oauth_disconnect),
+                    enabled = !busy,
+                    onClick = onDisconnect,
+                )
+            }
+            if (onEditOAuth != null) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.setting_webmount_oauth_edit_credentials),
+                    enabled = !busy,
+                    onClick = onEditOAuth,
+                )
+            }
+            ExperimentActionButton(
+                text = stringResource(R.string.setting_webmount_test),
+                enabled = !busy && site.nativeAdapterId != null,
+                onClick = onTest,
+            )
+            ExperimentActionButton(
+                text = stringResource(R.string.setting_webmount_delete_site),
+                enabled = !busy,
+                onClick = onDelete,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SiteStatusPill(
+    authKind: AuthKind,
+    stationState: WebMountStationState?,
+    loggedIn: Boolean?,
+    hasToken: Boolean,
+    hasCredentials: Boolean,
+) {
+    val workspace = workspaceColors()
+    // Pick a single label that the user can decide from at a glance.
+    val (color, labelRes) = when {
+        authKind == AuthKind.ANONYMOUS -> workspace.blue to R.string.setting_webmount_pill_public
+        authKind == AuthKind.OAUTH && hasToken -> workspace.blue to R.string.setting_webmount_pill_connected
+        authKind == AuthKind.OAUTH && hasCredentials -> workspace.muted to R.string.setting_webmount_pill_ready
+        authKind == AuthKind.OAUTH -> workspace.faint to R.string.setting_webmount_pill_needs_setup
+        loggedIn == true -> workspace.blue to R.string.setting_webmount_pill_signed_in
+        loggedIn == false -> workspace.muted to R.string.setting_webmount_pill_signed_out
+        stationState?.status == WebMountStatus.DEGRADED -> workspace.muted to R.string.setting_webmount_pill_rate_limited
+        stationState?.status == WebMountStatus.ERROR -> MaterialTheme.colorScheme.error to R.string.setting_webmount_pill_error
+        else -> workspace.faint to R.string.setting_webmount_pill_unknown
+    }
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.12f),
+        contentColor = color,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
+    ) {
+        Text(
+            text = stringResource(labelRes),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Dialogs
+// ----------------------------------------------------------------------------
+
 /**
- * Per-user-feedback — iCloud-style login card. Mirrors
- * `ICloudLoginDialog` in [SettingExperimentalPage]: a 16dp-inset Box
- * containing a 90%-height extraLarge-shape Surface with a header row
- * (title + X close) and the WebView filling the rest.
- *
- * The headless WebView pool already enables third-party cookies (M2.3
- * holistic review W-2 fix). This Dialog's user-facing WebView does the
- * same explicitly in onCreated so SSO redirects (e.g. passport.* →
- * www.*) persist their Set-Cookie hops into the process-global jar
- * that the agent's headless sessions read from.
+ * iCloud-style login card. 16dp-inset Box around a 90%-height Surface
+ * with a header row (title + X close) and a WebView filling the rest.
  */
 @Composable
 private fun WebMountLoginDialog(
@@ -405,9 +621,8 @@ private fun WebMountLoginDialog(
                             .fillMaxWidth()
                             .weight(1f),
                         onCreated = { webView ->
-                            val cookieManager = android.webkit.CookieManager.getInstance()
-                            cookieManager.setAcceptCookie(true)
-                            cookieManager.setAcceptThirdPartyCookies(webView, true)
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
                         },
                     )
                 }
@@ -416,408 +631,161 @@ private fun WebMountLoginDialog(
     }
 }
 
-/**
- * Detail page for a station, if it has one. Returns null for stations whose
- * configuration is fully inline in the station card (login + probe buttons).
- *
- * Phase 1 M1.6 onwards: sites with extra config (e.g. Feishu app credentials,
- * GitHub default org) get their own per-station detail page added here.
- */
-@Suppress("UNUSED_PARAMETER")
-private fun configureFor(stationId: String): me.rerere.rikkahub.Screen? = null
-
 @Composable
-private fun WebMountStationRow(
-    state: WebMountStationState,
-    busy: Boolean,
-    onConfigure: () -> Unit,
-    onProbe: () -> Unit,
-    onWriteProbe: () -> Unit,
-    onSignIn: (() -> Unit)? = null,
-    onSignOut: (() -> Unit)? = null,
-) {
-    val workspace = workspaceColors()
-    val canWriteProbe =
-        state.capability == WebMountCapability.READ_ONLY ||
-            state.capability == WebMountCapability.READ_WRITE
-    val hasConfigureTarget = configureFor(state.id) != null
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                modifier = Modifier.size(34.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(iconForStation(state.id), contentDescription = null)
-                }
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = stationDisplayNameRes(state.id)
-                        ?.let { stringResource(it) }
-                        ?: state.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = workspace.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = stringResource(stationIdKey(state.id)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.faint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            WebMountStatusPill(state.status)
-        }
-
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            WebMountCapabilityPill(state.capability)
-            state.authMethods.forEach { method ->
-                WebMountAuthPill(method)
-            }
-        }
-
-        state.message?.takeIf { it.isNotBlank() }?.let { message ->
-            ExperimentNote(text = message)
-        }
-
-        ExperimentActionRow {
-            if (hasConfigureTarget) {
-                ExperimentActionButton(
-                    text = stringResource(R.string.setting_webmount_configure),
-                    primary = true,
-                    enabled = !busy,
-                    onClick = onConfigure,
-                )
-            }
-            // Phase 2 M2.3.5: surface a "Sign in" action on cookie stations
-            // where login is missing. Opens the InlineLoginActivity for that
-            // station so the user doesn't have to chase the deep link from
-            // an agent tool response.
-            if (onSignIn != null) {
-                ExperimentActionButton(
-                    text = stringResource(R.string.setting_webmount_sign_in),
-                    primary = !hasConfigureTarget,
-                    enabled = !busy,
-                    onClick = onSignIn,
-                )
-            }
-            if (onSignOut != null) {
-                ExperimentActionButton(
-                    text = stringResource(R.string.setting_webmount_sign_out),
-                    enabled = !busy,
-                    onClick = onSignOut,
-                )
-            }
-            ExperimentActionButton(
-                text = stringResource(R.string.setting_webmount_probe),
-                enabled = !busy,
-                onClick = onProbe,
-            )
-            if (canWriteProbe) {
-                ExperimentActionButton(
-                    text = stringResource(R.string.setting_webmount_write_probe),
-                    enabled = !busy,
-                    onClick = onWriteProbe,
-                )
-            }
-        }
-
-        ExperimentStatusRow(
-            label = stringResource(R.string.setting_webmount_last_updated),
-            value = formatTimestamp(state.updatedAtMillis),
-        )
-    }
-}
-
-@Composable
-private fun WebMountStatusPill(status: WebMountStatus) {
-    val workspace = workspaceColors()
-    val (containerAlpha, color, labelRes) = when (status) {
-        WebMountStatus.READ_WRITE -> Triple(0.12f, workspace.blue, R.string.setting_webmount_status_read_write)
-        WebMountStatus.READ_ONLY -> Triple(0.12f, workspace.blue, R.string.setting_webmount_status_read_only)
-        WebMountStatus.PROBING -> Triple(0.10f, workspace.muted, R.string.setting_webmount_status_probing)
-        WebMountStatus.LOGIN_REQUIRED -> Triple(0.12f, workspace.muted, R.string.setting_webmount_status_login_required)
-        WebMountStatus.DEGRADED -> Triple(0.14f, workspace.muted, R.string.setting_webmount_status_degraded)
-        WebMountStatus.ERROR -> Triple(0.14f, MaterialTheme.colorScheme.error, R.string.setting_webmount_status_error)
-        WebMountStatus.NOT_CONFIGURED -> Triple(0.08f, workspace.faint, R.string.setting_webmount_status_not_configured)
-    }
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = color.copy(alpha = containerAlpha),
-        contentColor = color,
-        border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
-    ) {
-        Text(
-            text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun WebMountCapabilityPill(capability: WebMountCapability) {
-    val workspace = workspaceColors()
-    val labelRes = when (capability) {
-        WebMountCapability.READ_WRITE -> R.string.setting_webmount_capability_read_write
-        WebMountCapability.READ_ONLY -> R.string.setting_webmount_capability_read_only
-        WebMountCapability.NONE -> R.string.setting_webmount_capability_none
-    }
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = workspace.row,
-        contentColor = workspace.muted,
-        border = BorderStroke(1.dp, workspace.hairline),
-    ) {
-        Text(
-            text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun WebMountAuthPill(method: WebMountAuthMethod) {
-    val workspace = workspaceColors()
-    val labelRes = when (method) {
-        WebMountAuthMethod.COOKIE -> R.string.setting_webmount_auth_cookie
-        WebMountAuthMethod.OAUTH -> R.string.setting_webmount_auth_oauth
-        WebMountAuthMethod.ANONYMOUS -> R.string.setting_webmount_auth_anonymous
-    }
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = workspace.row,
-        contentColor = workspace.faint,
-        border = BorderStroke(1.dp, workspace.hairline),
-    ) {
-        Text(
-            text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-        )
-    }
-}
-
-@Suppress("UNUSED_PARAMETER")
-@Composable
-private fun OAuthProviderRow(
-    provider: OAuthProvider,
-    hasCredentials: Boolean,
-    hasToken: Boolean,
-    tokenExpiresAtMs: Long,
+private fun OAuthEditDialog(
+    siteName: String,
     initialAppId: String,
     initialAppSecret: String,
     initialScope: String,
-    onSaveCredentials: (String, String, String) -> Unit,
-    onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
+    providerHint: String,
+    onDismiss: () -> Unit,
+    onSave: (appId: String, appSecret: String, scope: String) -> Unit,
 ) {
-    val workspace = workspaceColors()
-    var appId by remember(provider.id, initialAppId) { mutableStateOf(initialAppId) }
-    var appSecret by remember(provider.id, initialAppSecret) { mutableStateOf(initialAppSecret) }
-    var scopeField by remember(provider.id, initialScope) { mutableStateOf(initialScope) }
-    val nowMs = remember { System.currentTimeMillis() }
-    val tokenExpired = hasToken && tokenExpiresAtMs > 0 && tokenExpiresAtMs <= nowMs
-    val statusRes = when {
-        hasToken && !tokenExpired -> R.string.setting_webmount_oauth_status_connected
-        hasToken && tokenExpired -> R.string.setting_webmount_oauth_status_expired
-        hasCredentials -> R.string.setting_webmount_oauth_status_ready
-        else -> R.string.setting_webmount_oauth_status_need_setup
-    }
-    val statusColor = when {
-        hasToken && !tokenExpired -> workspace.blue
-        hasToken && tokenExpired -> MaterialTheme.colorScheme.error
-        else -> workspace.muted
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                modifier = Modifier.size(34.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(HugeIcons.Globe02, contentDescription = null)
-                }
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
+    var appId by remember { mutableStateOf(initialAppId) }
+    var appSecret by remember { mutableStateOf(initialAppSecret) }
+    var scopeText by remember { mutableStateOf(initialScope) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.setting_webmount_oauth_edit_title, siteName)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = provider.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = workspace.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "provider id: ${provider.id} · redirect: ${provider.defaultRedirectUri}",
+                    providerHint,
                     style = MaterialTheme.typography.bodySmall,
-                    color = workspace.faint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = appId,
+                    onValueChange = { appId = it },
+                    label = { Text(stringResource(R.string.setting_webmount_oauth_app_id)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = appSecret,
+                    onValueChange = { appSecret = it },
+                    label = { Text(stringResource(R.string.setting_webmount_oauth_app_secret)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = scopeText,
+                    onValueChange = { scopeText = it },
+                    label = { Text(stringResource(R.string.setting_webmount_oauth_scope)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Surface(
-                shape = RoundedCornerShape(999.dp),
-                color = statusColor.copy(alpha = 0.12f),
-                contentColor = statusColor,
-                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.25f)),
-            ) {
-                Text(
-                    text = stringResource(statusRes),
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(appId, appSecret, scopeText) }) {
+                Text(stringResource(R.string.setting_webmount_oauth_save))
             }
-        }
-        OutlinedTextField(
-            value = appId,
-            onValueChange = { appId = it },
-            label = { Text(stringResource(R.string.setting_webmount_oauth_app_id)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = appSecret,
-            onValueChange = { appSecret = it },
-            label = { Text(stringResource(R.string.setting_webmount_oauth_app_secret)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = scopeField,
-            onValueChange = { scopeField = it },
-            label = { Text(stringResource(R.string.setting_webmount_oauth_scope)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        ExperimentActionRow {
-            ExperimentActionButton(
-                text = stringResource(R.string.setting_webmount_oauth_save),
-                primary = true,
-                enabled = true,
-                onClick = { onSaveCredentials(appId, appSecret, scopeField) },
-            )
-            ExperimentActionButton(
-                text = stringResource(R.string.setting_webmount_oauth_connect),
-                enabled = hasCredentials,
-                onClick = onConnect,
-            )
-            ExperimentActionButton(
-                text = stringResource(R.string.setting_webmount_oauth_disconnect),
-                enabled = hasToken,
-                onClick = onDisconnect,
-            )
-        }
-        ExperimentNote(text = provider.setupHint())
-    }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.setting_webmount_profile_import_dialog_cancel))
+            }
+        },
+    )
 }
 
-/**
- * Phase 2 M2.3.5 — return an `onSignIn` handler if this station is cookie-
- * auth, has a primary login URL, and is currently not signed in. Returns
- * null otherwise so the "Sign in" button doesn't render.
- */
-/**
- * Per-user-feedback fix: clicking the per-station "Sign in" button now
- * triggers an iCloud-style Compose Dialog (see [WebMountLoginDialog])
- * rather than launching the full-screen [InlineLoginActivity]. The
- * Activity used to render blank and lacked the X-close affordance.
- *
- * Returns null for non-cookie stations (OAuth has its own Connect button
- * in the OAuth providers section).
- */
-private fun isCookieAuthStation(state: WebMountStationState): Boolean =
-    WebMountAuthMethod.COOKIE in state.authMethods
-
-/**
- * Phase 2 follow-up — "Sign out" action for cookie stations. Clears every
- * cookie associated with the station's known URLs (profile origins +
- * adapter endpoint URLs) and refreshes the station state so the UI
- * immediately reflects the logged-out state. Returns null for OAuth /
- * anonymous stations (those don't have cookie-based sessions to clear —
- * OAuth has its own Disconnect button under OAuth providers).
- */
 @Composable
-private fun signOutLauncherFor(
-    state: WebMountStationState,
-    registry: ProfileRegistry,
-    webMountManager: WebMountManager,
-    cookieProvider: me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider,
-    toaster: com.dokar.sonner.ToasterState,
-): (() -> Unit)? {
-    if (WebMountAuthMethod.COOKIE !in state.authMethods) return null
-    val signedOutTemplate = stringResource(R.string.setting_webmount_signed_out_toast)
-    val noCookiesMessage = stringResource(R.string.setting_webmount_signed_out_nothing)
-    return {
-        // Gather every URL we know about for this station: profile.origins
-        // + the adapter's declared cookieUrls / loginUrl / origin / apiBase.
-        // Together these cover every host the station might have set cookies on.
-        val profile = registry.byId(state.id)?.profile
-        val adapter = webMountManager.adapterOf(state.id)
-        val urls = buildSet {
-            profile?.origins?.let { addAll(it) }
-            adapter?.endpoints?.forEach { endpoint ->
-                add(endpoint.origin)
-                add(endpoint.apiBase)
-                add(endpoint.loginUrl)
-                addAll(endpoint.cookieUrls)
+private fun AddCustomSiteDialog(
+    onDismiss: () -> Unit,
+    onAdd: (name: String, url: String, cookieName: String?) -> Unit,
+) {
+    var nameInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf("") }
+    var cookieInput by remember { mutableStateOf("") }
+    val urlValid = urlInput.startsWith("http://") || urlInput.startsWith("https://")
+    val canSubmit = nameInput.isNotBlank() && urlValid
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.setting_webmount_custom_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.setting_webmount_custom_dialog_helper),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text(stringResource(R.string.setting_webmount_custom_name_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { Text(stringResource(R.string.setting_webmount_custom_url_label)) },
+                    placeholder = { Text("https://weibo.com") },
+                    singleLine = true,
+                    isError = urlInput.isNotBlank() && !urlValid,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = cookieInput,
+                    onValueChange = { cookieInput = it },
+                    label = { Text(stringResource(R.string.setting_webmount_custom_cookie_label)) },
+                    placeholder = { Text("SUB") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            stringResource(R.string.setting_webmount_custom_cookie_supporting),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-        }.filter { it.isNotBlank() }.distinct()
-        val cleared = cookieProvider.clearCookiesFor(urls)
-        toaster.show(
-            if (cleared > 0) signedOutTemplate.format(state.displayName, cleared)
-            else noCookiesMessage.format(state.displayName)
-        )
-    }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canSubmit,
+                onClick = {
+                    onAdd(nameInput.trim(), urlInput.trim(), cookieInput.trim().ifBlank { null })
+                },
+            ) {
+                Text(stringResource(R.string.setting_webmount_custom_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.setting_webmount_profile_import_dialog_cancel))
+            }
+        },
+    )
 }
 
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
 /**
- * Phase 2 M2.3.4 — per-station Compose icons. Built-in station ids map to
- * topical HugeIcons; unknown stations fall back to the generic Globe02.
+ * Collect every URL the cookie provider might need to probe for this site:
+ * its homepage + any adapter-declared origins / cookie URLs. Used for both
+ * sign-out (clear all of them) and login probe (check any of them).
  */
-private fun iconForStation(stationId: String) = when (stationId) {
+private fun collectKnownUrlsFor(site: UserSite, manager: WebMountManager): List<String> {
+    val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
+    return buildSet {
+        add(site.homepageUrl)
+        adapter?.endpoints?.forEach { endpoint ->
+            add(endpoint.origin)
+            add(endpoint.apiBase)
+            add(endpoint.loginUrl)
+            addAll(endpoint.cookieUrls)
+        }
+    }.filter { it.isNotBlank() }.distinct()
+}
+
+private fun iconForIconKey(iconKey: String?) = when (iconKey) {
     "hackernews" -> HugeIcons.News01
     "reddit" -> HugeIcons.Comment01
     "github" -> HugeIcons.Github
@@ -828,30 +796,10 @@ private fun iconForStation(stationId: String) = when (stationId) {
     else -> HugeIcons.Globe02
 }
 
-/**
- * Phase 2 M2.3.3 — localized display-name resource per station id.
- * The data layer's [me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter.displayName]
- * is kept as a static label for non-UI consumers (logs, agent tool output);
- * the settings UI calls this to render in the user's current locale.
- */
-@androidx.annotation.StringRes
-private fun stationDisplayNameRes(stationId: String): Int? = when (stationId) {
-    "hackernews" -> R.string.station_hackernews_name
-    "reddit" -> R.string.station_reddit_name
-    "github" -> R.string.station_github_name
-    "bilibili" -> R.string.station_bilibili_name
-    "juejin" -> R.string.station_juejin_name
-    "zhihu" -> R.string.station_zhihu_name
-    "feishu_docs" -> R.string.station_feishu_docs_name
-    else -> null
-}
-
-@Suppress("UNUSED_PARAMETER")
-private fun stationIdKey(stationId: String): Int = R.string.setting_webmount_station_generic_desc
-
-private fun formatTimestamp(ms: Long): String =
-    if (ms <= 0L) {
-        "—"
-    } else {
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(ms))
-    }
+private fun slugify(name: String): String =
+    name.trim()
+        .lowercase(Locale.ROOT)
+        .replace(Regex("[^a-z0-9]+"), "_")
+        .trim('_')
+        .ifBlank { "site" }
+        .take(40)
