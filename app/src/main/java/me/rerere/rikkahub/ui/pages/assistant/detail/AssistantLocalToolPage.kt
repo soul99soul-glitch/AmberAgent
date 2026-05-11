@@ -72,7 +72,13 @@ private fun AssistantLocalToolContent(
         val newLocalTools = if (enabled) {
             assistant.localTools + option
         } else {
-            assistant.localTools - option
+            // Phase 2 M2.0.2: turning off WebMount also removes WebMountEval so
+            // re-enabling WebMount later doesn't silently bring wm_eval back.
+            if (option == LocalToolOption.WebMount) {
+                assistant.localTools - option - LocalToolOption.WebMountEval
+            } else {
+                assistant.localTools - option
+            }
         }
         onUpdate(assistant.copy(localTools = newLocalTools))
     }
@@ -251,6 +257,21 @@ private fun AssistantLocalToolContent(
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.WebMount),
                         onCheckedChange = { toggleLocalTool(LocalToolOption.WebMount, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_webmount_eval_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_webmount_eval_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.WebMountEval),
+                        enabled = assistant.localTools.contains(LocalToolOption.WebMount),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.WebMountEval, it) }
                     )
                 }
             )

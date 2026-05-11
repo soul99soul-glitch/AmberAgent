@@ -42,6 +42,7 @@ import me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.oauth.FeishuOAuthProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthCallbackDispatcher
+import me.rerere.rikkahub.data.agent.webmount.oauth.PendingOAuthStore
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
@@ -156,6 +157,10 @@ val appModule = module {
     }
 
     single {
+        PendingOAuthStore(context = get())
+    }
+
+    single {
         OAuthCallbackDispatcher()
     }
 
@@ -163,8 +168,10 @@ val appModule = module {
         WebMountOAuthClient(
             context = get(),
             store = get(),
+            pendingStore = get(),
             dispatcher = get(),
             http = get(),
+            appScope = get(),
         ).apply {
             register(FeishuOAuthProvider)
         }
@@ -279,7 +286,7 @@ val appModule = module {
     }
 
     single {
-        WebMountPrimitiveTools(pool = get(), activityStore = get())
+        WebMountPrimitiveTools(pool = get(), activityStore = get(), manager = get())
     }
 
     single {

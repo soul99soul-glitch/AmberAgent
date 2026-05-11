@@ -36,8 +36,10 @@ import java.util.concurrent.ConcurrentHashMap
 class WebMountManager(
     context: Context,
     private val adapters: List<WebMountAdapter>,
-    // wired through to adapters in M1.3 (Browser Primitives session bootstrap)
-    @Suppress("unused") private val cookieProvider: WebMountCookieProvider,
+    // Phase 2 M2.0.5: now plumbed into per-adapter WebMountToolHooks so
+    // cookie-auth adapters can call `hooks.cookies()` instead of threading
+    // (endpoints, cookieProvider) through every tool function.
+    private val cookieProvider: WebMountCookieProvider,
     // wired in M1.5 (OAuth Intent bridge) — currently a no-op in-memory stub
     @Suppress("unused") private val oauthStore: WebMountOAuthTokenStore,
     private val activityStore: AgentToolActivityStore,
@@ -126,6 +128,12 @@ class WebMountManager(
                 stationId = adapter.id,
                 runtimeLabel = "WebMount/${adapter.displayName}",
                 workspace = "/webmount/${adapter.id}",
+                // Phase 2 M2.0.5: pass cookie context so adapter tools can
+                // call hooks.cookies() / hooks.requireCookies(name) directly.
+                // Anonymous + OAuth adapters ignore these (hooks.cookies()
+                // just returns EMPTY).
+                cookieProvider = cookieProvider,
+                endpoints = adapter.endpoints,
             )
             adapter.tools(hooks)
         }

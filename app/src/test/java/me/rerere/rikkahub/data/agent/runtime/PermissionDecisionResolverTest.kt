@@ -54,11 +54,53 @@ class PermissionDecisionResolverTest {
         assertEquals("subagent", decision.source)
     }
 
+    @Test
+    fun mandatoryApprovalCannotBeBypassedByDoubleAutoApproveToggles() {
+        // Phase 2 M2.0.1: even with BOTH "auto-approve tools" AND "auto-approve
+        // high-risk tools" enabled, mandatoryApproval forces a human prompt.
+        val decision = resolver.resolve(
+            toolDef = mandatoryTool("wm_eval"),
+            tool = toolCall("wm_eval"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("mandatory_approval", decision.source)
+        assertTrue(decision.trace.policy!!.mandatoryApproval)
+    }
+
+    @Test
+    fun mandatoryApprovalOverridesPriorRunTrust() {
+        // Even if the user previously approved this tool earlier in the same
+        // run ("trust this tool for the rest of this conversation"), a
+        // mandatoryApproval tool must re-ask per invocation.
+        val decision = resolver.resolve(
+            toolDef = mandatoryTool("wm_eval"),
+            tool = toolCall("wm_eval"),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+            autoApprovedToolNames = setOf("wm_eval"),
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("mandatory_approval", decision.source)
+    }
+
     private fun approvalTool(name: String, allowsAutoApproval: Boolean = true) = Tool(
         name = name,
         description = "",
         needsApproval = true,
         allowsAutoApproval = allowsAutoApproval,
+        execute = { emptyList() },
+    )
+
+    private fun mandatoryTool(name: String) = Tool(
+        name = name,
+        description = "",
+        needsApproval = true,
+        allowsAutoApproval = false,
+        mandatoryApproval = true,
         execute = { emptyList() },
     )
 

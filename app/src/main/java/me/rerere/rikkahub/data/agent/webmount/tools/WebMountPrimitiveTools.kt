@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.agent.webmount.tools
 
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -14,6 +15,7 @@ import me.rerere.rikkahub.data.agent.tools.boolean
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
@@ -34,16 +36,24 @@ import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
 class WebMountPrimitiveTools(
     private val pool: WebViewPool,
     private val activityStore: AgentToolActivityStore,
+    private val manager: WebMountManager,
 ) {
 
-    fun getTools(): List<Tool> = listOf(
+    /**
+     * Phase 2 M2.0.2: `wm_eval` is now gated by a separate
+     * [me.rerere.rikkahub.data.ai.tools.LocalToolOption.WebMountEval] toggle
+     * because it can execute arbitrary JS in a logged-in WebView — a strictly
+     * stronger capability than the rest of the primitives. Pass
+     * `includeEval = true` only when that secondary toggle is on.
+     */
+    fun getTools(includeEval: Boolean = false): List<Tool> = listOfNotNull(
         openTool,
         stateTool,
         extractTool,
         waitTool,
         clickTool,
         typeTool,
-        evalTool,
+        if (includeEval) evalTool else null,
         scrollTool,
         backTool,
         forwardTool,
@@ -54,6 +64,7 @@ class WebMountPrimitiveTools(
         tabNewTool,
         tabCloseTool,
         screenshotTool,
+        stationsTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -383,12 +394,11 @@ class WebMountPrimitiveTools(
             ⚠️ HIGH RISK. Evaluate arbitrary JavaScript in the WebMount session and return the
             result. The script runs INSIDE the page's origin with full DOM access — it can read
             any data the user has on that site (cookies, sessionStorage, localStorage), perform
-            same-origin fetches with credentials, and mutate the page. Normally this tool requires
-            explicit per-call human approval; users who have BOTH the global "auto-approve tools"
-            AND "auto-approve high-risk tools" settings enabled will see this run silently. Prefer
-            the specific primitives (wm_click / wm_type / wm_extract / wm_find) when they suffice.
-            The expression's return value is JSON-serialized; non-serializable values fall back to
-            String() coercion.
+            same-origin fetches with credentials, and mutate the page. This tool ALWAYS requires
+            per-call human approval and cannot be bypassed by any auto-approve setting or prior
+            in-run trust. Prefer the specific primitives (wm_click / wm_type / wm_extract /
+            wm_find) when they suffice. The expression's return value is JSON-serialized;
+            non-serializable values fall back to String() coercion.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
@@ -402,6 +412,7 @@ class WebMountPrimitiveTools(
         },
         needsApproval = true,
         allowsAutoApproval = false,
+        mandatoryApproval = true,
         execute = { input ->
             track("wm_eval", "WebMount JS 执行", input.safeEvalPreview()) {
                 val sessionId = input.requiredString("session_id")
@@ -809,6 +820,81 @@ class WebMountPrimitiveTools(
                         }.toString()))
                     }
                 }
+            }
+        },
+    )
+
+    // -------------------------------------------------------- wm_stations
+
+    /**
+     * Phase 2 M2.0.4 — `wm_stations` introspection.
+     *
+     * Returns a flat snapshot of every WebMount station the user has
+     * configured (HN / Reddit / 飞书 / GitHub / Bilibili / 知乎 / 掘金 today;
+     * future additions automatic). The agent uses this to decide whether to
+     * prefer adapter tools (already authenticated) or fall back to generic
+     * `wm_*` primitives.
+     *
+     * The output schema reserves `applicable_profile` / `has_profile` /
+     * `login_indicator` fields — populated by M2.1 (Site Profile mechanism)
+     * once that ships. Today they are always null/false so callers can
+     * already key on them without breaking when M2.1 lands.
+     */
+    private val stationsTool = Tool(
+        name = "wm_stations",
+        description = """
+            List every WebMount station registered in this app along with its current status
+            (enabled, authenticated, read_only/read_write/login_required/...), display name,
+            and the auth methods it supports. Read-only and side-effect-free; safe to call
+            before deciding whether to use an adapter tool (e.g. github_repo_search) versus
+            a generic primitive (wm_open + wm_extract). Includes `applicable_profile_id` and
+            `has_profile` slots reserved for Phase 2 M2.1 (currently always null/false).
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("include_disabled", booleanProp("Include stations the user has not enabled. Default true."))
+                    put("status_filter", stringProp("Optional wire status to filter by: not_configured / login_required / probing / read_only / read_write / degraded / error."))
+                },
+                required = emptyList(),
+            )
+        },
+        execute = { input ->
+            track("wm_stations", "WebMount 站点列表", input) {
+                val includeDisabled = input.boolean("include_disabled") ?: true
+                val statusFilter = input.string("status_filter")?.lowercase()?.takeIf { it.isNotBlank() }
+                val states = manager.states.value.values
+                    .asSequence()
+                    .filter { includeDisabled || it.enabled }
+                    .filter { statusFilter == null || it.status.wireName == statusFilter }
+                    .toList()
+                val payload = buildJsonObject {
+                    put("count", states.size)
+                    put(
+                        "stations",
+                        buildJsonArray {
+                            states.forEach { s ->
+                                add(buildJsonObject {
+                                    put("id", s.id)
+                                    put("display_name", s.displayName)
+                                    put("enabled", s.enabled)
+                                    put("status", s.status.wireName)
+                                    put("capability", s.capability.wireName)
+                                    put("auth_methods", buildJsonArray {
+                                        s.authMethods.forEach { add(JsonPrimitive(it.wireName)) }
+                                    })
+                                    s.message?.let { put("message", it) }
+                                    if (s.updatedAtMillis > 0) put("updated_at_ms", s.updatedAtMillis)
+                                    // Phase 2 M2.1 reservations — agents can already key on
+                                    // these without breaking when profiles land.
+                                    put("has_profile", false)
+                                    put("applicable_profile_id", JsonNull)
+                                })
+                            }
+                        }
+                    )
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
         },
     )

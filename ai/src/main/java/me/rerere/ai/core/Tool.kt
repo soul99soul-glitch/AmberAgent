@@ -16,6 +16,12 @@ data class Tool(
     val systemPrompt: (model: Model, messages: List<UIMessage>) -> String = { _, _ -> "" },
     val needsApproval: Boolean = false,
     val allowsAutoApproval: Boolean = true,
+    // When true, this tool ALWAYS requires explicit human approval per-invocation
+    // and cannot be auto-approved by any setting toggle, prior in-run trust, or
+    // category fast-path. Used for tools whose blast radius makes silent
+    // execution unacceptable (e.g. wm_eval — arbitrary JS in a logged-in
+    // WebView). See PermissionDecisionResolver for enforcement.
+    val mandatoryApproval: Boolean = false,
     val execute: suspend (JsonElement) -> List<UIMessagePart>
 )
 

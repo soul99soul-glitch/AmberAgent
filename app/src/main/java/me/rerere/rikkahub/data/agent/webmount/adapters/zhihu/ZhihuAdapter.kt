@@ -64,5 +64,5 @@ class ZhihuAdapter(
         }
     }
 
-    override fun tools(hooks: WebMountToolHooks): List<Tool> = tools.buildTools(hooks, endpoints, cookieProvider)
+    override fun tools(hooks: WebMountToolHooks): List<Tool> = tools.buildTools(hooks)
 }

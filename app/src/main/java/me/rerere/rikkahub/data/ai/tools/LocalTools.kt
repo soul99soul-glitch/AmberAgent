@@ -94,6 +94,21 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("webmount")
     data object WebMount : LocalToolOption()
+
+    /**
+     * Secondary toggle that enables [WebMountPrimitiveTools.evalTool] (`wm_eval`)
+     * in addition to the safe primitives gated by [WebMount]. Default OFF.
+     *
+     * `wm_eval` runs arbitrary JavaScript inside a logged-in WebView origin —
+     * it can read cookies / sessionStorage / localStorage, perform same-origin
+     * fetches with credentials, and mutate the page. The framework guarantees
+     * a per-call human approval prompt via Tool.mandatoryApproval, but the
+     * conservative default is to keep the tool entirely out of the agent's
+     * catalog unless the user opts in here.
+     */
+    @Serializable
+    @SerialName("webmount_eval")
+    data object WebMountEval : LocalToolOption()
 }
 
 class LocalTools(
@@ -1157,7 +1172,11 @@ class LocalTools(
             tools.addAll(iCloudDriveTools.getTools())
         }
         if (options.contains(LocalToolOption.WebMount)) {
-            tools.addAll(webMountPrimitiveTools.getTools())
+            // Phase 2 M2.0.2: wm_eval is gated by a separate secondary toggle
+            // (WebMountEval) — enabling WebMount alone exposes the 16 safe
+            // primitives + adapter tools but not the arbitrary-JS escape hatch.
+            val includeEval = options.contains(LocalToolOption.WebMountEval)
+            tools.addAll(webMountPrimitiveTools.getTools(includeEval = includeEval))
             // Adapter-contributed tools (hn_*, github_*, bilibili_*, ...) are
             // also gated behind the WebMount toggle so the user opts in once.
             tools.addAll(webMountManager.allTools())

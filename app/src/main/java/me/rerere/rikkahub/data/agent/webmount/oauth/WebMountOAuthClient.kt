@@ -7,7 +7,9 @@ import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountOAuthToken
 import java.util.concurrent.ConcurrentHashMap
 
@@ -39,11 +41,35 @@ import java.util.concurrent.ConcurrentHashMap
 class WebMountOAuthClient(
     private val context: Context,
     private val store: WebMountOAuthTokenStore,
+    private val pendingStore: PendingOAuthStore,
     private val dispatcher: OAuthCallbackDispatcher,
     private val http: HttpClient,
+    private val appScope: AppScope,
 ) {
 
     private val providers = ConcurrentHashMap<String, OAuthProvider>()
+
+    /**
+     * States currently being handled by a live in-process [connect] coroutine.
+     * The resume collector below uses this to skip callbacks whose live
+     * owner is still around — only "orphaned" callbacks (live coroutine
+     * died with the process) get picked up by [tryResume].
+     */
+    private val inFlight = ConcurrentHashMap.newKeySet<String>()
+
+    init {
+        // Phase 2 M2.0.3 — resume orphaned OAuth flows after process death.
+        //
+        // The dispatcher's events flow re-emits every callback, including
+        // those whose original `connect()` coroutine died with the process.
+        // Pair with the encrypted [pendingStore] so we still have the
+        // code_verifier for the exchange.
+        appScope.launch {
+            dispatcher.events.collect { callback -> handleEventForResume(callback) }
+        }
+        // Drop pending entries that have outlived the OAuth user-action window.
+        appScope.launch { pendingStore.purgeStale(PENDING_TTL_MS) }
+    }
 
     fun register(provider: OAuthProvider) {
         providers[provider.id] = provider
@@ -67,27 +93,82 @@ class WebMountOAuthClient(
         val challenge = PkceUtils.s256Challenge(verifier)
         val authUrl = provider.buildAuthorizationUrl(credentials, state, challenge)
 
-        return runCatching {
-            launchAuth(authUrl)
-            val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) {
-                dispatcher.events.first { it.provider == providerId && it.state == state }
-            } ?: return ConnectResult.Failed("OAuth callback timed out after ${AUTH_TIMEOUT_MS / 1000}s")
+        // Persist BEFORE launching the browser so a process death between
+        // here and the callback can be recovered.
+        pendingStore.put(
+            PendingOAuthEntry(
+                state = state,
+                providerId = providerId,
+                codeVerifier = verifier,
+                startedAtMs = System.currentTimeMillis(),
+            )
+        )
+        inFlight.add(state)
 
-            if (!callback.isSuccess) {
-                return ConnectResult.Failed(
-                    "Provider returned error: ${callback.error ?: "unknown"} ${callback.errorDescription.orEmpty()}".trim()
-                )
+        return try {
+            runCatching {
+                launchAuth(authUrl)
+                val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) {
+                    dispatcher.events.first { it.provider == providerId && it.state == state }
+                } ?: return ConnectResult.Failed("OAuth callback timed out after ${AUTH_TIMEOUT_MS / 1000}s")
+
+                if (!callback.isSuccess) {
+                    return ConnectResult.Failed(
+                        "Provider returned error: ${callback.error ?: "unknown"} ${callback.errorDescription.orEmpty()}".trim()
+                    )
+                }
+                val code = callback.code
+                    ?: return ConnectResult.Failed("Provider callback had no `code` param")
+
+                val token = provider.exchangeCode(credentials, code, verifier, http)
+                store.putToken(providerId, token)
+                ConnectResult.Success(token)
+            }.getOrElse { error ->
+                Log.e(TAG, "OAuth connect failed for $providerId", error)
+                ConnectResult.Failed(error.message ?: error.toString())
             }
-            val code = callback.code
-                ?: return ConnectResult.Failed("Provider callback had no `code` param")
-
-            val token = provider.exchangeCode(credentials, code, verifier, http)
-            store.putToken(providerId, token)
-            ConnectResult.Success(token)
-        }.getOrElse { error ->
-            Log.e(TAG, "OAuth connect failed for $providerId", error)
-            ConnectResult.Failed(error.message ?: error.toString())
+        } finally {
+            // Either we finished or threw — clean up the pending entry and
+            // in-flight marker so the resume path doesn't fire later.
+            pendingStore.consume(state)
+            inFlight.remove(state)
         }
+    }
+
+    /**
+     * Called for every dispatcher event. Skips callbacks whose live
+     * [connect] coroutine is still around (the live one will handle it).
+     * For orphaned callbacks, consume the persisted [PendingOAuthEntry]
+     * and complete the token exchange in the background — the result
+     * lands in [WebMountOAuthTokenStore] and the UI's
+     * [WebMountOAuthTokenStore.updates] subscriber re-renders.
+     */
+    private suspend fun handleEventForResume(callback: OAuthCallback) {
+        val state = callback.state ?: return
+        // Give the live coroutine a moment to register inFlight if the
+        // event arrived basically simultaneously with connect() start.
+        // In practice the connect() always adds to inFlight before
+        // launching the browser, so this is just defense-in-depth.
+        if (state in inFlight) return
+        val entry = pendingStore.consume(state) ?: return
+        if (entry.providerId != callback.provider) {
+            Log.w(TAG, "Resume mismatched provider for state ${state.take(6)}…")
+            return
+        }
+        val provider = providers[entry.providerId]
+            ?: run { Log.w(TAG, "Resume: provider ${entry.providerId} not registered"); return }
+        val credentials = store.getCredentials(entry.providerId)
+            ?: run { Log.w(TAG, "Resume: credentials for ${entry.providerId} missing"); return }
+        if (!callback.isSuccess) {
+            Log.i(TAG, "Resume: provider returned error for ${entry.providerId}: ${callback.error}")
+            return
+        }
+        val code = callback.code ?: return
+        runCatching {
+            val token = provider.exchangeCode(credentials, code, entry.codeVerifier, http)
+            store.putToken(entry.providerId, token)
+            Log.i(TAG, "Resumed OAuth for ${entry.providerId} after process restart")
+        }.onFailure { Log.w(TAG, "Resume token exchange failed for ${entry.providerId}", it) }
     }
 
     /** Disconnect — drop the stored token. Keeps the app credentials. */
@@ -143,5 +224,9 @@ class WebMountOAuthClient(
         private const val TAG = "WebMountOAuthClient"
         private const val AUTH_TIMEOUT_MS = 5 * 60 * 1000L   // 5 minutes for user to log in
         private const val REFRESH_SKEW_MS = 5 * 60 * 1000L   // refresh if <5 min remaining
+        // Outlives AUTH_TIMEOUT_MS so a slow browser handoff after the
+        // live connect() coroutine timed out can still be resumed if the
+        // callback eventually arrives.
+        private const val PENDING_TTL_MS = 15 * 60 * 1000L   // 15 min GC window
     }
 }

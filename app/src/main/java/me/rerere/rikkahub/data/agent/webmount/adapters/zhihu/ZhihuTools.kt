@@ -9,8 +9,6 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
-import me.rerere.rikkahub.data.agent.webmount.cookie.EndpointSpec
-import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountCookieBundle
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountToolHooks
 
@@ -18,18 +16,14 @@ class ZhihuTools(private val client: ZhihuClient) {
 
     suspend fun probe(cookies: WebMountCookieBundle): Boolean = client.probe(cookies)
 
-    fun buildTools(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ): List<Tool> = listOf(
-        feedTool(hooks, endpoints, cookieProvider),
-        questionReadTool(hooks, endpoints, cookieProvider),
-        answerReadTool(hooks, endpoints, cookieProvider),
-        searchTool(hooks, endpoints, cookieProvider),
+    fun buildTools(hooks: WebMountToolHooks): List<Tool> = listOf(
+        feedTool(hooks),
+        questionReadTool(hooks),
+        answerReadTool(hooks),
+        searchTool(hooks),
     )
 
-    private fun feedTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun feedTool(hooks: WebMountToolHooks) = Tool(
         name = "zhihu_feed",
         description = """
             知乎首页推荐 feed. Requires login (z_c0 cookie). Mix of questions / answers / articles.
@@ -46,7 +40,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
         execute = { input ->
             hooks.track("zhihu_feed", "知乎首页", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.requireCookies("z_c0")
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val items = client.feed(cookies, limit)
                 listOf(UIMessagePart.Text(buildJsonObject {
@@ -57,7 +51,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
     )
 
-    private fun questionReadTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun questionReadTool(hooks: WebMountToolHooks) = Tool(
         name = "zhihu_question_read",
         description = """
             Read a 知乎 question with its top answers. `question_id` is the numeric id (the long
@@ -75,7 +69,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
         execute = { input ->
             hooks.track("zhihu_question_read", "知乎问题", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val questionId = input.requiredString("question_id")
                 val answerLimit = (input.long("answer_limit") ?: 5L).coerceIn(1L, 20L).toInt()
                 val question = client.question(cookies, questionId)
@@ -98,7 +92,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
     )
 
-    private fun answerReadTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun answerReadTool(hooks: WebMountToolHooks) = Tool(
         name = "zhihu_answer_read",
         description = "Read a single 知乎 answer by id. Returns full content (HTML), author, stats.",
         parameters = {
@@ -112,7 +106,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
         execute = { input ->
             hooks.track("zhihu_answer_read", "知乎答案", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val answerId = input.requiredString("answer_id")
                 val maxChars = (input.long("max_chars") ?: 30_000L).coerceIn(1L, 80_000L).toInt()
                 val answer = client.answer(cookies, answerId)
@@ -122,7 +116,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
     )
 
-    private fun searchTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun searchTool(hooks: WebMountToolHooks) = Tool(
         name = "zhihu_search",
         description = """
             Search 知乎 (general type — mixes questions, answers, articles, users). Returns up to
@@ -139,7 +133,7 @@ class ZhihuTools(private val client: ZhihuClient) {
         },
         execute = { input ->
             hooks.track("zhihu_search", "知乎搜索", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val query = input.requiredString("query")
                 val limit = (input.long("limit") ?: 15L).coerceIn(1L, 30L).toInt()
                 val hits = client.search(cookies, query, limit)

@@ -1160,7 +1160,9 @@
   <string name="assistant_page_local_tools_icloud_title">iCloud Drive tools</string>
   <string name="assistant_page_local_tools_icloud_desc">Use the experimental iCloud Web Mount for configured Obsidian or iCloud Drive files.</string>
   <string name="assistant_page_local_tools_webmount_title">WebMount browser tools</string>
-  <string name="assistant_page_local_tools_webmount_desc">Let the agent drive a headless WebView: open URLs, extract DOM, click, type, evaluate JS. Off by default.</string>
+  <string name="assistant_page_local_tools_webmount_desc">Let the agent drive a headless WebView: open URLs, extract DOM, click, type, scroll, screenshot. Off by default. The arbitrary-JS escape hatch (wm_eval) is gated by a separate toggle below.</string>
+  <string name="assistant_page_local_tools_webmount_eval_title">WebMount: arbitrary JS (wm_eval)</string>
+  <string name="assistant_page_local_tools_webmount_eval_desc">Allow the agent to call wm_eval, which executes arbitrary JavaScript inside the WebMount session\'s page origin (can read cookies / sessionStorage / localStorage and perform same-origin fetches). Each invocation still requires explicit per-call human approval and cannot be auto-approved — but enabling this puts the tool in the catalog. Requires WebMount to also be on. Off by default.</string>
   <string name="setting_files_page_workspace_title">Agent Workspace</string>
   <string name="setting_files_page_workspace_desc">Choose a folder AmberAgent can use as /workspace for file tools and command runs.</string>
   <string name="setting_files_page_workspace_choose">Choose Workspace</string>

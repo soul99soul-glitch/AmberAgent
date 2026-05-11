@@ -9,8 +9,6 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
-import me.rerere.rikkahub.data.agent.webmount.cookie.EndpointSpec
-import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountCookieBundle
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountToolHooks
 
@@ -18,18 +16,14 @@ class BilibiliTools(private val client: BilibiliClient) {
 
     suspend fun probe(cookies: WebMountCookieBundle): Boolean = client.probe(cookies)
 
-    fun buildTools(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ): List<Tool> = listOf(
-        popularTool(hooks, endpoints, cookieProvider),
-        videoInfoTool(hooks, endpoints, cookieProvider),
-        searchTool(hooks, endpoints, cookieProvider),
-        historyTool(hooks, endpoints, cookieProvider),
+    fun buildTools(hooks: WebMountToolHooks): List<Tool> = listOf(
+        popularTool(hooks),
+        videoInfoTool(hooks),
+        searchTool(hooks),
+        historyTool(hooks),
     )
 
-    private fun popularTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun popularTool(hooks: WebMountToolHooks) = Tool(
         name = "bilibili_hot_videos",
         description = """
             B站热门视频 (web-interface/popular). Anonymous-friendly; cookies improve geo-availability.
@@ -45,7 +39,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
         execute = { input ->
             hooks.track("bilibili_hot_videos", "B站热门", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val videos = client.popular(cookies, limit)
                 listOf(UIMessagePart.Text(buildJsonObject {
@@ -56,7 +50,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
     )
 
-    private fun videoInfoTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun videoInfoTool(hooks: WebMountToolHooks) = Tool(
         name = "bilibili_video_info",
         description = "Read full metadata for one B站 video by `bvid`: title, description, owner, stats.",
         parameters = {
@@ -69,7 +63,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
         execute = { input ->
             hooks.track("bilibili_video_info", "B站视频详情", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val bvid = input.requiredString("bvid")
                 val video = client.videoInfo(cookies, bvid) ?: error("Video not found: $bvid")
                 listOf(UIMessagePart.Text(buildJsonObject {
@@ -94,7 +88,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
     )
 
-    private fun searchTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun searchTool(hooks: WebMountToolHooks) = Tool(
         name = "bilibili_search",
         description = "Search B站 videos by keyword. Returns up to `limit` videos on page `page`. Anonymous-friendly.",
         parameters = {
@@ -109,7 +103,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
         execute = { input ->
             hooks.track("bilibili_search", "B站搜索", input) {
-                val cookies = cp.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val query = input.requiredString("query")
                 val page = (input.long("page") ?: 1L).coerceAtLeast(1L).toInt()
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
@@ -124,7 +118,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
     )
 
-    private fun historyTool(hooks: WebMountToolHooks, endpoints: List<EndpointSpec>, cp: WebMountCookieProvider) = Tool(
+    private fun historyTool(hooks: WebMountToolHooks) = Tool(
         name = "bilibili_user_history",
         description = "Read the user's view history. Requires login (SESSDATA cookie). Returns up to `limit` items, newest first.",
         parameters = {
@@ -137,10 +131,7 @@ class BilibiliTools(private val client: BilibiliClient) {
         },
         execute = { input ->
             hooks.track("bilibili_user_history", "B站历史", input) {
-                val cookies = cp.getCookies(endpoints)
-                require(cookies.hasAll(setOf("SESSDATA"))) {
-                    "Login required: open Bilibili in AmberAgent's WebView and sign in first"
-                }
+                val cookies = hooks.requireCookies("SESSDATA")
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val items = client.history(cookies, limit)
                 listOf(UIMessagePart.Text(buildJsonObject {

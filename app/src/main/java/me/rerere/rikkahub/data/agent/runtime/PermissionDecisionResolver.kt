@@ -62,6 +62,7 @@ data class PermissionDecisionTrace(
                 policy.speculativeBlockReason?.let { put("speculative_block_reason", it) }
                 put("output_budget_chars", policy.outputBudgetChars)
                 put("hard_blocked", policy.hardBlocked)
+                put("mandatory_approval", policy.mandatoryApproval)
                 policy.reason?.let { put("reason", it) }
             })
         }
@@ -106,6 +107,19 @@ class PermissionDecisionResolver {
         }
         if (policy.hardBlocked) {
             return decision(PermissionDecisionAction.DENY, policy.reason ?: "Tool invocation is blocked.", "policy", policy)
+        }
+        // Mandatory approval gate — wins over all auto-approve toggles AND
+        // prior in-run trust. Even if the user enabled both "auto-approve
+        // tools" and "auto-approve high-risk tools", a tool flagged
+        // mandatoryApproval (currently only wm_eval) must surface a human
+        // confirmation per invocation.
+        if (policy.mandatoryApproval) {
+            return decision(
+                PermissionDecisionAction.ASK,
+                "Tool requires explicit human approval per invocation and cannot be auto-approved.",
+                "mandatory_approval",
+                policy,
+            )
         }
         if (tool.toolName == ASK_USER_TOOL_NAME && policy.needsApproval) {
             return decision(PermissionDecisionAction.ASK, "ask_user always needs a human answer.", "hitl", policy)

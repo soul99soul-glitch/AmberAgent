@@ -10,8 +10,6 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
-import me.rerere.rikkahub.data.agent.webmount.cookie.EndpointSpec
-import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountCookieBundle
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountToolHooks
 
@@ -22,23 +20,15 @@ class JuejinTools(private val client: JuejinClient) {
             client.recommendArticles(cookies, limit = 1, cursor = null).items.isNotEmpty()
         }.getOrElse { false }
 
-    fun buildTools(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ): List<Tool> = listOf(
-        feedTool(hooks, endpoints, cookieProvider),
-        pinFeedTool(hooks, endpoints, cookieProvider),
-        articleReadTool(hooks, endpoints, cookieProvider),
-        searchTool(hooks, endpoints, cookieProvider),
-        myPostsTool(hooks, endpoints, cookieProvider),
+    fun buildTools(hooks: WebMountToolHooks): List<Tool> = listOf(
+        feedTool(hooks),
+        pinFeedTool(hooks),
+        articleReadTool(hooks),
+        searchTool(hooks),
+        myPostsTool(hooks),
     )
 
-    private fun feedTool(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ) = Tool(
+    private fun feedTool(hooks: WebMountToolHooks) = Tool(
         name = "juejin_feed",
         description = """
             掘金推荐文章 feed. Returns up to `limit` articles with title / brief / author / view+digg+comment
@@ -55,7 +45,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
         execute = { input ->
             hooks.track("juejin_feed", "掘金推荐", input) {
-                val cookies = cookieProvider.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val cursor = input.string("cursor")
                 val listing = client.recommendArticles(cookies, limit, cursor)
@@ -64,11 +54,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
     )
 
-    private fun pinFeedTool(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ) = Tool(
+    private fun pinFeedTool(hooks: WebMountToolHooks) = Tool(
         name = "juejin_pins",
         description = "掘金沸点 (short messages) feed. Similar pagination shape as juejin_feed.",
         parameters = {
@@ -82,7 +68,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
         execute = { input ->
             hooks.track("juejin_pins", "掘金沸点", input) {
-                val cookies = cookieProvider.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val cursor = input.string("cursor")
                 val listing = client.shortMsgFeed(cookies, limit, cursor)
@@ -91,11 +77,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
     )
 
-    private fun articleReadTool(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ) = Tool(
+    private fun articleReadTool(hooks: WebMountToolHooks) = Tool(
         name = "juejin_article_read",
         description = """
             Read a 掘金 article in full. `article_id` is the numeric string in the article's URL
@@ -109,7 +91,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
         execute = { input ->
             hooks.track("juejin_article_read", "掘金读取", input) {
-                val cookies = cookieProvider.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val articleId = input.requiredString("article_id")
                 val article = client.articleDetail(cookies, articleId)
                     ?: error("Article not found: $articleId")
@@ -128,11 +110,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
     )
 
-    private fun searchTool(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ) = Tool(
+    private fun searchTool(hooks: WebMountToolHooks) = Tool(
         name = "juejin_search",
         description = "Full-text search 掘金 articles. Returns up to `limit` hits, same shape as juejin_feed.",
         parameters = {
@@ -146,7 +124,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
         execute = { input ->
             hooks.track("juejin_search", "掘金搜索", input) {
-                val cookies = cookieProvider.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val query = input.requiredString("query")
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val listing = client.searchArticles(cookies, query, limit)
@@ -159,11 +137,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
     )
 
-    private fun myPostsTool(
-        hooks: WebMountToolHooks,
-        endpoints: List<EndpointSpec>,
-        cookieProvider: WebMountCookieProvider,
-    ) = Tool(
+    private fun myPostsTool(hooks: WebMountToolHooks) = Tool(
         name = "juejin_my_posts",
         description = """
             List articles published by a 掘金 user. Pass the numeric user_id (the long number in the
@@ -182,7 +156,7 @@ class JuejinTools(private val client: JuejinClient) {
         },
         execute = { input ->
             hooks.track("juejin_my_posts", "掘金作者文章", input) {
-                val cookies = cookieProvider.getCookies(endpoints)
+                val cookies = hooks.cookies()
                 val userId = input.requiredString("user_id")
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 50L).toInt()
                 val cursor = input.string("cursor")

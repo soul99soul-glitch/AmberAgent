@@ -19,6 +19,7 @@ data class ToolMetadata(
     val autoApprovable: Boolean,
     val outputBudgetChars: Int,
     val risk: ToolRisk,
+    val mandatoryApproval: Boolean = false,
 )
 
 data class ToolInvocationPolicy(
@@ -36,6 +37,7 @@ data class ToolInvocationPolicy(
     val speculativeBlockReason: String? = null,
     val hardBlocked: Boolean = false,
     val reason: String? = null,
+    val mandatoryApproval: Boolean = false,
 )
 
 class ToolRegistry private constructor(
@@ -78,8 +80,8 @@ class ToolRegistry private constructor(
         private fun Tool.toMetadata(): ToolMetadata {
             val mutates = mutatesState()
             val risk = risk()
-            val effectiveNeedsApproval = needsApproval || mutates || risk == ToolRisk.High
-            val effectiveAutoApproval = allowsAutoApproval && risk != ToolRisk.High
+            val effectiveNeedsApproval = mandatoryApproval || needsApproval || mutates || risk == ToolRisk.High
+            val effectiveAutoApproval = !mandatoryApproval && allowsAutoApproval && risk != ToolRisk.High
             return ToolMetadata(
                 name = name,
                 category = category(),
@@ -89,6 +91,7 @@ class ToolRegistry private constructor(
                 autoApprovable = effectiveAutoApproval,
                 outputBudgetChars = outputBudgetChars(),
                 risk = risk,
+                mandatoryApproval = mandatoryApproval,
             )
         }
     }
@@ -117,8 +120,8 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     val baseRisk = risk()
     var mutates = baseMutates
     var risk = baseRisk
-    var needsApproval = needsApproval || baseMutates || baseRisk == ToolRisk.High
-    var autoApprovable = allowsAutoApproval && baseRisk != ToolRisk.High
+    var needsApproval = mandatoryApproval || needsApproval || baseMutates || baseRisk == ToolRisk.High
+    var autoApprovable = !mandatoryApproval && allowsAutoApproval && baseRisk != ToolRisk.High
     var concurrencySafe = concurrencySafe()
 
     when (name) {
@@ -229,6 +232,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         requiresForegroundAppPackage = foregroundRequirement,
         speculativeEligible = speculativeBlockReason == null,
         speculativeBlockReason = speculativeBlockReason,
+        mandatoryApproval = mandatoryApproval,
     )
 }
 
