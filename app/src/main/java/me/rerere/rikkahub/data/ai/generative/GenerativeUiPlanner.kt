@@ -12,15 +12,22 @@ object GenerativeUiPlanner {
         if (latestUserText.isBlank()) return ""
 
         val classification = classify(latestUserText)
+        val toolMediated = isToolMediatedRequest(latestUserText)
         return buildString {
             appendLine()
             appendLine("**Generative UI Planner**")
             when (classification) {
                 WidgetUse.ENCOURAGE -> {
-                    appendLine("The user asked for a visual. Create a concise widget to answer the request.")
-                    appendLine("Start with one short sentence, then output the show-widget block immediately.")
-                    appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart or slides.")
-                    appendLine("Keep the SVG inside its viewBox with 24px padding; do not draw outside the card.")
+                    if (toolMediated) {
+                        appendLine("The user asked for a visual artifact but also requested tools, skills, subagents, files, or external context.")
+                        appendLine("Use the requested tool/skill/subagent first. Do NOT create a widget for routing, progress, plan, or status summaries.")
+                        appendLine("Only emit a show-widget after the real tool/skill/subagent result exists and the widget is the final requested artifact.")
+                    } else {
+                        appendLine("The user asked for a direct visual. Create a concise widget to answer the request.")
+                        appendLine("Start with one short sentence, then output the show-widget block immediately.")
+                        appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart or slides.")
+                        appendLine("Keep the SVG inside its viewBox with 24px padding; do not draw outside the card.")
+                    }
                 }
 
                 WidgetUse.DISCOURAGE -> {
@@ -33,7 +40,7 @@ object GenerativeUiPlanner {
     }
 
     fun needsVisibleStreamingFallback(setting: GenerativeUiSetting, messages: List<UIMessage>): Boolean =
-        setting.enabled && classify(latestUserText(messages)) == WidgetUse.ENCOURAGE
+        shouldGenerateDirectWidgetWithoutTools(setting, messages)
 
     fun shouldGenerateDirectWidgetWithoutTools(setting: GenerativeUiSetting, messages: List<UIMessage>): Boolean {
         if (!setting.enabled) return false
@@ -48,7 +55,7 @@ object GenerativeUiPlanner {
             "搜索", "查一下", "联网", "网页", "网址", "http://", "https://", "url",
             "读取", "文件", "workspace", "屏幕", "当前页面", "用工具", "调用工具",
         ).any { it in lower }
-        return directDraw && !needsExternalContext
+        return directDraw && !needsExternalContext && !isToolMediatedRequest(text)
     }
 
     private fun latestUserText(messages: List<UIMessage>): String = messages
@@ -67,7 +74,7 @@ object GenerativeUiPlanner {
         val explicitVisual = listOf(
             "画一下", "画一个", "画个", "画出", "可视化",
             "结构图", "流程图", "架构图", "组织图", "时序图", "思维导图",
-            "幻灯片", "PPT", "presentation", "slides", "slide deck",
+            "幻灯片", "ppt", "presentation", "slides", "slide deck",
             "slide", "简报", "汇报", "演示",
         )
         val englishVisualRegex = Regex(
@@ -81,6 +88,33 @@ object GenerativeUiPlanner {
             text.length < 48 || simpleKeywords.any { it in lower } -> WidgetUse.DISCOURAGE
             else -> WidgetUse.DISCOURAGE
         }
+    }
+
+    internal fun isToolMediatedRequest(text: String): Boolean {
+        val lower = text.lowercase()
+        val explicitDelegation = listOf(
+            "@",
+            "subagent",
+            "agent",
+            "skill",
+            "技能",
+            "插件",
+            "工具",
+            "调用",
+            "委托",
+            "delegate",
+            "guizang",
+            "workspace",
+            "文件",
+            "读取",
+            "搜索",
+            "联网",
+            "网页",
+            "网址",
+            "http://",
+            "https://",
+        )
+        return explicitDelegation.any { it in lower }
     }
 }
 

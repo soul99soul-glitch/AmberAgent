@@ -1971,11 +1971,29 @@ private fun ModelCouncilRunSheet(
             }
             val displayText = liveText.ifBlank { finalText }
             val scrollState = rememberScrollState()
-            LaunchedEffect(displayText, isRunning, activeSeatKey) {
-                if (isRunning) scrollState.animateScrollTo(scrollState.maxValue)
+            var followBottom by remember(step.runId, activeSeatKey) { mutableStateOf(true) }
+            LaunchedEffect(scrollState, isRunning, activeSeatKey) {
+                snapshotFlow { scrollState.value to scrollState.maxValue }
+                    .collect { (value, maxValue) ->
+                        if (isRunning && value >= (maxValue - 8).coerceAtLeast(0)) {
+                            followBottom = true
+                        }
+                    }
+            }
+            LaunchedEffect(displayText, isRunning, activeSeatKey, followBottom) {
+                if (isRunning && followBottom) scrollState.animateScrollTo(scrollState.maxValue)
             }
             Column(
-                modifier = Modifier.verticalScroll(scrollState),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .pointerInput(isRunning, activeSeatKey) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            if (isRunning) followBottom = false
+                        }
+                    }
+                    .verticalScroll(scrollState),
             ) {
                 if (displayText.isBlank()) {
                     Text(
@@ -1985,7 +2003,9 @@ private fun ModelCouncilRunSheet(
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 } else {
-                    SelectionContainer {
+                    SelectionContainer(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         MarkdownBlock(
                             content = displayText,
                             modifier = Modifier.fillMaxWidth(),
