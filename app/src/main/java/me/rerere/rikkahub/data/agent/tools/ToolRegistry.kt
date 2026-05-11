@@ -183,13 +183,14 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         }
 
         "wm_tab_close" -> {
-            // Destroys a WebView session (irreversible). Sensitive risk so the
-            // global "auto-approve tools" toggle alone won't fire it — needs
-            // either an explicit approval or the high-risk auto-approve flag.
+            // Destroys a session the agent itself opened. Mutates state but
+            // not user data — keep at Normal risk + auto-approvable to avoid
+            // approval-fatigue training. The user can still observe the
+            // close in activity logs.
             mutates = true
-            risk = ToolRisk.Sensitive
-            needsApproval = true
-            autoApprovable = false
+            risk = ToolRisk.Normal
+            needsApproval = false
+            autoApprovable = allowsAutoApproval
             concurrencySafe = false
         }
     }

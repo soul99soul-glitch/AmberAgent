@@ -18,19 +18,20 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Central registry for [WebMountAdapter] instances.
  *
- * Two paths exist per adapter:
+ * All 7 M1.6 adapters use the standalone path: this manager owns the
+ * station's persistent state via [prefs] and drives it through the [probe]
+ * state machine. [setEnabled] writes the flag locally.
  *
- *  - If [WebMountAdapter.externalStateFlow] is non-null (wrapping adapters
- *    like iCloud in M1.1), this manager mirrors that flow into [states] and
- *    delegates [probe] / [runWriteProbe] to the adapter, which forwards them
- *    to the underlying manager. [setEnabled] is a no-op for those — the
- *    underlying manager owns the enable flag.
+ * The [WebMountAdapter.externalStateFlow] hook exists as a future escape
+ * hatch for adapters that want to mirror state from an externally-managed
+ * source. When non-null, this manager mirrors that flow into [states] and
+ * delegates [probe] / [runWriteProbe] to the adapter; [setEnabled] is a
+ * no-op since the external source owns the enable flag. No shipped adapter
+ * uses this today — iCloud, which prototyped the path, was kept as a
+ * separate standalone Settings entry per the Phase 1 M1.2 directive.
  *
- *  - If no external flow is provided, this manager owns the station's
- *    persistent state via [prefs] and drives it through the [probe] state
- *    machine. [setEnabled] writes the flag locally.
- *
- * Mutex is keyed by station id so probing iCloud doesn't block probing GitHub.
+ * Per-station Mutex (keyed by id) lets concurrent probes across different
+ * stations run in parallel — probing HN doesn't block probing GitHub.
  */
 class WebMountManager(
     context: Context,
@@ -113,19 +114,24 @@ class WebMountManager(
     }
 
     /**
-     * Tools surfaced into the agent tool catalog. Wrapping adapters return
-     * empty lists in M1.1 — the legacy `ICloudDriveTools` keeps surfacing
-     * iCloud tools directly.
+     * Tools surfaced into the agent tool catalog. Each adapter's `tools()` is
+     * called once at registration time and cached — `LocalTools.getTools()`
+     * runs every chat turn, so rebuilding ~50 `Tool` objects + their hook
+     * envelopes per turn is pure waste.
      */
-    fun allTools(): List<Tool> = adapters.flatMap { adapter ->
-        val hooks = WebMountToolHooks(
-            activityStore = activityStore,
-            stationId = adapter.id,
-            runtimeLabel = "WebMount/${adapter.displayName}",
-            workspace = "/webmount/${adapter.id}",
-        )
-        adapter.tools(hooks)
+    private val cachedTools: List<Tool> by lazy {
+        adapters.flatMap { adapter ->
+            val hooks = WebMountToolHooks(
+                activityStore = activityStore,
+                stationId = adapter.id,
+                runtimeLabel = "WebMount/${adapter.displayName}",
+                workspace = "/webmount/${adapter.id}",
+            )
+            adapter.tools(hooks)
+        }
     }
+
+    fun allTools(): List<Tool> = cachedTools
 
     // ---- internals ----------------------------------------------------------
 

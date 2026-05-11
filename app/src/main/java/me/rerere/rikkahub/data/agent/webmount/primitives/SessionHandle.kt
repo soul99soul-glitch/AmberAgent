@@ -159,12 +159,18 @@ class SessionHandle internal constructor(
         withContext(Dispatchers.Main) {
             webView.evaluateJavascript(script, null)
         }
-        val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
-        lastActivityMs.set(System.currentTimeMillis())
-        return result ?: run {
+        // try/finally so the pending entry is always cleaned up — including
+        // when the caller's coroutine is structurally cancelled (e.g. agent
+        // stops a tool turn). Without this, the entry leaks until the entire
+        // session is destroyed.
+        val result = try {
+            withTimeoutOrNull(timeoutMs) { deferred.await() }
+        } finally {
             jsBridge.forget(requestId)
-            throw JsBridge.JsBridgeException("bridge call '$method' timed out after ${timeoutMs}ms")
+            lastActivityMs.set(System.currentTimeMillis())
         }
+        return result
+            ?: throw JsBridge.JsBridgeException("bridge call '$method' timed out after ${timeoutMs}ms")
     }
 
     /** Re-inject `bridge.js` after a navigation reset the JS realm. */

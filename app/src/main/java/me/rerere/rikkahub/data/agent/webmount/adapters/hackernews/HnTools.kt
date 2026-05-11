@@ -90,7 +90,7 @@ class HnTools(private val client: HnClient) {
         },
         execute = { input ->
             hooks.track("hn_item_read", "HN Item", input) {
-                val id = input.requiredString("id").toLong()
+                val id = input.long("id") ?: error("id is required (integer)")
                 val withKidsText = input.boolean("with_kids_text") ?: false
                 val maxKids = (input.long("max_kids") ?: 20L).coerceIn(0L, 100L).toInt()
                 val item = client.item(id) ?: error("HN item not found: $id")

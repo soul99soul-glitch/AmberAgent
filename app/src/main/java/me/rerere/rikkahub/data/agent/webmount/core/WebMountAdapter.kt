@@ -7,20 +7,19 @@ import me.rerere.rikkahub.data.agent.webmount.cookie.EndpointSpec
 /**
  * One website/service plugged into the WebMount framework.
  *
- * Two adapter shapes are supported:
+ * **Standalone adapters** (the M1.6 baseline shape, used by all 7 shipped sites):
+ * the adapter owns its own state, [WebMountManager] holds per-station state in
+ * shared prefs, calls [probe] / [writeProbe] to mutate it, and the adapter's
+ * [tools] are surfaced into the agent's tool catalog.
  *
- *  1. **Standalone adapters** (the typical case for M1.6 sites). The adapter
- *     owns its own state — [WebMountManager] holds per-station state in shared
- *     prefs, calls [probe] / [writeProbe] to mutate it, and the adapter's
- *     [tools] are surfaced into the agent's tool catalog.
- *
- *  2. **Wrapping adapters** (e.g. the iCloud prototype in M1.1). The adapter
- *     piggybacks on an existing manager (`ICloudDriveManager`) that already
- *     owns state and tools. The adapter overrides [externalStateFlow] to
- *     mirror that manager into [WebMountManager], and returns no tools — the
- *     existing `ICloudDriveTools` keeps doing its job. This makes the M1.1
- *     iCloud refactor non-destructive: the legacy code path stays intact while
- *     the new unified panel surfaces the same station.
+ * **Wrapping-adapter escape hatch**: the optional [externalStateFlow] override
+ * lets an adapter mirror state from a manager that lives outside the framework
+ * (so it shows up in the unified panel without owning its own probe state).
+ * No shipped adapter uses this path today — it's kept available for future
+ * integrations that need to surface an externally-managed station's state.
+ * (Note: the iCloud experimental feature is intentionally **not** wrapped —
+ * it stays as a separate standalone Settings entry per the user's directive
+ * from Phase 1 M1.2.)
  */
 interface WebMountAdapter {
     /**

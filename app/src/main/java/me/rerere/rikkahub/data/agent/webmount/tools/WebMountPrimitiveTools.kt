@@ -725,8 +725,9 @@ class WebMountPrimitiveTools(
                 required = listOf("session_id"),
             )
         },
-        needsApproval = true,
-        allowsAutoApproval = false,
+        // Closing its own session is not a security action — auto-approvable to
+        // avoid training users to click "Approve" reflexively on a confirmation
+        // that doesn't carry real risk. Reverses the M1.4 review over-correction.
         execute = { input ->
             track("wm_tab_close", "WebMount 关闭会话", input) {
                 val sessionId = input.requiredString("session_id")
