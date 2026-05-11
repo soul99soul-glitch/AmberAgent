@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.data.agent.webmount.core
 
 import android.content.Context
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
@@ -40,7 +40,10 @@ class WebMountManager(
     // wired in M1.5 (OAuth Intent bridge) — currently a no-op in-memory stub
     @Suppress("unused") private val oauthStore: WebMountOAuthTokenStore,
     private val activityStore: AgentToolActivityStore,
-    private val appScope: CoroutineScope,
+    // Use the concrete AppScope class instead of the CoroutineScope interface
+    // — the Koin module binds only the concrete type. AppScope already
+    // implements CoroutineScope via delegation so launch/collect work the same.
+    private val appScope: AppScope,
 ) {
     private val prefs = context.getSharedPreferences("amberagent_webmount", Context.MODE_PRIVATE)
     private val mutexes = ConcurrentHashMap<String, Mutex>()
