@@ -107,6 +107,12 @@ fun SettingExperimentalWebMountPage(
     var loginDialogSite by remember { mutableStateOf<UserSite?>(null) }
     var oauthEditDialog by remember { mutableStateOf<UserSite?>(null) }
     var addSiteDialogOpen by remember { mutableStateOf(false) }
+    // Phase 2 Plan v2 review B-1 fix: cookie-state revision counter. The
+    // login dialog dismiss + sign-out actions bump this; UserSiteCard reads
+    // it inside its `loggedIn` computation so rows re-probe CookieManager
+    // on every state change instead of caching the answer for the page's
+    // lifetime.
+    var cookieRevision by remember { mutableStateOf(0) }
 
     // Forces OAuth section to recompose when token store updates.
     var oauthRevision by remember { mutableStateOf(0) }
@@ -210,6 +216,8 @@ fun SettingExperimentalWebMountPage(
                                 stationState = states[site.id],
                                 cookieProvider = cookieProvider,
                                 oauthStore = oauthStore,
+                                webMountManager = webMountManager,
+                                cookieRevision = cookieRevision,
                                 busy = site.id in busyStations,
                                 onSignIn = if (site.authKind == AuthKind.COOKIE) {
                                     { loginDialogSite = site }
@@ -218,6 +226,7 @@ fun SettingExperimentalWebMountPage(
                                     {
                                         val urls = collectKnownUrlsFor(site, webMountManager)
                                         val cleared = cookieProvider.clearCookiesFor(urls)
+                                        cookieRevision++
                                         toaster.show(
                                             if (cleared > 0) signedOutTemplate.format(site.displayName, cleared)
                                             else noCookiesMessage.format(site.displayName)
@@ -264,6 +273,21 @@ fun SettingExperimentalWebMountPage(
                                 },
                                 onDelete = {
                                     if (userSiteRegistry.remove(site.id)) {
+                                        // Plan v2 review W-2 fix: wipe ALL data
+                                        // associated with this site so "delete"
+                                        // is honest. OAuth credentials + tokens
+                                        // were silently surviving the delete and
+                                        // would auto-attach if the user later
+                                        // re-added the same site id.
+                                        if (site.authKind == AuthKind.OAUTH) {
+                                            oauthStore.clearToken(site.id)
+                                            oauthStore.clearCredentials(site.id)
+                                        }
+                                        if (site.authKind == AuthKind.COOKIE) {
+                                            val urls = collectKnownUrlsFor(site, webMountManager)
+                                            cookieProvider.clearCookiesFor(urls)
+                                        }
+                                        cookieRevision++
                                         toaster.show(deletedTemplate.format(site.displayName))
                                     }
                                 },
@@ -306,6 +330,7 @@ fun SettingExperimentalWebMountPage(
             title = site.displayName,
             onDismiss = {
                 loginDialogSite = null
+                cookieRevision++  // B-1 fix: force row re-probe of CookieManager
                 val captured = site.loginCookieName?.let { cookieName ->
                     val urls = collectKnownUrlsFor(site, webMountManager)
                     cookieProvider.getCookies(emptyList(), urls).value(cookieName) != null
@@ -388,6 +413,9 @@ private fun UserSiteCard(
     stationState: WebMountStationState?,
     cookieProvider: WebMountCookieProvider,
     oauthStore: WebMountOAuthTokenStore,
+    webMountManager: WebMountManager,
+    /** Bumped by the parent on cookie-state changes so this row re-probes. */
+    cookieRevision: Int,
     busy: Boolean,
     onSignIn: (() -> Unit)?,
     onSignOut: (() -> Unit)?,
@@ -398,11 +426,16 @@ private fun UserSiteCard(
     onDelete: () -> Unit,
 ) {
     val workspace = workspaceColors()
-    // Compute display status from station state + cookie probe + token state.
-    val loggedIn = remember(site.id, site.loginCookieName) {
-        site.loginCookieName?.let { name ->
-            cookieProvider.getCookies(emptyList(), listOf(site.homepageUrl)).value(name) != null
-        }
+    // Plan v2 review B-1 + W-1 fix: probe the FULL known URL set on every
+    // recomposition (no remember cache). The login dialog dismiss + sign-out
+    // + delete actions all bump `cookieRevision` so this row sees a fresh
+    // CookieManager snapshot. The URL set matches what onSignOut /
+    // onDismiss probe — no asymmetry between the row label and the toast.
+    @Suppress("UNUSED_EXPRESSION") cookieRevision
+    val loggedIn = site.loginCookieName?.let { name ->
+        val urls = collectKnownUrlsFor(site, webMountManager)
+        if (urls.isEmpty()) null
+        else cookieProvider.getCookies(emptyList(), urls).value(name) != null
     }
     val hasToken = if (site.authKind == AuthKind.OAUTH) {
         oauthStore.getToken(site.id) != null
@@ -528,17 +561,31 @@ private fun SiteStatusPill(
     hasCredentials: Boolean,
 ) {
     val workspace = workspaceColors()
-    // Pick a single label that the user can decide from at a glance.
+    // Plan v2 review W-3 fix: operational status (DEGRADED / ERROR) takes
+    // precedence over auth state. A signed-in user being rate-limited wants
+    // to see "Rate-limited" — sign-in is a prerequisite, not the actionable
+    // info. ANONYMOUS sites still surface "Public" because they have no
+    // notion of signed-in/out, but their station status (if any) is still
+    // surfaced via DEGRADED / ERROR branches below.
     val (color, labelRes) = when {
-        authKind == AuthKind.ANONYMOUS -> workspace.blue to R.string.setting_webmount_pill_public
-        authKind == AuthKind.OAUTH && hasToken -> workspace.blue to R.string.setting_webmount_pill_connected
-        authKind == AuthKind.OAUTH && hasCredentials -> workspace.muted to R.string.setting_webmount_pill_ready
-        authKind == AuthKind.OAUTH -> workspace.faint to R.string.setting_webmount_pill_needs_setup
-        loggedIn == true -> workspace.blue to R.string.setting_webmount_pill_signed_in
-        loggedIn == false -> workspace.muted to R.string.setting_webmount_pill_signed_out
-        stationState?.status == WebMountStatus.DEGRADED -> workspace.muted to R.string.setting_webmount_pill_rate_limited
-        stationState?.status == WebMountStatus.ERROR -> MaterialTheme.colorScheme.error to R.string.setting_webmount_pill_error
-        else -> workspace.faint to R.string.setting_webmount_pill_unknown
+        stationState?.status == WebMountStatus.ERROR ->
+            MaterialTheme.colorScheme.error to R.string.setting_webmount_pill_error
+        stationState?.status == WebMountStatus.DEGRADED ->
+            workspace.muted to R.string.setting_webmount_pill_rate_limited
+        authKind == AuthKind.ANONYMOUS ->
+            workspace.blue to R.string.setting_webmount_pill_public
+        authKind == AuthKind.OAUTH && hasToken ->
+            workspace.blue to R.string.setting_webmount_pill_connected
+        authKind == AuthKind.OAUTH && hasCredentials ->
+            workspace.muted to R.string.setting_webmount_pill_ready
+        authKind == AuthKind.OAUTH ->
+            workspace.faint to R.string.setting_webmount_pill_needs_setup
+        loggedIn == true ->
+            workspace.blue to R.string.setting_webmount_pill_signed_in
+        loggedIn == false ->
+            workspace.muted to R.string.setting_webmount_pill_signed_out
+        else ->
+            workspace.faint to R.string.setting_webmount_pill_unknown
     }
     Surface(
         shape = RoundedCornerShape(999.dp),
