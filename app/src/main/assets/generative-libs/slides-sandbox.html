@@ -30,6 +30,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overf
 .slide{flex:0 0 100%;width:100%;height:100%;overflow-y:auto;scroll-snap-align:start;scroll-snap-stop:always;background:var(--slide-bg);color:var(--ink);-webkit-overflow-scrolling:touch;position:relative;}
 .slide::-webkit-scrollbar{width:0;}
 .slide-inner{min-height:100%;padding:clamp(22px,5.6vw,54px) clamp(18px,5vw,64px) 86px;display:flex;flex-direction:column;gap:clamp(14px,3vw,28px);}
+.slide-inner,.panel,.metric,h1,h2,h3,p,li,.subtitle,.quote-text,.metric-value,.metric-label,.item-title,.item-body{max-width:100%;overflow-wrap:anywhere;word-break:break-word;}
 .kicker{font-family:var(--mono);font-size:clamp(10px,2.1vw,13px);line-height:1.3;color:var(--accent);margin:0;text-transform:uppercase;}
 h1,h2,h3,p{margin:0;}
 h1{font-size:clamp(32px,10vw,76px);line-height:1.04;font-weight:760;color:var(--ink);letter-spacing:0;}
@@ -148,10 +149,21 @@ li{margin:.34em 0;}
     if(Array.isArray(input)) return {schemaVersion:2,style:'system',slides:input};
     if(!input || typeof input !== 'object') return null;
     if(Array.isArray(input.slides)) return input;
-    if(Array.isArray(input.pages)) return Object.assign({}, input, {slides:input.pages});
-    if(Array.isArray(input.spec)) return Object.assign({}, input, {slides:input.spec});
+    if(Array.isArray(input.pages)) return makeDeck(input, input.pages);
+    if(Array.isArray(input.spec)) return makeDeck(input, input.spec);
     if(input.spec && typeof input.spec === 'object') return normalizeDeck(input.spec);
     return null;
+  }
+
+  function makeDeck(input, slides){
+    return {
+      schemaVersion: input.schemaVersion || 2,
+      style: input.style || 'system',
+      accent: input.accent,
+      fontPack: input.fontPack,
+      title: input.title,
+      slides: slides
+    };
   }
 
   function normalizeStyle(value){
@@ -185,12 +197,14 @@ li{margin:.34em 0;}
   function itemTitle(item){
     if(item == null) return '';
     if(typeof item !== 'object') return String(item);
-    return String(pick(item, ['title','label','name','key','metric']) || '');
+    return String(pick(item, ['title','label','name','key','metric','summary','heading']) || '');
   }
 
   function itemBody(item){
     if(item == null || typeof item !== 'object') return '';
-    return String(pick(item, ['body','description','detail','text','value','caption']) || '');
+    var body = pick(item, ['body','description','detail','text','value','caption','takeaway','note']);
+    if(body != null && typeof body !== 'object') return String(body);
+    return '';
   }
 
   function renderList(items, compact){
@@ -199,6 +213,10 @@ li{margin:.34em 0;}
     return '<div class="content-list '+(compact?'compact':'')+'">' + rows.map(function(item){
       var title = itemTitle(item);
       var body = itemBody(item);
+      if(!title && item && typeof item === 'object'){
+        title = '内容';
+        body = compactObject(item);
+      }
       if(body){
         return '<div class="bullet"><div><p class="item-title">'+esc(title)+'</p><p class="item-body">'+esc(body)+'</p></div></div>';
       }
@@ -259,8 +277,41 @@ li{margin:.34em 0;}
     }).join('') + '</div>';
   }
 
+  function compactObject(value){
+    try{
+      return JSON.stringify(value, null, 2).slice(0, 800);
+    }catch(e){
+      return String(value);
+    }
+  }
+
+  function renderFallbackFields(slide){
+    var ignored = {
+      layout:true,style:true,theme:true,visual:true,tone:true,accent:true,accentColor:true,color:true,
+      title:true,name:true,heading:true,h1:true,header:true,subtitle:true,tagline:true,h2:true,subheading:true,
+      kicker:true,meta:true,label:true,section:true,notes:true,note:true,footer:true,speaker_notes:true,speakerNotes:true
+    };
+    var rows = [];
+    Object.keys(slide || {}).forEach(function(key){
+      if(ignored[key]) return;
+      var value = slide[key];
+      if(value == null || value === '') return;
+      if(Array.isArray(value)){
+        if(value.length === 0) return;
+        rows.push({title:key, body:value.map(function(item){
+          return (item && typeof item === 'object') ? compactObject(item) : String(item);
+        }).join(' · ')});
+      } else if(typeof value === 'object'){
+        rows.push({title:key, body:compactObject(value)});
+      } else {
+        rows.push({title:key, body:String(value)});
+      }
+    });
+    return renderList(rows, false);
+  }
+
   function renderBody(slide, layout){
-    var content = pick(slide, ['content','body','items','bullets','text','description','points']);
+    var content = pick(slide, ['content','body','items','bullets','text','description','points','summary','takeaways','sections']);
     if(layout === 'metrics') return renderMetrics(pick(slide, ['metrics','items','content']));
     if(layout === 'timeline') return renderTimeline(pick(slide, ['items','timeline','content']));
     if(layout === 'image-grid') return renderMedia(pick(slide, ['media','images','items']));
@@ -270,7 +321,7 @@ li{margin:.34em 0;}
       var right = renderCards(pick(slide, ['items','cards','details'])) || renderMedia(pick(slide, ['media','images']));
       return '<div class="two-col"><div>'+left+'</div><div>'+(right || renderList(pick(slide, ['notes','detail']), true))+'</div></div>';
     }
-    if(layout === 'cards' || layout === 'section') return renderCards(pick(slide, ['items','cards','content'])) || renderList(content, true);
+    if(layout === 'cards' || layout === 'section') return renderCards(pick(slide, ['items','cards','content','sections'])) || renderList(content, true);
     return renderList(content, layout === 'cover' || layout === 'closing');
   }
 
@@ -294,7 +345,7 @@ li{margin:.34em 0;}
       html += '<div class="section-number">'+esc(String(index).padStart(2, '0'))+'</div>';
       html += '<div class="rule"></div><h1>'+esc(title)+'</h1>';
       if(subtitle) html += '<p class="subtitle">'+esc(subtitle)+'</p>';
-      html += renderBody(slide, layout);
+      html += renderBody(slide, layout) || renderFallbackFields(slide);
     } else if(layout === 'quote'){
       html += '<div class="quote-mark">“</div>';
       html += '<p class="quote-text">'+esc(title)+'</p>';
@@ -302,11 +353,11 @@ li{margin:.34em 0;}
     } else if(layout === 'cover'){
       html += '<div class="cover-main"><div class="rule"></div><h1>'+esc(title)+'</h1>';
       if(subtitle) html += '<p class="subtitle">'+esc(subtitle)+'</p>';
-      html += '</div>' + renderBody(slide, layout);
+      html += '</div>' + (renderBody(slide, layout) || renderFallbackFields(slide));
     } else {
       html += '<h1>'+esc(title)+'</h1>';
       if(subtitle) html += '<p class="subtitle">'+esc(subtitle)+'</p>';
-      html += renderBody(slide, layout);
+      html += renderBody(slide, layout) || renderFallbackFields(slide);
     }
     if(notes) html += '<p class="notes">'+esc(notes)+'</p>';
     html += '</div>';

@@ -250,4 +250,13 @@ class GenerativeWidgetParserTest {
 
         assertFalse(result.valid)
     }
+
+    @Test
+    fun rejectsDangerousSlidesObjectKeys() {
+        val result = VChartSpecValidator.validateSlidesSpec(
+            """{"slides":[{"title":"A","__proto__":{"polluted":true}}]}"""
+        )
+
+        assertFalse(result.valid)
+    }
 }

@@ -205,13 +205,31 @@ object VChartSpecValidator {
             }
 
             is JsonObject -> {
-                element.values.forEach { child ->
+                element.entries.forEach { (key, child) ->
+                    val keyResult = validateObjectKey(key)
+                    if (!keyResult.valid) return keyResult
                     val result = validateElement(child, depth + 1, maxStringLength)
                     if (!result.valid) return result
                 }
                 ValidationResult(true)
             }
         }
+    }
+
+    private fun validateObjectKey(key: String): ValidationResult {
+        if (key.length > MAX_STRING_LENGTH) {
+            return ValidationResult(false, "object key too long: ${key.length}")
+        }
+        val lower = key.lowercase()
+        if (lower == "__proto__" || lower == "constructor" || lower == "prototype") {
+            return ValidationResult(false, "blocked object key: $key")
+        }
+        BLOCKED_PATTERNS.forEach { pattern ->
+            if (pattern.lowercase() in lower) {
+                return ValidationResult(false, "blocked object key pattern: $pattern")
+            }
+        }
+        return ValidationResult(true)
     }
 
     private fun validateStringValue(value: String, maxStringLength: Int): ValidationResult {

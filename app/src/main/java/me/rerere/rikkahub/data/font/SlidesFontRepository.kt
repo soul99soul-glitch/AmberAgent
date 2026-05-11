@@ -136,49 +136,53 @@ class SlidesFontRepository(
         val target = File(packDir, pack.fileName)
         val request = Request.Builder().url(pack.sourceUrl).build()
         _downloadsFlow.updateProgress(pack.id, 0L, pack.fileSizeBytes)
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                error("字体下载失败: HTTP ${response.code}")
-            }
-            val body = response.body
-            val total = body.contentLength().takeIf { it > 0L } ?: pack.fileSizeBytes
-            body.byteStream().use { input ->
-                tmp.outputStream().use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var downloaded = 0L
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        _downloadsFlow.updateProgress(pack.id, downloaded, total)
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("字体下载失败: HTTP ${response.code}")
+                }
+                val body = response.body
+                val total = body.contentLength().takeIf { it > 0L } ?: pack.fileSizeBytes
+                body.byteStream().use { input ->
+                    tmp.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var downloaded = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            _downloadsFlow.updateProgress(pack.id, downloaded, total)
+                        }
                     }
                 }
             }
-        }
-        val actualSha = sha256(tmp)
-        if (!actualSha.equals(pack.sha256, ignoreCase = true)) {
-            tmp.delete()
-            error("字体校验失败: $actualSha")
-        }
-        if (target.exists()) target.delete()
-        if (!tmp.renameTo(target)) {
-            tmp.copyTo(target, overwrite = true)
-            tmp.delete()
-        }
-        val records = readManifest().fonts
-            .filterNot { it.id == pack.id }
-            .plus(
-                InstalledFontRecord(
-                    id = pack.id,
-                    fileName = pack.fileName,
-                    sha256 = pack.sha256,
-                    installedAtMillis = System.currentTimeMillis(),
+            val actualSha = sha256(tmp)
+            if (!actualSha.equals(pack.sha256, ignoreCase = true)) {
+                tmp.delete()
+                error("字体校验失败: $actualSha")
+            }
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+            val records = readManifest().fonts
+                .filterNot { it.id == pack.id }
+                .plus(
+                    InstalledFontRecord(
+                        id = pack.id,
+                        fileName = pack.fileName,
+                        sha256 = pack.sha256,
+                        installedAtMillis = System.currentTimeMillis(),
+                    )
                 )
-            )
-        writeManifest(InstalledFontManifest(records.sortedBy { it.id }))
-        _downloadsFlow.value = _downloadsFlow.value - pack.id
-        refresh()
+            writeManifest(InstalledFontManifest(records.sortedBy { it.id }))
+            refresh()
+        } finally {
+            tmp.delete()
+            _downloadsFlow.value = _downloadsFlow.value - pack.id
+        }
     }
 
     suspend fun delete(packId: String) = withContext(Dispatchers.IO) {
