@@ -67,6 +67,275 @@
     return window.__amberWmConsole.slice(window.__amberWmConsole.length - max);
   }
 
+  // --------------------------------------------------------------- selectors
+
+  /**
+   * Resolve a selector string into a NodeList. Supports:
+   *   - "css:..."  or "...":   document.querySelectorAll(...)
+   *   - "text=..."             elements whose .innerText / .textContent
+   *                            contains the substring (case-insensitive)
+   *   - "xpath=..."            XPath via document.evaluate(...)
+   * Returns an Array (not live).
+   */
+  function resolveSelector(sel) {
+    if (!sel || typeof sel !== 'string') return [];
+    if (sel.indexOf('xpath=') === 0) {
+      var xp = sel.substring(6);
+      var out = [];
+      var snap = document.evaluate(xp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      for (var i = 0; i < snap.snapshotLength; i++) out.push(snap.snapshotItem(i));
+      return out;
+    }
+    if (sel.indexOf('text=') === 0) {
+      var needle = sel.substring(5).toLowerCase();
+      var all = Array.prototype.slice.call(document.querySelectorAll('a,button,input,[role=button],[role=link],label,h1,h2,h3,h4,li,p,span,div'));
+      return all.filter(function (el) {
+        var t = (el.innerText || el.textContent || '').toLowerCase();
+        return t.indexOf(needle) >= 0;
+      });
+    }
+    var css = sel.indexOf('css:') === 0 ? sel.substring(4) : sel;
+    try { return Array.prototype.slice.call(document.querySelectorAll(css)); }
+    catch (e) { return []; }
+  }
+
+  function isVisible(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    var cs = window.getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity || '1') === 0) return false;
+    return true;
+  }
+
+  function roleOf(el) {
+    var r = el.getAttribute && el.getAttribute('role');
+    if (r) return r;
+    switch ((el.tagName || '').toLowerCase()) {
+      case 'a': return 'link';
+      case 'button': return 'button';
+      case 'input': return el.type ? ('input:' + el.type) : 'input';
+      case 'select': return 'combobox';
+      case 'textarea': return 'textbox';
+      case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': return 'heading';
+      default: return null;
+    }
+  }
+
+  function accessibleName(el) {
+    if (!el) return null;
+    var aria = el.getAttribute && el.getAttribute('aria-label');
+    if (aria) return aria.trim();
+    var labelled = el.getAttribute && el.getAttribute('aria-labelledby');
+    if (labelled) {
+      var ref = document.getElementById(labelled);
+      if (ref) return (ref.innerText || ref.textContent || '').trim();
+    }
+    var alt = el.getAttribute && el.getAttribute('alt');
+    if (alt) return alt.trim();
+    var title = el.getAttribute && el.getAttribute('title');
+    if (title) return title.trim();
+    if (el.tagName === 'INPUT' && el.placeholder) return el.placeholder.trim();
+    var text = (el.innerText || el.textContent || '').trim();
+    if (text.length > 0 && text.length < 200) return text;
+    return null;
+  }
+
+  function rectOf(el) {
+    var r = el.getBoundingClientRect();
+    return [r.left | 0, r.top | 0, r.width | 0, r.height | 0];
+  }
+
+  function nodePath(el) {
+    // Cheap CSS-ish path with nth-of-type indexes. Capped at 6 segments
+    // to keep snapshot output small.
+    var parts = [];
+    var cur = el;
+    while (cur && cur.nodeType === 1 && parts.length < 6) {
+      var tag = cur.tagName ? cur.tagName.toLowerCase() : '#';
+      var parent = cur.parentElement;
+      if (parent) {
+        var sibs = Array.prototype.filter.call(parent.children, function (c) { return c.tagName === cur.tagName; });
+        if (sibs.length > 1) {
+          tag += ':nth(' + sibs.indexOf(cur) + ')';
+        }
+      }
+      parts.unshift(tag);
+      cur = cur.parentElement;
+    }
+    return parts.join('>');
+  }
+
+  // --------------------------------------------------------------- extract
+
+  function describeNode(el, opts) {
+    var node = {
+      tag: (el.tagName || '').toLowerCase(),
+      path: nodePath(el),
+      role: roleOf(el),
+      name: accessibleName(el),
+      rect: rectOf(el),
+      visible: isVisible(el),
+    };
+    if (el.tagName === 'A' && el.href) node.href = el.href;
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+      try { node.value = el.value; } catch (_) {}
+      if (el.type) node.input_type = el.type;
+      if (el.disabled) node.disabled = true;
+    }
+    if (opts && opts.text !== false) {
+      var t = (el.innerText || el.textContent || '').trim();
+      if (t.length > 0) node.text = t.length > 240 ? (t.substring(0, 240) + '…') : t;
+    }
+    return node;
+  }
+
+  function extractReadable(args) {
+    var maxChars = (args.max_chars | 0) || 4000;
+    var maxLinks = (args.max_links | 0) || 20;
+    var raw = (document.body && document.body.innerText) || '';
+    var text = raw.length > maxChars ? raw.substring(0, maxChars) : raw;
+    var anchors = Array.prototype.slice.call(document.querySelectorAll('a[href]'));
+    var seen = {};
+    var links = [];
+    for (var i = 0; i < anchors.length && links.length < maxLinks; i++) {
+      var a = anchors[i];
+      var href = a.href;
+      if (!href || seen[href]) continue;
+      seen[href] = true;
+      var label = accessibleName(a);
+      if (!label) continue;
+      links.push({ href: href, text: label });
+    }
+    return {
+      mode: 'readable',
+      url: location.href,
+      title: document.title || '',
+      text: text,
+      text_chars: text.length,
+      truncated: raw.length > maxChars,
+      total_chars: raw.length,
+      links: links,
+      total_links: anchors.length,
+    };
+  }
+
+  function extractInteractive(args) {
+    var maxNodes = Math.min(((args.max_nodes | 0) || 200), 1000);
+    var selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick]';
+    var els = Array.prototype.slice.call(document.querySelectorAll(selector));
+    var visible = args.visible_only !== false;
+    var nodes = [];
+    for (var i = 0; i < els.length && nodes.length < maxNodes; i++) {
+      var el = els[i];
+      if (visible && !isVisible(el)) continue;
+      nodes.push(describeNode(el, { text: true }));
+    }
+    return {
+      mode: 'interactive',
+      url: location.href,
+      title: document.title || '',
+      nodes: nodes,
+      truncated: nodes.length >= maxNodes && els.length > maxNodes,
+      total_candidates: els.length,
+    };
+  }
+
+  function extractSnapshot(args) {
+    var maxNodes = Math.min(((args.max_nodes | 0) || 1000), 4000);
+    var rootSel = args.root_selector;
+    var root = document.body;
+    if (rootSel) {
+      var matched = resolveSelector(rootSel);
+      if (matched.length > 0) root = matched[0];
+    }
+    var visible = args.visible_only !== false;
+    var nodes = [];
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
+    var cur = walker.currentNode;
+    while (cur && nodes.length < maxNodes) {
+      if (!visible || isVisible(cur)) {
+        var role = roleOf(cur);
+        var hasName = accessibleName(cur);
+        // Only keep semantically interesting nodes when not in role/name mode.
+        if (role || hasName || cur === root) {
+          nodes.push(describeNode(cur, { text: true }));
+        }
+      }
+      cur = walker.nextNode();
+    }
+    return {
+      mode: 'snapshot',
+      url: location.href,
+      title: document.title || '',
+      viewport: getViewport(),
+      root_selector: rootSel || 'body',
+      nodes: nodes,
+      truncated: nodes.length >= maxNodes,
+    };
+  }
+
+  function extractHtml(args) {
+    var sel = args.selector;
+    var maxChars = ((args.max_chars | 0) || 60000);
+    var target = sel ? (resolveSelector(sel)[0] || null) : document.documentElement;
+    if (!target) return { mode: 'html', error: 'no element matched: ' + sel };
+    var html = target.outerHTML || '';
+    var truncated = html.length > maxChars;
+    return {
+      mode: 'html',
+      url: location.href,
+      selector: sel || ':root',
+      html: truncated ? html.substring(0, maxChars) : html,
+      total_chars: html.length,
+      truncated: truncated,
+    };
+  }
+
+  // --------------------------------------------------------------- wait
+
+  function waitForSelector(sel, timeoutMs, visibleOnly, reqId) {
+    var deadline = Date.now() + timeoutMs;
+    function check() {
+      var matched = resolveSelector(sel);
+      if (visibleOnly) matched = matched.filter(isVisible);
+      if (matched.length > 0) {
+        AmberWM.resolve(reqId, safeJson({
+          waited_ms: timeoutMs - (deadline - Date.now()),
+          matched: matched.length,
+          first_path: nodePath(matched[0]),
+        }));
+        return;
+      }
+      if (Date.now() >= deadline) {
+        AmberWM.reject(reqId, 'wait timed out after ' + timeoutMs + 'ms for selector: ' + sel);
+        return;
+      }
+      setTimeout(check, 100);
+    }
+    check();
+  }
+
+  function waitForReadyState(target, timeoutMs, reqId) {
+    var deadline = Date.now() + timeoutMs;
+    function check() {
+      if (document.readyState === target ||
+          (target === 'complete' && document.readyState === 'complete') ||
+          (target === 'interactive' && (document.readyState === 'interactive' || document.readyState === 'complete'))) {
+        AmberWM.resolve(reqId, safeJson({ waited_ms: timeoutMs - (deadline - Date.now()), ready_state: document.readyState }));
+        return;
+      }
+      if (Date.now() >= deadline) {
+        AmberWM.reject(reqId, 'wait timed out, readyState=' + document.readyState);
+        return;
+      }
+      setTimeout(check, 100);
+    }
+    check();
+  }
+
+  // --------------------------------------------------------------- dispatch
+
   window.__amberWm_call = function (method, argsJson, reqId) {
     var args = {};
     try { if (argsJson) args = JSON.parse(argsJson); }
@@ -82,6 +351,36 @@
           var payload = snapshotState();
           if (includeConsole) payload.console_tail = consoleTail(tail);
           AmberWM.resolve(reqId, safeJson(payload));
+          return;
+        }
+        case 'extract': {
+          var mode = args.mode || 'readable';
+          var payload;
+          switch (mode) {
+            case 'readable':    payload = extractReadable(args); break;
+            case 'interactive': payload = extractInteractive(args); break;
+            case 'snapshot':    payload = extractSnapshot(args); break;
+            case 'html':        payload = extractHtml(args); break;
+            default:
+              AmberWM.reject(reqId, 'unknown extract mode: ' + mode);
+              return;
+          }
+          AmberWM.resolve(reqId, safeJson(payload));
+          return;
+        }
+        case 'wait': {
+          var until = args.until || 'selector';
+          var timeout = (args.timeout_ms | 0) || 10000;
+          if (until === 'selector') {
+            if (!args.value) { AmberWM.reject(reqId, 'wait selector requires value'); return; }
+            waitForSelector(args.value, timeout, args.visible_only !== false, reqId);
+            return;
+          }
+          if (until === 'ready_state') {
+            waitForReadyState(args.value || 'complete', timeout, reqId);
+            return;
+          }
+          AmberWM.reject(reqId, 'unknown wait kind: ' + until);
           return;
         }
         default:

@@ -36,6 +36,8 @@ class WebMountPrimitiveTools(
     fun getTools(): List<Tool> = listOf(
         openTool,
         stateTool,
+        extractTool,
+        waitTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -152,6 +154,107 @@ class WebMountPrimitiveTools(
                     put("error", ls.error)
                     put("updated_at_ms", ls.updatedAtMs)
                     put("page", bridgePayload)
+                }
+                listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // ------------------------------------------------------------ wm_extract
+
+    private val extractTool = Tool(
+        name = "wm_extract",
+        description = """
+            Extract structured information from the current page of a WebMount session. Four modes:
+            `readable` (default) returns innerText + outbound links (compatible with the legacy webview_read
+            payload); `interactive` returns only clickable elements (a, button, input, [role=button|link|tab|menuitem]);
+            `snapshot` returns a flattened tree of semantically interesting nodes with role / accessible name / rect /
+            visibility — useful for the agent to find the next element to click; `html` returns the outerHTML of one
+            selector. All modes cap output size to keep the agent's context manageable.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("mode", stringProp("'readable' (default) | 'interactive' | 'snapshot' | 'html'."))
+                    put("max_chars", integerProp("readable/html: max characters to return."))
+                    put("max_links", integerProp("readable: max links to return (default 20)."))
+                    put("max_nodes", integerProp("interactive/snapshot: max nodes to return."))
+                    put("visible_only", booleanProp("interactive/snapshot: skip hidden nodes (default true)."))
+                    put("root_selector", stringProp("snapshot: limit the walk to a subtree. Default body."))
+                    put("selector", stringProp("html: which element to serialize."))
+                },
+                required = listOf("session_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_extract", "WebMount 提取", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    input.string("mode")?.let { put("mode", it) }
+                    input.long("max_chars")?.let { put("max_chars", it) }
+                    input.long("max_links")?.let { put("max_links", it) }
+                    input.long("max_nodes")?.let { put("max_nodes", it) }
+                    input.boolean("visible_only")?.let { put("visible_only", it) }
+                    input.string("root_selector")?.let { put("root_selector", it) }
+                    input.string("selector")?.let { put("selector", it) }
+                }
+                val payload = handle.callBridge("extract", args, timeoutMs = 15_000L)
+                val merged = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }
+                listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // --------------------------------------------------------------- wm_wait
+
+    private val waitTool = Tool(
+        name = "wm_wait",
+        description = """
+            Block until a condition holds on the current page, or a timeout elapses. Two kinds:
+            `selector` (default) waits for at least one element matching the given selector to appear
+            (and be visible unless visible_only=false); `ready_state` waits until document.readyState
+            reaches the requested state ('interactive' or 'complete'). Useful after wm_open wait="none"
+            or after clicking a link that triggers an SPA navigation.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("until", stringProp("'selector' (default) | 'ready_state'."))
+                    put("value", stringProp("selector: CSS or 'text=...'/'xpath=...'; ready_state: target state."))
+                    put("timeout_ms", integerProp("Max wait in ms. Default 10000, clamped to [200, 60000]."))
+                    put("visible_only", booleanProp("selector: require visible match (default true)."))
+                },
+                required = listOf("session_id", "value"),
+            )
+        },
+        execute = { input ->
+            track("wm_wait", "WebMount 等待", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val until = input.string("until") ?: "selector"
+                require(until in setOf("selector", "ready_state")) { "until must be 'selector' or 'ready_state'" }
+                val value = input.requiredString("value")
+                val timeout = (input.long("timeout_ms") ?: 10_000L).coerceIn(200L, 60_000L)
+                val args = buildJsonObject {
+                    put("until", until)
+                    put("value", value)
+                    put("timeout_ms", timeout)
+                    input.boolean("visible_only")?.let { put("visible_only", it) }
+                }
+                // Allow the bridge a small grace window beyond its own JS-side timeout
+                // so it surfaces the explicit "wait timed out" error rather than our
+                // generic bridge-timeout one.
+                val payload = handle.callBridge("wait", args, timeoutMs = timeout + 3_000L)
+                val merged = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("ok", true)
+                    put("result", payload)
                 }
                 listOf(UIMessagePart.Text(merged.toString()))
             }
