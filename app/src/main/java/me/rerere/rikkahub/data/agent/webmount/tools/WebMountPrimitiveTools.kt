@@ -380,11 +380,15 @@ class WebMountPrimitiveTools(
     private val evalTool = Tool(
         name = "wm_eval",
         description = """
-            Evaluate arbitrary JavaScript in the WebMount session and return the result. High-risk
-            because the script runs with the user's logged-in cookies and full DOM access — always needs
-            explicit human approval. Use the more specific primitives (wm_click, wm_type, wm_extract)
-            when they suffice. The expression's return value is serialized to JSON; non-JSON-friendly
-            values fall back to a string coercion.
+            ⚠️ HIGH RISK. Evaluate arbitrary JavaScript in the WebMount session and return the
+            result. The script runs INSIDE the page's origin with full DOM access — it can read
+            any data the user has on that site (cookies, sessionStorage, localStorage), perform
+            same-origin fetches with credentials, and mutate the page. Normally this tool requires
+            explicit per-call human approval; users who have BOTH the global "auto-approve tools"
+            AND "auto-approve high-risk tools" settings enabled will see this run silently. Prefer
+            the specific primitives (wm_click / wm_type / wm_extract / wm_find) when they suffice.
+            The expression's return value is JSON-serialized; non-serializable values fall back to
+            String() coercion.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(

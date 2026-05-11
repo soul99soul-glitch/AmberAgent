@@ -1,8 +1,12 @@
 package me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
@@ -180,11 +184,24 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                 val text = input.requiredString("text")
                 val parentBlockId = input.string("parent_block_id")
                 val response = client.appendTextBlock(token, docId, text, parentBlockId)
+                // Flat output per WebMountAdapter kdoc convention. Extract the
+                // useful fields from 飞书's response instead of nesting the raw
+                // envelope. Block ids are what the agent actually wants to keep.
+                val createdBlockIds: List<String> = (response["children"] as? JsonArray)
+                    ?.mapNotNull { entry ->
+                        (entry as? JsonObject)?.get("block_id")?.jsonPrimitive?.contentOrNull
+                    }
+                    ?: emptyList()
                 listOf(UIMessagePart.Text(buildJsonObject {
+                    put("ok", true)
                     put("document_id", docId)
                     parentBlockId?.let { put("parent_block_id", it) }
-                    put("ok", true)
-                    put("response", response)
+                    put("appended_block_count", createdBlockIds.size)
+                    if (createdBlockIds.isNotEmpty()) {
+                        put("appended_block_ids", buildJsonArray {
+                            createdBlockIds.forEach { add(JsonPrimitive(it)) }
+                        })
+                    }
                 }.toString()))
             }
         },

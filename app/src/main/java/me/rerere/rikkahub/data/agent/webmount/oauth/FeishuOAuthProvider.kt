@@ -110,7 +110,8 @@ object FeishuOAuthProvider : OAuthProvider {
     override fun setupHint(): String =
         "1. 去飞书开放平台 (open.feishu.cn) 创建一个应用,在「安全设置 → 重定向 URL」里加入 amberagent://oauth/feishu。" +
             "2. 把 App ID + App Secret 复制到上方输入框。" +
-            "3. 在「权限管理」里开启所需的云文档 scope (如 docs:doc:read / docs:doc:write)。"
+            "3. 在「权限管理」里开启所需的云文档 scope (如 docs:doc:read / docs:doc:write)。" +
+            "注意: OAuth 跳转期间请不要后台 AmberAgent — 进程被 Android 杀掉会让 Connect 流程失败,需要重来。"
 
     // ----------------------------------------------------------------------
 

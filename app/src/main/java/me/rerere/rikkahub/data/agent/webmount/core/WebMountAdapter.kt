@@ -20,6 +20,27 @@ import me.rerere.rikkahub.data.agent.webmount.cookie.EndpointSpec
  * (Note: the iCloud experimental feature is intentionally **not** wrapped —
  * it stays as a separate standalone Settings entry per the user's directive
  * from Phase 1 M1.2.)
+ *
+ * ## Tool output shape convention
+ *
+ * Two shapes coexist in the catalog; adapter authors should match the
+ * appropriate style and avoid mixing.
+ *
+ *  - **Browser Primitives (`wm_*`)**: RPC-style nested envelope
+ *    `{session_id, ok?, result: {...}}` — `result` holds the bridge's reply.
+ *    The wrap is there because the wm tools sit on top of an in-page JS RPC
+ *    and the reply shape is bridge-defined.
+ *
+ *  - **Site adapter tools (`hn_*`, `reddit_*`, `feishu_docs_*`, etc.)**:
+ *    flat query-style. List tools surface `{count, items|articles|videos: [...]}`
+ *    with optional pagination cursors at the top level. Detail tools surface
+ *    object fields flat at the top level (`{id, title, content, ...}`).
+ *    Write tools return flat success fields (`{ok, id, ...}`) — no nested
+ *    `response` wrapper around upstream payloads.
+ *
+ * Reasoning: primitives are inherently RPC (one in-page call, one reply);
+ * adapter tools are query-style and the agent reasons over their fields
+ * directly. Matching this distinction keeps tool outputs predictable.
  */
 interface WebMountAdapter {
     /**
