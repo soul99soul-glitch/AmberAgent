@@ -114,7 +114,6 @@ import me.rerere.rikkahub.ui.pages.setting.SettingAgentPermissionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentRuntimeTasksPage
 import me.rerere.rikkahub.ui.pages.setting.SettingCronTasksPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
-import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalICloudPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalModelCouncilPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalOfficeProPage
@@ -538,10 +537,6 @@ class RouteActivity : ComponentActivity() {
                                 SettingMcpPage()
                             }
 
-                            entry<Screen.SettingDonate> {
-                                SettingDonatePage()
-                            }
-
                             entry<Screen.SettingFiles> {
                                 SettingFilesPage()
                             }
@@ -817,9 +812,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingMcp : Screen
-
-    @Serializable
-    data object SettingDonate : Screen
 
     @Serializable
     data object SettingFiles : Screen
