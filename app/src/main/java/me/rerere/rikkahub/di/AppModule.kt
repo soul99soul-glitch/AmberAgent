@@ -19,6 +19,9 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
+import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliAdapter
+import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliClient
+import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliTools
 import me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs.FeishuDocsAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs.FeishuDocsClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs.FeishuDocsTools
@@ -225,13 +228,26 @@ val appModule = module {
     }
 
     single {
+        BilibiliClient(http = get())
+    }
+
+    single {
+        BilibiliTools(client = get())
+    }
+
+    single {
+        BilibiliAdapter(tools = get(), cookieProvider = get())
+    }
+
+    single {
         val adapters: List<WebMountAdapter> = listOf(
             get<HnAdapter>(),
             get<RedditAdapter>(),
             get<JuejinAdapter>(),
             get<FeishuDocsAdapter>(),
             get<GithubAdapter>(),
-            // M1.6 will append: Bilibili, Zhihu
+            get<BilibiliAdapter>(),
+            // M1.6 will append: Zhihu
         )
         WebMountManager(
             context = get(),
