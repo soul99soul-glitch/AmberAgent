@@ -161,17 +161,47 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
         }
+
+        "wm_eval" -> {
+            // Arbitrary JS in the user's logged-in WebView — treat as high-risk
+            // mutation; always needs explicit approval.
+            mutates = true
+            risk = ToolRisk.High
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+        }
+
+        "wm_click", "wm_type", "wm_keys", "wm_select" -> {
+            // DOM mutation on a logged-in page — Sensitive by default; the
+            // adapter system can pre-approve known-origin tools later.
+            mutates = true
+            risk = ToolRisk.Sensitive
+            needsApproval = true
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
     }
 
     val category = category()
     val foregroundRequirement = foregroundPackageRequirement()
+    // For wm_* tools we want concurrent execution across different sessions
+    // but strict serialization within a session, regardless of mutates/risk.
+    // Derive the parallel group from the session_id in input.
+    val baseParallelGroup = if (concurrencySafe && !mutates && risk == ToolRisk.Normal) category else null
+    val parallelGroup = if (name.startsWith("wm_")) {
+        val sessionId = input.stringValue("session_id")
+        if (sessionId != null) "webmount:$sessionId" else "webmount:unbound"
+    } else {
+        baseParallelGroup
+    }
     val speculativeBlockReason = speculativeBlockReason(
         category = category,
         mutates = mutates,
         needsApproval = needsApproval,
         concurrencySafe = concurrencySafe,
         risk = risk,
-        parallelGroup = if (concurrencySafe && !mutates && risk == ToolRisk.Normal) category else null,
+        parallelGroup = parallelGroup,
         requiresForegroundAppPackage = foregroundRequirement,
     )
     return ToolInvocationPolicy(
@@ -183,7 +213,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         concurrencySafe = concurrencySafe,
         outputBudgetChars = outputBudgetChars(),
         risk = risk,
-        parallelGroup = if (concurrencySafe && !mutates && risk == ToolRisk.Normal) category else null,
+        parallelGroup = parallelGroup,
         requiresForegroundAppPackage = foregroundRequirement,
         speculativeEligible = speculativeBlockReason == null,
         speculativeBlockReason = speculativeBlockReason,

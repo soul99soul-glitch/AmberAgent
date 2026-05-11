@@ -38,6 +38,9 @@ class WebMountPrimitiveTools(
         stateTool,
         extractTool,
         waitTool,
+        clickTool,
+        typeTool,
+        evalTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -261,6 +264,133 @@ class WebMountPrimitiveTools(
         },
     )
 
+    // ------------------------------------------------------------- wm_click
+
+    private val clickTool = Tool(
+        name = "wm_click",
+        description = """
+            Click an element in a WebMount session. The element is resolved via the same selector grammar
+            as wm_extract / wm_wait: plain CSS, `text=substring`, `xpath=expr`. The bridge focuses the
+            element, dispatches mousedown/mouseup, then calls .click() so default actions (form submit,
+            anchor navigation) fire. Hidden elements are scrolled into view once; if they remain hidden
+            after that, the call fails rather than clicking the wrong thing.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("selector", stringProp("CSS / text=... / xpath=... selector for the target element."))
+                    put("visible_only", booleanProp("Require the element to be visible (default true)."))
+                },
+                required = listOf("session_id", "selector"),
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            track("wm_click", "WebMount 点击", input) {
+                val sessionId = input.requiredString("session_id")
+                val selector = input.requiredString("selector")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    put("selector", selector)
+                    input.boolean("visible_only")?.let { put("visible_only", it) }
+                }
+                val payload = handle.callBridge("click", args, timeoutMs = 5_000L)
+                val merged = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }
+                listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // -------------------------------------------------------------- wm_type
+
+    private val typeTool = Tool(
+        name = "wm_type",
+        description = """
+            Type text into an editable element (input/textarea/[contenteditable]) in a WebMount session.
+            Fires `input` and `change` events so frontend frameworks observe the new value. Pass
+            `press_enter=true` to dispatch a synthetic Enter after typing (useful for search boxes that
+            submit on Enter). `clear=true` empties the field first.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("selector", stringProp("Selector for the editable element."))
+                    put("text", stringProp("UTF-8 text to type."))
+                    put("clear", booleanProp("Empty the field before typing (default false)."))
+                    put("press_enter", booleanProp("Dispatch Enter keydown after typing (default false)."))
+                },
+                required = listOf("session_id", "selector", "text"),
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            track("wm_type", "WebMount 输入", input) {
+                val sessionId = input.requiredString("session_id")
+                val selector = input.requiredString("selector")
+                val text = input.requiredString("text")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    put("selector", selector)
+                    put("text", text)
+                    input.boolean("clear")?.let { put("clear", it) }
+                    input.boolean("press_enter")?.let { put("press_enter", it) }
+                }
+                val payload = handle.callBridge("type", args, timeoutMs = 5_000L)
+                val merged = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }
+                listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // -------------------------------------------------------------- wm_eval
+
+    private val evalTool = Tool(
+        name = "wm_eval",
+        description = """
+            Evaluate arbitrary JavaScript in the WebMount session and return the result. High-risk
+            because the script runs with the user's logged-in cookies and full DOM access — always needs
+            explicit human approval. Use the more specific primitives (wm_click, wm_type, wm_extract)
+            when they suffice. The expression's return value is serialized to JSON; non-JSON-friendly
+            values fall back to a string coercion.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("expression", stringProp("JS expression to evaluate. Wrapped in `return (...)` if it's an expression; statements are also accepted."))
+                    put("timeout_ms", integerProp("Max time the JS engine may take. Default 5000, clamped to [200, 30000]."))
+                },
+                required = listOf("session_id", "expression"),
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            track("wm_eval", "WebMount JS 执行", input.safeEvalPreview()) {
+                val sessionId = input.requiredString("session_id")
+                val expression = input.requiredString("expression")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val timeout = (input.long("timeout_ms") ?: 5_000L).coerceIn(200L, 30_000L)
+                val args = buildJsonObject {
+                    put("expression", expression)
+                }
+                val payload = handle.callBridge("eval", args, timeoutMs = timeout)
+                val merged = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }
+                listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
     // ------------------------------------------------------------- helpers
 
     private suspend fun track(
@@ -291,6 +421,12 @@ class WebMountPrimitiveTools(
             put("url", string("url").orEmpty())
             put("session_id", string("session_id"))
             put("wait", string("wait"))
+        }
+
+    private fun JsonElement.safeEvalPreview(): JsonObject =
+        buildJsonObject {
+            put("session_id", string("session_id"))
+            put("expression_chars", string("expression")?.length ?: 0)
         }
 
     private fun List<UIMessagePart>.previewText(): String =

@@ -334,6 +334,99 @@
     check();
   }
 
+  // --------------------------------------------------------------- mutations
+
+  function dispatchMouseEvent(el, type) {
+    var r = el.getBoundingClientRect();
+    var x = r.left + r.width / 2;
+    var y = r.top + r.height / 2;
+    var ev = new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      button: 0,
+      clientX: x,
+      clientY: y,
+    });
+    el.dispatchEvent(ev);
+  }
+
+  function performClick(args) {
+    var sel = args.selector;
+    if (!sel) throw new Error('click requires selector');
+    var matched = resolveSelector(sel);
+    if (matched.length === 0) throw new Error('no element matched: ' + sel);
+    var target = matched[0];
+    if (args.visible_only !== false && !isVisible(target)) {
+      // Try scrollIntoView once.
+      if (target.scrollIntoView) target.scrollIntoView({ block: 'center', inline: 'center' });
+      if (!isVisible(target)) throw new Error('element not visible: ' + sel);
+    }
+    if (target.focus) try { target.focus(); } catch (_) {}
+    dispatchMouseEvent(target, 'mousedown');
+    dispatchMouseEvent(target, 'mouseup');
+    // .click() handles default action (e.g. form submit, anchor navigation).
+    try { target.click(); } catch (_) {}
+    return {
+      ok: true,
+      target: { tag: (target.tagName || '').toLowerCase(), name: accessibleName(target), rect: rectOf(target) },
+      url: location.href,
+    };
+  }
+
+  function performType(args) {
+    var sel = args.selector;
+    if (!sel) throw new Error('type requires selector');
+    var text = args.text;
+    if (typeof text !== 'string') throw new Error('type requires text string');
+    var matched = resolveSelector(sel);
+    if (matched.length === 0) throw new Error('no element matched: ' + sel);
+    var el = matched[0];
+    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !el.isContentEditable) {
+      throw new Error('element is not editable: ' + sel);
+    }
+    if (el.focus) try { el.focus(); } catch (_) {}
+    var clear = args.clear === true;
+    if (clear) {
+      if (el.isContentEditable) el.textContent = '';
+      else el.value = '';
+    }
+    if (el.isContentEditable) {
+      // Simple insert at end.
+      el.textContent = (el.textContent || '') + text;
+    } else {
+      el.value = (el.value || '') + text;
+    }
+    // Fire input/change so frameworks observe the new value.
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (args.press_enter === true) {
+      var k = new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
+      el.dispatchEvent(k);
+    }
+    return {
+      ok: true,
+      target: { tag: (el.tagName || '').toLowerCase(), name: accessibleName(el) },
+      value_chars: (el.isContentEditable ? (el.textContent || '') : (el.value || '')).length,
+    };
+  }
+
+  function performEval(args) {
+    var expr = args.expression;
+    if (typeof expr !== 'string') throw new Error('eval requires expression string');
+    // Wrap so we always have a return value path.
+    var fn;
+    try { fn = new Function('return (' + expr + ');'); }
+    catch (_) {
+      try { fn = new Function(expr); } catch (e) { throw e; }
+    }
+    var result = fn();
+    var serialized;
+    try { serialized = JSON.parse(JSON.stringify(result === undefined ? null : result)); }
+    catch (_) { serialized = String(result); }
+    return { ok: true, result: serialized };
+  }
+
   // --------------------------------------------------------------- dispatch
 
   window.__amberWm_call = function (method, argsJson, reqId) {
@@ -383,6 +476,9 @@
           AmberWM.reject(reqId, 'unknown wait kind: ' + until);
           return;
         }
+        case 'click':  AmberWM.resolve(reqId, safeJson(performClick(args))); return;
+        case 'type':   AmberWM.resolve(reqId, safeJson(performType(args))); return;
+        case 'eval':   AmberWM.resolve(reqId, safeJson(performEval(args))); return;
         default:
           AmberWM.reject(reqId, 'unknown method: ' + method);
       }
