@@ -1306,6 +1306,7 @@ private fun MessagePartsBlock(
                                                     scope = AssistantAffectScope.USER,
                                                     visual = true,
                                                 ),
+                                                fillWidth = false,
                                                 onClickCitation = handleClickCitation
                                             )
                                         }

@@ -29,6 +29,8 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -89,6 +91,14 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 import java.util.LinkedHashMap
+
+/**
+ * When false, markdown nodes use wrap-content width instead of fill-max-width.
+ * Used by user message bubbles to allow adaptive width.
+ */
+internal val LocalMarkdownFillWidth = compositionLocalOf { true }
+
+private fun Modifier.fillWidthIf(fill: Boolean): Modifier = if (fill) fillMaxWidth() else this
 
 private val flavour by lazy {
     GFMFlavourDescriptor(
@@ -367,6 +377,7 @@ fun MarkdownBlock(
     content: String,
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
+    fillWidth: Boolean = true,
     onClickCitation: (String) -> Unit = {}
 ) {
     var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
@@ -384,6 +395,7 @@ fun MarkdownBlock(
     }
 
     TraceMarkdownComposable("Amber MarkdownBlock render") {
+      CompositionLocalProvider(LocalMarkdownFillWidth provides fillWidth) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
                 content = content,
@@ -398,17 +410,19 @@ fun MarkdownBlock(
                         .padding(start = 4.dp)
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
+                    val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
                     data.astTree.children.fastForEach { child ->
                         MarkdownNode(
                             node = child,
                             content = data.preprocessed,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = nodeModifier,
                             onClickCitation = onClickCitation,
                         )
                     }
                 }
             }
         }
+      }
     }
 }
 
@@ -493,7 +507,7 @@ private fun MarkdownNode(
             }
             ProvideTextStyle(value = style) {
                 FlowRow(
-                    modifier = modifier.fillMaxWidth(),
+                    modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     node.children.fastForEach { node ->
@@ -784,7 +798,7 @@ private fun UnorderedListNode(
 
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            .fillWidthIf(LocalMarkdownFillWidth.current)
             .padding(start = (level * 8).dp)
     ) {
         node.children.fastForEach { child ->
@@ -811,7 +825,7 @@ private fun OrderedListNode(
 ) {
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            .fillWidthIf(LocalMarkdownFillWidth.current)
             .padding(start = (level * 8).dp)
     ) {
         var index = 1
@@ -837,14 +851,14 @@ private fun ListItemNode(
     node: ASTNode, content: String, bulletText: String, onClickCitation: (String) -> Unit = {}, level: Int
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
     ) {
         // 分离列表项的直接内容和嵌套列表
         val (directContent, nestedLists) = separateContentAndLists(node)
         // directContent 渲染处理
         if (directContent.isNotEmpty()) {
             Row(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
             ) {
                 Text(
                     text = bulletText,
@@ -860,7 +874,7 @@ private fun ListItemNode(
                         MarkdownNode(
                             node = contentChild,
                             content = content,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
                             onClickCitation = onClickCitation,
                             listLevel = level,
                         )
@@ -905,7 +919,7 @@ private fun Paragraph(
 ) {
     // dumpAst(node, content)
     if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
-        FlowRow(modifier = modifier.fillMaxWidth()) {
+        FlowRow(modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) {
             node.children.fastForEach { child ->
                 MarkdownNode(
                     node = child, content = content, onClickCitation = onClickCitation
@@ -928,7 +942,7 @@ private fun Paragraph(
     val density = LocalDensity.current
     FlowRow(
         modifier = modifier
-            .fillMaxWidth()
+            .fillWidthIf(LocalMarkdownFillWidth.current)
             .then(
                 if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
                 else Modifier
@@ -953,7 +967,7 @@ private fun Paragraph(
         }
         Text(
             text = annotatedString,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
             inlineContent = inlineContents,
             softWrap = true,
             overflow = TextOverflow.Visible,
