@@ -165,6 +165,91 @@ class SiteProfileTest {
     }
 
     @Test
+    fun versionZeroRejected() {
+        val profile = SiteProfile(
+            id = "v0",
+            name = "v0",
+            version = 0,
+            origins = listOf("https://x.example"),
+        )
+        try {
+            profile.validate()
+            fail("expected version=0 to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            // ok
+        }
+    }
+
+    @Test
+    fun emptyOriginsRejected() {
+        val profile = SiteProfile(
+            id = "empty",
+            name = "empty",
+            origins = emptyList(),
+        )
+        try {
+            profile.validate()
+            fail("expected empty origins to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            // ok
+        }
+    }
+
+    @Test
+    fun trailingSlashOriginRejected() {
+        val profile = SiteProfile(
+            id = "slash",
+            name = "slash",
+            origins = listOf("https://x.example/"),
+        )
+        try {
+            profile.validate()
+            fail("expected trailing slash to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            // ok
+        }
+    }
+
+    @Test
+    fun invalidRateLimitMapToRejected() {
+        val profile = SiteProfile(
+            id = "ratelimit",
+            name = "ratelimit",
+            origins = listOf("https://x.example"),
+            hints = ProfileHints(rateLimit = RateLimitPattern(httpStatus = 412, mapTo = "EXPLODE")),
+        )
+        try {
+            profile.validate()
+            fail("expected invalid map_to to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message!!.contains("map_to"))
+        }
+    }
+
+    @Test
+    fun extractOriginNormalizesCaseAndQueryString() {
+        // M2.1 review B-1: stop at `?` even when no `/` is present.
+        assertEquals(
+            "https://www.bilibili.com",
+            ProfileRegistry.extractOrigin("https://www.bilibili.com?q=1"),
+        )
+        assertEquals(
+            "https://www.bilibili.com",
+            ProfileRegistry.extractOrigin("https://www.bilibili.com#frag"),
+        )
+        // M2.1 review B-2: case-insensitive host.
+        assertEquals(
+            "https://www.bilibili.com",
+            ProfileRegistry.extractOrigin("https://WWW.BILIBILI.COM/path"),
+        )
+        // Combination of both.
+        assertEquals(
+            "https://api.example",
+            ProfileRegistry.extractOrigin("HTTPS://API.EXAMPLE?q=1"),
+        )
+    }
+
+    @Test
     fun readOnlyClassification() {
         assertTrue(ProfilePermission.ReadCookie("x").isReadOnly())
         assertTrue(ProfilePermission.DetectLogin.isReadOnly())

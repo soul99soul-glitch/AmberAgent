@@ -71,6 +71,14 @@ data class SiteProfile(
         require(rateLimitPerSec in 1..MAX_RATE_LIMIT_PER_SEC) {
             "Profile $id: rate_limit_per_sec must be in 1..$MAX_RATE_LIMIT_PER_SEC (got $rateLimitPerSec)"
         }
+        // M2.1 review N-2: rate_limit.map_to must map to a known WebMountStatus
+        // wire form so the M2.3 fault-mapping path can act on it.
+        hints.rateLimit?.mapTo?.let { wire ->
+            require(wire in VALID_RATE_LIMIT_MAP_TO) {
+                "Profile $id: rate_limit.map_to '$wire' must be one of " +
+                    VALID_RATE_LIMIT_MAP_TO.joinToString(", ")
+            }
+        }
         // Parse + validate permissions, collect the page-fn ones.
         val parsed = permissions.map { ProfilePermission.parse(it, id) }
         val declaredFns = parsed.mapNotNull { (it as? ProfilePermission.CallPageFn)?.fnName }.toSet()
@@ -107,6 +115,9 @@ data class SiteProfile(
         const val DEFAULT_RATE_LIMIT_PER_SEC: Int = 10
         const val MAX_RATE_LIMIT_PER_SEC: Int = 20
         private val ID_PATTERN = Regex("[a-z0-9_]+")
+        // Mirrors WebMountStatus wire names — kept as plain strings here to
+        // avoid pulling the core module into the profile package.
+        private val VALID_RATE_LIMIT_MAP_TO = setOf("DEGRADED", "ERROR", "LOGIN_REQUIRED")
     }
 }
 

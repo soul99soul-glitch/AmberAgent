@@ -32,6 +32,7 @@ import me.rerere.rikkahub.data.agent.webmount.profile.ProfilePermission
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfile
 import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfileEntry
+import me.rerere.rikkahub.data.agent.webmount.profile.isReadOnly
 import me.rerere.rikkahub.data.agent.webmount.profile.profileJson
 
 /**
@@ -144,9 +145,15 @@ fun WebMountProfileSection(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (preview.permissions.isNotEmpty()) {
+                        // M2.1 review N-1: tag each permission with ✓ (auto-granted,
+                        // read-only) or ⚠ (will be withheld until manual opt-in) so the
+                        // audit dialog actually conveys the L4 trust downgrade.
                         Text(
                             stringResource(R.string.setting_webmount_profile_permissions) + ":\n" +
-                                preview.permissions.joinToString("\n") { "• ${it.describeZh()}" },
+                                preview.permissions.joinToString("\n") { perm ->
+                                    val marker = if (perm.isReadOnly()) "✓" else "⚠"
+                                    "$marker ${perm.describeZh()}"
+                                },
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -250,12 +257,18 @@ private fun ProfileExpandedDetail(
 
         val granted = entry.effective.granted
         val withheld = entry.effective.withheld
+        // M2.1 review W-3 fix: opted-in non-readonly permissions are already
+        // rendered with a revocable Switch below — skip them in the upper
+        // granted block so they don't render twice.
+        val grantedAlsoOptedIn = if (entry is SiteProfileEntry.UserImported) {
+            entry.grantedNonReadOnlyWireForms
+        } else emptySet()
         if (granted.isNotEmpty() || withheld.isNotEmpty()) {
             Text(
                 stringResource(R.string.setting_webmount_profile_permissions) + ":",
                 style = MaterialTheme.typography.labelMedium,
             )
-            granted.forEach { perm ->
+            granted.filterNot { it.wire in grantedAlsoOptedIn }.forEach { perm ->
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Text(
                         "✓ ${perm.describeZh()}",

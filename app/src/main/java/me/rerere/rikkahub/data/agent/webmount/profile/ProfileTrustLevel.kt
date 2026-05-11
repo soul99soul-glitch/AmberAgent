@@ -45,8 +45,11 @@ data class EffectivePermissions(
  * The set of permission verbs that are "read-only" — safe to grant
  * automatically to user-imported profiles. Anything else needs an
  * explicit per-profile opt-in via the settings UI.
+ *
+ * Public for the import-audit UI (Phase 2 M2.1 review N-1) to pre-classify
+ * permissions as ✓ (auto-granted) vs ⚠ (will be withheld) at import time.
  */
-internal fun ProfilePermission.isReadOnly(): Boolean = when (this) {
+fun ProfilePermission.isReadOnly(): Boolean = when (this) {
     is ProfilePermission.ReadCookie -> true
     ProfilePermission.DetectLogin -> true
     ProfilePermission.DetectRateLimit -> true

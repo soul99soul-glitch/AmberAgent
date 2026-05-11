@@ -134,7 +134,14 @@ class ProfileRegistry(
         val current = readImportedBlob(id) ?: return false
         val parsed = runCatching { profileJson.decodeFromString(SiteProfile.serializer(), current.rawJson) }
             .getOrNull() ?: return false
-        if (permissionWire !in parsed.permissions) return false
+        // M2.1 review B-3 fix: declared permissions may use `window.X` or `X`
+        // forms; ProfilePermission.parse normalizes both to the canonical wire
+        // form. Compare via the normalized form so the UI's permission rows
+        // (which carry `perm.wire`) match the manifest's declarations.
+        val declaredWires = parsed.permissions
+            .mapNotNull { runCatching { ProfilePermission.parse(it, parsed.id).wire }.getOrNull() }
+            .toSet()
+        if (permissionWire !in declaredWires) return false
         val perm = runCatching { ProfilePermission.parse(permissionWire, parsed.id) }.getOrNull() ?: return false
         if (perm.isReadOnly()) return false // already granted by default
         val nextSet = if (granted) current.grantedNonReadOnly + permissionWire else current.grantedNonReadOnly - permissionWire
@@ -264,9 +271,20 @@ class ProfileRegistry(
         private const val PROFILE_FILE = "amberagent_webmount_profiles"
         private const val ASSET_DIR = "webmount/profiles"
 
+        // M2.1 review B-1 fix: stop at `/`, `?`, or `#` so a URL like
+        // `https://example.com?q=1` (no path slash) still resolves to the
+        // bare origin. M2.1 review B-2 fix: lowercase the scheme + host
+        // segment before returning — RFC 3986 §3.2.2 makes hostnames
+        // case-insensitive, and profile origins are written lowercase
+        // by convention.
         internal fun extractOrigin(url: String): String? {
-            val match = Regex("^(https?://[^/]+)").find(url) ?: return null
-            return match.groupValues[1]
+            val match = Regex("^(https?://[^/?#]+)", RegexOption.IGNORE_CASE).find(url) ?: return null
+            val raw = match.groupValues[1]
+            val schemeEnd = raw.indexOf("://")
+            if (schemeEnd < 0) return raw.lowercase()
+            val scheme = raw.substring(0, schemeEnd).lowercase()
+            val hostAndPort = raw.substring(schemeEnd + 3).lowercase()
+            return "$scheme://$hostAndPort"
         }
 
         internal fun sha256Hex(text: String): String {
