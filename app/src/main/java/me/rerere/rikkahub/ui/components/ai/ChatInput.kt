@@ -2456,8 +2456,9 @@ private fun TextInputRow(
             if (!mentionEnabled || slashQuery != null) null
             else detectMentionContextFor(mentionTextSnapshot, mentionSelection.start)
         }
-        if (isFocused && mentionState != null) {
-            val matches = remember(
+        val mentionVisible = isFocused && mentionState != null
+        val mentionMatches = if (mentionVisible && mentionState != null) {
+            remember(
                 settings.agentRuntime.subAgent.enabled,
                 settings.agentRuntime.modelCouncil.enabled,
                 mentionState.query,
@@ -2470,10 +2471,28 @@ private fun TextInputRow(
                     query = mentionState.query,
                 )
             }
+        } else emptyList()
+        androidx.compose.animation.AnimatedVisibility(
+            visible = mentionVisible,
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(150)
+            ) + androidx.compose.animation.slideInVertically(
+                animationSpec = androidx.compose.animation.core.tween(150),
+                initialOffsetY = { it / 4 }
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(100)
+            ) + androidx.compose.animation.slideOutVertically(
+                animationSpec = androidx.compose.animation.core.tween(100),
+                targetOffsetY = { it / 4 }
+            ),
+        ) {
             MentionPanel(
-                roles = matches,
+                roles = mentionMatches,
                 onSelect = { role ->
-                    state.replaceMention(mentionState, role.id)
+                    if (mentionState != null) {
+                        state.replaceMention(mentionState, role.id)
+                    }
                 },
             )
         }

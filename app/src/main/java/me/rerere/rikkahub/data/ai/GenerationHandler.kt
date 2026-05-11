@@ -859,6 +859,8 @@ class GenerationHandler(
                 params = TextGenerationParams(
                     model = model,
                     reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
+                    customHeaders = model.customHeaders,
+                    customBody = model.customBodies,
                 ),
             ).collect { chunk ->
                 messages = messages.handleMessageChunk(chunk)
@@ -879,18 +881,22 @@ class GenerationHandler(
                     model = model,
                     temperature = 0.3f,
                     topP = 0.95f,
-                    customBody = listOf(
-                        CustomBody(
-                            key = "translation_options",
-                            value = buildJsonObject {
-                                put("source_lang", JsonPrimitive("auto"))
-                                put(
-                                    "target_lang",
-                                    JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
-                                )
-                            }
+                    customHeaders = model.customHeaders,
+                    customBody = buildList {
+                        addAll(model.customBodies)
+                        add(
+                            CustomBody(
+                                key = "translation_options",
+                                value = buildJsonObject {
+                                    put("source_lang", JsonPrimitive("auto"))
+                                    put(
+                                        "target_lang",
+                                        JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
+                                    )
+                                }
+                            )
                         )
-                    )
+                    }
                 ),
             )
             val translatedText = chunk.choices.firstOrNull()?.message?.toText() ?: ""

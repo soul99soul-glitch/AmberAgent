@@ -82,6 +82,8 @@ class ProviderModelCouncilTextRunner(
             temperature = 0.2f,
             tools = emptyList(),
             reasoningLevel = ReasoningLevel.OFF,
+            customHeaders = model.customHeaders,
+            customBody = model.customBodies,
         )
         // Streaming path: per-chunk MessageChunk.choices.first.delta is the delta; we accumulate
         // and emit the running text. The provider abstraction returns chunked deltas, so we keep

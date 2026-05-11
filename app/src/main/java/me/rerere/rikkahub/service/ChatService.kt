@@ -1195,6 +1195,8 @@ class ChatService(
                 params = TextGenerationParams(
                     model = model,
                     reasoningLevel = ReasoningLevel.OFF,
+                    customHeaders = model.customHeaders,
+                    customBody = model.customBodies,
                 ),
             )
 
@@ -1240,6 +1242,8 @@ class ChatService(
                 params = TextGenerationParams(
                     model = model,
                     reasoningLevel = ReasoningLevel.OFF,
+                    customHeaders = model.customHeaders,
+                    customBody = model.customBodies,
                 ),
             )
             val suggestions =

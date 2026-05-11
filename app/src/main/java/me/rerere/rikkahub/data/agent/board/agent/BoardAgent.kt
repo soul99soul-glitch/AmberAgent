@@ -76,7 +76,11 @@ class BoardAgent(
             val response = providerManager.getProviderByType(provider).generateText(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
-                params = TextGenerationParams(model = model),
+                params = TextGenerationParams(
+                    model = model,
+                    customHeaders = model.customHeaders,
+                    customBody = model.customBodies,
+                ),
             )
             response.choices.firstOrNull()?.message?.toText()
         }.onFailure { Log.e(TAG, "board model call failed", it) }

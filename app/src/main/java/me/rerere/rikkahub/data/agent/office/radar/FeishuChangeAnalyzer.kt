@@ -91,6 +91,8 @@ class FeishuChangeAnalyzer(
             params = TextGenerationParams(
                 model = model,
                 reasoningLevel = worker.daydreamReasoningLevel,
+                customHeaders = model.customHeaders,
+                customBody = model.customBodies,
             ),
         )
         val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
