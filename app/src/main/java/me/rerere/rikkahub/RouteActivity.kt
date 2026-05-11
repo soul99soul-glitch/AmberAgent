@@ -154,6 +154,7 @@ class RouteActivity : ComponentActivity() {
     private val highlighter by inject<Highlighter>()
     private val okHttpClient by inject<OkHttpClient>()
     private val settingsStore by inject<SettingsStore>()
+    private val oauthCallbackDispatcher by inject<me.rerere.rikkahub.data.agent.webmount.oauth.OAuthCallbackDispatcher>()
     private var navStack: MutableList<NavKey>? = null
     private var newIntentHandler: ((Intent) -> Unit)? = null
 
@@ -241,6 +242,12 @@ class RouteActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // WebMount OAuth callback: amberagent://oauth/<provider>?code=...&state=...
+        // Dispatched before any other handler so the awaiting OAuth flow gets
+        // its callback even if other branches would also touch this intent.
+        intent.data?.takeIf { it.scheme == "amberagent" && it.host == "oauth" }?.let { uri ->
+            oauthCallbackDispatcher.dispatch(uri)
+        }
         // Navigate to the chat screen if a conversation ID is provided
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))

@@ -263,6 +263,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.browser)
+    implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.profileinstaller)
 
     // Compose
