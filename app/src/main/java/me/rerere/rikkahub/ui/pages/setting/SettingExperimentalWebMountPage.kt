@@ -75,6 +75,10 @@ fun SettingExperimentalWebMountPage(
     LaunchedEffect(oauthStore) {
         oauthStore.updates.collectLatest { oauthRevision++ }
     }
+    val appIdRequiredMessage = stringResource(R.string.setting_webmount_oauth_app_id_required)
+    val connectedTemplate = stringResource(R.string.setting_webmount_oauth_connected_toast)
+    val disconnectedTemplate = stringResource(R.string.setting_webmount_oauth_disconnected_toast)
+    val failedTemplate = stringResource(R.string.setting_webmount_oauth_failed_toast)
 
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_webmount_title),
@@ -118,10 +122,7 @@ fun SettingExperimentalWebMountPage(
                                 initialScope = credentials?.scope.orEmpty(),
                                 onSaveCredentials = { appId, appSecret, scope ->
                                     if (appId.isBlank()) {
-                                        toaster.show(
-                                            // i18n fallback: hardcoded en, zh handles via resource
-                                            "App ID is required"
-                                        )
+                                        toaster.show(appIdRequiredMessage)
                                     } else {
                                         oauthStore.putCredentials(
                                             provider.id,
@@ -139,20 +140,25 @@ fun SettingExperimentalWebMountPage(
                                         runCatching {
                                             val result = oauthClient.connect(provider.id)
                                             when (result) {
-                                                is WebMountOAuthClient.ConnectResult.Success -> {
-                                                    toaster.show("Connected to ${provider.displayName}")
-                                                }
+                                                is WebMountOAuthClient.ConnectResult.Success ->
+                                                    toaster.show(
+                                                        connectedTemplate.format(provider.displayName)
+                                                    )
                                                 is WebMountOAuthClient.ConnectResult.NotConfigured ->
                                                     toaster.show(result.reason)
                                                 is WebMountOAuthClient.ConnectResult.Failed ->
-                                                    toaster.show("OAuth failed: ${result.reason}")
+                                                    toaster.show(
+                                                        failedTemplate.format(result.reason)
+                                                    )
                                             }
                                         }.onFailure { toaster.show(it.message ?: it.toString()) }
                                     }
                                 },
                                 onDisconnect = {
                                     oauthClient.disconnect(provider.id)
-                                    toaster.show("Disconnected ${provider.displayName}")
+                                    toaster.show(
+                                        disconnectedTemplate.format(provider.displayName)
+                                    )
                                 },
                             )
                             if (index != providers.lastIndex) ExperimentDivider()

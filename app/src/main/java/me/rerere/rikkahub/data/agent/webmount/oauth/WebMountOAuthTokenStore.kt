@@ -193,4 +193,10 @@ data class OAuthAppCredentials(
     val appSecret: String? = null,
     val redirectUri: String? = null,
     val scope: String? = null,
-)
+) {
+    /** Defensive: never leak the secret via toString. */
+    override fun toString(): String =
+        "OAuthAppCredentials(provider=$provider, appId=$appId, " +
+            "appSecret=${if (appSecret == null) "null" else "***redacted***"}, " +
+            "redirectUri=$redirectUri, scope=$scope)"
+}

@@ -1300,6 +1300,10 @@
   <string name="setting_webmount_oauth_status_expired">Token expired</string>
   <string name="setting_webmount_oauth_status_ready">Ready to connect</string>
   <string name="setting_webmount_oauth_status_need_setup">Needs App ID</string>
+  <string name="setting_webmount_oauth_app_id_required">App ID is required</string>
+  <string name="setting_webmount_oauth_connected_toast">Connected to %1$s</string>
+  <string name="setting_webmount_oauth_disconnected_toast">Disconnected %1$s</string>
+  <string name="setting_webmount_oauth_failed_toast">OAuth failed: %1$s</string>
   <string name="setting_officepro_section">Feishu Office Enhancement</string>
   <string name="setting_officepro_title">Feishu Office Enhancement Mode</string>
   <string name="setting_officepro_desc">Read visible screens, notifications, and usage signals to build a workspace context.</string>

@@ -23,6 +23,18 @@ import java.util.concurrent.ConcurrentHashMap
  *
  *  Also exposes [getValidAccessToken] for the request path — inline-refresh
  *  if the cached token is within [REFRESH_SKEW_MS] of expiry.
+ *
+ *  ## Threat model
+ *
+ *  If another app on the device declares the same `amberagent://oauth/<provider>`
+ *  intent-filter, Android's intent resolver will show a chooser (it cannot
+ *  silently intercept the callback). Even in the worst case where the user
+ *  picks the malicious app, that app receives only the authorization `code`
+ *  + `state`. It cannot exchange the code for tokens because the PKCE
+ *  `code_verifier` is generated and held only within this process — never
+ *  transmitted over the wire and never persisted. The user's `state`
+ *  expectation must also match, which the attacker can't predict. So PKCE
+ *  is what makes WebMount's deep-link callback safe against rogue apps.
  */
 class WebMountOAuthClient(
     private val context: Context,

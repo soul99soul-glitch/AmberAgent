@@ -820,6 +820,10 @@
   <string name="setting_webmount_oauth_status_expired">Token 已过期</string>
   <string name="setting_webmount_oauth_status_ready">可登录</string>
   <string name="setting_webmount_oauth_status_need_setup">需填写 App ID</string>
+  <string name="setting_webmount_oauth_app_id_required">需先填写 App ID</string>
+  <string name="setting_webmount_oauth_connected_toast">已连接到 %1$s</string>
+  <string name="setting_webmount_oauth_disconnected_toast">已断开 %1$s</string>
+  <string name="setting_webmount_oauth_failed_toast">OAuth 失败:%1$s</string>
   <string name="setting_officepro_section">飞书办公增强模式</string>
   <string name="setting_officepro_title">飞书办公增强模式</string>
   <string name="setting_officepro_desc">读取可见屏幕、通知和使用情况信号，生成 workspace 工作上下文。</string>

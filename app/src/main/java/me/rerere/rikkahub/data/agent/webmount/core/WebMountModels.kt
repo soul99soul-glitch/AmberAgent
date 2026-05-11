@@ -81,6 +81,16 @@ data class WebMountOAuthToken(
 ) {
     fun isExpired(nowMs: Long = System.currentTimeMillis(), skewMs: Long = 5 * 60_000L): Boolean =
         expiresAtMs - skewMs <= nowMs
+
+    /**
+     * Defensive toString: redacts the secrets so a stray Log.d / crash dump can't
+     * leak the token. If you genuinely need the values, access the fields directly.
+     */
+    override fun toString(): String =
+        "WebMountOAuthToken(provider=$provider, accessToken=***redacted***, " +
+            "refreshToken=${if (refreshToken == null) "null" else "***redacted***"}, " +
+            "scope=$scope, tokenType=$tokenType, expiresAtMs=$expiresAtMs, " +
+            "acquiredAtMs=$acquiredAtMs, userOpenId=$userOpenId)"
 }
 
 /**

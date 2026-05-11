@@ -48,7 +48,12 @@ object FeishuOAuthProvider : OAuthProvider {
         codeChallenge: String,
     ): String {
         val redirect = credentials.redirectUri ?: defaultRedirectUri
+        // 飞书 v1 authorize endpoint uses BOTH `app_id` and `client_id` in the wild
+        // — older versions accept only `app_id`, newer OAuth-standard ones accept
+        // `client_id`. We send the same value under both names so either path
+        // works; the endpoint ignores the one it doesn't recognize.
         val pairs = mutableListOf(
+            "app_id" to credentials.appId,
             "client_id" to credentials.appId,
             "redirect_uri" to redirect,
             "response_type" to "code",
@@ -67,10 +72,16 @@ object FeishuOAuthProvider : OAuthProvider {
         codeVerifier: String,
         http: HttpClient,
     ): WebMountOAuthToken {
+        // See [buildAuthorizationUrl] — send both app_id/app_secret AND
+        // client_id/client_secret so v1 and v2 token endpoints both work.
         val body = buildJsonObject {
             put("grant_type", "authorization_code")
+            put("app_id", credentials.appId)
             put("client_id", credentials.appId)
-            credentials.appSecret?.let { put("client_secret", it) }
+            credentials.appSecret?.let {
+                put("app_secret", it)
+                put("client_secret", it)
+            }
             put("code", code)
             put("code_verifier", codeVerifier)
             put("redirect_uri", credentials.redirectUri ?: defaultRedirectUri)
@@ -85,8 +96,12 @@ object FeishuOAuthProvider : OAuthProvider {
     ): WebMountOAuthToken {
         val body = buildJsonObject {
             put("grant_type", "refresh_token")
+            put("app_id", credentials.appId)
             put("client_id", credentials.appId)
-            credentials.appSecret?.let { put("client_secret", it) }
+            credentials.appSecret?.let {
+                put("app_secret", it)
+                put("client_secret", it)
+            }
             put("refresh_token", refreshToken)
         }
         return tokenRequest(http, body, credentials)
