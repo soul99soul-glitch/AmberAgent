@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -181,7 +182,7 @@ class SlidesFontRepository(
             refresh()
         } finally {
             tmp.delete()
-            _downloadsFlow.value = _downloadsFlow.value - pack.id
+            _downloadsFlow.update { it - pack.id }
         }
     }
 
@@ -327,7 +328,7 @@ private fun MutableStateFlow<Map<String, FontDownloadProgress>>.updateProgress(
     downloadedBytes: Long,
     totalBytes: Long,
 ) {
-    value = value + (packId to FontDownloadProgress(packId, downloadedBytes, totalBytes))
+    update { it + (packId to FontDownloadProgress(packId, downloadedBytes, totalBytes)) }
 }
 
 private fun JsonObject.string(key: String): String? =

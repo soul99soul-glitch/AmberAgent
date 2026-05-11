@@ -317,9 +317,12 @@ li{margin:.34em 0;}
     if(layout === 'image-grid') return renderMedia(pick(slide, ['media','images','items']));
     if(layout === 'comparison') return renderComparison(slide);
     if(layout === 'split'){
-      var left = renderList(content, true);
-      var right = renderCards(pick(slide, ['items','cards','details'])) || renderMedia(pick(slide, ['media','images']));
-      return '<div class="two-col"><div>'+left+'</div><div>'+(right || renderList(pick(slide, ['notes','detail']), true))+'</div></div>';
+      var left = renderList(pick(slide, ['left','primary','content','body','items','bullets','text','description','points']), true);
+      var right = renderCards(pick(slide, ['right','secondary','cards','details'])) ||
+        renderMedia(pick(slide, ['media','images'])) ||
+        renderList(pick(slide, ['right','secondary','notes','detail']), true);
+      if(!left && !right) return '';
+      return '<div class="two-col"><div>'+left+'</div><div>'+right+'</div></div>';
     }
     if(layout === 'cards' || layout === 'section') return renderCards(pick(slide, ['items','cards','content','sections'])) || renderList(content, true);
     return renderList(content, layout === 'cover' || layout === 'closing');
