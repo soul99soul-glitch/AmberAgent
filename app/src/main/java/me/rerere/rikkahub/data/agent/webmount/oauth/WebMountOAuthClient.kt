@@ -122,15 +122,20 @@ class WebMountOAuthClient(
 
                 val token = provider.exchangeCode(credentials, code, verifier, http)
                 store.putToken(providerId, token)
+                // M2.0 review B-2 fix: only consume the pending entry on
+                // confirmed exchange success. Timeout / provider-error /
+                // missing-code paths leave the entry so a delayed callback
+                // (or process-death recovery) within PENDING_TTL_MS can
+                // still complete. Stale entries are GC'd by purgeStale.
+                pendingStore.consume(state)
                 ConnectResult.Success(token)
             }.getOrElse { error ->
                 Log.e(TAG, "OAuth connect failed for $providerId", error)
                 ConnectResult.Failed(error.message ?: error.toString())
             }
         } finally {
-            // Either we finished or threw — clean up the pending entry and
-            // in-flight marker so the resume path doesn't fire later.
-            pendingStore.consume(state)
+            // Only release the in-flight marker — the pending entry is
+            // intentionally kept on non-success paths (see B-2 fix above).
             inFlight.remove(state)
         }
     }
@@ -145,25 +150,32 @@ class WebMountOAuthClient(
      */
     private suspend fun handleEventForResume(callback: OAuthCallback) {
         val state = callback.state ?: return
-        // Give the live coroutine a moment to register inFlight if the
-        // event arrived basically simultaneously with connect() start.
-        // In practice the connect() always adds to inFlight before
-        // launching the browser, so this is just defense-in-depth.
         if (state in inFlight) return
-        val entry = pendingStore.consume(state) ?: return
-        if (entry.providerId != callback.provider) {
-            Log.w(TAG, "Resume mismatched provider for state ${state.take(6)}…")
-            return
-        }
-        val provider = providers[entry.providerId]
-            ?: run { Log.w(TAG, "Resume: provider ${entry.providerId} not registered"); return }
-        val credentials = store.getCredentials(entry.providerId)
-            ?: run { Log.w(TAG, "Resume: credentials for ${entry.providerId} missing"); return }
         if (!callback.isSuccess) {
-            Log.i(TAG, "Resume: provider returned error for ${entry.providerId}: ${callback.error}")
+            // Provider-level error (e.g. user denied) — log and leave the
+            // pending entry to be GC'd, so a later retry doesn't collide.
+            Log.i(TAG, "Resume: callback for ${callback.provider} carries error=${callback.error}")
             return
         }
         val code = callback.code ?: return
+        // M2.0 review W-1 fix: peek at the pending entry first so we don't
+        // remove it before confirming we can actually handle the exchange.
+        // The provider / credentials check used to run AFTER consume(),
+        // meaning a misregistered provider would silently lose the
+        // verifier and force the user to redo the whole OAuth dance.
+        val peeked = pendingStore.peek(state) ?: return
+        if (peeked.providerId != callback.provider) {
+            Log.w(TAG, "Resume mismatched provider for state ${state.take(6)}…")
+            return
+        }
+        val provider = providers[peeked.providerId]
+            ?: run { Log.w(TAG, "Resume: provider ${peeked.providerId} not registered"); return }
+        val credentials = store.getCredentials(peeked.providerId)
+            ?: run { Log.w(TAG, "Resume: credentials for ${peeked.providerId} missing"); return }
+        // Validation passed — now atomically consume. If a race with the
+        // live coroutine raced us to consume(), the entry is gone and we
+        // bail; the live path will have stored the token.
+        val entry = pendingStore.consume(state) ?: return
         runCatching {
             val token = provider.exchangeCode(credentials, code, entry.codeVerifier, http)
             store.putToken(entry.providerId, token)

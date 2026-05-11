@@ -21,17 +21,24 @@ import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
 
 /**
- * Browser Primitives tool catalog (M1.3).
+ * Browser Primitives tool catalog.
  *
  * Each `wm_*` tool is a thin shim over [WebViewPool]: parse the agent's
  * JSON input, call into the pool / session, format the result as JSON text.
  *
- * M1.3.1 ships: `wm_open`, `wm_state`. Subsequent sub-milestones (M1.3.2+)
- * extend [getTools] with `wm_extract`, `wm_wait`, `wm_click`, `wm_type`,
- * `wm_eval`, and the rest of the catalog.
+ * Current catalog (set by [getTools]):
+ *  - Navigation/state: `wm_open`, `wm_state`, `wm_stations`,
+ *    `wm_back`, `wm_forward`, `wm_scroll`
+ *  - Reading: `wm_extract`, `wm_wait`, `wm_find`, `wm_screenshot`
+ *  - Interaction: `wm_click`, `wm_type`, `wm_keys`, `wm_select`
+ *  - Tabs: `wm_tab_list`, `wm_tab_new`, `wm_tab_close`
+ *  - Escape hatch (separate toggle): `wm_eval`
  *
  * **Default OFF**: the LocalTools aggregator only includes these when the
- * user enables `LocalToolOption.WebMount` per assistant.
+ * user enables `LocalToolOption.WebMount` per assistant. `wm_eval` requires
+ * an additional `LocalToolOption.WebMountEval` opt-in (Phase 2 M2.0.2)
+ * and is flagged `Tool.mandatoryApproval = true` (M2.0.1) so the per-call
+ * human approval prompt cannot be bypassed by any auto-approve setting.
  */
 class WebMountPrimitiveTools(
     private val pool: WebViewPool,
@@ -862,7 +869,15 @@ class WebMountPrimitiveTools(
         execute = { input ->
             track("wm_stations", "WebMount 站点列表", input) {
                 val includeDisabled = input.boolean("include_disabled") ?: true
-                val statusFilter = input.string("status_filter")?.lowercase()?.takeIf { it.isNotBlank() }
+                val rawFilter = input.string("status_filter")?.lowercase()?.takeIf { it.isNotBlank() }
+                // M2.0 review W-5 fix: validate status_filter against the
+                // enum's wireName set so a typo like "online" doesn't silently
+                // produce zero results — surface a warning the agent can act on.
+                val validStatuses = me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus.entries
+                    .map { it.wireName }
+                    .toSet()
+                val statusFilter = rawFilter?.takeIf { it in validStatuses }
+                val unknownFilter = rawFilter != null && statusFilter == null
                 val states = manager.states.value.values
                     .asSequence()
                     .filter { includeDisabled || it.enabled }
@@ -870,6 +885,14 @@ class WebMountPrimitiveTools(
                     .toList()
                 val payload = buildJsonObject {
                     put("count", states.size)
+                    if (unknownFilter) {
+                        put(
+                            "warning",
+                            "Unknown status_filter '$rawFilter'. Valid values: " +
+                                validStatuses.sorted().joinToString(", ") +
+                                ". Returning unfiltered results."
+                        )
+                    }
                     put(
                         "stations",
                         buildJsonArray {

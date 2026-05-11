@@ -183,6 +183,17 @@ class RouteActivity : ComponentActivity() {
             finish()
             return
         }
+        // Phase 2 M2.0.3 fix: cold-start OAuth callback (e.g. AmberAgent's
+        // process was killed during the browser handoff) lands here via
+        // ACTION_VIEW on the first onCreate, NOT onNewIntent. Dispatch the
+        // URI so WebMountOAuthClient's resume collector can complete the
+        // token exchange from the persisted PendingOAuthEntry. The
+        // dispatcher's SharedFlow is replay=1 + WebMountOAuthClient is
+        // eagerly constructed at Koin start, so the event lands on a live
+        // subscriber regardless of dispatch ordering.
+        intent?.data?.takeIf { it.scheme == "amberagent" && it.host == "oauth" }?.let { uri ->
+            oauthCallbackDispatcher.dispatch(uri)
+        }
         setContent {
             RikkahubTheme {
                 setSingletonImageLoaderFactory { context ->

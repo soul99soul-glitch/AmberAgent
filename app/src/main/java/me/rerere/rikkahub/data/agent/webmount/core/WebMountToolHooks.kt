@@ -56,8 +56,12 @@ class WebMountToolHooks(
      * Fetch the adapter's cookie bundle. Returns [WebMountCookieBundle.EMPTY]
      * for adapters that don't carry cookies (the bundle's `isEmpty` is true
      * and `hasAll` returns false for any non-empty set).
+     *
+     * Non-suspend — Android's `CookieManager` is synchronous and we
+     * intentionally keep callers free to invoke this from non-coroutine
+     * contexts (tests, debug UI).
      */
-    suspend fun cookies(): WebMountCookieBundle =
+    fun cookies(): WebMountCookieBundle =
         cookieProvider?.getCookies(endpoints) ?: WebMountCookieBundle.EMPTY
 
     /**
@@ -66,7 +70,7 @@ class WebMountToolHooks(
      * their own bespoke "请先在 WebMount 设置页登录" string and inconsistent
      * cookie checks; this centralizes both.
      */
-    suspend fun requireCookies(vararg required: String): WebMountCookieBundle {
+    fun requireCookies(vararg required: String): WebMountCookieBundle {
         val bundle = cookies()
         val needed = required.toSet()
         require(bundle.hasAll(needed)) {

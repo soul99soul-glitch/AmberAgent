@@ -40,6 +40,7 @@ class PendingOAuthStore(context: Context) {
     private val prefs: SharedPreferences? = tryCreateEncryptedPrefs(context)
     private val mem = ConcurrentHashMap<String, PendingOAuthEntry>()
 
+    @Synchronized
     fun put(entry: PendingOAuthEntry) {
         val raw = json.encodeToString(PendingOAuthEntry.serializer(), entry)
         if (prefs != null) {
@@ -50,10 +51,30 @@ class PendingOAuthStore(context: Context) {
     }
 
     /**
+     * Read the pending entry without removing it. Used by callers that want
+     * to validate the entry can be acted on (provider registered, etc.)
+     * before committing to removal via [consume]. Returns null if missing.
+     */
+    @Synchronized
+    fun peek(state: String): PendingOAuthEntry? {
+        val raw = prefs?.getString(state, null)
+        return if (raw != null) {
+            runCatching {
+                json.decodeFromString(PendingOAuthEntry.serializer(), raw)
+            }.onFailure { Log.w(TAG, "Failed to decode pending entry for state (peek)", it) }
+                .getOrNull()
+        } else {
+            mem[state]
+        }
+    }
+
+    /**
      * Atomically fetch and remove the pending entry for the given state.
      * Returns null if no entry exists (either never put, already consumed,
-     * or GC'd by [purgeStale]).
+     * or GC'd by [purgeStale]). Synchronized so two concurrent consume()
+     * callers cannot both observe the same entry.
      */
+    @Synchronized
     fun consume(state: String): PendingOAuthEntry? {
         if (prefs != null) {
             val raw = prefs.getString(state, null) ?: return null

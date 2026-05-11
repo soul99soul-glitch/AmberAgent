@@ -18,8 +18,15 @@ import kotlinx.coroutines.flow.asSharedFlow
  */
 class OAuthCallbackDispatcher {
 
+    // Phase 2 M2.0.3 fix: `replay = 1` so a cold-start OAuth callback (the
+    // process was killed during the browser handoff) is still visible to
+    // WebMountOAuthClient's resume collector even when RouteActivity.onCreate
+    // dispatches the event slightly before the lazy Koin singleton wires its
+    // subscriber. Per-call `state` nonces mean a stale replayed event can't
+    // be accidentally re-consumed by a later connect() — the filter is by
+    // `state` which is fresh per invocation.
     private val _events = MutableSharedFlow<OAuthCallback>(
-        replay = 0,
+        replay = 1,
         extraBufferCapacity = 8,
     )
     val events: SharedFlow<OAuthCallback> = _events.asSharedFlow()

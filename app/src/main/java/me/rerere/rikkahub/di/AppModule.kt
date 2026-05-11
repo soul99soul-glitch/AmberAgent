@@ -164,7 +164,12 @@ val appModule = module {
         OAuthCallbackDispatcher()
     }
 
-    single {
+    // Phase 2 M2.0.3 fix: createdAtStart so the OAuth resume collector
+    // subscribes to dispatcher.events BEFORE a cold-start callback Intent
+    // can arrive. Combined with OAuthCallbackDispatcher's replay=1 this
+    // closes the race where the dispatch fires before any UI/service has
+    // resolved this singleton.
+    single(createdAtStart = true) {
         WebMountOAuthClient(
             context = get(),
             store = get(),
