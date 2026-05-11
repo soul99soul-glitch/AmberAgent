@@ -120,6 +120,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalModelCouncilPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalOfficeProPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalSubAgentPage
+import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalWebMountPage
 import me.rerere.rikkahub.ui.pages.board.TodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
@@ -551,6 +552,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingExperimentalModelCouncilPage()
                             }
 
+                            entry<Screen.SettingExperimentalWebMount> {
+                                SettingExperimentalWebMountPage()
+                            }
+
                             entry<Screen.TodayBoard> {
                                 TodayBoardPage()
                             }
@@ -818,6 +823,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingExperimentalModelCouncil : Screen
+
+    @Serializable
+    data object SettingExperimentalWebMount : Screen
 
     @Serializable
     data object SettingSystemAccess : Screen

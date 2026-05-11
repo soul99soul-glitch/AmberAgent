@@ -62,6 +62,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.Globe02
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -126,6 +127,13 @@ fun SettingExperimentalPage() {
                 ExperimentSectionCard(
                     title = stringResource(R.string.setting_experimental_page_title),
                 ) {
+                    ExperimentFeatureRow(
+                        onClick = { navController.navigate(Screen.SettingExperimentalWebMount) },
+                        icon = { Icon(HugeIcons.Globe02, contentDescription = null) },
+                        title = stringResource(R.string.setting_webmount_title),
+                        description = stringResource(R.string.setting_webmount_desc),
+                    )
+                    ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalICloud) },
                         icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
@@ -1915,7 +1923,7 @@ internal fun ExperimentSectionCard(
 }
 
 @Composable
-private fun ExperimentHeroCard(
+internal fun ExperimentHeroCard(
     icon: @Composable () -> Unit,
     title: String,
     description: String,
@@ -2028,7 +2036,7 @@ internal fun ExperimentDivider() {
 }
 
 @Composable
-private fun ExperimentActionRow(
+internal fun ExperimentActionRow(
     content: @Composable () -> Unit,
 ) {
     FlowRow(
@@ -2041,7 +2049,7 @@ private fun ExperimentActionRow(
 }
 
 @Composable
-private fun ExperimentActionButton(
+internal fun ExperimentActionButton(
     text: String,
     enabled: Boolean,
     primary: Boolean = false,
@@ -2077,7 +2085,7 @@ private fun ExperimentActionButton(
 }
 
 @Composable
-private fun ExperimentStatusRow(
+internal fun ExperimentStatusRow(
     label: String,
     value: String,
 ) {
@@ -2125,7 +2133,7 @@ private fun ExperimentBooleanPill(
 }
 
 @Composable
-private fun ExperimentNote(
+internal fun ExperimentNote(
     text: String,
     error: Boolean = false,
 ) {
