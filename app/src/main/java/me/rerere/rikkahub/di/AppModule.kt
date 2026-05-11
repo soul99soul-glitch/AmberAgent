@@ -19,7 +19,9 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
+import me.rerere.rikkahub.data.agent.webmount.oauth.FeishuOAuthProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthCallbackDispatcher
+import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
@@ -134,6 +136,17 @@ val appModule = module {
 
     single {
         OAuthCallbackDispatcher()
+    }
+
+    single {
+        WebMountOAuthClient(
+            context = get(),
+            store = get(),
+            dispatcher = get(),
+            http = get(),
+        ).apply {
+            register(FeishuOAuthProvider)
+        }
     }
 
     single {
