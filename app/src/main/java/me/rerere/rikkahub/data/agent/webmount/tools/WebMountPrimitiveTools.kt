@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data.agent.webmount.tools
 
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
@@ -41,6 +43,12 @@ class WebMountPrimitiveTools(
         clickTool,
         typeTool,
         evalTool,
+        scrollTool,
+        backTool,
+        forwardTool,
+        keysTool,
+        selectTool,
+        findTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -391,6 +399,243 @@ class WebMountPrimitiveTools(
                     put("result", payload)
                 }
                 listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // ------------------------------------------------------------ wm_scroll
+
+    private val scrollTool = Tool(
+        name = "wm_scroll",
+        description = """
+            Scroll a WebMount session. Three mutually exclusive modes (in priority order):
+            (1) `selector` scrolls the matched element into view; (2) `to` accepts "top" | "bottom",
+            or absolute coordinates via `to_x` + `to_y`; (3) `by_x` + `by_y` scrolls relative to the
+            current position. Reports the post-scroll {x, y}.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                    put("selector", stringProp("Selector to scroll into view (CSS / text= / xpath=)."))
+                    put("to", stringProp("'top' | 'bottom' for shorthand absolute scrolls."))
+                    put("to_x", integerProp("Absolute x (used with to_y)."))
+                    put("to_y", integerProp("Absolute y."))
+                    put("by_x", integerProp("Relative horizontal delta."))
+                    put("by_y", integerProp("Relative vertical delta."))
+                },
+                required = listOf("session_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_scroll", "WebMount 滚动", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    val selector = input.string("selector")
+                    val to = input.string("to")
+                    val toX = input.long("to_x")
+                    val toY = input.long("to_y")
+                    val byX = input.long("by_x")
+                    val byY = input.long("by_y")
+                    when {
+                        selector != null -> put("selector", selector)
+                        to != null -> put("to", to)
+                        toX != null && toY != null -> put("to", buildJsonObject {
+                            put("x", toX)
+                            put("y", toY)
+                        })
+                        byX != null || byY != null ->
+                            put("by", buildJsonArray {
+                                add(JsonPrimitive(byX ?: 0L))
+                                add(JsonPrimitive(byY ?: 0L))
+                            })
+                        else -> error("wm_scroll requires selector / to / to_x+to_y / by_x+by_y")
+                    }
+                }
+                val payload = handle.callBridge("scroll", args, timeoutMs = 5_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
+            }
+        },
+    )
+
+    // ----------------------------------------------- wm_back / wm_forward
+
+    private val backTool = Tool(
+        name = "wm_back",
+        description = "Step the WebMount session's history one page backwards (window.history.back).",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                },
+                required = listOf("session_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_back", "WebMount 后退", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val payload = handle.callBridge("back", buildJsonObject {}, timeoutMs = 3_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
+            }
+        },
+    )
+
+    private val forwardTool = Tool(
+        name = "wm_forward",
+        description = "Step the WebMount session's history one page forwards (window.history.forward).",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                },
+                required = listOf("session_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_forward", "WebMount 前进", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val payload = handle.callBridge("forward", buildJsonObject {}, timeoutMs = 3_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
+            }
+        },
+    )
+
+    // -------------------------------------------------------------- wm_keys
+
+    private val keysTool = Tool(
+        name = "wm_keys",
+        description = """
+            Dispatch a synthetic keyboard event in a WebMount session. Useful for Enter / Escape / Tab /
+            arrow keys after wm_type when the field doesn't auto-submit. Modifiers can be combined
+            (ctrl, shift, alt, meta). If `selector` is provided, focus moves to that element first;
+            otherwise the event targets the currently-focused element.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                    put("key", stringProp("Key name: 'Enter', 'Escape', 'Tab', 'ArrowDown', 'a', etc."))
+                    put("selector", stringProp("Optional selector to focus before sending the key."))
+                    put("ctrl", booleanProp("Hold Ctrl while pressing (default false)."))
+                    put("shift", booleanProp("Hold Shift (default false)."))
+                    put("alt", booleanProp("Hold Alt (default false)."))
+                    put("meta", booleanProp("Hold Meta / Cmd (default false)."))
+                },
+                required = listOf("session_id", "key"),
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            track("wm_keys", "WebMount 键盘", input) {
+                val sessionId = input.requiredString("session_id")
+                val key = input.requiredString("key")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val mods = buildJsonObject {
+                    input.boolean("ctrl")?.let { put("ctrl", it) }
+                    input.boolean("shift")?.let { put("shift", it) }
+                    input.boolean("alt")?.let { put("alt", it) }
+                    input.boolean("meta")?.let { put("meta", it) }
+                }
+                val args = buildJsonObject {
+                    put("key", key)
+                    input.string("selector")?.let { put("selector", it) }
+                    put("modifiers", mods)
+                }
+                val payload = handle.callBridge("keys", args, timeoutMs = 5_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
+            }
+        },
+    )
+
+    // ------------------------------------------------------------ wm_select
+
+    private val selectTool = Tool(
+        name = "wm_select",
+        description = """
+            Choose an option in a <select> dropdown. Matches `value` against both option.value and the
+            visible option text — so the agent can use whichever it sees in wm_extract. Fires
+            input + change events so frontend frameworks observe the new selection.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                    put("selector", stringProp("Selector for the <select> element."))
+                    put("value", stringProp("Option value or visible text to choose."))
+                },
+                required = listOf("session_id", "selector", "value"),
+            )
+        },
+        needsApproval = true,
+        execute = { input ->
+            track("wm_select", "WebMount 选择", input) {
+                val sessionId = input.requiredString("session_id")
+                val selector = input.requiredString("selector")
+                val value = input.requiredString("value")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    put("selector", selector)
+                    put("value", value)
+                }
+                val payload = handle.callBridge("select", args, timeoutMs = 5_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
+            }
+        },
+    )
+
+    // -------------------------------------------------------------- wm_find
+
+    private val findTool = Tool(
+        name = "wm_find",
+        description = """
+            Search the page text for a substring and return up to N visible matches with their CSS path,
+            bounding rect, and a short text preview. Use this to locate elements the agent then clicks
+            via wm_click (e.g. find "Login" → click that path). Case-insensitive by default.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id."))
+                    put("text", stringProp("Text substring to search for."))
+                    put("case_sensitive", booleanProp("Default false."))
+                    put("max", integerProp("Max matches to return. Default 20, cap 100."))
+                },
+                required = listOf("session_id", "text"),
+            )
+        },
+        execute = { input ->
+            track("wm_find", "WebMount 查找", input) {
+                val sessionId = input.requiredString("session_id")
+                val text = input.requiredString("text")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    put("text", text)
+                    input.boolean("case_sensitive")?.let { put("case_sensitive", it) }
+                    input.long("max")?.let { put("max", it) }
+                }
+                val payload = handle.callBridge("find", args, timeoutMs = 10_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
             }
         },
     )

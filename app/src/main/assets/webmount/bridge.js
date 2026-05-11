@@ -440,6 +440,148 @@
     return payload;
   }
 
+  // --------------------------------------------------------------- navigation
+
+  function performScroll(args) {
+    var sel = args.selector;
+    if (sel) {
+      var matched = resolveSelector(sel);
+      if (matched.length === 0) throw new Error('no element matched: ' + sel);
+      var target = matched[0];
+      if (target.scrollIntoView) target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
+      return { ok: true, mode: 'into_view', selector: sel, after: { y: window.scrollY | 0 } };
+    }
+    if (args.to) {
+      var to = args.to;
+      if (to === 'top') { window.scrollTo(0, 0); }
+      else if (to === 'bottom') { window.scrollTo(0, document.documentElement.scrollHeight | 0); }
+      else if (typeof to === 'object' && to !== null) {
+        window.scrollTo((to.x | 0), (to.y | 0));
+      } else {
+        throw new Error("scroll.to must be 'top' | 'bottom' | {x, y}");
+      }
+      return { ok: true, mode: 'to', after: { x: window.scrollX | 0, y: window.scrollY | 0 } };
+    }
+    if (args.by) {
+      var by = args.by;
+      if (!Array.isArray(by) || by.length !== 2) throw new Error('scroll.by must be [dx, dy]');
+      window.scrollBy((by[0] | 0), (by[1] | 0));
+      return { ok: true, mode: 'by', after: { x: window.scrollX | 0, y: window.scrollY | 0 } };
+    }
+    throw new Error('scroll requires selector | to | by');
+  }
+
+  function performHistory(direction) {
+    var before = location.href;
+    if (direction === 'back') window.history.back();
+    else if (direction === 'forward') window.history.forward();
+    else throw new Error('history requires direction=back|forward');
+    return { ok: true, direction: direction, before_url: before };
+  }
+
+  function performKeys(args) {
+    var key = args.key;
+    if (typeof key !== 'string') throw new Error('keys requires key string');
+    var target = document.activeElement || document.body;
+    if (args.selector) {
+      var matched = resolveSelector(args.selector);
+      if (matched.length === 0) throw new Error('no element matched: ' + args.selector);
+      target = matched[0];
+      if (target.focus) try { target.focus(); } catch (_) {}
+    }
+    var mods = args.modifiers || {};
+    var init = {
+      bubbles: true,
+      cancelable: true,
+      key: key,
+      code: keyToCode(key),
+      keyCode: keyToCode(key, true),
+      ctrlKey: !!mods.ctrl,
+      shiftKey: !!mods.shift,
+      altKey: !!mods.alt,
+      metaKey: !!mods.meta,
+    };
+    target.dispatchEvent(new KeyboardEvent('keydown', init));
+    target.dispatchEvent(new KeyboardEvent('keypress', init));
+    target.dispatchEvent(new KeyboardEvent('keyup', init));
+    return { ok: true, key: key, target: { tag: (target.tagName || '').toLowerCase() } };
+  }
+
+  function keyToCode(key, numeric) {
+    var map = {
+      Enter: numeric ? 13 : 'Enter',
+      Escape: numeric ? 27 : 'Escape',
+      Tab: numeric ? 9 : 'Tab',
+      Backspace: numeric ? 8 : 'Backspace',
+      Delete: numeric ? 46 : 'Delete',
+      ArrowUp: numeric ? 38 : 'ArrowUp',
+      ArrowDown: numeric ? 40 : 'ArrowDown',
+      ArrowLeft: numeric ? 37 : 'ArrowLeft',
+      ArrowRight: numeric ? 39 : 'ArrowRight',
+      Home: numeric ? 36 : 'Home',
+      End: numeric ? 35 : 'End',
+      PageUp: numeric ? 33 : 'PageUp',
+      PageDown: numeric ? 34 : 'PageDown',
+      ' ': numeric ? 32 : 'Space',
+      Space: numeric ? 32 : 'Space',
+    };
+    if (map.hasOwnProperty(key)) return map[key];
+    if (numeric) return key.length === 1 ? key.charCodeAt(0) : 0;
+    // For single characters, return 'Key<X>' code conventionally.
+    return key.length === 1 ? 'Key' + key.toUpperCase() : key;
+  }
+
+  function performSelect(args) {
+    var sel = args.selector;
+    if (!sel) throw new Error('select requires selector');
+    var matched = resolveSelector(sel);
+    if (matched.length === 0) throw new Error('no element matched: ' + sel);
+    var el = matched[0];
+    if (el.tagName !== 'SELECT') throw new Error('not a <select>: ' + sel);
+    var value = args.value;
+    if (typeof value !== 'string') throw new Error('select requires value string');
+    var found = false;
+    for (var i = 0; i < el.options.length; i++) {
+      if (el.options[i].value === value || el.options[i].text === value) {
+        el.selectedIndex = i;
+        found = true;
+        break;
+      }
+    }
+    if (!found) throw new Error('no option matched: ' + value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true, selected_index: el.selectedIndex, value: el.value };
+  }
+
+  function performFind(args) {
+    var needle = args.text;
+    if (typeof needle !== 'string' || needle.length === 0) throw new Error('find requires non-empty text');
+    var caseSensitive = args.case_sensitive === true;
+    var max = Math.min(((args.max | 0) || 20), 100);
+    var query = caseSensitive ? needle : needle.toLowerCase();
+    var matches = [];
+    // Walk text nodes — bail out early at `max` matches.
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    var node = walker.nextNode();
+    while (node && matches.length < max) {
+      var text = node.nodeValue || '';
+      var hay = caseSensitive ? text : text.toLowerCase();
+      if (hay.indexOf(query) >= 0) {
+        var el = node.parentElement;
+        if (el && isVisible(el)) {
+          matches.push({
+            path: nodePath(el),
+            rect: rectOf(el),
+            text_preview: text.replace(/\s+/g, ' ').trim().substring(0, 120),
+          });
+        }
+      }
+      node = walker.nextNode();
+    }
+    return { ok: true, matches: matches, total_returned: matches.length };
+  }
+
   // --------------------------------------------------------------- dispatch
 
   window.__amberWm_call = function (method, argsJson, reqId) {
@@ -489,9 +631,15 @@
           AmberWM.reject(reqId, 'unknown wait kind: ' + until);
           return;
         }
-        case 'click':  AmberWM.resolve(reqId, safeJson(performClick(args))); return;
-        case 'type':   AmberWM.resolve(reqId, safeJson(performType(args))); return;
-        case 'eval':   AmberWM.resolve(reqId, safeJson(performEval(args))); return;
+        case 'click':    AmberWM.resolve(reqId, safeJson(performClick(args))); return;
+        case 'type':     AmberWM.resolve(reqId, safeJson(performType(args))); return;
+        case 'eval':     AmberWM.resolve(reqId, safeJson(performEval(args))); return;
+        case 'scroll':   AmberWM.resolve(reqId, safeJson(performScroll(args))); return;
+        case 'back':     AmberWM.resolve(reqId, safeJson(performHistory('back'))); return;
+        case 'forward':  AmberWM.resolve(reqId, safeJson(performHistory('forward'))); return;
+        case 'keys':     AmberWM.resolve(reqId, safeJson(performKeys(args))); return;
+        case 'select':   AmberWM.resolve(reqId, safeJson(performSelect(args))); return;
+        case 'find':     AmberWM.resolve(reqId, safeJson(performFind(args))); return;
         default:
           AmberWM.reject(reqId, 'unknown method: ' + method);
       }
