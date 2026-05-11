@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
+import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
 import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
@@ -88,6 +89,10 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("icloud_drive")
     data object ICloudDrive : LocalToolOption()
+
+    @Serializable
+    @SerialName("webmount")
+    data object WebMount : LocalToolOption()
 }
 
 class LocalTools(
@@ -104,6 +109,7 @@ class LocalTools(
     private val iCloudDriveTools: ICloudDriveTools,
     private val feishuOfficeTools: FeishuOfficeTools,
     private val agentCronTools: AgentCronTools,
+    private val webMountPrimitiveTools: WebMountPrimitiveTools,
     private val settingsStore: SettingsStore,
 ) {
     val javascriptTool by lazy {
@@ -1147,6 +1153,9 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.ICloudDrive)) {
             tools.addAll(iCloudDriveTools.getTools())
+        }
+        if (options.contains(LocalToolOption.WebMount)) {
+            tools.addAll(webMountPrimitiveTools.getTools())
         }
         tools.add(permissionsStatusTool)
         tools.addAll(agentCronTools.getTools())

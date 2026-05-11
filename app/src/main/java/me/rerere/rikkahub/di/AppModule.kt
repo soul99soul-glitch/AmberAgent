@@ -20,6 +20,8 @@ import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
+import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
+import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
 import me.rerere.rikkahub.data.agent.live.LiveModeManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner
@@ -142,6 +144,14 @@ val appModule = module {
     }
 
     single {
+        WebViewPool(appContext = get())
+    }
+
+    single {
+        WebMountPrimitiveTools(pool = get(), activityStore = get())
+    }
+
+    single {
         FeishuOfficeEnhancementManager(get(), get(), get(), get(), get())
     }
 
@@ -254,7 +264,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {
