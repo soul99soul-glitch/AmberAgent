@@ -55,6 +55,44 @@ class WebMountManager(
     private val _states = MutableStateFlow(buildInitialStates())
     val states: StateFlow<Map<String, WebMountStationState>> = _states.asStateFlow()
 
+    /**
+     * Phase 2 post-review fix: top-level "experimental feature enable" flag
+     * matching the iCloud / Feishu Office Enhancement pattern. When OFF
+     * (default), WebMount adds zero tools to the agent catalog regardless
+     * of any per-assistant or per-station configuration. When ON, the
+     * safe `wm_*` primitives + adapter tools are immediately available
+     * to every assistant without further configuration.
+     *
+     * `wm_eval` (arbitrary JS) is gated by a separate sub-toggle
+     * [evalEnabledFlow] so users can enable the main feature without
+     * granting the high-risk eval capability.
+     */
+    private val _globalEnabled = MutableStateFlow(prefs.getBoolean(KEY_GLOBAL_ENABLED, false))
+    val globalEnabledFlow: StateFlow<Boolean> = _globalEnabled.asStateFlow()
+
+    private val _evalEnabled = MutableStateFlow(prefs.getBoolean(KEY_EVAL_ENABLED, false))
+    val evalEnabledFlow: StateFlow<Boolean> = _evalEnabled.asStateFlow()
+
+    /** Synchronous accessors for callers outside coroutine scopes. */
+    val globalEnabled: Boolean get() = _globalEnabled.value
+    val evalEnabled: Boolean get() = _evalEnabled.value
+
+    fun setGlobalEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_GLOBAL_ENABLED, enabled).apply()
+        _globalEnabled.value = enabled
+        // Disabling the main feature also clears the eval sub-toggle so
+        // re-enabling later doesn't silently grant eval back.
+        if (!enabled && _evalEnabled.value) {
+            prefs.edit().putBoolean(KEY_EVAL_ENABLED, false).apply()
+            _evalEnabled.value = false
+        }
+    }
+
+    fun setEvalEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_EVAL_ENABLED, enabled).apply()
+        _evalEnabled.value = enabled
+    }
+
     init {
         adapters.forEach { adapter ->
             val flow = adapter.externalStateFlow ?: return@forEach
@@ -289,4 +327,9 @@ class WebMountManager(
     private fun keyMessage(id: String) = "message.$id"
     private fun keyUpdatedAt(id: String) = "updated_at.$id"
     private fun keyWriteValidated(id: String) = "write_validated.$id"
+
+    companion object {
+        private const val KEY_GLOBAL_ENABLED = "global.enabled"
+        private const val KEY_EVAL_ENABLED = "global.eval_enabled"
+    }
 }

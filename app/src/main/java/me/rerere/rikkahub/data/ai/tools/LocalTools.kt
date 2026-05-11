@@ -1171,14 +1171,22 @@ class LocalTools(
         if (options.contains(LocalToolOption.ICloudDrive)) {
             tools.addAll(iCloudDriveTools.getTools())
         }
-        if (options.contains(LocalToolOption.WebMount)) {
-            // Phase 2 M2.0.2: wm_eval is gated by a separate secondary toggle
-            // (WebMountEval) — enabling WebMount alone exposes the 16 safe
-            // primitives + adapter tools but not the arbitrary-JS escape hatch.
-            val includeEval = options.contains(LocalToolOption.WebMountEval)
+        // Phase 2 post-review UX fix: WebMount is now gated by a SINGLE
+        // global toggle on the WebMount Stations setting page (matches the
+        // iCloud / Feishu Office Enhancement experimental pattern). When
+        // the global toggle is ON, every assistant gets the WebMount tools
+        // automatically — no per-assistant config needed. Per-assistant
+        // `LocalToolOption.WebMount` is preserved as a manual override
+        // (someone can still opt one assistant in even when the global is
+        // off), but it's no longer the primary discovery path.
+        val webMountActive = webMountManager.globalEnabled || options.contains(LocalToolOption.WebMount)
+        if (webMountActive) {
+            // `wm_eval` is gated by the separate global WebMountEval toggle.
+            // Per-assistant `LocalToolOption.WebMountEval` is kept as a manual
+            // override (one assistant can have eval even when the global is off).
+            val includeEval = webMountManager.evalEnabled || options.contains(LocalToolOption.WebMountEval)
             tools.addAll(webMountPrimitiveTools.getTools(includeEval = includeEval))
-            // Adapter-contributed tools (hn_*, github_*, bilibili_*, ...) are
-            // also gated behind the WebMount toggle so the user opts in once.
+            // Adapter-contributed tools (hn_*, github_*, bilibili_*, ...).
             tools.addAll(webMountManager.allTools())
         }
         tools.add(permissionsStatusTool)

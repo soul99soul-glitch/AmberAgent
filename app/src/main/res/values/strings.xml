@@ -1267,7 +1267,16 @@
   <string name="setting_icloud_saved">iCloud path saved</string>
   <!-- WebMount Stations (Phase 1, experimental) -->
   <string name="setting_webmount_title">WebMount Stations</string>
-  <string name="setting_webmount_desc">Mount any website as deterministic agent tools through your in-app login session.</string>
+  <string name="setting_webmount_desc">Experimental — turn websites into deterministic agent tools. Toggle on to expose the WebMount toolkit to every assistant; toggle off to remove it everywhere.</string>
+  <!-- Global toggle + agent integration (Phase 2 post-review UX) -->
+  <string name="setting_webmount_global_section_title">Agent integration</string>
+  <string name="setting_webmount_global_status_label">Status</string>
+  <string name="setting_webmount_global_status_on">Enabled — agent has WebMount tools</string>
+  <string name="setting_webmount_global_status_off">Disabled — agent has no WebMount tools</string>
+  <string name="setting_webmount_global_on_note">Every assistant can now use the WebMount toolkit: open any URL with wm_open, read content with wm_extract, plus the dedicated tools for the stations you sign into below. No per-assistant configuration needed.</string>
+  <string name="setting_webmount_global_off_note">Toggle on above to make the agent tools available. While disabled, the agent has zero WebMount capability and the per-station controls below are inert.</string>
+  <string name="setting_webmount_eval_label">Allow arbitrary JavaScript (wm_eval)</string>
+  <string name="setting_webmount_eval_desc">High risk. Lets the agent execute arbitrary JavaScript inside a logged-in page (can read cookies / sessionStorage). Each call still requires explicit human approval. Leave off unless you specifically need it.</string>
   <string name="setting_webmount_about_note">WebMount lets you log into a website once inside AmberAgent and surface that session to agents as stable, scriptable tools — no screenshots, no extra token cost. The first batch of stations is coming in M1.6.</string>
   <string name="setting_webmount_section_stations">Available stations</string>
   <string name="setting_webmount_no_stations">No stations registered yet.</string>

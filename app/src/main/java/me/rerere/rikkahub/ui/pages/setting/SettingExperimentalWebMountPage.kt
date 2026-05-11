@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,6 +88,8 @@ fun SettingExperimentalWebMountPage(
     LaunchedEffect(oauthStore) {
         oauthStore.updates.collectLatest { oauthRevision++ }
     }
+    val globalEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
+    val evalEnabled by webMountManager.evalEnabledFlow.collectAsStateWithLifecycle()
     val appIdRequiredMessage = stringResource(R.string.setting_webmount_oauth_app_id_required)
     val connectedTemplate = stringResource(R.string.setting_webmount_oauth_connected_toast)
     val disconnectedTemplate = stringResource(R.string.setting_webmount_oauth_disconnected_toast)
@@ -105,8 +108,58 @@ fun SettingExperimentalWebMountPage(
                     icon = { Icon(HugeIcons.Globe02, contentDescription = null) },
                     title = stringResource(R.string.setting_webmount_title),
                     description = stringResource(R.string.setting_webmount_desc),
-                    trailing = { /* no global toggle — each station owns its enable state */ },
+                    trailing = {
+                        Switch(
+                            checked = globalEnabled,
+                            onCheckedChange = { webMountManager.setGlobalEnabled(it) },
+                        )
+                    },
                 )
+            }
+            item {
+                ExperimentSectionCard(
+                    title = stringResource(R.string.setting_webmount_global_section_title),
+                ) {
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_webmount_global_status_label),
+                        value = if (globalEnabled) {
+                            stringResource(R.string.setting_webmount_global_status_on)
+                        } else {
+                            stringResource(R.string.setting_webmount_global_status_off)
+                        },
+                    )
+                    ExperimentNote(
+                        text = if (globalEnabled) {
+                            stringResource(R.string.setting_webmount_global_on_note)
+                        } else {
+                            stringResource(R.string.setting_webmount_global_off_note)
+                        },
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.setting_webmount_eval_label),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                stringResource(R.string.setting_webmount_eval_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = evalEnabled,
+                            enabled = globalEnabled,
+                            onCheckedChange = { webMountManager.setEvalEnabled(it) },
+                        )
+                    }
+                }
             }
             item {
                 ExperimentNote(text = stringResource(R.string.setting_webmount_about_note))
@@ -566,6 +619,13 @@ private fun OAuthProviderRow(
  * auth, has a primary login URL, and is currently not signed in. Returns
  * null otherwise so the "Sign in" button doesn't render.
  */
+/**
+ * Phase 2 post-review UX fix: the per-station "Sign in" button is now
+ * ALWAYS visible for cookie-auth stations (was: only when login cookie
+ * absent). Users couldn't discover the entry point when they had never
+ * logged in OR when they were already logged in and wanted to switch
+ * accounts. Always-on makes "WebView login" reachable in one tap.
+ */
 @Composable
 private fun signInLauncherFor(
     state: WebMountStationState,
@@ -573,16 +633,9 @@ private fun signInLauncherFor(
 ): (() -> Unit)? {
     val context = LocalContext.current
     if (WebMountAuthMethod.COOKIE !in state.authMethods) return null
-    val profile = registry.byId(state.id)?.profile ?: return null
-    val loginCookie = profile.hints.loginCookie ?: return null
-    val cookies = android.webkit.CookieManager.getInstance()
-    val loggedIn = profile.origins.any { origin ->
-        cookies.getCookie(origin)
-            ?.split(";")
-            ?.map { it.trim() }
-            ?.any { it.startsWith("$loginCookie=") && it.length > "$loginCookie=".length } == true
-    }
-    if (loggedIn) return null
+    // Profile is optional — even sites without a profile can still expose
+    // a "Sign in" entry point that opens the station's primary login URL.
+    registry.byId(state.id)?.profile
     return {
         val activity = context as? Activity
         if (activity != null) {
