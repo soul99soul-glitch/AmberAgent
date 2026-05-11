@@ -241,6 +241,7 @@ internal fun Tool.category(): String = when {
     name in setOf("search_web", "scrape_web", "search_sources_status", "search_strategy_explain", "http_request") -> "web"
     name.startsWith("webview_") -> "webview"
     name.startsWith("wm_") -> "webmount"
+    name.startsWith("hn_") -> "webmount_hackernews"
     name.startsWith("screen_") || name == "vlm_task" -> "screen"
     name.startsWith("sms_") || name.startsWith("contacts_") || name.startsWith("calendar_") ||
         name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||

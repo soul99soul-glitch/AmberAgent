@@ -16,6 +16,9 @@ import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnAdapter
+import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnClient
+import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
@@ -150,7 +153,22 @@ val appModule = module {
     }
 
     single {
-        val adapters: List<WebMountAdapter> = emptyList() // populated in M1.6
+        HnClient(http = get())
+    }
+
+    single {
+        HnTools(client = get())
+    }
+
+    single {
+        HnAdapter(tools = get())
+    }
+
+    single {
+        val adapters: List<WebMountAdapter> = listOf(
+            get<HnAdapter>(),
+            // M1.6 will append: Reddit, Juejin, Feishu docs, GitHub, Bilibili, Zhihu
+        )
         WebMountManager(
             context = get(),
             adapters = adapters,
@@ -282,7 +300,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

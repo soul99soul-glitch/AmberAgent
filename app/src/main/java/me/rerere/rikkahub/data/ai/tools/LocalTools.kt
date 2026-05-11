@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
 import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
@@ -110,6 +111,7 @@ class LocalTools(
     private val feishuOfficeTools: FeishuOfficeTools,
     private val agentCronTools: AgentCronTools,
     private val webMountPrimitiveTools: WebMountPrimitiveTools,
+    private val webMountManager: WebMountManager,
     private val settingsStore: SettingsStore,
 ) {
     val javascriptTool by lazy {
@@ -1156,6 +1158,9 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.WebMount)) {
             tools.addAll(webMountPrimitiveTools.getTools())
+            // Adapter-contributed tools (hn_*, github_*, bilibili_*, ...) are
+            // also gated behind the WebMount toggle so the user opts in once.
+            tools.addAll(webMountManager.allTools())
         }
         tools.add(permissionsStatusTool)
         tools.addAll(agentCronTools.getTools())
