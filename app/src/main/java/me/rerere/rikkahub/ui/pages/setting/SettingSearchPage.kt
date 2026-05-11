@@ -120,8 +120,14 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
         containerColor = CustomColors.topBarColors.containerColor
     ) {
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-            // The first two items are global/free-source cards; configured service cards start after them.
-            val offset = 2
+            // Three fixed items live before the configurable service rows in this LazyColumn:
+            //   0  agent_search_enable    (the global toggle card)
+            //   1  builtin_free_sources   (built-in free providers)
+            //   2  recommended_search_sets (the recommended-combo card)
+            // → service[i] sits at LazyColumn index (i + 3). If you add or remove a fixed
+            //   header card above the `items(searchServices)` block, update this offset
+            //   too — drag/drop silently mis-targets when it drifts.
+            val offset = 3
             val fromIndex = from.index - offset
             val toIndex = to.index - offset
 
