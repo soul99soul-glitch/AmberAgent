@@ -16,6 +16,11 @@ import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import me.rerere.rikkahub.data.agent.webmount.adapters.icloud.IcloudWebMountAdapter
+import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountAdapter
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
+import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.live.LiveModeManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner
@@ -111,6 +116,39 @@ val appModule = module {
 
     single {
         ICloudDriveTools(get(), get())
+    }
+
+    // WebMount Stations (experimental, Phase 1 M1.1).
+    // iCloud is wrapped here as the first station; existing ICloudDrive*
+    // classes above keep owning iCloud-specific state and tools — this layer
+    // surfaces a generalized view for the unified panel.
+    single {
+        WebMountCookieProvider()
+    }
+
+    single {
+        WebMountOAuthTokenStore()
+    }
+
+    single {
+        IcloudWebMountAdapter(
+            driveManager = get(),
+            appScope = get(),
+        )
+    }
+
+    single {
+        val adapters: List<WebMountAdapter> = listOf(
+            get<IcloudWebMountAdapter>(),
+        )
+        WebMountManager(
+            context = get(),
+            adapters = adapters,
+            cookieProvider = get(),
+            oauthStore = get(),
+            activityStore = get(),
+            appScope = get(),
+        )
     }
 
     single {
