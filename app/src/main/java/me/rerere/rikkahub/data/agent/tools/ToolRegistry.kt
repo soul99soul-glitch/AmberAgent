@@ -181,6 +181,17 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
         }
+
+        "wm_tab_close" -> {
+            // Destroys a WebView session (irreversible). Sensitive risk so the
+            // global "auto-approve tools" toggle alone won't fire it — needs
+            // either an explicit approval or the high-risk auto-approve flag.
+            mutates = true
+            risk = ToolRisk.Sensitive
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+        }
     }
 
     val category = category()
@@ -346,6 +357,11 @@ private fun Tool.speculativeBlockReason(
 
 private fun Tool.outputBudgetChars(): Int = when (name) {
     "file_read" -> FILE_READ_HARD_MAX_CHARS + 2_048
+    // Screenshots inline their base64 image in the Text payload (Image parts
+    // are silently dropped by every provider's tool-result serializer). A
+    // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
+    // are best taken as JPEG.
+    "wm_screenshot" -> 1_200_000
     else -> DEFAULT_TOOL_OUTPUT_BUDGET_CHARS
 }
 

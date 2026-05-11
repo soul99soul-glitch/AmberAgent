@@ -46,17 +46,26 @@ class NetworkLog(private val capacity: Int = DEFAULT_CAPACITY) {
     /**
      * Return events whose `seq > sinceSeq`, oldest first. Pass `sinceSeq=0`
      * (or omit) to see everything still in the buffer.
+     *
+     * The returned `last_event_seq` is the seq of the LAST event included in
+     * `events` — so the agent can pass it back as `sinceSeq` for the next
+     * poll and not skip anything. If the caller hit [maxEntries] before
+     * draining the buffer, `more_available` is true and `buffer_newest_seq`
+     * tells them how many they still missed.
      */
     fun snapshot(sinceSeq: Long = 0L, maxEntries: Int = capacity): JsonElement {
-        val (entries, lastSeq) = synchronized(lock) {
+        val (entries, bufferNewest) = synchronized(lock) {
             val take = buffer.asSequence()
                 .filter { it.seq > sinceSeq }
                 .take(maxEntries)
                 .toList()
             take to (buffer.lastOrNull()?.seq ?: 0L)
         }
+        val lastReturned = entries.lastOrNull()?.seq ?: sinceSeq
         return buildJsonObject {
-            put("last_event_seq", JsonPrimitive(lastSeq))
+            put("last_event_seq", JsonPrimitive(lastReturned))
+            put("buffer_newest_seq", JsonPrimitive(bufferNewest))
+            put("more_available", JsonPrimitive(lastReturned < bufferNewest))
             put("count", JsonPrimitive(entries.size))
             put("events", buildJsonArray { entries.forEach { add(it.payload) } })
         }

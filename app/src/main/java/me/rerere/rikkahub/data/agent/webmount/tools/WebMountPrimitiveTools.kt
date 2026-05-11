@@ -726,6 +726,7 @@ class WebMountPrimitiveTools(
             )
         },
         needsApproval = true,
+        allowsAutoApproval = false,
         execute = { input ->
             track("wm_tab_close", "WebMount 关闭会话", input) {
                 val sessionId = input.requiredString("session_id")
@@ -746,12 +747,12 @@ class WebMountPrimitiveTools(
     private val screenshotTool = Tool(
         name = "wm_screenshot",
         description = """
-            Capture the current page of a WebMount session as a PNG (or JPEG) and return it as a
-            base64 string. `full_page=false` (default) captures the visible viewport; `full_page=true`
-            scrolls + stitches up to ~16384px tall. Uses native Android Bitmap rendering with a
-            software-rendering fallback for hardware-accelerated WebViews. Output base64 can be sent
-            directly to the model as an image — heads up that big full-page PNGs blow up the agent's
-            context, prefer JPEG with quality=75-85 for those.
+            Capture the current page of a WebMount session and return its base64-encoded image in
+            the tool result text (a `data:` URI). `full_page=false` (default) captures the visible
+            viewport; `full_page=true` scrolls + stitches up to ~16384px tall. Uses native Android
+            Bitmap rendering with a software-rendering fallback for hardware-accelerated WebViews.
+            Heads up: full-page PNGs are large; for full-page captures prefer format="jpeg" with
+            quality=75-85 to keep the agent's context manageable.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
@@ -777,7 +778,13 @@ class WebMountPrimitiveTools(
                 val result = WebViewScreenshot.capture(handle, fullPage, format, quality)
                 when (result) {
                     is WebViewScreenshot.Result.Success -> {
-                        val metadata = buildJsonObject {
+                        // Inline the base64 in the Text payload — every provider's
+                        // tool-result serializer drops UIMessagePart.Image, so the
+                        // model never sees standalone Image parts on a tool return.
+                        // The wm_screenshot Tool's `outputBudgetChars` is bumped
+                        // (see ToolRegistry.outputBudgetChars) so the base64 fits.
+                        val mime = if (result.format == "jpeg") "image/jpeg" else "image/png"
+                        val payload = buildJsonObject {
                             put("session_id", sessionId)
                             put("ok", true)
                             put("width", result.width)
@@ -785,16 +792,9 @@ class WebMountPrimitiveTools(
                             put("format", result.format)
                             put("size_bytes", result.sizeBytes)
                             put("full_page", fullPage)
+                            put("image_data_url", "data:$mime;base64,${result.base64}")
                         }
-                        // Return the image as a separate UIMessagePart.Image so it
-                        // flows to the model's multimodal channel instead of
-                        // bloating the text budget. The metadata Text part lets
-                        // the agent reason about dimensions / size.
-                        val mime = if (result.format == "jpeg") "image/jpeg" else "image/png"
-                        listOf(
-                            UIMessagePart.Text(metadata.toString()),
-                            UIMessagePart.Image(url = "data:$mime;base64,${result.base64}"),
-                        )
+                        listOf(UIMessagePart.Text(payload.toString()))
                     }
                     is WebViewScreenshot.Result.Failed -> {
                         listOf(UIMessagePart.Text(buildJsonObject {
