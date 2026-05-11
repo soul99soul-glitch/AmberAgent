@@ -11,6 +11,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.tools.boolean
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
@@ -36,6 +37,9 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
         searchTool(hooks, oauth),
         createTool(hooks, oauth),
         appendBlockTool(hooks, oauth),
+        appendHeadingTool(hooks, oauth),
+        appendListItemTool(hooks, oauth),
+        appendCalloutTool(hooks, oauth),
     )
 
     private fun listTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
@@ -206,6 +210,152 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
             }
         },
     )
+
+    // ---- Phase 2 M2.4 rich-text tools ---------------------------------
+
+    private fun appendHeadingTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
+        name = "feishu_docs_append_heading",
+        description = """
+            Append a heading block (H1-H9) to a 飞书 docx. `level` 1-9 maps to heading1..heading9
+            (display-wise H1 is largest). Same shape and approval flow as feishu_docs_append_block.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("document_id", stringProp("Target document id"))
+                    put("level", integerProp("Heading level 1-9"))
+                    put("text", stringProp("Heading text content"))
+                    put("parent_block_id", stringProp("Parent block id (optional)"))
+                },
+                required = listOf("document_id", "level", "text"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            hooks.track("feishu_docs_append_heading", "飞书 追加标题", input) {
+                val token = requireToken(oauth)
+                val docId = input.requiredString("document_id")
+                val level = (input.long("level") ?: error("level is required (1-9)"))
+                    .coerceIn(1L, 9L).toInt()
+                val text = input.requiredString("text")
+                val parentBlockId = input.string("parent_block_id")
+                val response = client.appendRichBlock(
+                    accessToken = token,
+                    documentId = docId,
+                    blockKind = "heading$level",
+                    text = text,
+                    parentBlockId = parentBlockId,
+                )
+                listOf(UIMessagePart.Text(formatAppendResult(docId, parentBlockId, response).toString()))
+            }
+        },
+    )
+
+    private fun appendListItemTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
+        name = "feishu_docs_append_list_item",
+        description = """
+            Append a single list-item block (bullet or ordered) to a 飞书 docx. Set `ordered=true`
+            for numbered lists, false (default) for bullets. Lists are flat sequences of items in
+            飞书's block tree — chain multiple calls to build a longer list. Each call returns the
+            new item's block_id so the agent can later append a nested sub-item by passing
+            `parent_block_id` = that id.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("document_id", stringProp("Target document id"))
+                    put("text", stringProp("Item text content"))
+                    put("ordered", buildJsonObject {
+                        put("type", "boolean")
+                        put("description", "true → numbered list; false (default) → bullet")
+                    })
+                    put("parent_block_id", stringProp("Parent block id (optional)"))
+                },
+                required = listOf("document_id", "text"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            hooks.track("feishu_docs_append_list_item", "飞书 追加列表项", input) {
+                val token = requireToken(oauth)
+                val docId = input.requiredString("document_id")
+                val text = input.requiredString("text")
+                val ordered = input.boolean("ordered") == true
+                val parentBlockId = input.string("parent_block_id")
+                val response = client.appendRichBlock(
+                    accessToken = token,
+                    documentId = docId,
+                    blockKind = if (ordered) "ordered" else "bullet",
+                    text = text,
+                    parentBlockId = parentBlockId,
+                )
+                listOf(UIMessagePart.Text(formatAppendResult(docId, parentBlockId, response).toString()))
+            }
+        },
+    )
+
+    private fun appendCalloutTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
+        name = "feishu_docs_append_callout",
+        description = """
+            Append a callout block (a highlighted box with an emoji marker) containing a single
+            paragraph of text. Useful for notes / warnings / quotes. The callout uses the default
+            neutral styling — color customization is out of Phase 2 scope.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("document_id", stringProp("Target document id"))
+                    put("text", stringProp("Callout text content"))
+                    put("parent_block_id", stringProp("Parent block id (optional)"))
+                },
+                required = listOf("document_id", "text"),
+            )
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { input ->
+            hooks.track("feishu_docs_append_callout", "飞书 追加 Callout", input) {
+                val token = requireToken(oauth)
+                val docId = input.requiredString("document_id")
+                val text = input.requiredString("text")
+                val parentBlockId = input.string("parent_block_id")
+                val response = client.appendRichBlock(
+                    accessToken = token,
+                    documentId = docId,
+                    blockKind = "callout",
+                    text = text,
+                    parentBlockId = parentBlockId,
+                )
+                listOf(UIMessagePart.Text(formatAppendResult(docId, parentBlockId, response).toString()))
+            }
+        },
+    )
+
+    /** Shared output shape — matches feishu_docs_append_block (M2.0 D6 fix). */
+    private fun formatAppendResult(
+        docId: String,
+        parentBlockId: String?,
+        response: JsonObject,
+    ): JsonObject {
+        val createdBlockIds: List<String> = (response["children"] as? JsonArray)
+            ?.mapNotNull { entry ->
+                (entry as? JsonObject)?.get("block_id")?.jsonPrimitive?.contentOrNull
+            }
+            ?: emptyList()
+        return buildJsonObject {
+            put("ok", true)
+            put("document_id", docId)
+            parentBlockId?.let { put("parent_block_id", it) }
+            put("appended_block_count", createdBlockIds.size)
+            if (createdBlockIds.isNotEmpty()) {
+                put("appended_block_ids", buildJsonArray {
+                    createdBlockIds.forEach { add(JsonPrimitive(it)) }
+                })
+            }
+        }
+    }
 
     private suspend fun requireToken(oauth: WebMountOAuthClient): String =
         oauth.getValidAccessToken("feishu")

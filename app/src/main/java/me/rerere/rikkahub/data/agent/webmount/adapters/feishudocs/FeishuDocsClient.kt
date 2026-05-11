@@ -159,6 +159,103 @@ class FeishuDocsClient(
     }
 
     /**
+     * Phase 2 M2.4 — Append a rich-text block (heading / bullet / ordered /
+     * callout) to a docx. Returns the same `data` envelope as
+     * [appendTextBlock] — `children[].block_id` carries the new block ids
+     * so the agent can chain further appends under the same parent.
+     *
+     * `blockKind` accepts:
+     *  - `text` (≈ [appendTextBlock])
+     *  - `heading1` ... `heading9` (block_type 3..11)
+     *  - `bullet` (block_type 12) — single bullet-list item
+     *  - `ordered` (block_type 13) — single ordered-list item
+     *  - `callout` (block_type 19) — text wrapped in a default-style callout
+     *
+     * Multi-line rich text is out of Phase 2 scope; one block per call,
+     * caller composes structures by chaining.
+     */
+    suspend fun appendRichBlock(
+        accessToken: String,
+        documentId: String,
+        blockKind: String,
+        text: String,
+        parentBlockId: String? = null,
+    ): JsonObject {
+        require(documentId.isNotBlank()) { "document_id is required" }
+        require(text.isNotEmpty()) { "text is required" }
+        val (blockType, wrapInCallout) = blockTypeFor(blockKind)
+        val resolvedParent = parentBlockId?.takeIf { it.isNotBlank() }
+            ?: resolveRootBlockId(accessToken, documentId)
+        val textRun = buildJsonObject {
+            put("elements", buildJsonArray {
+                add(buildJsonObject {
+                    put("text_run", buildJsonObject {
+                        put("content", text)
+                    })
+                })
+            })
+            put("style", buildJsonObject {})
+        }
+        val block = if (wrapInCallout) {
+            // Callout is a container block: it carries no direct text;
+            // instead it has a child `text` block. The Feishu API accepts
+            // a `callout` block with a nested `children[0]` text block in
+            // the same request.
+            buildJsonObject {
+                put("block_type", 19)
+                put("callout", buildJsonObject {
+                    // Default background; agents can hint a color in a
+                    // future tool param. Phase 2 ships neutral.
+                    put("background_color", 1)
+                    put("border_color", 1)
+                    put("emoji_id", "memo")
+                })
+                put("children", buildJsonArray {
+                    add(buildJsonObject {
+                        put("block_type", 2)
+                        put("text", textRun)
+                    })
+                })
+            }
+        } else {
+            buildJsonObject {
+                put("block_type", blockType)
+                put(BLOCK_FIELD_FOR_TYPE[blockType] ?: "text", textRun)
+            }
+        }
+        val response = http.post("$DOCX_BASE/v1/documents/$documentId/blocks/$resolvedParent/children") {
+            applyHeaders(accessToken)
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("index", -1)
+                put("children", buildJsonArray { add(block) })
+            }.toString())
+        }
+        return parseFeishu(response, "append rich block $blockKind").data ?: buildJsonObject {}
+    }
+
+    /** Map block_kind wire string → (block_type, is_callout_wrapper). */
+    private fun blockTypeFor(blockKind: String): Pair<Int, Boolean> = when (blockKind.lowercase()) {
+        "text", "paragraph" -> 2 to false
+        "heading1", "h1" -> 3 to false
+        "heading2", "h2" -> 4 to false
+        "heading3", "h3" -> 5 to false
+        "heading4", "h4" -> 6 to false
+        "heading5", "h5" -> 7 to false
+        "heading6", "h6" -> 8 to false
+        "heading7", "h7" -> 9 to false
+        "heading8", "h8" -> 10 to false
+        "heading9", "h9" -> 11 to false
+        "bullet" -> 12 to false
+        "ordered" -> 13 to false
+        "callout" -> 19 to true
+        else -> error(
+            "Unknown block_kind '$blockKind'. Valid: text, heading1..heading9, " +
+                "bullet, ordered, callout"
+        )
+    }
+
+    /**
      * Look up the document's root block id by listing its blocks. The first
      * returned block (parent_id == "") is the page-level root.
      */
@@ -248,6 +345,26 @@ class FeishuDocsClient(
         private const val DRIVE_BASE = "https://open.feishu.cn/open-apis/drive"
         private const val DOCX_BASE = "https://open.feishu.cn/open-apis/docx"
         private const val SUITE_BASE = "https://open.feishu.cn/open-apis/suite"
+
+        // Block-content field name keyed by block_type. text-flavored blocks
+        // (text + heading1..heading9 + bullet + ordered) all carry their
+        // content under a field named after the block kind in Feishu's API.
+        // Callout (19) is a container and uses a different shape — see
+        // [appendRichBlock].
+        private val BLOCK_FIELD_FOR_TYPE: Map<Int, String> = mapOf(
+            2 to "text",
+            3 to "heading1",
+            4 to "heading2",
+            5 to "heading3",
+            6 to "heading4",
+            7 to "heading5",
+            8 to "heading6",
+            9 to "heading7",
+            10 to "heading8",
+            11 to "heading9",
+            12 to "bullet",
+            13 to "ordered",
+        )
     }
 }
 
