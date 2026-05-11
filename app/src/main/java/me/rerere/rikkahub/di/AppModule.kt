@@ -19,6 +19,9 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
+import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinAdapter
+import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinClient
+import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinTools
 import me.rerere.rikkahub.data.agent.webmount.adapters.reddit.RedditAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.reddit.RedditClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.reddit.RedditTools
@@ -180,10 +183,23 @@ val appModule = module {
     }
 
     single {
+        JuejinClient(http = get())
+    }
+
+    single {
+        JuejinTools(client = get())
+    }
+
+    single {
+        JuejinAdapter(tools = get(), cookieProvider = get())
+    }
+
+    single {
         val adapters: List<WebMountAdapter> = listOf(
             get<HnAdapter>(),
             get<RedditAdapter>(),
-            // M1.6 will append: Juejin, Feishu docs, GitHub, Bilibili, Zhihu
+            get<JuejinAdapter>(),
+            // M1.6 will append: Feishu docs, GitHub, Bilibili, Zhihu
         )
         WebMountManager(
             context = get(),
