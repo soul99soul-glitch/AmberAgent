@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.components.workspace
 
+import android.content.Context
+import android.content.Intent
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -33,41 +39,46 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Refresh01
+import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun WorkspaceFileSheet(
     vm: WorkspaceFileVM,
     onDismiss: () -> Unit,
     onOpenFile: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     val recent by vm.recent.collectAsStateWithLifecycle()
     val currentPath by vm.currentPath.collectAsStateWithLifecycle()
     val currentItems by vm.currentDirItems.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    // Long-press a file row → set pendingDelete → confirm dialog. State hoisted here
-    // so a single dialog instance handles both tabs and survives row recompositions.
+    val pagerState = rememberPagerState { 2 }
+    val scope = rememberCoroutineScope()
+    // Long-press a file row → set pendingAction → choose share/delete.
+    var pendingAction by remember { mutableStateOf<WorkspaceFileItem?>(null) }
     var pendingDelete by remember { mutableStateOf<WorkspaceFileItem?>(null) }
 
     ModalBottomSheet(
@@ -86,30 +97,30 @@ fun WorkspaceFileSheet(
             )
 
             TabRow(
-                selectedTabIndex = selectedTab,
+                selectedTabIndex = pagerState.currentPage,
                 containerColor = Color.Transparent,
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
+                    selected = pagerState.currentPage == 0,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                     text = {
                         Text(
                             text = "最近文件",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (pagerState.currentPage == 0) FontWeight.SemiBold else FontWeight.Normal,
                             ),
                         )
                     },
                 )
                 Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
+                    selected = pagerState.currentPage == 1,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                     text = {
                         Text(
                             text = "目录结构",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (pagerState.currentPage == 1) FontWeight.SemiBold else FontWeight.Normal,
                             ),
                         )
                     },
@@ -118,26 +129,58 @@ fun WorkspaceFileSheet(
 
             Spacer(Modifier.height(4.dp))
 
-            Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                when {
-                    loading && recent.isEmpty() && currentItems.isEmpty() ->
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
-                    selectedTab == 0 -> RecentFilesList(
-                        files = recent,
-                        onOpenFile = onOpenFile,
-                        onLongPressFile = { pendingDelete = it },
-                    )
-                    else -> DirectoryBrowser(
-                        currentPath = currentPath,
-                        items = currentItems,
-                        onNavigate = { vm.navigateTo(it) },
-                        onNavigateUp = { vm.navigateUp() },
-                        onOpenFile = onOpenFile,
-                        onLongPressFile = { pendingDelete = it },
-                    )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                    when {
+                        loading && recent.isEmpty() && currentItems.isEmpty() ->
+                            CircularProgressIndicator(modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
+                        page == 0 -> RecentFilesList(
+                            files = recent,
+                            onOpenFile = onOpenFile,
+                            onLongPressFile = { pendingAction = it },
+                        )
+                        else -> DirectoryBrowser(
+                            currentPath = currentPath,
+                            items = currentItems,
+                            onNavigate = { vm.navigateTo(it) },
+                            onNavigateUp = { vm.navigateUp() },
+                            onOpenFile = onOpenFile,
+                            onLongPressFile = { pendingAction = it },
+                        )
+                    }
                 }
             }
         }
+    }
+
+    pendingAction?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingAction = null },
+            title = { Text(target.name) },
+            text = { Text("选择要对这个 workspace 文件执行的操作。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingAction = null
+                        shareWorkspaceFile(context, vm.shareableFile(target.path), target)
+                    }
+                ) { Text("分享") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { pendingAction = null }) { Text("取消") }
+                    TextButton(
+                        onClick = {
+                            pendingAction = null
+                            pendingDelete = target
+                        }
+                    ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+        )
     }
 
     pendingDelete?.let { target ->
@@ -529,3 +572,29 @@ private fun formatTime(epochMs: Long): String {
     }
 }
 
+private fun shareWorkspaceFile(
+    context: Context,
+    file: File?,
+    item: WorkspaceFileItem,
+) {
+    if (file == null || !file.isFile) {
+        Toast.makeText(context, "文件不可分享", Toast.LENGTH_SHORT).show()
+        return
+    }
+    runCatching {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val mimeType = MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(item.extension.lowercase())
+            ?: "application/octet-stream"
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "分享文件")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }.onFailure { error ->
+        Toast.makeText(context, error.message ?: "无法打开分享面板", Toast.LENGTH_SHORT).show()
+    }
+}

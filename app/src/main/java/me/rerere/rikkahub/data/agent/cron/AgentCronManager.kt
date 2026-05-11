@@ -144,15 +144,35 @@ class AgentCronManager(
         removed
     }
 
-    suspend fun prepareTriggeredRun(id: String): AgentCronTask? = withContext(Dispatchers.IO) {
+    suspend fun runTaskNow(id: String): Boolean = withContext(Dispatchers.IO) {
+        val task = listTasks().firstOrNull { it.id == id } ?: return@withContext false
+        val request = OneTimeWorkRequestBuilder<AgentCronWorker>()
+            .setInputData(
+                workDataOf(
+                    AgentCronWorker.KEY_TASK_ID to task.id,
+                    AgentCronWorker.KEY_MANUAL_RUN to true,
+                )
+            )
+            .addTag(WORK_TAG)
+            .build()
+        workManager.enqueueUniqueWork(workName(task.id), ExistingWorkPolicy.REPLACE, request)
+        agentTaskStore.upsert(task.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED))
+        true
+    }
+
+    suspend fun prepareTriggeredRun(id: String, manual: Boolean = false): AgentCronTask? = withContext(Dispatchers.IO) {
         var prepared: AgentCronTask? = null
         replaceTasks { tasks ->
             tasks.map { task ->
-                if (task.id != id || !task.enabled) return@map task
+                if (task.id != id || (!manual && !task.enabled)) return@map task
                 val now = System.currentTimeMillis()
-                val nextRunAt = runCatching {
-                    CronExpression.parse(task.cronExpression).nextRunAfter(now, resolveZone(task.timezoneId))
-                }.getOrNull()
+                val nextRunAt = if (task.enabled) {
+                    runCatching {
+                        CronExpression.parse(task.cronExpression).nextRunAfter(now, resolveZone(task.timezoneId))
+                    }.getOrNull()
+                } else {
+                    null
+                }
                 task.copy(
                     lastRunAtMs = now,
                     nextRunAtMs = nextRunAt,
@@ -166,6 +186,40 @@ class AgentCronManager(
         prepared?.let { schedule(it) }
         prepared?.let { agentTaskStore.upsert(it.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED)) }
         prepared
+    }
+
+    suspend fun markRunStarted(id: String) = withContext(Dispatchers.IO) {
+        replaceTasks { tasks ->
+            tasks.map { task ->
+                if (task.id == id) {
+                    task.copy(
+                        lastStatus = AgentCronTaskStatus.Running,
+                        lastError = null,
+                        updatedAtMs = System.currentTimeMillis(),
+                    )
+                } else {
+                    task
+                }
+            }
+        }
+        agentTaskStore.update(id, status = AgentTaskStatus.RUNNING, error = "")
+    }
+
+    suspend fun markRunCompleted(id: String) = withContext(Dispatchers.IO) {
+        replaceTasks { tasks ->
+            tasks.map { task ->
+                if (task.id == id) {
+                    task.copy(
+                        lastStatus = AgentCronTaskStatus.Succeeded,
+                        lastError = null,
+                        updatedAtMs = System.currentTimeMillis(),
+                    )
+                } else {
+                    task
+                }
+            }
+        }
+        agentTaskStore.update(id, status = AgentTaskStatus.COMPLETED, summary = "Cron run completed.")
     }
 
     suspend fun markRunFailed(id: String, message: String) = withContext(Dispatchers.IO) {
@@ -307,6 +361,8 @@ class AgentCronManager(
         status = status ?: when {
             !enabled -> AgentTaskStatus.CANCELLED
             lastStatus == AgentCronTaskStatus.Failed -> AgentTaskStatus.FAILED
+            lastStatus == AgentCronTaskStatus.Running -> AgentTaskStatus.RUNNING
+            lastStatus == AgentCronTaskStatus.Succeeded -> AgentTaskStatus.COMPLETED
             lastStatus == AgentCronTaskStatus.Queued -> AgentTaskStatus.QUEUED
             else -> AgentTaskStatus.QUEUED
         },

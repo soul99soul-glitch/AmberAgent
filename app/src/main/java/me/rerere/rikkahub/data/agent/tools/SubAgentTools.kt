@@ -80,28 +80,18 @@ class SubAgentTools(
                 }
             }
 
-            // Full id set = built-ins + user-saved custom roles. Otherwise users get their custom
-            // roles advertised in the roster but @-mentions for them silently no-op.
-            val rosterIds = subAgentManager.listBuiltIns().map { it.id }.toSet()
+            // Full id set = built-ins + user-saved custom roles. @council belongs to the
+            // ModelCouncilTools prompt so it still works when subagents are disabled.
+            val rosterIds = buildSet {
+                addAll(subAgentManager.listBuiltIns().map { it.id })
+            }
             val mentioned = messages
                 .lastOrNull { it.role == MessageRole.USER }
                 ?.toText()
                 ?.let { SubAgentDefinitions.extractMentions(it, rosterIds) }
                 .orEmpty()
 
-            val mentionDirective = if (mentioned.isEmpty()) "" else buildString {
-                appendLine()
-                appendLine("=== USER MENTION OVERRIDE ===")
-                if (mentioned.size == 1) {
-                    appendLine("The user explicitly invoked @${mentioned[0]}. You MUST call subagent_start with subagent_id=\"${mentioned[0]}\" for this turn, filling the task fields from the user's message. After it reports, you may package or follow up on its result.")
-                } else {
-                    appendLine("The user explicitly invoked: ${mentioned.joinToString { "@$it" }}. You MUST start each of these via subagent_start (in parallel where the subtasks are independent). After they report, synthesize their results.")
-                }
-                // Self-loop guard: the system prompt is rebuilt on every tool-call iteration within
-                // the same user turn, so without this the directive nags the model after it already
-                // dispatched.
-                appendLine("(If you have already started the requested subagent(s) in this turn, do NOT start them again — proceed to wait/read their results.)")
-            }
+            val mentionDirective = buildMentionOverrideDirective(mentioned)
 
             roster + mentionDirective
         }
@@ -198,5 +188,28 @@ class SubAgentTools(
     private fun stringProp(description: String) = buildJsonObject {
         put("type", "string")
         put("description", description)
+    }
+}
+
+internal fun buildMentionOverrideDirective(mentioned: List<String>): String {
+    if (mentioned.isEmpty()) return ""
+    return buildString {
+        appendLine()
+        appendLine("=== USER MENTION OVERRIDE ===")
+        val subAgentMentions = mentioned.filterNot { it == "council" }
+        if ("council" in mentioned) {
+            appendLine("The user explicitly invoked @council. You MUST call model_council_start for this turn, using the user's message as the council objective. Choose extra_lens by topic when helpful, then use model_council_wait/read and synthesize the verdict.")
+        }
+        if (subAgentMentions.isNotEmpty()) {
+            if (subAgentMentions.size == 1) {
+                appendLine("The user explicitly invoked @${subAgentMentions[0]}. You MUST call subagent_start with subagent_id=\"${subAgentMentions[0]}\" for this turn, filling the task fields from the user's message. After it reports, you may package or follow up on its result.")
+            } else {
+                appendLine("The user explicitly invoked: ${subAgentMentions.joinToString { "@$it" }}. You MUST start each of these via subagent_start (in parallel where the subtasks are independent). After they report, synthesize their results.")
+            }
+        }
+        // Self-loop guard: the system prompt is rebuilt on every tool-call iteration within
+        // the same user turn, so without this the directive nags the model after it already
+        // dispatched.
+        appendLine("(If you have already started the requested subagent(s) or council run in this turn, do NOT start them again — proceed to wait/read their results.)")
     }
 }

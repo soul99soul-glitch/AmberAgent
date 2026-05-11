@@ -24,6 +24,8 @@ data class AgentCronTask(
 enum class AgentCronTaskStatus {
     Idle,
     Queued,
+    Running,
+    Succeeded,
     Failed,
 }
 

@@ -149,12 +149,20 @@ object GenerativeWidgetParser {
         // "flowchart"), fall back to rendering widget_code as plain html instead of rejecting the
         // whole widget. The sanitizer still strips unsafe content; rejecting outright leaves the
         // user staring at raw JSON in a code block.
-        val renderedCode = GenerativeWidgetRenderer.render(renderer, parsed?.get("spec"))
+        val specElement = if (parsed == null) {
+            null
+        } else {
+            parsed["spec"] ?: if (renderer == "slides") parsed["slides"] ?: parsed["pages"] else null
+        }
+        val renderedCode = GenerativeWidgetRenderer.render(renderer, specElement)
         val rawWidgetCode = parsed?.stringOrNull("widget_code")
             ?: extractJsonStringValue(jsonText, "widget_code", allowUnclosed = false)
         val title = parsed?.stringOrNull("title")
             ?: extractJsonStringValue(jsonText, "title", allowUnclosed = false)
-        val specJson = parsed?.get("spec")?.toString()
+        val specJson = when (renderer) {
+            "slides" -> specElement?.let { VChartSpecValidator.normalizeSlidesSpecJson(it.toString()) }
+            else -> specElement?.toString()
+        }
         val code = when (renderer) {
             "vchart", "slides" -> renderedCode ?: rawWidgetCode
             "html" -> rawWidgetCode

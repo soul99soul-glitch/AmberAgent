@@ -19,7 +19,9 @@ object GenerativeWidgetRenderer {
         if (renderer?.lowercase() == "slides") {
             val specArray = when (spec) {
                 is JsonArray -> spec
-                is JsonObject -> spec["slides"]?.jsonArrayOrNull() ?: spec["spec"]?.jsonArrayOrNull()
+                is JsonObject -> spec["slides"]?.jsonArrayOrNull()
+                    ?: spec["spec"]?.jsonArrayOrNull()
+                    ?: spec["pages"]?.jsonArrayOrNull()
                 else -> null
             }
             if (specArray != null) {

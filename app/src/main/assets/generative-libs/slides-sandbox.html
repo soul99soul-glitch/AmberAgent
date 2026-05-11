@@ -14,6 +14,12 @@
   --nav-bg: rgba(0,0,0,0.55);
   --nav-bg-active: rgba(0,0,0,0.78);
   --nav-fg: #ffffff;
+  --accent: #002FA7;
+  --serif-zh: "Noto Serif SC","Source Han Serif SC","Songti SC","STSong",serif;
+  --serif-en: "Playfair Display","Source Serif 4",Georgia,serif;
+  --sans: "Inter","Helvetica Neue","Helvetica","Roboto","Arial",system-ui,-apple-system,sans-serif;
+  --sans-zh: "PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --mono: "JetBrains Mono","IBM Plex Mono","SF Mono","Roboto Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -28,7 +34,7 @@
     --nav-fg: #ffffff;
   }
 }
-html,body{margin:0;padding:0;height:100%;background:transparent;font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
+html,body{margin:0;padding:0;height:100%;background:transparent;font-family:var(--sans),var(--sans-zh);overflow:hidden;}
 *{box-sizing:border-box;}
 .deck{
   display:flex;
@@ -54,15 +60,33 @@ html,body{margin:0;padding:0;height:100%;background:transparent;font-family:syst
   background:var(--slide-bg);
   color:var(--text-muted);
   display:block;
+  position:relative;
   -webkit-overflow-scrolling:touch;
 }
 .slide::-webkit-scrollbar{width:0;}
 .slide h1{margin:0 0 14px;font-size:26px;font-weight:700;color:var(--text-primary);line-height:1.3;}
 .slide h2{margin:0 0 10px;font-size:20px;font-weight:600;color:var(--text-secondary);line-height:1.3;}
 .slide p,.slide li{font-size:15px;color:var(--text-muted);line-height:1.6;margin:4px 0;}
+.slide li strong{color:var(--text-secondary);}
 .slide ul,.slide ol{padding-left:22px;margin:8px 0;}
 .slide .subtitle{font-size:16px;color:var(--text-faint);margin:0 0 8px;}
 .slide .notes{font-size:12px;color:var(--text-faint);margin-top:18px;padding-top:12px;border-top:1px solid var(--hairline);}
+.slide .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+.slide.magazine{background:#f1efea;color:#18181a;font-family:var(--sans-zh);}
+.slide.magazine h1{font-family:var(--serif-zh);font-size:31px;font-weight:700;line-height:1.16;letter-spacing:-.01em;color:#0a0a0b;}
+.slide.magazine h2,.slide.magazine .subtitle{font-family:var(--serif-zh);font-size:17px;color:#3f3b36;}
+.slide.magazine p,.slide.magazine li{font-family:var(--sans-zh);color:#34302c;line-height:1.75;}
+.slide.magazine .notes{font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#6f675f;border-color:rgba(10,10,11,.2);}
+.slide.magazine:after{content:"";position:absolute;right:24px;bottom:58px;width:42%;height:1px;background:#0a0a0b;opacity:.22;}
+.slide.swiss{background:#fafaf8;color:#0a0a0a;font-family:var(--sans),var(--sans-zh);}
+.slide.swiss:before{content:"";position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(rgba(10,10,10,.16) 1px,transparent 1px);background-size:12px 12px;opacity:.28;}
+.slide.swiss>*{position:relative;}
+.slide.swiss h1{font-family:var(--sans),var(--sans-zh);font-size:34px;font-weight:300;line-height:.98;letter-spacing:-.025em;color:#0a0a0a;}
+.slide.swiss h1:before{content:"";display:block;width:54px;height:4px;background:var(--accent);margin-bottom:18px;}
+.slide.swiss h2,.slide.swiss .subtitle{font-family:var(--sans),var(--sans-zh);font-size:15px;font-weight:400;color:#525252;}
+.slide.swiss p,.slide.swiss li{font-family:var(--sans),var(--sans-zh);font-size:15px;color:#373737;line-height:1.55;}
+.slide.swiss li::marker{color:var(--accent);}
+.slide.swiss .notes{font-family:var(--mono);letter-spacing:.08em;color:#737373;border-color:#d4d4d2;}
 .nav{
   position:fixed;
   bottom:14px;left:0;right:0;
@@ -122,19 +146,37 @@ html,body{margin:0;padding:0;height:100%;background:transparent;font-family:syst
     return null;
   }
 
+  function normalizeStyle(value){
+    var s = String(value || '').toLowerCase();
+    if(s.indexOf('swiss') >= 0 || s.indexOf('helvetica') >= 0 || s.indexOf('瑞士') >= 0) return 'swiss';
+    if(s.indexOf('magazine') >= 0 || s.indexOf('editorial') >= 0 || s.indexOf('serif') >= 0 || s.indexOf('杂志') >= 0 || s.indexOf('墨水') >= 0) return 'magazine';
+    return '';
+  }
+
+  function safeColor(value){
+    var s = String(value || '').trim();
+    return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : null;
+  }
+
   function renderSlide(slide){
     var div = document.createElement('div');
-    div.className = 'slide';
     var html = '';
     if(slide == null || typeof slide !== 'object'){
+      div.className = 'slide';
       div.innerHTML = '<p>' + esc(String(slide == null ? '' : slide)) + '</p>';
       return div;
     }
+    var visualStyle = normalizeStyle(pickField(slide, ['style','theme','visual','tone']));
+    div.className = 'slide' + (visualStyle ? ' ' + visualStyle : '');
+    var accent = safeColor(pickField(slide, ['accent','accentColor','color']));
+    if(accent) div.style.setProperty('--accent', accent);
+    var kicker = pickField(slide, ['kicker','meta','label','section']);
     var title = pickField(slide, ['title','name','heading','h1','header']);
     var subtitle = pickField(slide, ['subtitle','tagline','h2','subheading']);
     var content = pickField(slide, ['content','body','items','bullets','text','description','points']);
     var notes = pickField(slide, ['notes','note','footer','speaker_notes','speakerNotes']);
 
+    if(kicker) html += '<p class="kicker">' + esc(String(kicker)) + '</p>';
     if(title) html += '<h1>' + esc(String(title)) + '</h1>';
     if(subtitle) html += '<p class="subtitle">' + esc(String(subtitle)) + '</p>';
     if(content){
@@ -142,7 +184,15 @@ html,body{margin:0;padding:0;height:100%;background:transparent;font-family:syst
         html += '<ul>';
         content.forEach(function(item){
           if(item != null && typeof item === 'object'){
-            html += '<li>' + esc(JSON.stringify(item)) + '</li>';
+            var itemTitle = pickField(item, ['title','label','name','key']);
+            var itemDesc = pickField(item, ['description','body','text','detail','value']);
+            if(itemTitle || itemDesc){
+              html += '<li>' + (itemTitle ? '<strong>' + esc(String(itemTitle)) + '</strong>' : '') +
+                (itemTitle && itemDesc ? ' · ' : '') +
+                (itemDesc ? esc(String(itemDesc)) : '') + '</li>';
+            } else {
+              html += '<li>' + esc(JSON.stringify(item)) + '</li>';
+            }
           } else {
             html += '<li>' + esc(String(item)) + '</li>';
           }
@@ -199,6 +249,11 @@ html,body{margin:0;padding:0;height:100%;background:transparent;font-family:syst
   window.__renderSlides = function(slidesJson){
     try{
       var slides = JSON.parse(slidesJson);
+      if(!Array.isArray(slides) && slides && typeof slides === 'object'){
+        slides = Array.isArray(slides.slides) ? slides.slides :
+          (Array.isArray(slides.spec) ? slides.spec :
+            (Array.isArray(slides.pages) ? slides.pages : slides));
+      }
       if(!Array.isArray(slides) || slides.length === 0){
         throw new Error('空幻灯片数据');
       }

@@ -1,11 +1,17 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
+import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -51,12 +57,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.dokar.sonner.ToasterState
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -80,7 +93,11 @@ import me.rerere.rikkahub.utils.getActivity
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toCssHex
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 private const val WIDGET_MIN_HEIGHT_DP = 160
 private const val WIDGET_FALLBACK_HEIGHT_DP = 320
@@ -113,6 +130,9 @@ fun GenerativeWidgetCard(
     modifier: Modifier = Modifier,
     onAction: (String) -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
     val settings = LocalSettings.current.agentRuntime.generativeUi
     val sanitized = remember(widget.widgetCode, settings) {
         GenerativeWidgetSanitizer.sanitize(widget.widgetCode, settings)
@@ -209,18 +229,46 @@ fun GenerativeWidgetCard(
                     onAction = onAction,
                 )
             }
-            if (widget.complete && widget.renderer in setOf("vchart", "slides") && widget.specJson != null && canOpenExpanded) {
-                Surface(
-                    onClick = { showExpanded = true },
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ) {
-                    Text(
-                        text = if (widget.renderer == "slides") "▶ 打开演示" else "▶ 交互式图表",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
+            if (widget.complete && widget.renderer in setOf("vchart", "slides") &&
+                widget.specJson != null && canOpenExpanded
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = { showExpanded = true },
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ) {
+                        Text(
+                            text = if (widget.renderer == "slides") "▶ 打开演示" else "▶ 交互式图表",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                    if (widget.renderer == "slides") {
+                        Surface(
+                            onClick = {
+                                scope.launch {
+                                    shareSlidesDeckArchive(
+                                        context = context,
+                                        title = widget.title,
+                                        specJson = widget.specJson,
+                                        coverHtml = sanitized.html,
+                                        toaster = toaster,
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) {
+                            Text(
+                                text = "分享 ZIP",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
                 }
             }
             if (!widget.complete && sanitized.status == GenerativeWidgetSanitizeStatus.READY) {
@@ -258,8 +306,12 @@ fun ExpandedGenerativeWidgetDialog(
         properties = DialogProperties(
             dismissOnClickOutside = !isFullscreen,
             usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
         ),
     ) {
+        if (isFullscreen) {
+            FullscreenDialogWindowEffect()
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -399,6 +451,59 @@ fun ExpandedGenerativeWidgetDialog(
                 destroy()
             }
             webView = null
+        }
+    }
+}
+
+@Composable
+private fun FullscreenDialogWindowEffect() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.parent as? DialogWindowProvider)?.window
+        if (window == null) {
+            onDispose { }
+        } else {
+            val previousStatusBarColor = window.statusBarColor
+            val previousNavigationBarColor = window.navigationBarColor
+            val previousSoftInputMode = window.attributes.softInputMode
+            val previousCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes.layoutInDisplayCutoutMode
+            } else {
+                null
+            }
+            window.setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+            )
+            window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsetsCompat.Type.systemBars())
+            }
+            onDispose {
+                WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                window.statusBarColor = previousStatusBarColor
+                window.navigationBarColor = previousNavigationBarColor
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && previousCutoutMode != null) {
+                    window.attributes = window.attributes.apply {
+                        layoutInDisplayCutoutMode = previousCutoutMode
+                        softInputMode = previousSoftInputMode
+                    }
+                } else {
+                    window.attributes = window.attributes.apply {
+                        softInputMode = previousSoftInputMode
+                    }
+                }
+            }
         }
     }
 }
@@ -661,6 +766,179 @@ private class WidgetBridge(
     }
 }
 
+private suspend fun shareSlidesDeckArchive(
+    context: Context,
+    title: String?,
+    specJson: String,
+    coverHtml: String,
+    toaster: ToasterState,
+) {
+    toaster.show("正在打包幻灯片…")
+    val archive = runCatching {
+        withContext(Dispatchers.IO) {
+            createSlidesDeckArchive(context, title, specJson, coverHtml)
+        }
+    }.getOrElse { error ->
+        toaster.show(error.message ?: "打包失败", type = ToastType.Error)
+        return
+    }
+    runCatching {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", archive)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/zip"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, archive.name)
+            putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
+            clipData = ClipData.newUri(context.contentResolver, archive.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "分享幻灯片 ZIP")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }.onSuccess {
+        toaster.show("已打开分享菜单", type = ToastType.Success)
+    }.onFailure { error ->
+        toaster.show(error.message ?: "无法打开分享菜单", type = ToastType.Error)
+    }
+}
+
+private fun createSlidesDeckArchive(
+    context: Context,
+    title: String?,
+    specJson: String,
+    coverHtml: String,
+): File {
+    val now = System.currentTimeMillis()
+    val safeTitle = safeArchiveName(title)
+    val dir = File(context.cacheDir, "slide-shares").apply { mkdirs() }
+    dir.listFiles()
+        ?.filter { it.isFile && now - it.lastModified() > 2 * 24 * 60 * 60 * 1000L }
+        ?.forEach { it.delete() }
+    val archive = File(dir, "AmberAgent_${safeTitle}_$now.zip")
+    val normalizedSlides = VChartSpecValidator.normalizeSlidesSpecJson(specJson)
+        ?: error("幻灯片数据格式不正确，无法分享")
+    val validation = VChartSpecValidator.validateSlidesSpec(normalizedSlides)
+    if (!validation.valid) {
+        error("幻灯片数据不安全或过大，无法分享: ${validation.reason.orEmpty()}")
+    }
+    val prettySlides = org.json.JSONArray(normalizedSlides).toString(2)
+    val slideCount = org.json.JSONArray(normalizedSlides).length()
+    ZipOutputStream(FileOutputStream(archive)).use { zip ->
+        zip.writeTextEntry(
+            name = "manifest.json",
+            text = JSONObject()
+                .put("type", "amberagent-slides")
+                .put("title", title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
+                .put("slide_count", slideCount)
+                .put("created_at_ms", now)
+                .toString(2),
+        )
+        zip.writeTextEntry("slides.json", prettySlides)
+        zip.writeTextEntry("index.html", buildStandaloneSlidesHtml(title, normalizedSlides))
+        zip.writeTextEntry(
+            "README.md",
+            """
+            # ${title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides"}
+
+            - `index.html`: 离线预览页面，解压后用浏览器打开。
+            - `slides.json`: AmberAgent slides renderer 使用的原始结构化内容。
+            - `cover.svg`: 如果存在，是聊天内联预览封面。
+            """.trimIndent(),
+        )
+        val cover = coverHtml.trim()
+        if (cover.startsWith("<svg", ignoreCase = true) && cover.length <= 32_000) {
+            zip.writeTextEntry("cover.svg", cover)
+        }
+    }
+    return archive
+}
+
+private fun ZipOutputStream.writeTextEntry(name: String, text: String) {
+    putNextEntry(ZipEntry(name))
+    write(text.toByteArray(Charsets.UTF_8))
+    closeEntry()
+}
+
+private fun buildStandaloneSlidesHtml(title: String?, specJson: String): String {
+    val safeTitle = htmlEscape(title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
+    val slidesLiteral = JSONObject.quote(specJson.toScriptSafeJsonString())
+    return """
+        <!doctype html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+        <title>$safeTitle</title>
+        <style>
+        :root{--accent:#002FA7;--serif-zh:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;--serif-en:"Playfair Display","Source Serif 4",Georgia,serif;--sans:"Inter","Helvetica Neue","Helvetica","Roboto",system-ui,-apple-system,sans-serif;--sans-zh:"PingFang SC","Noto Sans SC","Microsoft YaHei UI",sans-serif;--mono:"JetBrains Mono","IBM Plex Mono","SF Mono",ui-monospace,monospace}
+        *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:var(--sans),var(--sans-zh);background:#f6f7f9;color:#111827}
+        .deck{height:100%;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+        .slide{flex:0 0 100%;height:100%;padding:34px 24px 86px;overflow-y:auto;scroll-snap-align:start;background:#fff;position:relative}
+        h1{font-size:30px;line-height:1.15;margin:0 0 16px}h2{font-size:17px;color:#64748b;margin:0 0 22px;font-weight:500}
+        li,p{font-size:17px;line-height:1.65}ul{padding-left:22px}.notes{margin-top:24px;padding-top:14px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:13px}
+        .kicker{font-family:var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-size:12px;margin:0 0 14px}
+        .slide.magazine{background:#f1efea;color:#18181a}.slide.magazine h1{font-family:var(--serif-zh);font-weight:700}.slide.magazine h2{font-family:var(--serif-zh)}.slide.magazine li,.slide.magazine p{font-family:var(--sans-zh)}
+        .slide.swiss{background:#fafaf8;color:#0a0a0a}.slide.swiss:before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(10,10,10,.15) 1px,transparent 1px);background-size:12px 12px;opacity:.26;pointer-events:none}.slide.swiss>*{position:relative}.slide.swiss h1{font-family:var(--sans),var(--sans-zh);font-size:34px;font-weight:300;letter-spacing:-.025em;line-height:.98}.slide.swiss h1:before{content:"";display:block;width:54px;height:4px;background:var(--accent);margin-bottom:18px}.slide.swiss li::marker{color:var(--accent)}
+        .nav{position:fixed;left:0;right:0;bottom:18px;display:flex;justify-content:center;gap:10px;align-items:center}
+        button,.count{border:0;border-radius:999px;background:rgba(17,24,39,.76);color:white;padding:10px 16px;font-size:14px}.count{min-width:72px;text-align:center}
+        </style>
+        </head>
+        <body>
+        <main id="deck" class="deck"></main>
+        <nav class="nav"><button id="prev">‹</button><span id="count" class="count">1 / 1</span><button id="next">›</button></nav>
+        <script>
+        const slides = JSON.parse($slidesLiteral);
+        const deck = document.getElementById('deck');
+        const count = document.getElementById('count');
+        let index = 0;
+        function esc(s){return String(s ?? '').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+        function styleOf(s){const v=String(s.style||s.theme||'').toLowerCase();return v.includes('swiss')||v.includes('瑞士')?'swiss':(v.includes('magazine')||v.includes('杂志')||v.includes('serif')?'magazine':'');}
+        function safeColor(v){v=String(v||'').trim();return /^#[0-9a-fA-F]{3,8}${'$'}/.test(v)?v:null;}
+        function renderContent(c){
+          if(Array.isArray(c)) return '<ul>'+c.map(x=>'<li>'+esc(typeof x==='object'?JSON.stringify(x):x)+'</li>').join('')+'</ul>';
+          if(c && typeof c==='object') return '<pre>'+esc(JSON.stringify(c,null,2))+'</pre>';
+          return c ? '<p>'+esc(c)+'</p>' : '';
+        }
+        slides.forEach((raw,i)=>{
+          const s=(raw && typeof raw==='object') ? raw : {title:String(raw ?? '')};
+          const el=document.createElement('section'); el.className='slide '+styleOf(s);
+          const accent=safeColor(s.accent||s.accentColor||s.color); if(accent) el.style.setProperty('--accent',accent);
+          el.innerHTML=(s.kicker?'<p class="kicker">'+esc(s.kicker)+'</p>':'')+
+            '<h1>'+esc(s.title || ('Slide '+(i+1)))+'</h1>'+(s.subtitle?'<h2>'+esc(s.subtitle)+'</h2>':'')+
+            renderContent(s.content || s.body || s.items || s.bullets || s.text || '')+
+            (s.notes?'<p class="notes">'+esc(s.notes)+'</p>':'');
+          deck.appendChild(el);
+        });
+        function update(){index=Math.max(0,Math.min(slides.length-1,Math.round(deck.scrollLeft/deck.clientWidth)));count.textContent=(index+1)+' / '+slides.length;}
+        function jump(delta){deck.scrollTo({left:(index+delta)*deck.clientWidth,behavior:'smooth'});}
+        document.getElementById('prev').onclick=()=>jump(-1);document.getElementById('next').onclick=()=>jump(1);
+        deck.addEventListener('scroll',()=>requestAnimationFrame(update),{passive:true});update();
+        </script>
+        </body>
+        </html>
+    """.trimIndent()
+}
+
+private fun safeArchiveName(value: String?): String =
+    (value?.takeIf { it.isNotBlank() } ?: "slides")
+        .replace(Regex("[^\\p{L}\\p{N}_-]"), "_")
+        .take(40)
+        .ifBlank { "slides" }
+
+private fun htmlEscape(value: String): String =
+    value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+
+private fun String.toScriptSafeJsonString(): String =
+    replace("<", "\\u003C")
+        .replace(">", "\\u003E")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+
 private suspend fun captureSlidesToJpg(
     webView: WebView,
     activity: android.app.Activity,
@@ -760,10 +1038,13 @@ private fun RichSandboxWebView(
     maxHeightDp: Int = 720,
     onWebViewReady: (WebView?) -> Unit = {},
 ) {
-    val validated = remember(specJson, renderer) {
+    val normalizedSpecJson = remember(specJson, renderer) {
+        if (renderer == "slides") VChartSpecValidator.normalizeSlidesSpecJson(specJson) else specJson
+    }
+    val validated = remember(normalizedSpecJson, renderer) {
         when (renderer) {
-            "vchart" -> VChartSpecValidator.validateChartSpec(specJson)
-            "slides" -> VChartSpecValidator.validateSlidesSpec(specJson)
+            "vchart" -> VChartSpecValidator.validateChartSpec(normalizedSpecJson.orEmpty())
+            "slides" -> VChartSpecValidator.validateSlidesSpec(normalizedSpecJson.orEmpty())
             else -> VChartSpecValidator.ValidationResult(false, "unknown renderer")
         }
     }
@@ -772,7 +1053,7 @@ private fun RichSandboxWebView(
     var heightDp by remember(maxHeightDp) { mutableStateOf(maxHeightDp) }
     // Strip U+2028/U+2029 (line/paragraph separators) — JSON allows them,
     // but evaluateJavascript treats them as line terminators and silently fails.
-    val safeJson = specJson.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    val safeJson = normalizedSpecJson.orEmpty().replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     val animatedHeight by animateDpAsState(
         targetValue = heightDp.coerceIn(240, maxHeightDp).dp,
         animationSpec = tween(durationMillis = 200),

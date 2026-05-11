@@ -182,4 +182,46 @@ class GenerativeWidgetParserTest {
         assertTrue(widget.widgetCode.contains("viewBox=\"0 0 680 220\""))
         assertFalse(widget.widgetCode.contains("x=\"562\""))
     }
+
+    @Test
+    fun normalizesWrappedSlidesSpecForExpandedPreview() {
+        val segments = GenerativeWidgetParser.parse(
+            """
+            ```show-widget
+            {"title":"Deck","renderer":"slides","spec":{"slides":[{"title":"A","content":["B"]}]}}
+            ```
+            """.trimIndent(),
+            streaming = false,
+        )
+
+        val widget = segments.single() as GenerativeWidgetSegment.Widget
+        assertEquals("slides", widget.renderer)
+        assertEquals("""[{"title":"A","content":["B"]}]""", widget.specJson)
+        assertTrue(widget.widgetCode.contains("A"))
+    }
+
+    @Test
+    fun normalizesPagesWrappedSlidesSpecForExpandedPreview() {
+        val segments = GenerativeWidgetParser.parse(
+            """
+            ```show-widget
+            {"title":"Deck","renderer":"slides","spec":{"pages":[{"title":"Mobile","content":["Readable"]}]}}
+            ```
+            """.trimIndent(),
+            streaming = false,
+        )
+
+        val widget = segments.single() as GenerativeWidgetSegment.Widget
+        assertEquals("slides", widget.renderer)
+        assertEquals("""[{"title":"Mobile","content":["Readable"]}]""", widget.specJson)
+        assertTrue(widget.widgetCode.contains("Mobile"))
+    }
+
+    @Test
+    fun validatesWrappedSlidesSpec() {
+        val result = VChartSpecValidator.validateSlidesSpec("""{"slides":[{"title":"A","content":["B"]}]}""")
+
+        assertTrue(result.valid)
+        assertEquals("""[{"title":"A","content":["B"]}]""", VChartSpecValidator.normalizeSlidesSpecJson("""{"slides":[{"title":"A","content":["B"]}]}"""))
+    }
 }

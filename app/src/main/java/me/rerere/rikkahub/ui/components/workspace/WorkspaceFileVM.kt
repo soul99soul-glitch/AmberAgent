@@ -94,6 +94,19 @@ class WorkspaceFileVM(
         }
     }
 
+    fun shareableFile(relativePath: String): File? {
+        if (relativePath.isBlank()) return null
+        return runCatching {
+            val root = mirrorDir.canonicalFile
+            val target = mirrorDir.resolve(relativePath).canonicalFile
+            if (!target.path.startsWith(root.path + File.separator) || !target.isFile) {
+                null
+            } else {
+                target
+            }
+        }.getOrNull()
+    }
+
     private suspend fun buildRecent(): List<WorkspaceFileItem> = withContext(Dispatchers.IO) {
         val root = mirrorDir
         if (!root.exists() || !root.isDirectory) return@withContext emptyList()

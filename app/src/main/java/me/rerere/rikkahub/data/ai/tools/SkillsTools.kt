@@ -156,6 +156,11 @@ private fun wrapSkillForMobileRuntime(skillName: String, filePath: String?, body
         appendLine("- File outputs go to /workspace via file_write; users browse them through the in-app file sheet, not through Finder/Explorer.")
         appendLine("- If the skill describes a desktop-only workflow, translate it into the mobile equivalent: replace \"open in PowerPoint\" with \"emit a renderer:slides widget\", \"open in browser\" with \"emit a widget_code SVG/HTML widget\", etc.")
         appendLine("- IMPORTANT about use_skill paths: many skills installed via download only ship the SKILL.md file — the references/, scripts/, assets/ subfolders mentioned in the SKILL.md links may NOT exist locally. Do NOT chain a second use_skill(path=...) call just because SKILL.md links to it; treat SKILL.md as self-contained instructions and only retry with a path if a previous call confirms that file exists.")
+        if (skillName.contains("guizang-ppt", ignoreCase = true)) {
+            appendLine("- guizang-ppt-skill SPECIAL MOBILE ADAPTER: treat its desktop HTML templates as visual/storytelling references only. Do NOT copy `assets/template*.html`, `<section class=\"slide\">` skeletons, WebGL/canvas, Motion One scripts, CDN links, browser preview instructions, or keyboard controls into the final visible answer.")
+            appendLine("- For guizang-ppt-skill output, always emit an AmberAgent-native `show-widget` using `renderer:\"slides\"` and `spec` as a flat JSON array of 6-10 slide objects. Each slide must fit a phone screen: one short title, optional subtitle, 2-4 concise content bullets, and optional notes. To preserve the skill's look, add optional visual keys only when useful: `style:\"magazine\"` for serif editorial decks, `style:\"swiss\"` for Inter/Helvetica grid decks, `accent:\"#002FA7\"` or another theme hex color, and a short `kicker` meta label.")
+            appendLine("- Do NOT output a full raw HTML deck, CSS/JS presentation runtime, desktop presenter controls, or a single giant SVG/HTML grid as the mobile preview. If you save an export file under `/workspace`, immediately also emit the mobile `renderer:\"slides\"` widget so the user can preview it in chat.")
+        }
         appendLine()
         appendLine("Skill: $skillName  ($pathLabel)")
         appendLine("--- skill content begins ---")

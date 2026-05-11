@@ -63,11 +63,11 @@ object VChartSpecValidator {
         if (slidesJson.length > MAX_SPEC_BYTES) {
             return ValidationResult(false, "slides too large: ${slidesJson.length} bytes")
         }
-        val parsed = runCatching {
-            Json.parseToJsonElement(slidesJson)
+        val normalized = normalizeSlidesSpecJson(slidesJson)
+            ?: return ValidationResult(false, "expected JSON array")
+        val array = runCatching {
+            Json.parseToJsonElement(normalized) as? JsonArray
         }.getOrNull() ?: return ValidationResult(false, "invalid JSON")
-
-        val array = (parsed as? JsonArray) ?: return ValidationResult(false, "expected JSON array")
         if (array.size > 24) {
             return ValidationResult(false, "too many slides: ${array.size}")
         }
@@ -76,6 +76,20 @@ object VChartSpecValidator {
             if (!result.valid) return result
         }
         return ValidationResult(true)
+    }
+
+    fun normalizeSlidesSpecJson(slidesJson: String): String? {
+        val parsed = runCatching {
+            Json.parseToJsonElement(slidesJson)
+        }.getOrNull() ?: return null
+        val array = when (parsed) {
+            is JsonArray -> parsed
+            is JsonObject -> parsed["slides"] as? JsonArray
+                ?: parsed["spec"] as? JsonArray
+                ?: parsed["pages"] as? JsonArray
+            else -> null
+        } ?: return null
+        return array.toString()
     }
 
     private fun validateElement(element: JsonElement, depth: Int): ValidationResult {

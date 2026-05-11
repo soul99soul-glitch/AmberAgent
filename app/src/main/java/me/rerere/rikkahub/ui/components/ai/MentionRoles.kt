@@ -1,0 +1,58 @@
+package me.rerere.rikkahub.ui.components.ai
+
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
+
+internal enum class MentionRoleKind {
+    SUBAGENT,
+    COUNCIL,
+}
+
+internal data class MentionRoleItem(
+    val id: String,
+    val name: String,
+    val description: String,
+    val kind: MentionRoleKind,
+)
+
+internal fun buildMentionRoleItems(
+    subAgentEnabled: Boolean,
+    modelCouncilEnabled: Boolean,
+    subAgents: List<SubAgentDefinition> = SubAgentDefinitions.builtIns,
+): List<MentionRoleItem> = buildList {
+    if (subAgentEnabled) {
+        subAgents.forEach { role ->
+            add(
+                MentionRoleItem(
+                    id = role.id,
+                    name = role.name,
+                    description = role.description,
+                    kind = MentionRoleKind.SUBAGENT,
+                )
+            )
+        }
+    }
+    if (modelCouncilEnabled) {
+        add(
+            MentionRoleItem(
+                id = "council",
+                name = "Council",
+                description = "发起模型议会共同讨论",
+                kind = MentionRoleKind.COUNCIL,
+            )
+        )
+    }
+}
+
+internal fun filterMentionRoleItems(
+    items: List<MentionRoleItem>,
+    query: String,
+): List<MentionRoleItem> {
+    val normalized = query.trim()
+    if (normalized.isBlank()) return items
+    return items.filter { role ->
+        role.id.contains(normalized, ignoreCase = true) ||
+            role.name.contains(normalized, ignoreCase = true) ||
+            role.description.contains(normalized, ignoreCase = true)
+    }
+}

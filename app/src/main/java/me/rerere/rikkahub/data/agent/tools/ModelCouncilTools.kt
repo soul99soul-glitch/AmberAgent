@@ -10,11 +10,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
+import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -69,6 +71,14 @@ class ModelCouncilTools(
                     }.toString()
                 )
             )
+        },
+        systemPrompt = { _, messages ->
+            val latestUserText = messages.lastOrNull { it.role == MessageRole.USER }?.toText()
+            buildString {
+                appendLine("=== Model Council ===")
+                appendLine("@council is available when the user wants a multi-model council discussion. Use model_council_start, then model_council_wait/read, and synthesize the final verdict.")
+                append(buildModelCouncilMentionOverrideDirective(latestUserText))
+            }
         },
     )
 
@@ -228,4 +238,11 @@ class ModelCouncilTools(
 
     private fun JsonElement.int(name: String): Int? =
         jsonObject[name]?.jsonPrimitive?.intOrNull
+}
+
+internal fun buildModelCouncilMentionOverrideDirective(latestUserText: String?): String {
+    val mentioned = latestUserText
+        ?.let { SubAgentDefinitions.extractMentions(it, setOf("council")) }
+        .orEmpty()
+    return buildMentionOverrideDirective(mentioned)
 }

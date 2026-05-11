@@ -3,6 +3,8 @@ package me.rerere.rikkahub.ui.components.message
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -58,9 +60,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1621,10 +1625,19 @@ private fun SubAgentRunSheet(
     val displayText = liveText.ifBlank { finalText }
 
     val scrollState = rememberScrollState()
+    var followBottom by remember(step.runId) { mutableStateOf(true) }
+    LaunchedEffect(scrollState, isRunning) {
+        snapshotFlow { scrollState.value to scrollState.maxValue }
+            .collect { (value, maxValue) ->
+                if (isRunning && value >= (maxValue - 8).coerceAtLeast(0)) {
+                    followBottom = true
+                }
+            }
+    }
     // Auto-follow only while the run is active. Once it finishes the user can scroll up freely
     // without being yanked back to the bottom.
-    LaunchedEffect(displayText, isRunning) {
-        if (isRunning) scrollState.animateScrollTo(scrollState.maxValue)
+    LaunchedEffect(displayText, isRunning, followBottom) {
+        if (isRunning && followBottom) scrollState.animateScrollTo(scrollState.maxValue)
     }
 
     ModalBottomSheet(
@@ -1636,6 +1649,12 @@ private fun SubAgentRunSheet(
                 .fillMaxWidth()
                 .fillMaxHeight(0.85f)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
+                .pointerInput(isRunning) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        if (isRunning) followBottom = false
+                    }
+                }
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

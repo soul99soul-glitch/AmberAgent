@@ -192,6 +192,14 @@
         android:value="long-running AI generation and tool execution" />
     </service>
     <service
+      android:name="androidx.work.impl.foreground.SystemForegroundService"
+      android:foregroundServiceType="specialUse"
+      tools:node="merge">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="mobile cron task execution" />
+    </service>
+    <service
       android:name=".data.automation.AmberAccessibilityService"
       android:exported="true"
       android:label="@string/amberagent_accessibility_service_label"

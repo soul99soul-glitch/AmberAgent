@@ -76,7 +76,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -122,7 +121,6 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -172,6 +170,7 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
+import me.rerere.rikkahub.data.context.ContextFootprintEstimator
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -188,8 +187,6 @@ import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.utils.formatNumber
 import org.koin.compose.koinInject
@@ -724,41 +721,15 @@ private fun ContextUsageIndicator(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    val latestNode = conversation.messageNodes.lastOrNull()
-    val latestMessage = latestNode?.currentMessage
-    val latestUsagePromptTokens = latestMessage?.usage?.promptTokens
-    val latestAssistantUsageTokens = remember(
-        conversation.id,
-        conversation.messageNodes.size,
-        latestNode?.id,
-        latestUsagePromptTokens,
-    ) {
-        conversation.messageNodes.asReversed()
-            .asSequence()
-            .map { it.currentMessage }
-            .firstOrNull { it.role == MessageRole.ASSISTANT && (it.usage?.promptTokens ?: 0) > 0 }
-            ?.usage
-            ?.promptTokens
+    val currentMessages = conversation.currentMessages
+    val contextFingerprint = ContextFootprintEstimator.inputFingerprint(currentMessages)
+    val latestExactPromptTokens = remember(contextFingerprint) {
+        ContextFootprintEstimator.latestExactPromptUsage(currentMessages)
     }
-    val estimatedTokens = remember(
-        conversation.id,
-        conversation.messageNodes.size,
-        latestNode?.id,
-    ) {
-        estimateConversationTokens(conversation)
+    val estimatedTokens = remember(contextFingerprint) {
+        ContextFootprintEstimator.estimateConversationInputTokens(conversation)
     }
-    val rawUsedTokens = latestAssistantUsageTokens ?: estimatedTokens
-    var stickyUsedTokens by remember(conversation.id) { mutableIntStateOf(0) }
-    LaunchedEffect(conversation.id, latestAssistantUsageTokens, rawUsedTokens) {
-        val shouldUpdate = latestAssistantUsageTokens != null ||
-            stickyUsedTokens == 0 ||
-            rawUsedTokens >= 1_000 ||
-            rawUsedTokens >= stickyUsedTokens
-        if (shouldUpdate) {
-            stickyUsedTokens = rawUsedTokens
-        }
-    }
-    val usedTokens = stickyUsedTokens.takeIf { it > 0 } ?: rawUsedTokens
+    val usedTokens = latestExactPromptTokens ?: estimatedTokens
     val contextWindow = remember(model?.modelId, model?.contextWindowTokens) {
         model?.contextWindowTokens ?: model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
     }
@@ -810,24 +781,6 @@ private fun Int.formatContextTokens(): String = when {
     this <= 0 -> "0"
     this < 1_000 -> "<1K"
     else -> formatNumber()
-}
-
-private fun estimateConversationTokens(conversation: Conversation): Int {
-    val chars = conversation.currentMessages.sumOf { message ->
-        message.parts.sumOf { it.estimatedTokenChars() }
-    }
-    return (chars / 4).coerceAtLeast(0)
-}
-
-private fun UIMessagePart.estimatedTokenChars(): Int = when (this) {
-    is UIMessagePart.Text -> text.length
-    is UIMessagePart.Reasoning -> reasoning.length
-    is UIMessagePart.Document -> fileName.length
-    is UIMessagePart.Tool -> input.length + output.sumOf { it.estimatedTokenChars() }
-    is UIMessagePart.Image,
-    is UIMessagePart.Video,
-    is UIMessagePart.Audio -> 0
-    else -> 0
 }
 
 private data class ComposerUsageStatus(
@@ -2492,26 +2445,30 @@ private fun TextInputRow(
                 },
             )
         }
-        // @subagent mention: only when subagent experimental mode is on. Detection result is
+        // @role mention: subagents and Model Council share the same lightweight picker.
+        // Detection result is
         // memoized on (text, selection) so we don't walk the string on every recomposition.
         // Slash command takes precedence — a leading `/` shouldn't double-pop a mention panel.
-        val subAgentEnabled = settings.agentRuntime.subAgent.enabled
+        val mentionEnabled = settings.agentRuntime.subAgent.enabled || settings.agentRuntime.modelCouncil.enabled
         val mentionTextSnapshot = state.textContent.text.toString()
         val mentionSelection = state.textContent.selection
-        val mentionState = remember(subAgentEnabled, slashQuery, mentionTextSnapshot, mentionSelection) {
-            if (!subAgentEnabled || slashQuery != null) null
+        val mentionState = remember(mentionEnabled, slashQuery, mentionTextSnapshot, mentionSelection) {
+            if (!mentionEnabled || slashQuery != null) null
             else detectMentionContextFor(mentionTextSnapshot, mentionSelection.start)
         }
         if (isFocused && mentionState != null) {
-            val matches = remember(mentionState.query) {
-                if (mentionState.query.isBlank()) {
-                    SubAgentDefinitions.builtIns
-                } else {
-                    SubAgentDefinitions.builtIns.filter { role ->
-                        role.id.contains(mentionState.query, ignoreCase = true) ||
-                            role.name.contains(mentionState.query, ignoreCase = true)
-                    }
-                }
+            val matches = remember(
+                settings.agentRuntime.subAgent.enabled,
+                settings.agentRuntime.modelCouncil.enabled,
+                mentionState.query,
+            ) {
+                filterMentionRoleItems(
+                    items = buildMentionRoleItems(
+                        subAgentEnabled = settings.agentRuntime.subAgent.enabled,
+                        modelCouncilEnabled = settings.agentRuntime.modelCouncil.enabled,
+                    ),
+                    query = mentionState.query,
+                )
             }
             MentionPanel(
                 roles = matches,
@@ -2855,8 +2812,8 @@ private fun ChatInputState.replaceMention(context: MentionContext, roleId: Strin
 
 @Composable
 private fun MentionPanel(
-    roles: List<SubAgentDefinition>,
-    onSelect: (SubAgentDefinition) -> Unit,
+    roles: List<MentionRoleItem>,
+    onSelect: (MentionRoleItem) -> Unit,
 ) {
     val workspace = workspaceColors()
     Surface(
@@ -2888,7 +2845,7 @@ private fun MentionPanel(
 
 @Composable
 private fun MentionRow(
-    role: SubAgentDefinition,
+    role: MentionRoleItem,
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
