@@ -184,6 +184,37 @@ class SessionHandle internal constructor(
         webView.evaluateJavascript(bridgeBootstrapJs, null)
     }
 
+    /**
+     * Inject an auxiliary host-defined script (e.g. a profile signing shim).
+     * Idempotent at the JS level — shims are written to guard against
+     * double-definition. Re-injected on every call because page navigation
+     * clears the JS realm. Fire-and-forget; errors only surface via JS console.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    internal fun injectHostShim(source: String) {
+        if (destroyed) return
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            webView.post { injectHostShim(source) }
+            return
+        }
+        webView.evaluateJavascript(source, null)
+    }
+
+    /**
+     * Phase 2 M2.2 — silent eval channel for profile signing.
+     *
+     * Runs [script] via [evalRaw] without going through the [Tool] approval
+     * gate. The agent's `wm_eval` tool always requires per-call human
+     * approval (mandatoryApproval=true); this internal channel is reserved
+     * for **host-defined** profile signing helpers (e.g. WBI). Callers MUST
+     * have validated the profile's permissions + origin first — see
+     * [me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge].
+     */
+    internal suspend fun evalSilent(
+        script: String,
+        timeoutMs: Long = DEFAULT_EVAL_TIMEOUT_MS,
+    ): String? = evalRaw(script, timeoutMs)
+
     internal fun onLoadProgress(progress: Int) {
         _loadState.value = _loadState.value.copy(
             progress = progress,

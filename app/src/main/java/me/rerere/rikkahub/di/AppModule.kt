@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
+import me.rerere.rikkahub.data.agent.webmount.profile.HostShimRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.data.agent.webmount.adapters.bilibili.BilibiliAdapter
@@ -297,7 +298,11 @@ val appModule = module {
     }
 
     single {
-        ProfileBridge()
+        HostShimRegistry(context = get())
+    }
+
+    single {
+        ProfileBridge(shimRegistry = get())
     }
 
     single {
@@ -307,6 +312,7 @@ val appModule = module {
             manager = get(),
             profileRegistry = get(),
             cookieProvider = get(),
+            profileBridge = get(),
         )
     }
 

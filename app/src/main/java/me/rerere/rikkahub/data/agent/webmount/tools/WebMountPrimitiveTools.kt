@@ -15,11 +15,13 @@ import me.rerere.rikkahub.data.agent.tools.boolean
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
+import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
+import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfileEntry
 
@@ -49,6 +51,7 @@ class WebMountPrimitiveTools(
     private val manager: WebMountManager,
     private val profileRegistry: ProfileRegistry,
     private val cookieProvider: WebMountCookieProvider,
+    private val profileBridge: ProfileBridge,
 ) {
 
     /**
@@ -118,6 +121,7 @@ class WebMountPrimitiveTools(
         tabCloseTool,
         screenshotTool,
         stationsTool,
+        signedFetchTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -155,13 +159,15 @@ class WebMountPrimitiveTools(
                     .coerceIn(1_000L, 60_000L)
                 val sessionId = input.string("session_id")
                 val handle = if (sessionId != null) pool.acquire(sessionId) else pool.acquireNew()
-                val profile = applicableProfileJson(url)
                 val payload: JsonObject = if (wait == "none") {
                     // Issue load but don't wait. Still routes through SessionHandle
                     // so _loadState is flipped to LOADING synchronously — without
                     // this, a follow-up wm_state would briefly see stale "ready"
                     // state from the prior navigation.
                     val state = handle.loadUrlNoWait(url)
+                    // M2.1 review W-1: wait=none can't see the post-redirect URL
+                    // yet; best-effort attach using the requested URL with a flag.
+                    val profile = applicableProfileJson(state.currentUrl ?: url)
                     buildJsonObject {
                         put("session_id", handle.sessionId)
                         put("status", state.status.wireName)
@@ -172,6 +178,10 @@ class WebMountPrimitiveTools(
                     }
                 } else {
                     val state = handle.loadUrl(url, timeoutMs)
+                    // M2.1 review W-1 fix: prefer committed URL so redirect chains
+                    // (http→https, root→www) get the *actual* origin's profile,
+                    // not a stale match against the requested URL.
+                    val profile = applicableProfileJson(state.currentUrl ?: url)
                     buildJsonObject {
                         put("session_id", handle.sessionId)
                         put("status", state.status.wireName)
@@ -304,6 +314,114 @@ class WebMountPrimitiveTools(
                     put("result", payload)
                 }
                 listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // -------------------------------------------------------- wm_signed_fetch
+
+    /**
+     * Phase 2 M2.2 — Profile-driven signed fetch.
+     *
+     * Issue a request to a site's API endpoint with the profile's signing
+     * script applied to it (e.g. Bilibili WBI). The fetch runs IN-PAGE via
+     * the host shim so the user's cookies are attached and the Referer
+     * header is correct.
+     *
+     * Flow:
+     *  1. Look up profile for the current WebView's origin (or use
+     *     `profile_id` override if supplied).
+     *  2. Verify profile declares `scripts.sign_request` with the
+     *     necessary `call_page_fn:<x>` permission.
+     *  3. Call ProfileBridge.callSign — origin check, rate limit, shim
+     *     injection, evalSilent. Returns the response envelope as JSON.
+     */
+    private val signedFetchTool = Tool(
+        name = "wm_signed_fetch",
+        description = """
+            Issue a profile-signed fetch from inside a WebMount session. Use this when an API
+            endpoint requires per-request signing (e.g. Bilibili WBI w_rid params). The signing
+            algorithm is provided by a host-defined shim associated with the applicable profile;
+            the fetch runs in-page so the user's cookies are sent automatically. Returns the
+            response status/headers/body (text). For GET/HEAD this is read-only; POST/PUT/PATCH/
+            DELETE require explicit human approval per call.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("url", stringProp("Absolute http(s) URL to fetch (must be in the profile's origins)."))
+                    put("method", stringProp("HTTP method, default GET. POST/PUT/PATCH/DELETE need approval."))
+                    put("body", stringProp("Request body (string or JSON). Ignored for GET/HEAD."))
+                    put("extra_params", buildJsonObject {
+                        put("type", "object")
+                        put("description", "Extra query params merged into the URL before signing.")
+                    })
+                    put("profile_id", stringProp("Override profile lookup (default: derive from session's current origin)."))
+                    put("sign_script", stringProp("Which entry in profile.scripts to call. Default 'sign_request'."))
+                    put("timeout_ms", integerProp("Sign+fetch timeout. Default 15000, clamped to [1000, 60000]."))
+                },
+                required = listOf("session_id", "url"),
+            )
+        },
+        execute = { input ->
+            track("wm_signed_fetch", "WebMount 签名请求", input) {
+                val sessionId = input.requiredString("session_id")
+                val url = input.requiredString("url")
+                require(url.startsWith("http://") || url.startsWith("https://")) {
+                    "wm_signed_fetch only supports http(s) URLs"
+                }
+                val method = (input.string("method") ?: "GET").uppercase()
+                val body = input.string("body")
+                val extraParams = (input.jsonObject)["extra_params"] as? JsonObject
+                val timeout = (input.long("timeout_ms") ?: 15_000L).coerceIn(1_000L, 60_000L)
+                val scriptKey = input.string("sign_script") ?: "sign_request"
+                val profileOverride = input.string("profile_id")
+
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val currentUrl = handle.loadState.value.currentUrl ?: url
+                val currentOrigin = ProfileRegistry.extractOrigin(currentUrl)
+                    ?: error("session has no committed URL yet — call wm_open first")
+                val entry = profileOverride?.let { profileRegistry.byId(it) }
+                    ?: profileRegistry.forUrl(currentUrl)
+                    ?: error("no profile applies to $currentUrl (or override $profileOverride)")
+
+                val args = listOf<JsonElement>(
+                    JsonPrimitive(url),
+                    JsonPrimitive(method),
+                    body?.let { JsonPrimitive(it) } ?: JsonNull,
+                    extraParams ?: buildJsonObject {},
+                )
+                val result = profileBridge.callSign(
+                    handle = handle,
+                    entry = entry,
+                    currentOrigin = currentOrigin,
+                    scriptKey = scriptKey,
+                    args = args,
+                    timeoutMs = timeout,
+                )
+                val response = when (result) {
+                    is ProfileBridge.SignResult.Success -> buildJsonObject {
+                        put("ok", true)
+                        put("session_id", sessionId)
+                        put("profile_id", entry.profile.id)
+                        put("response", result.value)
+                    }
+                    is ProfileBridge.SignResult.Error -> buildJsonObject {
+                        put("ok", false)
+                        put("session_id", sessionId)
+                        put("profile_id", entry.profile.id)
+                        put("error", result.message)
+                    }
+                    is ProfileBridge.SignResult.RateLimited -> buildJsonObject {
+                        put("ok", false)
+                        put("session_id", sessionId)
+                        put("profile_id", entry.profile.id)
+                        put("error", result.message)
+                        put("rate_limited", true)
+                    }
+                }
+                listOf(UIMessagePart.Text(response.toString()))
             }
         },
     )

@@ -196,6 +196,21 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             autoApprovable = allowsAutoApproval
             concurrencySafe = false
         }
+
+        "wm_signed_fetch" -> {
+            // Phase 2 M2.2: profile-driven signed fetch. The risk is
+            // method-dependent — GET/HEAD reads are safe (user's own
+            // cookies, same as a browser tab fetching the URL), but
+            // write methods need explicit human approval since they
+            // can perform follow/like/post actions on the user's behalf.
+            val method = input.stringValue("method")?.uppercase(Locale.ROOT) ?: "GET"
+            val safe = method in setOf("GET", "HEAD")
+            mutates = !safe
+            risk = if (safe) ToolRisk.Normal else ToolRisk.High
+            needsApproval = !safe
+            autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
+            concurrencySafe = safe
+        }
     }
 
     val category = category()
@@ -374,6 +389,9 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
     // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
     // are best taken as JPEG.
     "wm_screenshot" -> 1_200_000
+    // Phase 2 M2.2: signed_fetch bodies can be ~1MB (cap in the shim).
+    // Add headroom for the JSON envelope.
+    "wm_signed_fetch" -> 1_100_000
     // WebMount adapters whose Tool ctor advertises a >80k max_chars cap. Without
     // these overrides, the registry truncates them at 80k right after the tool
     // produces the larger payload — pure waste. Cap each at "claimed max +
