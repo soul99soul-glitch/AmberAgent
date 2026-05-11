@@ -140,6 +140,17 @@ class WebViewPool(
             // size doesn't matter — the WebView is never attached to a window.
             layout(0, 0, VIRTUAL_VIEWPORT_W, VIRTUAL_VIEWPORT_H)
         }
+        // Phase 2 holistic review W-2 fix: enable third-party cookies on
+        // the headless WebView. Android's per-WebView default is false on
+        // Lollipop+, so SSO/redirect flows (www.bilibili.com →
+        // passport.bilibili.com → back) silently drop their Set-Cookie
+        // hops without this. The InlineLoginActivity's visible WebView
+        // already enables it; symmetric treatment on headless prevents
+        // cookies captured there from being unusable here.
+        android.webkit.CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
         val networkLog = NetworkLog()
         val jsBridge = JsBridge(sessionId, NetworkLogObserver(networkLog))
         val handle = SessionHandle(

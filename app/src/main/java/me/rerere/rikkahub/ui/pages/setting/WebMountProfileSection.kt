@@ -213,8 +213,18 @@ private fun ProfileRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
             ) {
+                // Phase 2 holistic review W-3: localized name for built-in
+                // profiles so the Profile section matches the Station section
+                // across locales (en sees "Feishu Docs", zh sees "飞书云文档").
+                // User-imported profiles keep their manifest's `name` verbatim
+                // since that's what the user signed up for.
+                val localizedRes = profileDisplayNameRes(entry.profile.id)
                 Text(
-                    entry.profile.name,
+                    text = if (localizedRes != null && entry is SiteProfileEntry.BuiltIn) {
+                        stringResource(localizedRes)
+                    } else {
+                        entry.profile.name
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -347,6 +357,22 @@ private fun ProfileExpandedDetail(
             }
         }
     }
+}
+
+/**
+ * Mirrors `stationDisplayNameRes` in [SettingExperimentalWebMountPage] —
+ * keep both in sync if a new built-in station ships.
+ */
+@androidx.annotation.StringRes
+private fun profileDisplayNameRes(profileId: String): Int? = when (profileId) {
+    "hackernews" -> R.string.station_hackernews_name
+    "reddit" -> R.string.station_reddit_name
+    "github" -> R.string.station_github_name
+    "bilibili" -> R.string.station_bilibili_name
+    "juejin" -> R.string.station_juejin_name
+    "zhihu" -> R.string.station_zhihu_name
+    "feishu_docs" -> R.string.station_feishu_docs_name
+    else -> null
 }
 
 private data class ProfileImportPreview(

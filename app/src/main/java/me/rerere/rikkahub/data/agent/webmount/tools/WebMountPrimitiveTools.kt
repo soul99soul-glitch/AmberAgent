@@ -406,6 +406,9 @@ class WebMountPrimitiveTools(
                     body?.let { JsonPrimitive(it) } ?: JsonNull,
                     extraParams ?: buildJsonObject {},
                 )
+                // Holistic review B-2 fix: pass the outbound URL's host so
+                // ProfileBridge can enforce send_signed:<host> + origin.
+                val requestedHost = ProfileRegistry.extractOrigin(url)
                 val result = profileBridge.callSign(
                     handle = handle,
                     entry = entry,
@@ -413,6 +416,7 @@ class WebMountPrimitiveTools(
                     scriptKey = scriptKey,
                     args = args,
                     timeoutMs = timeout,
+                    requestedUrlHost = requestedHost,
                 )
                 val response = when (result) {
                     is ProfileBridge.SignResult.Success -> buildJsonObject {

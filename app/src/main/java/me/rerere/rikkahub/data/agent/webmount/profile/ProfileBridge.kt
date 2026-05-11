@@ -91,19 +91,20 @@ class ProfileBridge(
     }
 
     /**
-     * End-to-end signing call:
-     *  1. Validate origin allow-list.
-     *  2. Validate the profile granted `call_page_fn:<fnName>`.
-     *  3. Acquire a rate-limit slot.
-     *  4. Inject the host shim (idempotent JS) so the function exists.
-     *  5. Build a host-defined wrapper `(async() => JSON.stringify(await fn(...args)))()`
-     *     and run it via [SessionHandle.evalSilent].
-     *  6. Parse the JSON envelope. The wrapper catches exceptions and
-     *     returns `{__amberError: msg}` so failures don't throw across the
-     *     JS bridge boundary.
+     * End-to-end signing call (Phase 2 holistic review B-1 + B-2 fix):
+     *  1. Validate origin allow-list (L3 — current WebView page).
+     *  2. Validate `send_signed:<host>` for the requested URL's host if
+     *     supplied (so a profile can be scoped to e.g. api.bilibili.com
+     *     even if the page is on www.bilibili.com).
+     *  3. Validate the profile granted `call_page_fn:<fnName>`.
+     *  4. Acquire a rate-limit slot (L5; user-imported capped tighter).
+     *  5. Inject the host shim (idempotent JS) so the function exists.
+     *  6. Call [SessionHandle.callPageFn] which routes through the
+     *     `AmberWM.resolve` bridge channel so async/Promise-returning
+     *     shim functions are properly awaited.
      *
-     * Returns the parsed result, or a structured error envelope. Never
-     * throws on signing-side failures — `wm_extract signed_fetch` can
+     * Returns the parsed JSON envelope, or a structured error result.
+     * Never throws on signing-side failures — `wm_signed_fetch` can
      * surface the error to the agent.
      */
     suspend fun callSign(
@@ -113,16 +114,38 @@ class ProfileBridge(
         scriptKey: String,
         args: List<JsonElement>,
         timeoutMs: Long = 8_000L,
+        requestedUrlHost: String? = null,
     ): SignResult {
         val script = entry.profile.scripts[scriptKey]
             ?: return SignResult.Error("Profile ${entry.profile.id} has no script '$scriptKey'")
         val fnName = script.callPageFn.removePrefix("window.")
 
+        // L3 origin check (page-side).
         if (!originAllowed(entry, currentOrigin)) {
             return SignResult.Error("Origin '$currentOrigin' not in profile allow-list")
         }
+        // L2 permission check.
         if (!checkCallPageFn(entry, fnName)) {
             return SignResult.Error("Profile permissions do not grant call_page_fn:$fnName")
+        }
+        // Holistic review B-2 fix: validate the OUTBOUND host against
+        // either send_signed:<host> permission or the profile origins.
+        // Without this, an agent passing an arbitrary `url` to
+        // wm_signed_fetch could direct the shim's in-page fetch
+        // anywhere — the SOP would block credentialed requests but
+        // the bridge would still expose the response shape.
+        if (requestedUrlHost != null) {
+            val sendSignedHosts = entry.effective.granted
+                .filterIsInstance<ProfilePermission.SendSigned>()
+                .map { it.host }
+            val originAllowed = entry.profile.origins.any { it == requestedUrlHost }
+            val signedAllowed = sendSignedHosts.any { it == requestedUrlHost }
+            if (!originAllowed && !signedAllowed) {
+                return SignResult.Error(
+                    "Outbound host '$requestedUrlHost' not in profile origins " +
+                        "or send_signed permissions"
+                )
+            }
         }
         if (!acquireSlot(entry)) {
             return SignResult.RateLimited(
@@ -135,46 +158,19 @@ class ProfileBridge(
         // after every navigation is safe.
         shimRegistry.shimSource(entry.profile.id)?.let { handle.injectHostShim(it) }
 
-        // Build the wrapper. The shim's signing function may be async (returns
-        // a Promise); the wrapper awaits it and JSON.stringifies the result so
-        // the value travels across the WebView's JS-to-host string channel.
-        val argsLiteral = JsonArray(args).toString()
-        val fnRef = "window[" + JsonPrimitive(fnName).toString() + "]"
-        val script_js = """
-            (async function() {
-              try {
-                if (typeof $fnRef !== 'function') {
-                  return JSON.stringify({__amberError: 'shim function ' + ${JsonPrimitive(fnName)} + ' not defined'});
-                }
-                var args = $argsLiteral;
-                var result = await $fnRef.apply(null, args);
-                return JSON.stringify(result);
-              } catch (e) {
-                return JSON.stringify({__amberError: String(e && e.message || e)});
-              }
-            })();
-        """.trimIndent()
-
-        val raw = handle.evalSilent(script_js, timeoutMs = timeoutMs)
-            ?: return SignResult.Error("evalSilent returned null (timeout?)")
-
-        // Android WebView wraps the return value in JSON.stringify of the
-        // string itself when our wrapper already returned a string — so we
-        // get a double-encoded JSON string. Parse once to unwrap, then again
-        // to get the actual envelope.
-        val unwrapped = runCatching {
-            kotlinx.serialization.json.Json.parseToJsonElement(raw)
-        }.getOrElse { return SignResult.Error("Bridge return not JSON: $raw") }
-        val inner = when (unwrapped) {
-            is JsonPrimitive ->
-                if (unwrapped.isString) unwrapped.content
-                else return SignResult.Error("Bridge returned non-string primitive: $raw")
-            JsonNull -> return SignResult.Error("Bridge returned null")
-            else -> raw // already structured; treat as JSON envelope
+        // Route through the bridge so async functions are awaited (Phase 2
+        // holistic review B-1 fix — the old IIFE-returns-Promise pattern
+        // produced "{}" for every call because evaluateJavascript doesn't
+        // await Promises).
+        val payload = try {
+            handle.callPageFn(
+                fnName = fnName,
+                args = kotlinx.serialization.json.JsonArray(args),
+                timeoutMs = timeoutMs,
+            )
+        } catch (error: Throwable) {
+            return SignResult.Error("callPageFn '$fnName' failed: ${error.message ?: error.toString()}")
         }
-        val payload = runCatching {
-            if (inner === raw) unwrapped else kotlinx.serialization.json.Json.parseToJsonElement(inner)
-        }.getOrElse { return SignResult.Error("Inner not JSON: $inner") }
 
         val obj = payload as? JsonObject
             ?: return SignResult.Success(payload) // non-object payloads pass through

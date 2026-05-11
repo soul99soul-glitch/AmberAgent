@@ -201,19 +201,78 @@ class SessionHandle internal constructor(
     }
 
     /**
-     * Phase 2 M2.2 — silent eval channel for profile signing.
+     * Phase 2 M2.2 — silent eval channel for synchronous JS expressions.
      *
      * Runs [script] via [evalRaw] without going through the [Tool] approval
      * gate. The agent's `wm_eval` tool always requires per-call human
      * approval (mandatoryApproval=true); this internal channel is reserved
-     * for **host-defined** profile signing helpers (e.g. WBI). Callers MUST
-     * have validated the profile's permissions + origin first — see
+     * for **host-defined** helpers. Callers MUST have validated the
+     * profile's permissions + origin first — see
      * [me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge].
+     *
+     * **NOTE**: `evaluateJavascript` returns the JSON-stringified value of
+     * the script's synchronous return. Promises are stringified as `"{}"`
+     * — for async results, use [callPageFn] instead (which routes through
+     * the bridge's `AmberWM.resolve` callback so async functions are
+     * properly awaited).
      */
     internal suspend fun evalSilent(
         script: String,
         timeoutMs: Long = DEFAULT_EVAL_TIMEOUT_MS,
     ): String? = evalRaw(script, timeoutMs)
+
+    /**
+     * Phase 2 M2.2 — bridge-aware call to a host-defined or page-defined
+     * function. Use this in place of [evalSilent] when the target function
+     * is async or returns a Promise. The wrapper script delivers the
+     * resolved value through the same `AmberWM.resolve(reqId, ...)`
+     * channel that [callBridge] uses, so async functions are properly
+     * awaited.
+     *
+     * Returns the parsed JSON envelope. If the target throws or rejects,
+     * returns a [JsonObject] with a `__amberError` field. Times out per
+     * [timeoutMs] — on timeout, throws [JsBridge.JsBridgeException].
+     *
+     * Like [evalSilent], no [Tool] approval gate is touched — the
+     * [me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge] is
+     * responsible for the L2 / L3 / L5 checks before calling this.
+     */
+    internal suspend fun callPageFn(
+        fnName: String,
+        args: kotlinx.serialization.json.JsonArray,
+        timeoutMs: Long = 10_000L,
+    ): JsonElement {
+        ensureAlive()
+        val requestId = UUID.randomUUID().toString()
+        val deferred = jsBridge.expect(requestId)
+        val fnLit = JSON.encodeToString(String.serializer(), fnName)
+        val reqIdLit = JSON.encodeToString(String.serializer(), requestId)
+        val argsLit = args.toString()
+        // The wrapper:
+        //  - Awaits the (possibly async) function call.
+        //  - JSON.stringify the result and pass it through AmberWM.resolve.
+        //  - On any throw, route via AmberWM.reject so the deferred fails
+        //    with a clear message instead of the agent seeing "{}".
+        val script =
+            "(async function(){try{" +
+                "if(typeof window[$fnLit] !== 'function'){" +
+                "AmberWM.reject($reqIdLit,'shim function '+$fnLit+' not defined');return;}" +
+                "var r = await window[$fnLit].apply(null, $argsLit);" +
+                "AmberWM.resolve($reqIdLit, JSON.stringify(r));" +
+                "}catch(e){AmberWM.reject($reqIdLit, String((e&&e.message)||e));}})();"
+
+        withContext(Dispatchers.Main) {
+            webView.evaluateJavascript(script, null)
+        }
+        val result = try {
+            withTimeoutOrNull(timeoutMs) { deferred.await() }
+        } finally {
+            jsBridge.forget(requestId)
+            lastActivityMs.set(System.currentTimeMillis())
+        }
+        return result
+            ?: throw JsBridge.JsBridgeException("callPageFn '$fnName' timed out after ${timeoutMs}ms")
+    }
 
     internal fun onLoadProgress(progress: Int) {
         _loadState.value = _loadState.value.copy(

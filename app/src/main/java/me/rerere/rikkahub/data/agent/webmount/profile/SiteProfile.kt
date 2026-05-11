@@ -89,9 +89,29 @@ data class SiteProfile(
             // Strip leading "window." for permission matching (the bridge
             // resolves both `window.foo` and `foo` to the same function).
             val fnLookup = script.callPageFn.removePrefix("window.")
+            // Phase 2 holistic review W-6 fix: deny ambient browser built-ins
+            // (fetch, eval, etc.) — they're not site-defined functions and
+            // routing them through `call_page_fn` would let a malicious
+            // manifest dress them up as legitimate signing helpers in the
+            // user-facing audit dialog.
+            require(fnLookup !in AMBIENT_FN_DENYLIST) {
+                "Profile $id: scripts.$key.call_page_fn references browser " +
+                    "built-in '$fnLookup' which is not a permitted target. " +
+                    "Profiles can only bridge to functions the site's own JS " +
+                    "bundle exposes; ambient browser APIs are disallowed."
+            }
             require(fnLookup in declaredFns) {
                 "Profile $id: scripts.$key calls '$fnLookup' which is not declared " +
                     "in permissions (need 'call_page_fn:$fnLookup')"
+            }
+        }
+        // Same deny-list applied to the permission declarations themselves
+        // so an unused (decoy) permission line can't slip past the import
+        // audit dialog with a plausible label.
+        parsed.filterIsInstance<ProfilePermission.CallPageFn>().forEach { perm ->
+            require(perm.fnName !in AMBIENT_FN_DENYLIST) {
+                "Profile $id: call_page_fn permission references browser " +
+                    "built-in '${perm.fnName}' which is not a permitted target."
             }
         }
         // Login cookie probe implies detect_login permission.
@@ -118,6 +138,27 @@ data class SiteProfile(
         // Mirrors WebMountStatus wire names — kept as plain strings here to
         // avoid pulling the core module into the profile package.
         private val VALID_RATE_LIMIT_MAP_TO = setOf("DEGRADED", "ERROR", "LOGIN_REQUIRED")
+        // Ambient browser globals that profiles must NOT reference via
+        // `call_page_fn`. These are not site-supplied JS, so allowing them
+        // would defeat the L1 hardening claim ("profile bridges to
+        // site-defined functions only").
+        private val AMBIENT_FN_DENYLIST: Set<String> = setOf(
+            "fetch",
+            "XMLHttpRequest",
+            "WebSocket",
+            "eval",
+            "Function",
+            "parent",
+            "top",
+            "opener",
+            "import",
+            "navigator",
+            "location",
+            "document",
+            "alert",
+            "prompt",
+            "confirm",
+        )
     }
 }
 
