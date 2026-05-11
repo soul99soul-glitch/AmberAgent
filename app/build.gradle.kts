@@ -43,8 +43,8 @@ android {
         applicationId = "me.rerere.amberagent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 317
-        versionName = "1.5.1"
+        versionCode = 322
+        versionName = "1.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId

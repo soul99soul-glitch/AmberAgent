@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style id="amber-fonts"></style>
 <style>
+@font-face{font-family:"Playfair Display";src:url("https://amberagent.local/builtin-fonts/PlayfairDisplay-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap;}
+@font-face{font-family:"Inter";src:url("https://amberagent.local/builtin-fonts/Inter-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap;}
 :root{
   --slide-bg:#ffffff;
   --paper:#f4f0e8;
@@ -18,16 +19,16 @@
   --nav-bg:rgba(0,0,0,.58);
   --nav-fg:#fff;
   --serif-zh:"Noto Serif SC","Source Han Serif SC","Songti SC","STSong",serif;
-  --serif-en:Georgia,serif;
+  --serif-en:"Playfair Display",Georgia,serif;
   --sans:"Inter","Helvetica Neue","Helvetica","Roboto",system-ui,-apple-system,sans-serif;
   --sans-zh:"PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
   --mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Roboto Mono",ui-monospace,monospace;
 }
-html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;font-family:var(--sans),var(--sans-zh);color:var(--ink);}
+html,body{margin:0;padding:0;width:100%;height:100vh;background:transparent;overflow:hidden;font-family:var(--sans),var(--sans-zh);color:var(--ink);}
 *{box-sizing:border-box;min-width:0;}
-.deck{display:flex;flex-direction:row;width:100%;height:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.deck{display:flex;flex-direction:row;width:100%;height:100vh;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
 .deck::-webkit-scrollbar{display:none;}
-.slide{flex:0 0 100%;width:100%;height:100%;overflow-y:auto;scroll-snap-align:start;scroll-snap-stop:always;background:var(--slide-bg);color:var(--ink);-webkit-overflow-scrolling:touch;position:relative;}
+.slide{flex:0 0 100%;width:100%;height:100vh;overflow-y:auto;scroll-snap-align:start;scroll-snap-stop:always;background:var(--slide-bg);color:var(--ink);-webkit-overflow-scrolling:touch;position:relative;}
 .slide::-webkit-scrollbar{width:0;}
 .slide-inner{min-height:100%;padding:clamp(22px,5.6vw,54px) clamp(18px,5vw,64px) 86px;display:flex;flex-direction:column;gap:clamp(14px,3vw,28px);}
 .slide-inner,.panel,.metric,h1,h2,h3,p,li,.subtitle,.quote-text,.metric-value,.metric-label,.item-title,.item-body{max-width:100%;overflow-wrap:anywhere;word-break:break-word;}
@@ -106,6 +107,7 @@ li{margin:.34em 0;}
   .notes{padding-top:10px;}
 }
 </style>
+<style id="amber-fonts"></style>
 </head>
 <body>
 <div class="deck" id="deck"></div>
@@ -408,6 +410,17 @@ li{margin:.34em 0;}
       }
       currentSlide = 0;
       updateIndicator();
+      // Force explicit pixel heights — 100vh/100% can resolve to 0 in Android WebView
+      // when body has overflow:hidden and content is dynamically injected.
+      function applyViewportHeight(){
+        var vh = window.innerHeight || document.documentElement.clientHeight || 740;
+        document.documentElement.style.height = vh + 'px';
+        document.body.style.height = vh + 'px';
+        deckEl.style.height = vh + 'px';
+        deckEl.querySelectorAll('.slide').forEach(function(s){ s.style.height = vh + 'px'; });
+      }
+      applyViewportHeight();
+      window.addEventListener('resize', applyViewportHeight);
       var raf = null;
       deckEl.addEventListener('scroll', function(){
         if(raf) cancelAnimationFrame(raf);

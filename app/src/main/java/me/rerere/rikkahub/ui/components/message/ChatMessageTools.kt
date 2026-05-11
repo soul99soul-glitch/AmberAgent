@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1969,7 +1970,7 @@ private fun ModelCouncilRunSheet(
                     extractFinalCouncilSeatText(step.tools, activeSeatKey)
                 } else ""
             }
-            val displayText = liveText.ifBlank { finalText }
+            val displayText = (liveText.ifBlank { finalText }).cleanCouncilLineBreaks()
             val scrollState = rememberScrollState()
             var followBottom by remember(step.runId, activeSeatKey) { mutableStateOf(true) }
             LaunchedEffect(scrollState, isRunning, activeSeatKey) {
@@ -2106,4 +2107,22 @@ private fun extractFinalSubAgentText(tools: List<UIMessagePart.Tool>): String {
         if (!summary.isNullOrBlank()) return summary
     }
     return ""
+}
+
+/**
+ * Fix legacy council text where [UIMessage.toText] joined streaming deltas with "\n" separators,
+ * producing single-character lines like "根据\n常见\n控\n糖\n...". Collapses spurious line breaks
+ * while preserving intentional paragraph breaks (double newlines) and Markdown structure.
+ */
+private fun String.cleanCouncilLineBreaks(): String {
+    if (!contains('\n')) return this
+    val lines = lines()
+    val shortLineRatio = lines.count { it.trim().length in 1..3 }.toFloat() / lines.size.coerceAtLeast(1)
+    if (shortLineRatio < 0.35f) return this
+    return replace(Regex("""(?<!\n)\n(?!\n)""")) { match ->
+        val before = getOrNull(match.range.first - 1)
+        val after = getOrNull(match.range.last + 1)
+        if (before in listOf(':', '-', '。', '！', '？', '.', '!', '?') || after == '#' || after == '-' || after == '*') "\n"
+        else ""
+    }
 }

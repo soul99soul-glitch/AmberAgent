@@ -26,6 +26,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
 import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
@@ -92,7 +93,10 @@ class ProviderModelCouncilTextRunner(
             messages = messages,
             params = params,
         ).collect { chunk ->
-            val delta = chunk.choices.firstOrNull()?.delta?.toText().orEmpty()
+            val delta = chunk.choices.firstOrNull()?.delta?.parts
+                ?.filterIsInstance<UIMessagePart.Text>()
+                ?.joinToString("") { it.text }
+                .orEmpty()
             if (delta.isNotEmpty()) {
                 accumulated.append(delta)
                 onChunk(accumulated.toString())

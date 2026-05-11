@@ -449,7 +449,7 @@ fun ExpandedGenerativeWidgetDialog(
                                 renderer = widget.renderer,
                                 specJson = widget.specJson,
                                 setting = setting,
-                                modifier = Modifier.align(Alignment.TopCenter),
+                                modifier = if (widget.renderer == "slides") Modifier.fillMaxSize() else Modifier.align(Alignment.TopCenter),
                                 maxHeightDp = maxHeight.value.toInt().coerceAtLeast(240),
                                 onWebViewReady = { webView = it },
                             )
@@ -1026,6 +1026,23 @@ private fun WebView.captureWidgetBitmap(): Bitmap? {
     }
 }
 
+private val BUILTIN_FONTS = mapOf(
+    "PlayfairDisplay-Regular.ttf" to "generative-libs/builtin-fonts/PlayfairDisplay-Regular.ttf",
+    "Inter-Regular.ttf" to "generative-libs/builtin-fonts/Inter-Regular.ttf",
+)
+
+private fun WebView.interceptBuiltinFontRequest(request: WebResourceRequest?): WebResourceResponse? {
+    val uri = request?.url ?: return null
+    if (uri.scheme != "https" || uri.host != "amberagent.local") return null
+    val segments = uri.pathSegments
+    if (segments.size != 2 || segments[0] != "builtin-fonts") return null
+    val assetPath = BUILTIN_FONTS[segments[1]] ?: return null
+    val mimeType = if (segments[1].endsWith(".otf")) "font/otf" else "font/ttf"
+    return runCatching {
+        WebResourceResponse(mimeType, null, context.assets.open(assetPath))
+    }.getOrNull()
+}
+
 private fun isSafeExternalWidgetUrl(url: String): Boolean {
     if (url.length !in 1..MAX_WIDGET_URL_LENGTH) return false
     val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
@@ -1116,7 +1133,13 @@ private fun RichSandboxWebView(
                     settings.javaScriptCanOpenWindowsAutomatically = false
                     settings.cacheMode = WebSettings.LOAD_NO_CACHE
                     settings.blockNetworkLoads = renderer != "slides"
-                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    // Slides need MIXED_CONTENT_ALWAYS_ALLOW so that the file:///android_asset/ page
+                    // can trigger https://amberagent.local/ font requests which are intercepted locally
+                    // by shouldInterceptRequest. NEVER_ALLOW silently blocks these before interception.
+                    settings.mixedContentMode = if (renderer == "slides")
+                        WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    else
+                        WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     settings.setSupportMultipleWindows(false)
                     addJavascriptInterface(
                         object {
@@ -1139,7 +1162,11 @@ private fun RichSandboxWebView(
                             view: WebView?,
                             request: WebResourceRequest?,
                         ): WebResourceResponse? {
+                            // Serve downloaded CJK fonts from local storage
                             fontRepository.interceptFontRequest(request)?.let { return it }
+                            // Serve builtin English fonts from APK assets
+                            interceptBuiltinFontRequest(request)?.let { return it }
+                            // Block all other network requests
                             val scheme = request?.url?.scheme?.lowercase()
                             if (scheme == "http" || scheme == "https") {
                                 return WebResourceResponse("text/plain", "utf-8", "".byteInputStream())
@@ -1157,7 +1184,21 @@ private fun RichSandboxWebView(
                             )
                         }
                     }
-                    loadUrl("file:///android_asset/$assetFile")
+                    // Load via loadDataWithBaseURL so the page origin is https://amberagent.local/.
+                    // This lets @font-face url("https://amberagent.local/fonts/...") trigger
+                    // shouldInterceptRequest (same-origin). loadUrl("file:///") would make
+                    // the https font requests cross-origin and silently blocked.
+                    // Delay until after one layout pass so viewport height is non-zero.
+                    val sandboxHtml = context.assets.open(assetFile).bufferedReader().readText()
+                    post {
+                        loadDataWithBaseURL(
+                            "https://amberagent.local/",
+                            sandboxHtml,
+                            "text/html",
+                            "utf-8",
+                            null,
+                        )
+                    }
                     activeWebView = this
                     onWebViewReady(this)
                 }

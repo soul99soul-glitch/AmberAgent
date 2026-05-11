@@ -199,12 +199,15 @@ class SlidesFontRepository(
         val deck = runCatching { json.parseToJsonElement(specJson) as? JsonObject }.getOrNull()
         val requested = deck?.string("fontPack")
         val style = deck?.string("style")?.lowercase(Locale.ROOT).orEmpty()
-        val fallback = when {
-            style == "swiss" -> setting.slidesSwissFontPack
-            style == "magazine" -> setting.slidesMagazineFontPack
+        // Auto-pick by category based on style if model didn't specify a fontPack
+        val categoryFallback = when {
+            style.contains("swiss") || style.contains("sans") ->
+                fontsFlow.value.firstOrNull { it.installed && it.pack.category == FontPackCategory.SANS }?.pack?.id
+            style.contains("magazine") || style.contains("serif") ->
+                fontsFlow.value.firstOrNull { it.installed && it.pack.category == FontPackCategory.SERIF }?.pack?.id
             else -> null
         }
-        val pack = listOfNotNull(requested, fallback)
+        val pack = listOfNotNull(requested, categoryFallback)
             .firstNotNullOfOrNull { id -> installedPack(id) }
             ?: return ""
         val family = "AmberSlides-${pack.pack.id}"

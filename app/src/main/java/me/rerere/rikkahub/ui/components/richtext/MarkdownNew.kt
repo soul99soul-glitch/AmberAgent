@@ -151,7 +151,9 @@ fun MarkdownNew(
     ProvideTextStyle(style) {
         Column(modifier = modifier.padding(start = 4.dp)) {
             document.body().childNodes().fastForEach { node ->
-                HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+                }
             }
         }
     }

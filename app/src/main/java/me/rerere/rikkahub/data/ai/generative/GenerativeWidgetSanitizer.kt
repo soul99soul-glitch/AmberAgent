@@ -41,7 +41,7 @@ object GenerativeWidgetSanitizer {
     private val cssImport = Regex("""@import\s+[^;]+;?""", RegexOption.IGNORE_CASE)
     private val javascriptStyleUrl = Regex("""url\(\s*(['"]?)\s*javascript:[^)]+\)""", RegexOption.IGNORE_CASE)
     private val externalStyleUrl = Regex("""url\(\s*(['"]?)\s*(https?:|//)[^)]+\)""", RegexOption.IGNORE_CASE)
-    private val unsafeStyleUrl = Regex("""url\(\s*(['"]?)(?!data:image/)[^)]+\)""", RegexOption.IGNORE_CASE)
+    private val unsafeStyleUrl = Regex("""url\(\s*(['"]?)(?!data:image/|#)[^)]+\)""", RegexOption.IGNORE_CASE)
     private val fixedPositionStyle = Regex("""position\s*:\s*(fixed|-webkit-sticky|sticky)\s*;?""", RegexOption.IGNORE_CASE)
     private val tagRegex = Regex("""<\s*[a-zA-Z][^>]*>""")
     private val stripTags = Regex("""<[^>]+>""")
@@ -116,7 +116,8 @@ object GenerativeWidgetSanitizer {
             Regex("""\ssrc\s*=\s*(?!["']?data:image/(png|jpeg|jpg|gif|webp);base64,)""", RegexOption.IGNORE_CASE).containsMatchIn(html) -> "external resource"
             "data:image/svg" in compact -> "svg data image"
             Regex("""url\(""", RegexOption.IGNORE_CASE).containsMatchIn(html) &&
-                !Regex("""url\(\s*(['"]?)data:image/(png|jpeg|jpg|gif|webp);base64,""", RegexOption.IGNORE_CASE).containsMatchIn(html) -> "css url"
+                !Regex("""url\(\s*(['"]?)data:image/(png|jpeg|jpg|gif|webp);base64,""", RegexOption.IGNORE_CASE).containsMatchIn(html) &&
+                !Regex("""url\(\s*(['"]?)#""").containsMatchIn(html) -> "css url"
             else -> null
         }
     }
