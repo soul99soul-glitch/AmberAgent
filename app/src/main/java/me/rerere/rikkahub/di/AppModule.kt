@@ -31,6 +31,9 @@ import me.rerere.rikkahub.data.agent.webmount.adapters.github.GithubTools
 import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.juejin.JuejinTools
+import me.rerere.rikkahub.data.agent.webmount.adapters.zhihu.ZhihuAdapter
+import me.rerere.rikkahub.data.agent.webmount.adapters.zhihu.ZhihuClient
+import me.rerere.rikkahub.data.agent.webmount.adapters.zhihu.ZhihuTools
 import me.rerere.rikkahub.data.agent.webmount.adapters.reddit.RedditAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.reddit.RedditClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.reddit.RedditTools
@@ -240,6 +243,18 @@ val appModule = module {
     }
 
     single {
+        ZhihuClient(http = get())
+    }
+
+    single {
+        ZhihuTools(client = get())
+    }
+
+    single {
+        ZhihuAdapter(tools = get(), cookieProvider = get())
+    }
+
+    single {
         val adapters: List<WebMountAdapter> = listOf(
             get<HnAdapter>(),
             get<RedditAdapter>(),
@@ -247,7 +262,7 @@ val appModule = module {
             get<FeishuDocsAdapter>(),
             get<GithubAdapter>(),
             get<BilibiliAdapter>(),
-            // M1.6 will append: Zhihu
+            get<ZhihuAdapter>(),
         )
         WebMountManager(
             context = get(),

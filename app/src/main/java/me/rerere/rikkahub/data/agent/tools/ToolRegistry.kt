@@ -247,6 +247,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("feishu_docs_") -> "webmount_feishu_docs"
     name.startsWith("github_") -> "webmount_github"
     name.startsWith("bilibili_") -> "webmount_bilibili"
+    name.startsWith("zhihu_") -> "webmount_zhihu"
     name.startsWith("screen_") || name == "vlm_task" -> "screen"
     name.startsWith("sms_") || name.startsWith("contacts_") || name.startsWith("calendar_") ||
         name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
