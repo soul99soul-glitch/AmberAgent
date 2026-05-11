@@ -13,11 +13,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,9 +29,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Globe02
@@ -38,6 +44,10 @@ import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
+import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
+import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthProvider
+import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
+import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -50,6 +60,8 @@ import java.util.Locale
 @Composable
 fun SettingExperimentalWebMountPage(
     webMountManager: WebMountManager = koinInject(),
+    oauthClient: WebMountOAuthClient = koinInject(),
+    oauthStore: WebMountOAuthTokenStore = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
@@ -58,6 +70,11 @@ fun SettingExperimentalWebMountPage(
     // Track which station ids are currently probing so the same probe button
     // can be disabled per-station while leaving siblings interactive.
     var busyStations by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Bump on every TokenStore update — triggers OAuth section recomposition.
+    var oauthRevision by remember { mutableStateOf(0) }
+    LaunchedEffect(oauthStore) {
+        oauthStore.updates.collectLatest { oauthRevision++ }
+    }
 
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_webmount_title),
@@ -77,6 +94,71 @@ fun SettingExperimentalWebMountPage(
             }
             item {
                 ExperimentNote(text = stringResource(R.string.setting_webmount_about_note))
+            }
+            item {
+                ExperimentSectionCard(
+                    title = stringResource(R.string.setting_webmount_section_oauth),
+                ) {
+                    val providers = oauthClient.providers().toList()
+                    if (providers.isEmpty()) {
+                        ExperimentNote(text = stringResource(R.string.setting_webmount_no_oauth_providers))
+                    } else {
+                        providers.forEachIndexed { index, provider ->
+                            // Read fresh each recomposition so saves/disconnects update the UI.
+                            @Suppress("UNUSED_EXPRESSION") oauthRevision
+                            val credentials = oauthStore.getCredentials(provider.id)
+                            val token = oauthStore.getToken(provider.id)
+                            OAuthProviderRow(
+                                provider = provider,
+                                hasCredentials = credentials != null,
+                                hasToken = token != null,
+                                tokenExpiresAtMs = token?.expiresAtMs ?: 0L,
+                                initialAppId = credentials?.appId.orEmpty(),
+                                initialAppSecret = credentials?.appSecret.orEmpty(),
+                                initialScope = credentials?.scope.orEmpty(),
+                                onSaveCredentials = { appId, appSecret, scope ->
+                                    if (appId.isBlank()) {
+                                        toaster.show(
+                                            // i18n fallback: hardcoded en, zh handles via resource
+                                            "App ID is required"
+                                        )
+                                    } else {
+                                        oauthStore.putCredentials(
+                                            provider.id,
+                                            OAuthAppCredentials(
+                                                provider = provider.id,
+                                                appId = appId.trim(),
+                                                appSecret = appSecret.trim().ifBlank { null },
+                                                scope = scope.trim().ifBlank { null },
+                                            ),
+                                        )
+                                    }
+                                },
+                                onConnect = {
+                                    scope.launch {
+                                        runCatching {
+                                            val result = oauthClient.connect(provider.id)
+                                            when (result) {
+                                                is WebMountOAuthClient.ConnectResult.Success -> {
+                                                    toaster.show("Connected to ${provider.displayName}")
+                                                }
+                                                is WebMountOAuthClient.ConnectResult.NotConfigured ->
+                                                    toaster.show(result.reason)
+                                                is WebMountOAuthClient.ConnectResult.Failed ->
+                                                    toaster.show("OAuth failed: ${result.reason}")
+                                            }
+                                        }.onFailure { toaster.show(it.message ?: it.toString()) }
+                                    }
+                                },
+                                onDisconnect = {
+                                    oauthClient.disconnect(provider.id)
+                                    toaster.show("Disconnected ${provider.displayName}")
+                                },
+                            )
+                            if (index != providers.lastIndex) ExperimentDivider()
+                        }
+                    }
+                }
             }
             item {
                 ExperimentSectionCard(
@@ -307,6 +389,135 @@ private fun WebMountAuthPill(method: WebMountAuthMethod) {
 }
 
 @Suppress("UNUSED_PARAMETER")
+@Composable
+private fun OAuthProviderRow(
+    provider: OAuthProvider,
+    hasCredentials: Boolean,
+    hasToken: Boolean,
+    tokenExpiresAtMs: Long,
+    initialAppId: String,
+    initialAppSecret: String,
+    initialScope: String,
+    onSaveCredentials: (String, String, String) -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    var appId by remember(provider.id, initialAppId) { mutableStateOf(initialAppId) }
+    var appSecret by remember(provider.id, initialAppSecret) { mutableStateOf(initialAppSecret) }
+    var scopeField by remember(provider.id, initialScope) { mutableStateOf(initialScope) }
+    val nowMs = remember { System.currentTimeMillis() }
+    val tokenExpired = hasToken && tokenExpiresAtMs > 0 && tokenExpiresAtMs <= nowMs
+    val statusRes = when {
+        hasToken && !tokenExpired -> R.string.setting_webmount_oauth_status_connected
+        hasToken && tokenExpired -> R.string.setting_webmount_oauth_status_expired
+        hasCredentials -> R.string.setting_webmount_oauth_status_ready
+        else -> R.string.setting_webmount_oauth_status_need_setup
+    }
+    val statusColor = when {
+        hasToken && !tokenExpired -> workspace.blue
+        hasToken && tokenExpired -> MaterialTheme.colorScheme.error
+        else -> workspace.muted
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(34.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = workspace.row,
+                contentColor = workspace.muted,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(HugeIcons.Globe02, contentDescription = null)
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = provider.displayName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "provider id: ${provider.id} · redirect: ${provider.defaultRedirectUri}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.faint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = statusColor.copy(alpha = 0.12f),
+                contentColor = statusColor,
+                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.25f)),
+            ) {
+                Text(
+                    text = stringResource(statusRes),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+        OutlinedTextField(
+            value = appId,
+            onValueChange = { appId = it },
+            label = { Text(stringResource(R.string.setting_webmount_oauth_app_id)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = appSecret,
+            onValueChange = { appSecret = it },
+            label = { Text(stringResource(R.string.setting_webmount_oauth_app_secret)) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = scopeField,
+            onValueChange = { scopeField = it },
+            label = { Text(stringResource(R.string.setting_webmount_oauth_scope)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        ExperimentActionRow {
+            ExperimentActionButton(
+                text = stringResource(R.string.setting_webmount_oauth_save),
+                primary = true,
+                enabled = true,
+                onClick = { onSaveCredentials(appId, appSecret, scopeField) },
+            )
+            ExperimentActionButton(
+                text = stringResource(R.string.setting_webmount_oauth_connect),
+                enabled = hasCredentials,
+                onClick = onConnect,
+            )
+            ExperimentActionButton(
+                text = stringResource(R.string.setting_webmount_oauth_disconnect),
+                enabled = hasToken,
+                onClick = onDisconnect,
+            )
+        }
+        ExperimentNote(text = provider.setupHint())
+    }
+}
+
 private fun iconForStation(stationId: String) = HugeIcons.Globe02
 
 @Suppress("UNUSED_PARAMETER")

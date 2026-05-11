@@ -1287,6 +1287,19 @@
   <string name="setting_webmount_auth_oauth">OAuth</string>
   <string name="setting_webmount_auth_anonymous">anonymous</string>
   <string name="setting_webmount_station_generic_desc">Web station</string>
+  <!-- OAuth providers (M1.5) -->
+  <string name="setting_webmount_section_oauth">OAuth providers</string>
+  <string name="setting_webmount_no_oauth_providers">No OAuth providers registered yet.</string>
+  <string name="setting_webmount_oauth_app_id">App ID</string>
+  <string name="setting_webmount_oauth_app_secret">App Secret (optional for PKCE-only)</string>
+  <string name="setting_webmount_oauth_scope">Scope (space-separated, optional)</string>
+  <string name="setting_webmount_oauth_save">Save</string>
+  <string name="setting_webmount_oauth_connect">Connect</string>
+  <string name="setting_webmount_oauth_disconnect">Disconnect</string>
+  <string name="setting_webmount_oauth_status_connected">Connected</string>
+  <string name="setting_webmount_oauth_status_expired">Token expired</string>
+  <string name="setting_webmount_oauth_status_ready">Ready to connect</string>
+  <string name="setting_webmount_oauth_status_need_setup">Needs App ID</string>
   <string name="setting_officepro_section">Feishu Office Enhancement</string>
   <string name="setting_officepro_title">Feishu Office Enhancement Mode</string>
   <string name="setting_officepro_desc">Read visible screens, notifications, and usage signals to build a workspace context.</string>

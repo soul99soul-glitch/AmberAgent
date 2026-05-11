@@ -807,6 +807,19 @@
   <string name="setting_webmount_auth_oauth">OAuth</string>
   <string name="setting_webmount_auth_anonymous">匿名</string>
   <string name="setting_webmount_station_generic_desc">Web 站点</string>
+  <!-- OAuth providers (M1.5) -->
+  <string name="setting_webmount_section_oauth">OAuth 凭证</string>
+  <string name="setting_webmount_no_oauth_providers">尚未注册任何 OAuth provider</string>
+  <string name="setting_webmount_oauth_app_id">App ID</string>
+  <string name="setting_webmount_oauth_app_secret">App Secret(PKCE-only 应用可留空)</string>
+  <string name="setting_webmount_oauth_scope">Scope(空格分隔,可选)</string>
+  <string name="setting_webmount_oauth_save">保存</string>
+  <string name="setting_webmount_oauth_connect">登录</string>
+  <string name="setting_webmount_oauth_disconnect">断开</string>
+  <string name="setting_webmount_oauth_status_connected">已连接</string>
+  <string name="setting_webmount_oauth_status_expired">Token 已过期</string>
+  <string name="setting_webmount_oauth_status_ready">可登录</string>
+  <string name="setting_webmount_oauth_status_need_setup">需填写 App ID</string>
   <string name="setting_officepro_section">飞书办公增强模式</string>
   <string name="setting_officepro_title">飞书办公增强模式</string>
   <string name="setting_officepro_desc">读取可见屏幕、通知和使用情况信号，生成 workspace 工作上下文。</string>
