@@ -35,7 +35,9 @@ import java.util.concurrent.ConcurrentHashMap
 class WebMountManager(
     context: Context,
     private val adapters: List<WebMountAdapter>,
+    // wired through to adapters in M1.3 (Browser Primitives session bootstrap)
     @Suppress("unused") private val cookieProvider: WebMountCookieProvider,
+    // wired in M1.5 (OAuth Intent bridge) — currently a no-op in-memory stub
     @Suppress("unused") private val oauthStore: WebMountOAuthTokenStore,
     private val activityStore: AgentToolActivityStore,
     private val appScope: CoroutineScope,
@@ -145,6 +147,18 @@ class WebMountManager(
         result: WebMountProbeResult,
         isWriteProbe: Boolean,
     ): WebMountStationState {
+        // NotSupported means the adapter has nothing to probe (e.g. fully
+        // anonymous stations whose readiness is implicit). Preserve the
+        // prior status/capability so a UI Probe tap doesn't destroy state;
+        // only surface the message and bump updated_at.
+        if (result == WebMountProbeResult.NotSupported) {
+            return updateLocalState(adapter) {
+                it.copy(
+                    message = "Probe not supported by adapter",
+                    updatedAtMillis = System.currentTimeMillis(),
+                )
+            }
+        }
         val nextStatus: WebMountStatus
         val nextCapability: WebMountCapability
         val message: String?
@@ -179,11 +193,7 @@ class WebMountManager(
                 nextCapability = WebMountCapability.NONE
                 message = result.message
             }
-            WebMountProbeResult.NotSupported -> {
-                nextStatus = WebMountStatus.NOT_CONFIGURED
-                nextCapability = WebMountCapability.NONE
-                message = "Probe not supported by adapter"
-            }
+            WebMountProbeResult.NotSupported -> error("handled above")
         }
         return updateLocalState(adapter) {
             it.copy(

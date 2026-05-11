@@ -1264,7 +1264,7 @@
   <!-- WebMount Stations (Phase 1, experimental) -->
   <string name="setting_webmount_title">WebMount Stations</string>
   <string name="setting_webmount_desc">Mount any website as deterministic agent tools through your in-app login session.</string>
-  <string name="setting_webmount_about_note">WebMount lets you log into a website once inside AmberAgent and surface that session to agents as stable, scriptable tools — no screenshots, no extra token cost. iCloud Drive is the first station; more sites are coming.</string>
+  <string name="setting_webmount_about_note">WebMount lets you log into a website once inside AmberAgent and surface that session to agents as stable, scriptable tools — no screenshots, no extra token cost. The first batch of stations is coming in M1.6.</string>
   <string name="setting_webmount_section_stations">Available stations</string>
   <string name="setting_webmount_no_stations">No stations registered yet.</string>
   <string name="setting_webmount_configure">Configure</string>

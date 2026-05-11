@@ -786,7 +786,7 @@
   <!-- WebMount Stations (Phase 1, 实验性) -->
   <string name="setting_webmount_title">WebMount 站点</string>
   <string name="setting_webmount_desc">把任意网站作为确定性 agent 工具挂载进来,复用应用内的登录态。</string>
-  <string name="setting_webmount_about_note">WebMount 让你在 AmberAgent 内登录一次网站,然后把它当成稳定、可脚本化的工具暴露给 agent——不截图、不烧 token。iCloud Drive 是首个站点,后续会陆续接入更多网站。</string>
+  <string name="setting_webmount_about_note">WebMount 让你在 AmberAgent 内登录一次网站,然后把它当成稳定、可脚本化的工具暴露给 agent——不截图、不烧 token。首批站点将在 M1.6 接入。</string>
   <string name="setting_webmount_section_stations">已注册站点</string>
   <string name="setting_webmount_no_stations">尚未注册任何站点</string>
   <string name="setting_webmount_configure">配置</string>

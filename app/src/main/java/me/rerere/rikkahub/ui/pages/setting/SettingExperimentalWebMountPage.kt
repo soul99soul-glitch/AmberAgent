@@ -55,7 +55,9 @@ fun SettingExperimentalWebMountPage(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val navController = LocalNavController.current
-    var busyStation by remember { mutableStateOf<String?>(null) }
+    // Track which station ids are currently probing so the same probe button
+    // can be disabled per-station while leaving siblings interactive.
+    var busyStations by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_webmount_title),
@@ -87,24 +89,24 @@ fun SettingExperimentalWebMountPage(
                         stationStates.forEachIndexed { index, state ->
                             WebMountStationRow(
                                 state = state,
-                                busy = busyStation == state.id,
+                                busy = state.id in busyStations,
                                 onConfigure = {
                                     configureFor(state.id)?.let { navController.navigate(it) }
                                 },
                                 onProbe = {
-                                    busyStation = state.id
+                                    busyStations = busyStations + state.id
                                     scope.launch {
                                         runCatching { webMountManager.probe(state.id) }
                                             .onFailure { toaster.show(it.message ?: it.toString()) }
-                                        busyStation = null
+                                        busyStations = busyStations - state.id
                                     }
                                 },
                                 onWriteProbe = {
-                                    busyStation = state.id
+                                    busyStations = busyStations + state.id
                                     scope.launch {
                                         runCatching { webMountManager.runWriteProbe(state.id) }
                                             .onFailure { toaster.show(it.message ?: it.toString()) }
-                                        busyStation = null
+                                        busyStations = busyStations - state.id
                                     }
                                 },
                             )

@@ -23,6 +23,12 @@ import me.rerere.rikkahub.data.agent.webmount.cookie.EndpointSpec
  *     the new unified panel surfaces the same station.
  */
 interface WebMountAdapter {
+    /**
+     * Stable wire id used as the SharedPreferences key prefix (`enabled.<id>` etc.)
+     * and the tool name prefix. Must match `[a-z0-9_]+` — no dots, no spaces,
+     * no uppercase. Dots in particular would collide with the prefs key
+     * namespace separator.
+     */
     val id: String
     val displayName: String
     val authMethods: Set<WebMountAuthMethod>
