@@ -95,6 +95,7 @@ fun SettingExperimentalWebMountPage(
     userSiteRegistry: UserSiteRegistry = koinInject(),
     cookieProvider: WebMountCookieProvider = koinInject(),
     profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry = koinInject(),
+    settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val sites by userSiteRegistry.sites.collectAsStateWithLifecycle()
@@ -203,6 +204,26 @@ fun SettingExperimentalWebMountPage(
                             checked = evalEnabled,
                             enabled = globalEnabled,
                             onCheckedChange = { webMountManager.setEvalEnabled(it) },
+                        )
+                    }
+                    // One-tap install for the /webmount slash command. Adds a
+                    // globally-available QuickMessage that prefixes whatever
+                    // task the user types with a system-style instruction
+                    // teaching the agent to use WebMount tools.
+                    ExperimentActionRow {
+                        ExperimentActionButton(
+                            text = stringResource(R.string.setting_webmount_install_slash_command),
+                            enabled = globalEnabled,
+                            primary = true,
+                            onClick = {
+                                scope.launch {
+                                    val installed = installWebMountSlashCommand(settingsStore)
+                                    toaster.show(
+                                        if (installed) "已添加 /webmount 斜杠命令。聊天里输 / 选 webmount。"
+                                        else "你已经装过 /webmount 了。"
+                                    )
+                                }
+                            },
                         )
                     }
                 }
@@ -914,6 +935,43 @@ private fun iconForIconKey(iconKey: String?) = when (iconKey) {
     "zhihu" -> HugeIcons.BubbleChatQuestion
     "feishu_docs" -> HugeIcons.Note01
     else -> HugeIcons.Globe02
+}
+
+/**
+ * Install the /webmount slash command into the global QuickMessages list.
+ * Idempotent — returns false if a quick message titled "webmount" already
+ * exists, so re-tapping the button doesn't duplicate.
+ *
+ * The template is a system-style instruction that frames whatever follows
+ * (the user's actual task) so the agent uses WebMount tools by default,
+ * handles the "site not yet in list / not signed in" cases gracefully, and
+ * doesn't fall back to generic web search just because it doesn't recognize
+ * the site.
+ */
+private suspend fun installWebMountSlashCommand(
+    settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore,
+): Boolean {
+    val current = settingsStore.settingsFlow.value
+    val already = current.quickMessages.any { it.title.equals("webmount", ignoreCase = true) }
+    if (already) return false
+    val template = """
+        请用 WebMount 工具帮我完成下面这件事。准则:
+        1. 先调 wm_stations 看我现在哪些网站可用、登录态如何。
+        2. 涉及的网站不在列表里就 wm_site_add 加进来 (默认 needs_login=true)。
+        3. 如果某个站 login_status="unknown" 不要假设我没登录 — 直接 wm_open + wm_extract 试,
+           只有页面真出登录墙再让我去设置页登录。
+        4. 公开网站直接 wm_open + wm_extract,不需要登录。
+        5. 用完一次后,如果这是个用户加的自定义站且能记下有用 selectors,顺手调 wm_profile_synthesize
+           保存 hints,下次更快。
+
+        我的任务:
+    """.trimIndent()
+    val newQuickMessage = me.rerere.rikkahub.data.model.QuickMessage(
+        title = "webmount",
+        content = template + "\n",  // trailing newline so cursor lands on a fresh line
+    )
+    settingsStore.update { it.copy(quickMessages = it.quickMessages + newQuickMessage) }
+    return true
 }
 
 private fun slugify(name: String): String =
