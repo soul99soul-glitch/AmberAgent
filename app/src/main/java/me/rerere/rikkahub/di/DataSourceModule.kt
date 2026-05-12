@@ -11,6 +11,7 @@ import io.pebbletemplates.pebble.PebbleEngine
 import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import io.requery.android.database.sqlite.SQLiteCustomExtension
 import kotlinx.serialization.json.Json
+import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.http.AcceptLanguageBuilder
 import me.rerere.rikkahub.BuildConfig
@@ -38,9 +39,12 @@ import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
-import me.rerere.rikkahub.data.sync.webdav.WebDavSync
+import me.rerere.rikkahub.data.sync.core.SyncArchiveManager
+import me.rerere.rikkahub.data.sync.google.GoogleDriveAppDataClient
+import me.rerere.rikkahub.data.sync.google.GoogleDriveSyncRepository
+import me.rerere.rikkahub.data.sync.google.GoogleOAuthConfigGate
+import me.rerere.rikkahub.data.sync.local.LocalBackupRepository
 import me.rerere.search.SearchService
-import me.rerere.rikkahub.data.sync.S3Sync
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -282,16 +286,6 @@ val dataSourceModule = module {
         ProviderManager(client = get(), context = get())
     }
 
-    single {
-        WebDavSync(
-            settingsStore = get(),
-            json = get(),
-            context = get(),
-            httpClient = get(),
-            appDatabase = get()
-        )
-    }
-
     single<HttpClient> {
         HttpClient(OkHttp) {
             engine {
@@ -307,13 +301,32 @@ val dataSourceModule = module {
         }
     }
 
+    single { OpenAICodexAuthStore(context = get()) }
+
     single {
-        S3Sync(
-            settingsStore = get(),
-            json = get(),
+        SyncArchiveManager(
             context = get(),
-            httpClient = get(),
-            appDatabase = get()
+            settingsStore = get(),
+            database = get(),
+            messageFtsManager = get(),
+            filesManager = get(),
+            webMountOAuthTokenStore = get(),
+            openAICodexAuthStore = get(),
+            json = get(),
+        )
+    }
+
+    single { LocalBackupRepository(context = get(), syncArchiveManager = get()) }
+
+    single { GoogleOAuthConfigGate(context = get()) }
+
+    single { GoogleDriveAppDataClient(httpClient = createGoogleDriveHttpClient(get()), json = get()) }
+
+    single {
+        GoogleDriveSyncRepository(
+            context = get(),
+            driveClient = get(),
+            archiveManager = get(),
         )
     }
 
@@ -327,4 +340,27 @@ val dataSourceModule = module {
     single<RikkaHubAPI> {
         get<Retrofit>().create(RikkaHubAPI::class.java)
     }
+}
+
+private fun createGoogleDriveHttpClient(context: Context): OkHttpClient {
+    val acceptLang = AcceptLanguageBuilder.fromAndroid(context).build()
+    return OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.MINUTES)
+        .writeTimeout(120, TimeUnit.SECONDS)
+        .followSslRedirects(true)
+        .followRedirects(true)
+        .retryOnConnectionFailure(true)
+        .addInterceptor { chain ->
+            val originalRequest = chain.request()
+            val requestBuilder = originalRequest.newBuilder()
+                .addHeader(HttpHeaders.AcceptLanguage, acceptLang)
+
+            if (originalRequest.header(HttpHeaders.UserAgent) == null) {
+                requestBuilder.addHeader(HttpHeaders.UserAgent, "AmberAgent-Android/${BuildConfig.VERSION_NAME}")
+            }
+
+            chain.proceed(requestBuilder.build())
+        }
+        .build()
 }

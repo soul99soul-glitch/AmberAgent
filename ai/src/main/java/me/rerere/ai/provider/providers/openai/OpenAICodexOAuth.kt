@@ -84,6 +84,24 @@ class OpenAICodexAuthStore(context: Context) {
     fun clear(providerId: Uuid) {
         prefs.edit().remove(providerId.toString()).apply()
     }
+
+    fun exportRawJsonForSync(): String {
+        val values = prefs.all.mapNotNull { (key, value) ->
+            val raw = value as? String ?: return@mapNotNull null
+            key to raw
+        }.toMap()
+        return json.encodeToString(values)
+    }
+
+    fun restoreRawJsonFromSync(raw: String) {
+        val values = runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrNull() ?: return
+        prefs.edit().apply {
+            clear()
+            values.forEach { (key, value) ->
+                putString(key, value)
+            }
+        }.apply()
+    }
 }
 
 class OpenAICodexOAuthClient(

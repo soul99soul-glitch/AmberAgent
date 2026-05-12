@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.utils.JsonInstant
 import java.util.Locale
 
 data class ToolMetadata(
@@ -111,7 +112,7 @@ enum class ToolRisk {
 
 fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
     val input = runCatching {
-        kotlinx.serialization.json.Json.parseToJsonElement(inputText.ifBlank { "{}" })
+        JsonInstant.parseToJsonElement(inputText.ifBlank { "{}" })
     }.getOrNull()
     return invocationPolicy(input)
 }

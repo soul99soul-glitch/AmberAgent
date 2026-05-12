@@ -8,6 +8,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 
 data class MessageSearchResult(
@@ -54,6 +55,45 @@ class MessageFtsManager(private val database: AppDatabase) {
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         db.execSQL("DELETE FROM message_fts")
+    }
+
+    suspend fun rebuildAllFromDatabase() = withContext(Dispatchers.IO) {
+        db.execSQL("DELETE FROM message_fts")
+        val cursor = db.query(
+            """
+            SELECT n.id, n.messages, n.conversation_id, c.title, c.update_at
+            FROM message_node n
+            JOIN conversationentity c ON c.id = n.conversation_id
+            """.trimIndent()
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                val nodeId = it.getString(0)
+                val messagesJson = it.getString(1)
+                val conversationId = it.getString(2)
+                val title = it.getString(3)
+                val updateAt = it.getLong(4).toString()
+                val messages = runCatching {
+                    JsonInstant.decodeFromString<List<UIMessage>>(messagesJson)
+                }.getOrElse { emptyList() }
+                messages.forEach { message ->
+                    val text = message.extractFtsText()
+                    if (text.isNotBlank()) {
+                        db.execSQL(
+                            "INSERT INTO message_fts(text, node_id, message_id, conversation_id, title, update_at) VALUES (?, ?, ?, ?, ?, ?)",
+                            arrayOf(
+                                text,
+                                nodeId,
+                                message.id.toString(),
+                                conversationId,
+                                title,
+                                updateAt,
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 
     suspend fun search(keyword: String): List<MessageSearchResult> = withContext(Dispatchers.IO) {

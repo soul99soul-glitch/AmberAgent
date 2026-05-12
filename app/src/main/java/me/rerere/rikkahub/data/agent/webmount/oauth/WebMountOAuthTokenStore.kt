@@ -72,6 +72,35 @@ class WebMountOAuthTokenStore(context: Context) {
     fun tokenProviders(): Set<String> =
         tokens?.all?.keys?.toSet() ?: memTokens.keys.toSet()
 
+    fun exportRawJsonForSync(): String = buildJsonObject {
+        put("tokens", buildJsonObject {
+            tokenProviders().forEach { provider ->
+                getToken(provider)?.let { put(provider, it.toJson()) }
+            }
+        })
+        put("credentials", buildJsonObject {
+            credentialProviders().forEach { provider ->
+                getCredentials(provider)?.let { put(provider, it.toJson()) }
+            }
+        })
+    }.toString()
+
+    fun restoreRawJsonFromSync(raw: String) {
+        val obj = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return
+        clearAllForSync()
+        obj["tokens"]?.jsonObject?.forEach { (provider, value) ->
+            runCatching { putToken(provider, tokenFromJson(value.jsonObject)) }
+        }
+        obj["credentials"]?.jsonObject?.forEach { (provider, value) ->
+            runCatching { putCredentials(provider, credentialsFromJson(value.jsonObject)) }
+        }
+    }
+
+    private fun clearAllForSync() {
+        tokenProviders().forEach(::clearToken)
+        credentialProviders().forEach(::clearCredentials)
+    }
+
     // ---- credentials -------------------------------------------------------
 
     fun putCredentials(provider: String, cred: OAuthAppCredentials) {
@@ -98,6 +127,9 @@ class WebMountOAuthTokenStore(context: Context) {
         memCreds.remove(provider)
         _updates.tryEmit("$provider:credentials")
     }
+
+    fun credentialProviders(): Set<String> =
+        creds?.all?.keys?.toSet() ?: memCreds.keys.toSet()
 
     // ---- M1.1 compatibility shims (called by WebMountManager ctor) ---------
 

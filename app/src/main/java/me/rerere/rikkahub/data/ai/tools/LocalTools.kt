@@ -6,7 +6,6 @@ import com.whl.quickjs.wrapper.QuickJSObject
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -38,6 +37,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
 import java.net.URLEncoder
@@ -1006,7 +1006,7 @@ class LocalTools(
             val toolName = input.jsonObject["tool_name"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val rawInput = input.jsonObject["input"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val toolInput = runCatching {
-                Json.parseToJsonElement(rawInput.ifBlank { "{}" })
+                JsonInstant.parseToJsonElement(rawInput.ifBlank { "{}" })
             }.getOrNull()
             val policy = registry.evaluateInvocation(toolName, toolInput)
             val payload = buildJsonObject {

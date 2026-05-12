@@ -129,6 +129,25 @@ private const val GENERATION_CHECKPOINT_INTERVAL_MS = 10_000L
 private const val INITIAL_TIMELINE_NODE_COUNT = 80
 private const val TIMELINE_PREFETCH_BATCH_SIZE = 40
 private const val TIMELINE_PREFETCH_DELAY_MS = 32L
+private const val ASK_USER_TOOL_NAME = "ask_user"
+
+private val TOOL_APPROVAL_CONTINUATION_WORDS = setOf(
+    "继续",
+    "继续吧",
+    "可以继续",
+    "执行",
+    "执行吧",
+    "确认",
+    "同意",
+    "批准",
+    "ok",
+    "yes",
+    "y",
+    "continue",
+    "goahead",
+    "approve",
+    "approved",
+)
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -421,7 +440,10 @@ class ChatService(
 
     suspend fun initializeConversation(conversationId: Uuid) {
         val session = getOrCreateSession(conversationId) // 确保 session 存在
-        if (session.timelineLoadState.value.initialized) return
+        if (session.timelineLoadState.value.initialized) {
+            launchPendingMessageLoopIfNeeded(conversationId, session)
+            return
+        }
 
         val window = conversationRepo.getConversationTailById(conversationId, INITIAL_TIMELINE_NODE_COUNT)
         if (window != null) {
@@ -458,6 +480,16 @@ class ChatService(
                     prefetchingOlder = false,
                 )
             )
+        }
+        launchPendingMessageLoopIfNeeded(conversationId, session)
+    }
+
+    private fun launchPendingMessageLoopIfNeeded(
+        conversationId: Uuid,
+        session: ConversationSession,
+    ) {
+        if (!session.isGenerating && session.pendingUserMessages.value.isNotEmpty()) {
+            launchPendingMessageLoop(conversationId)
         }
     }
 
@@ -555,7 +587,6 @@ class ChatService(
 
         val session = getOrCreateSession(conversationId)
         val processedContent = preprocessUserInputParts(content)
-        val shouldQueue = session.isGenerating || session.state.value.hasPendingOrUnexecutedTools()
         val pendingMessage = PendingUserMessage(
             id = Uuid.random().toString(),
             parts = processedContent,
@@ -563,7 +594,7 @@ class ChatService(
             mode = if (session.isGenerating) queueMode else PendingUserMessageMode.FOLLOWUP,
         )
 
-        if (shouldQueue) {
+        if (session.isGenerating) {
             val accepted = session.enqueuePendingUserMessage(pendingMessage)
             if (!accepted) {
                 addError(
@@ -590,7 +621,7 @@ class ChatService(
         firstMessage: PendingUserMessage? = null,
     ) {
         val session = getOrCreateSession(conversationId)
-        if (session.isGenerating || session.state.value.hasPendingOrUnexecutedTools()) {
+        if (session.isGenerating) {
             firstMessage?.let { message ->
                 if (!session.enqueuePendingUserMessage(message)) {
                     addError(
@@ -621,6 +652,15 @@ class ChatService(
                         messageId = dispatchMessage.id,
                         detail = dispatchMessage.mode.name.lowercase(),
                     )
+                    if (resolveIdleToolBlockerBeforeDispatch(conversationId, dispatchMessage)) {
+                        _generationDoneFlow.emit(conversationId)
+                        val conversation = getConversationFlow(conversationId).value
+                        if (conversation.hasPendingOrUnexecutedTools()) {
+                            break
+                        }
+                        nextMessage = session.dequeueNextPendingUserMessage()
+                        continue
+                    }
                     appendUserMessage(conversationId, dispatchMessage)
                     if (dispatchMessage.answer) {
                         handleMessageComplete(conversationId)
@@ -641,6 +681,109 @@ class ChatService(
             }
         }
         session.setJob(job)
+    }
+
+    private suspend fun resolveIdleToolBlockerBeforeDispatch(
+        conversationId: Uuid,
+        message: PendingUserMessage,
+    ): Boolean {
+        val currentConversation = getConversationFlow(conversationId).value
+        val lastNode = currentConversation.messageNodes.lastOrNull() ?: return false
+        val lastMessage = lastNode.currentMessage
+        val blockingTools = lastMessage.getTools().filter { !it.isExecuted }
+        if (blockingTools.isEmpty()) return false
+
+        val userAnswer = message.previewText(maxChars = 4_000)
+        val explicitApproval = message.isToolApprovalContinuation()
+        val hasAskUserAnswer = userAnswer.isNotBlank() &&
+            blockingTools.any { it.isPending && it.toolName == ASK_USER_TOOL_NAME }
+        val shouldResume = explicitApproval || hasAskUserAnswer
+
+        var changed = false
+        val updatedMessage = lastMessage.copy(
+            parts = lastMessage.parts.map { part ->
+                if (part is UIMessagePart.Tool && !part.isExecuted) {
+                    when {
+                        part.toolName == ASK_USER_TOOL_NAME && hasAskUserAnswer -> {
+                            changed = true
+                            part.copy(approvalState = ToolApprovalState.Answered(userAnswer))
+                        }
+
+                        explicitApproval && part.isPending -> {
+                            changed = true
+                            part.copy(approvalState = ToolApprovalState.Approved)
+                        }
+
+                        explicitApproval -> {
+                            changed = true
+                            skipStaleToolForContinuation(part)
+                        }
+
+                        hasAskUserAnswer -> {
+                            part
+                        }
+
+                        else -> {
+                            changed = true
+                            cancelToolForNewUserMessage(part)
+                        }
+                    }
+                } else {
+                    part
+                }
+            }
+        )
+        if (!changed || updatedMessage == lastMessage) return false
+
+        val updatedConversation = currentConversation.copy(
+            messageNodes = currentConversation.messageNodes.dropLast(1) + lastNode.copy(
+                messages = lastNode.messages.map { nodeMessage ->
+                    if (nodeMessage.id == lastMessage.id) updatedMessage else nodeMessage
+                }
+            ),
+            updateAt = Instant.now(),
+        )
+        saveConversation(conversationId, updatedConversation)
+        recordPendingQueueEvent(
+            conversationId = conversationId,
+            event = if (shouldResume) "pending_tool_resume" else "pending_tool_cancel",
+            messageId = message.id,
+            count = blockingTools.size,
+            detail = blockingTools.joinToString(separator = ",") { it.toolName },
+        )
+
+        if (shouldResume) {
+            handleMessageComplete(conversationId)
+            return true
+        }
+        return false
+    }
+
+    private fun PendingUserMessage.isToolApprovalContinuation(): Boolean {
+        if (parts.any { it !is UIMessagePart.Text }) return false
+        val raw = previewText(maxChars = 80).trim().lowercase(Locale.ROOT)
+        if (raw.isBlank()) return false
+        val compact = raw.replace(Regex("""[\s\p{Punct}，。！？、；：「」『』（）【】《》]+"""), "")
+        return compact in TOOL_APPROVAL_CONTINUATION_WORDS ||
+            compact.startsWith("继续") ||
+            compact.startsWith("可以继续")
+    }
+
+    private fun cancelToolForNewUserMessage(tool: UIMessagePart.Tool): UIMessagePart.Tool {
+        return tool.copy(
+            output = listOf(
+                UIMessagePart.Text(
+                    """{"status":"cancelled","error":"A new user message arrived before this pending tool was approved, so AmberAgent cancelled the stale tool state and continued the conversation."}"""
+                )
+            ),
+            approvalState = ToolApprovalState.Denied("Cancelled because a new user message arrived before approval")
+        )
+    }
+
+    private fun skipStaleToolForContinuation(tool: UIMessagePart.Tool): UIMessagePart.Tool {
+        return tool.copy(
+            approvalState = ToolApprovalState.Denied("Skipped stale tool after user asked to continue")
+        )
     }
 
     private suspend fun appendUserMessage(

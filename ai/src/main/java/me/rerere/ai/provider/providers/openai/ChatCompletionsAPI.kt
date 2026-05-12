@@ -28,6 +28,8 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.OpenAIBrand
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.PartGroup
@@ -257,9 +259,10 @@ class ChatCompletionsAPI(
         stream: Boolean = false,
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
+        val isMiMo = isMiMoProvider(providerSetting, host, params.model.modelId)
         return buildJsonObject {
             put("model", params.model.modelId)
-            put("messages", buildMessages(messages))
+            put("messages", buildMessages(messages, preserveHistoricalReasoningContent = isMiMo))
 
             if (isModelAllowTemperature(params.model)) {
                 if (params.temperature != null) put("temperature", params.temperature)
@@ -288,8 +291,15 @@ class ChatCompletionsAPI(
 
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
-                when (host) {
-                    "openrouter.ai" -> {
+                when {
+                    isMiMo -> {
+                        // MiMo thinking mode uses the OpenAI-compatible extra_body field `thinking`.
+                        put("thinking", buildJsonObject {
+                            put("type", if (level.isEnabled) "enabled" else "disabled")
+                        })
+                    }
+
+                    host == "openrouter.ai" -> {
                         // https://openrouter.ai/docs/use-cases/reasoning-tokens
                         put("reasoning", buildJsonObject {
                             when (level) {
@@ -300,31 +310,31 @@ class ChatCompletionsAPI(
                         })
                     }
 
-                    "dashscope.aliyuncs.com" -> {
+                    host == "dashscope.aliyuncs.com" -> {
                         // 阿里云百炼
                         // https://bailian.console.aliyun.com/console?tab=doc#/doc/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2870973.html&renderType=iframe
                         put("enable_thinking", level.isEnabled)
                         if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
                     }
 
-                    "ark.cn-beijing.volces.com" -> {
+                    host == "ark.cn-beijing.volces.com" -> {
                         // 豆包 (火山)
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
                     }
 
-                    "api.mistral.ai" -> {
+                    host == "api.mistral.ai" -> {
                         // Mistral 不支持
                     }
 
-                    "chat.intern-ai.org.cn" -> {
+                    host == "chat.intern-ai.org.cn" -> {
                         // 书生
                         // https://internlm.intern-ai.org.cn/api/document?lang=zh
                         put("thinking_mode", level.isEnabled)
                     }
 
-                    "api.siliconflow.cn" -> {
+                    host == "api.siliconflow.cn" -> {
                         // https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning#3-1-api-%E5%8F%82%E6%95%B0
                         val modelId = params.model.modelId
                         val siliconflowThinkingModels = setOf(
@@ -359,19 +369,19 @@ class ChatCompletionsAPI(
                         }
                     }
 
-                    "open.bigmodel.cn" -> {
+                    host == "open.bigmodel.cn" -> {
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
                     }
 
-                    "api.moonshot.cn" -> {
+                    host == "api.moonshot.cn" -> {
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
                     }
 
-                    "api.deepseek.com" -> {
+                    host == "api.deepseek.com" -> {
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
@@ -416,17 +426,35 @@ class ChatCompletionsAPI(
         return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) && !ModelRegistry.GPT_5.match(model.modelId)
     }
 
-    private fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
+    private fun buildMessages(
+        messages: List<UIMessage>,
+        preserveHistoricalReasoningContent: Boolean,
+    ) = buildJsonArray {
         val filteredMessages = messages.filter { it.isValidToUpload() }
         val lastUserIndex = filteredMessages.indexOfLast { it.role == MessageRole.USER }
 
         filteredMessages.forEachIndexed { index, message ->
             if (message.role == MessageRole.ASSISTANT) {
-                addAssistantMessages(message, includeReasoning = index > lastUserIndex)
+                addAssistantMessages(
+                    message = message,
+                    includeReasoning = preserveHistoricalReasoningContent || index > lastUserIndex,
+                )
             } else {
                 addNonAssistantMessage(message)
             }
         }
+    }
+
+    private fun isMiMoProvider(
+        providerSetting: ProviderSetting.OpenAI,
+        host: String,
+        modelId: String,
+    ): Boolean {
+        val lowerModelId = modelId.lowercase()
+        return providerSetting.brand == OpenAIBrand.MIMO ||
+            providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
+            host.endsWith("xiaomimimo.com") ||
+            lowerModelId.contains("mimo")
     }
 
     private fun JsonArrayBuilder.addAssistantMessages(message: UIMessage, includeReasoning: Boolean) {

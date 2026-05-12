@@ -1,37 +1,36 @@
 package me.rerere.rikkahub.ui.pages.backup
 
-import android.util.Log
+import android.app.PendingIntent
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.provider.Modality
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelAbility
-import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.sync.importer.CherryStudioProviderImporter
-import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
-import me.rerere.rikkahub.data.sync.webdav.WebDavSync
-import me.rerere.rikkahub.data.sync.S3BackupItem
-import me.rerere.rikkahub.data.sync.S3Sync
-import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.data.sync.core.SyncExportRequest
+import me.rerere.rikkahub.data.sync.core.SyncMode
+import me.rerere.rikkahub.data.sync.core.SyncPreview
+import me.rerere.rikkahub.data.sync.core.SyncRestoreRequest
+import me.rerere.rikkahub.data.sync.google.GoogleDriveAuthSession
+import me.rerere.rikkahub.data.sync.google.GoogleDriveAuthRequiredException
+import me.rerere.rikkahub.data.sync.google.GoogleDriveAuthorizationOutcome
+import me.rerere.rikkahub.data.sync.google.GoogleDriveFile
+import me.rerere.rikkahub.data.sync.google.GoogleDriveSyncRepository
+import me.rerere.rikkahub.data.sync.google.GoogleOAuthConfigGate
+import me.rerere.rikkahub.data.sync.google.GoogleOAuthConfigStatus
+import me.rerere.rikkahub.data.sync.local.LocalBackupRepository
 import me.rerere.rikkahub.utils.UiState
-import java.io.File
-
-private const val TAG = "BackupVM"
+import kotlin.uuid.Uuid
 
 class BackupVM(
     private val settingsStore: SettingsStore,
-    private val webDavSync: WebDavSync,
-    private val s3Sync: S3Sync,
+    private val localBackupRepository: LocalBackupRepository,
+    private val googleDriveSyncRepository: GoogleDriveSyncRepository,
+    googleOAuthConfigGate: GoogleOAuthConfigGate,
 ) : ViewModel() {
     val settings = settingsStore.settingsFlow.stateIn(
         scope = viewModelScope,
@@ -39,200 +38,355 @@ class BackupVM(
         initialValue = Settings.dummy()
     )
 
-    val webDavBackupItems = MutableStateFlow<UiState<List<WebDavBackupItem>>>(UiState.Idle)
-    val s3BackupItems = MutableStateFlow<UiState<List<S3BackupItem>>>(UiState.Idle)
+    val operationState = MutableStateFlow<UiState<SyncPreview>>(UiState.Idle)
+    val pendingImportPreview = MutableStateFlow<SyncPreview?>(null)
+    val googleSession = MutableStateFlow<GoogleDriveAuthSession?>(null)
+    val googleMessage = MutableStateFlow("")
+    val pendingGoogleAuthorization = MutableStateFlow<PendingIntent?>(null)
+    val pendingCloudRestore = MutableStateFlow(false)
+    val cloudConflict = MutableStateFlow<GoogleCloudConflict?>(null)
+    val googleConfigStatus: GoogleOAuthConfigStatus = googleOAuthConfigGate.status()
+
+    private var pendingCloudRestoreBytes: ByteArray? = null
+    private var pendingCloudRestoreRevision: String = ""
+    private var pendingCloudUploadRequest: SyncExportRequest? = null
+    private var googleAuthorizationInFlight = false
 
     init {
-        loadBackupFileItems()
-        loadS3BackupFileItems()
-    }
-
-    fun updateSettings(settings: Settings) {
         viewModelScope.launch {
-            settingsStore.update(settings)
+            settingsStore.update { current ->
+                if (current.init || current.syncSettings.deviceId.isNotBlank()) {
+                    current
+                } else {
+                    current.copy(
+                        syncSettings = current.syncSettings.copy(
+                            deviceId = Uuid.random().toString()
+                        )
+                    )
+                }
+            }
         }
     }
 
-    fun loadBackupFileItems() {
+    fun updateMode(mode: SyncMode) {
         viewModelScope.launch {
+            settingsStore.update { current ->
+                current.copy(syncSettings = current.syncSettings.copy(mode = mode))
+            }
+        }
+    }
+
+    fun connectGoogle() {
+        if (googleAuthorizationInFlight) return
+        googleAuthorizationInFlight = true
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
+            try {
+                runCatching {
+                    googleDriveSyncRepository.authorizeDrive()
+                }.onSuccess { outcome ->
+                    when (outcome) {
+                        is GoogleDriveAuthorizationOutcome.Authorized -> {
+                            applyGoogleSession(outcome.session)
+                            operationState.value = UiState.Idle
+                        }
+
+                        is GoogleDriveAuthorizationOutcome.ResolutionRequired -> {
+                            pendingGoogleAuthorization.value = outcome.pendingIntent
+                            operationState.value = UiState.Idle
+                        }
+                    }
+                }.onFailure { error ->
+                    operationState.value = UiState.Error(error)
+                    googleMessage.value = "Google 授权失败：${error.message.orEmpty()}"
+                    recordError(error)
+                }
+            } finally {
+                googleAuthorizationInFlight = false
+            }
+        }
+    }
+
+    fun consumePendingGoogleAuthorization() {
+        pendingGoogleAuthorization.value = null
+    }
+
+    fun completeGoogleAuthorization(intent: Intent?) {
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
             runCatching {
-                webDavBackupItems.emit(UiState.Loading)
-                webDavBackupItems.emit(
-                    value = UiState.Success(
-                        data = webDavSync.listBackupFiles(
-                            config = settings.value.webDavConfig
-                        ).sortedByDescending { it.lastModified }
-                    )
-                )
-            }.onFailure {
-                webDavBackupItems.emit(UiState.Error(it))
+                googleDriveSyncRepository.completeAuthorization(intent)
+            }.onSuccess { session ->
+                applyGoogleSession(session)
+                operationState.value = UiState.Idle
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                googleMessage.value = "Google 授权失败：${error.message.orEmpty()}"
+                recordError(error)
             }
         }
     }
 
-    suspend fun testWebDav() {
-        webDavSync.testConnection(settings.value.webDavConfig)
+    fun cancelGoogleAuthorization() {
+        googleMessage.value = "Google 授权已取消"
+        operationState.value = UiState.Idle
     }
 
-    suspend fun backup() {
-        webDavSync.backup(settings.value.webDavConfig)
-        recordBackupTime()
-    }
-
-    suspend fun restore(item: WebDavBackupItem) {
-        webDavSync.restore(config = settings.value.webDavConfig, item = item)
-    }
-
-    suspend fun deleteWebDavBackupFile(item: WebDavBackupItem) {
-        webDavSync.deleteBackupFile(settings.value.webDavConfig, item)
-    }
-
-    suspend fun exportToFile(): File {
-        val file = webDavSync.prepareBackupFile(settings.value.webDavConfig.copy())
-        recordBackupTime()
-        return file
-    }
-
-    suspend fun restoreFromLocalFile(file: File) {
-        webDavSync.restoreFromLocalFile(file, settings.value.webDavConfig)
-    }
-
-    fun restoreFromChatBox(file: File) {
-        val importProviders = arrayListOf<ProviderSetting>()
-
-        val jsonElements = JsonInstant.parseToJsonElement(file.readText()).jsonObject
-        val settingsObj = jsonElements["settings"]?.jsonObject
-        if (settingsObj != null) {
-            settingsObj["providers"]?.jsonObject?.let { providers ->
-                providers["openai"]?.jsonObject?.let { openai ->
-                    val apiHost = openai["apiHost"]?.jsonPrimitive?.contentOrNull ?: "https://api.openai.com"
-                    val apiKey = openai["apiKey"]?.jsonPrimitive?.contentOrNull ?: ""
-                    val models = openai["models"]?.jsonArray?.map { element ->
-                        val modelId = element.jsonObject["modelId"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val capabilities =
-                            element.jsonObject["capabilities"]?.jsonArray?.map { it.jsonPrimitive.contentOrNull }
-                                ?: emptyList()
-                        Model(
-                            modelId = modelId,
-                            displayName = modelId,
-                            inputModalities = buildList {
-                                if (capabilities.contains("vision")) {
-                                    add(Modality.IMAGE)
-                                }
-                            },
-                            abilities = buildList {
-                                if (capabilities.contains("tool_use")) {
-                                    add(ModelAbility.TOOL)
-                                }
-                                if (capabilities.contains("reasoning")) {
-                                    add(ModelAbility.REASONING)
-                                }
-                            }
-                        )
-                    } ?: emptyList()
-                    if (apiKey.isNotBlank()) importProviders.add(
-                        ProviderSetting.OpenAI(
-                            name = "OpenAI",
-                            baseUrl = "$apiHost/v1",
-                            apiKey = apiKey,
-                            models = models,
-                        )
-                    )
-                }
-                providers["claude"]?.jsonObject?.let { claude ->
-                    val apiHost =
-                        claude["apiHost"]?.jsonPrimitive?.contentOrNull ?: "https://api.anthropic.com"
-                    val apiKey = claude["apiKey"]?.jsonPrimitive?.contentOrNull ?: ""
-                    if (apiKey.isNotBlank()) importProviders.add(
-                        ProviderSetting.Claude(
-                            name = "Claude",
-                            baseUrl = "${apiHost}/v1",
-                            apiKey = apiKey,
-                        )
-                    )
-                }
-                providers["gemini"]?.jsonObject?.let { gemini ->
-                    val apiHost = gemini["apiHost"]?.jsonPrimitive?.contentOrNull
-                        ?: "https://generativelanguage.googleapis.com"
-                    val apiKey = gemini["apiKey"]?.jsonPrimitive?.contentOrNull ?: ""
-                    if (apiKey.isNotBlank()) importProviders.add(
-                        ProviderSetting.Google(
-                            name = "Gemini",
-                            baseUrl = "$apiHost/v1beta",
-                            apiKey = apiKey,
-                        )
-                    )
-                }
-            }
+    fun uploadGoogle(mode: SyncMode, passphrase: String, overwrite: Boolean = false) {
+        val session = googleSession.value
+        if (session == null) {
+            connectGoogle()
+            googleMessage.value = "请先完成 Google Drive 授权，再上传云端快照。"
+            return
         }
-
-        Log.i(TAG, "restoreFromChatBox: import ${importProviders.size} providers: $importProviders")
-
-        updateSettings(
-            settings.value.copy(
-                providers = importProviders + settings.value.providers,
-            )
-        )
-    }
-
-    fun restoreFromCherryStudio(file: File) {
-        val importProviders = CherryStudioProviderImporter.importProviders(file)
-
-        if (importProviders.isEmpty()) {
-            throw IllegalArgumentException("No importable providers found in Cherry Studio backup")
-        }
-
-        Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers: $importProviders")
-
-        updateSettings(
-            settings.value.copy(
-                providers = importProviders + settings.value.providers,
-            )
-        )
-    }
-
-    // S3 Backup methods
-    fun loadS3BackupFileItems() {
+        val request = SyncExportRequest(mode = mode, passphrase = passphrase)
         viewModelScope.launch {
+            operationState.value = UiState.Loading
             runCatching {
-                s3BackupItems.emit(UiState.Loading)
-                s3BackupItems.emit(
-                    value = UiState.Success(
-                        data = s3Sync.listBackupFiles(
-                            config = settings.value.s3Config
+                val remote = googleDriveSyncRepository.findLatest(session)
+                val localRevision = settings.value.syncSettings.lastRemoteRevision
+                if (!overwrite && remote != null && remote.revisionKey != localRevision) {
+                    pendingCloudUploadRequest = request
+                    cloudConflict.value = GoogleCloudConflict(
+                        remoteFile = remote,
+                        localRevision = localRevision,
+                    )
+                    operationState.value = UiState.Idle
+                    return@launch
+                }
+                googleDriveSyncRepository.upload(
+                    session = session,
+                    request = request,
+                    existingFileId = remote?.id,
+                    expectedRemoteRevision = remote?.revisionKey,
+                )
+            }.onSuccess { result ->
+                settingsStore.update { current ->
+                    current.copy(
+                        syncSettings = current.syncSettings.copy(
+                            googleEnabled = true,
+                            googleAccountEmail = session.accountEmail,
+                            googleAccountId = session.accountId,
+                            googleDisplayName = session.displayName,
+                            mode = mode,
+                            lastUploadAt = System.currentTimeMillis(),
+                            lastRemoteRevision = result.file.revisionKey,
+                            lastError = "",
                         )
                     )
-                )
-            }.onFailure {
-                s3BackupItems.emit(UiState.Error(it))
+                }
+                googleMessage.value = "已上传到 Google Drive：${session.label}"
+                operationState.value = UiState.Success(result.preview)
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                googleMessage.value = "云端上传失败：${error.message.orEmpty()}"
+                recordGoogleDriveError(error)
             }
         }
     }
 
-    suspend fun testS3() {
-        s3Sync.testS3(settings.value.s3Config)
+    fun confirmOverwriteCloud() {
+        val request = pendingCloudUploadRequest ?: return
+        pendingCloudUploadRequest = null
+        cloudConflict.value = null
+        uploadGoogle(request.mode, request.passphrase, overwrite = true)
     }
 
-    suspend fun backupToS3() {
-        s3Sync.backupToS3(settings.value.s3Config)
-        recordBackupTime()
+    fun dismissCloudConflict() {
+        pendingCloudUploadRequest = null
+        cloudConflict.value = null
+        operationState.value = UiState.Idle
     }
 
-    suspend fun restoreFromS3(item: S3BackupItem) {
-        s3Sync.restoreFromS3(config = settings.value.s3Config, item = item)
+    fun downloadGooglePreview() {
+        val session = googleSession.value
+        if (session == null) {
+            connectGoogle()
+            googleMessage.value = "请先完成 Google Drive 授权，再下载云端快照。"
+            return
+        }
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
+            runCatching {
+                googleDriveSyncRepository.downloadLatest(session)
+            }.onSuccess { result ->
+                pendingCloudRestoreBytes = result.bytes
+                pendingCloudRestoreRevision = result.file.revisionKey
+                pendingCloudRestore.value = true
+                pendingImportPreview.value = result.preview
+                googleMessage.value = "已读取云端快照，确认后可恢复。"
+                operationState.value = UiState.Success(result.preview)
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                googleMessage.value = "云端下载失败：${error.message.orEmpty()}"
+                recordGoogleDriveError(error)
+            }
+        }
     }
 
-    suspend fun deleteS3BackupFile(item: S3BackupItem) {
-        s3Sync.deleteS3BackupFile(settings.value.s3Config, item)
+    fun restoreGoogle(passphrase: String) {
+        val bytes = pendingCloudRestoreBytes
+        if (bytes == null) {
+            operationState.value = UiState.Error(IllegalStateException("没有待恢复的云端快照"))
+            return
+        }
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
+            runCatching {
+                googleDriveSyncRepository.restore(
+                    bytes = bytes,
+                    request = SyncRestoreRequest(passphrase = passphrase),
+                )
+            }.onSuccess { preview ->
+                pendingCloudRestoreBytes = null
+                pendingCloudRestore.value = false
+                pendingImportPreview.value = null
+                settingsStore.update { current ->
+                    current.copy(
+                        syncSettings = current.syncSettings.copy(
+                            googleEnabled = true,
+                            lastDownloadAt = System.currentTimeMillis(),
+                            lastRemoteRevision = pendingCloudRestoreRevision,
+                            lastError = "",
+                        )
+                    )
+                }
+                pendingCloudRestoreRevision = ""
+                googleMessage.value = "已从 Google Drive 恢复快照。"
+                operationState.value = UiState.Success(preview)
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                googleMessage.value = "云端恢复失败：${error.message.orEmpty()}"
+                recordError(error)
+            }
+        }
     }
 
-    private suspend fun recordBackupTime() {
-        settingsStore.update { settings ->
-            settings.copy(
-                backupReminderConfig = settings.backupReminderConfig.copy(
-                    lastBackupTime = System.currentTimeMillis()
+    fun exportLocal(uri: Uri, mode: SyncMode, passphrase: String) {
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
+            runCatching {
+                localBackupRepository.exportToUri(
+                    uri = uri,
+                    request = SyncExportRequest(mode = mode, passphrase = passphrase)
+                )
+            }.onSuccess { preview ->
+                settingsStore.update { current ->
+                    current.copy(
+                        syncSettings = current.syncSettings.copy(
+                            mode = mode,
+                            lastLocalExportAt = System.currentTimeMillis(),
+                            lastError = "",
+                        )
+                    )
+                }
+                operationState.value = UiState.Success(preview)
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                recordError(error)
+            }
+        }
+    }
+
+    fun inspectImport(uri: Uri) {
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
+            runCatching {
+                localBackupRepository.inspectUri(uri)
+            }.onSuccess { preview ->
+                pendingImportPreview.value = preview
+                operationState.value = UiState.Success(preview)
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                recordError(error)
+            }
+        }
+    }
+
+    fun restoreLocal(uri: Uri, passphrase: String) {
+        viewModelScope.launch {
+            operationState.value = UiState.Loading
+            runCatching {
+                localBackupRepository.restoreFromUri(
+                    uri = uri,
+                    request = SyncRestoreRequest(passphrase = passphrase)
+                )
+            }.onSuccess { preview ->
+                pendingImportPreview.value = null
+                settingsStore.update { current ->
+                    current.copy(
+                        syncSettings = current.syncSettings.copy(
+                            lastDownloadAt = System.currentTimeMillis(),
+                            lastError = "",
+                        )
+                    )
+                }
+                operationState.value = UiState.Success(preview)
+            }.onFailure { error ->
+                operationState.value = UiState.Error(error)
+                recordError(error)
+            }
+        }
+    }
+
+    fun clearOperationState() {
+        operationState.value = UiState.Idle
+    }
+
+    fun clearPendingImport() {
+        pendingImportPreview.value = null
+        pendingCloudRestoreBytes = null
+        pendingCloudRestore.value = false
+        pendingCloudRestoreRevision = ""
+    }
+
+    private suspend fun applyGoogleSession(session: GoogleDriveAuthSession) {
+        googleSession.value = session
+        googleMessage.value = "已连接：${session.label}"
+        settingsStore.update { current ->
+            current.copy(
+                syncSettings = current.syncSettings.copy(
+                    googleEnabled = true,
+                    googleAccountEmail = session.accountEmail,
+                    googleAccountId = session.accountId,
+                    googleDisplayName = session.displayName,
+                    lastError = "",
                 )
             )
         }
+    }
+
+    private suspend fun recordError(error: Throwable) {
+        settingsStore.update { current ->
+            current.copy(
+                syncSettings = current.syncSettings.copy(
+                    lastError = error.message.orEmpty()
+                )
+            )
+        }
+    }
+
+    private suspend fun recordGoogleDriveError(error: Throwable) {
+        if (error is GoogleDriveAuthRequiredException) {
+            runCatching {
+                googleDriveSyncRepository.clearCachedToken(error.accessToken)
+            }
+            googleSession.value = null
+            settingsStore.update { current ->
+                current.copy(
+                    syncSettings = current.syncSettings.copy(
+                        googleEnabled = false,
+                        lastError = error.message.orEmpty()
+                    )
+                )
+            }
+            return
+        }
+        recordError(error)
     }
 }
+
+data class GoogleCloudConflict(
+    val remoteFile: GoogleDriveFile,
+    val localRevision: String,
+)

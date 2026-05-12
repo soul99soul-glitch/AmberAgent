@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import com.android.build.api.dsl.Packaging
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -25,6 +26,27 @@ fun String.asBuildConfigString(): String =
     replace("\\", "\\\\").replace("\"", "\\\"")
 
 val xiaomiXmsAppId = projectProperty("xiaomiXmsAppId", "XIAOMI_XMS_APP_ID")
+val baseApplicationId = "me.rerere.amberagent"
+
+fun googleOAuthConfigured(packageName: String): Boolean = runCatching {
+    val configFile = file("google-services.json")
+    if (!configFile.exists()) return@runCatching false
+    val root = JsonSlurper().parse(configFile) as? Map<*, *> ?: return@runCatching false
+    val clients = root["client"] as? List<*> ?: return@runCatching false
+    val client = clients
+        .mapNotNull { it as? Map<*, *> }
+        .firstOrNull {
+            val clientInfo = it["client_info"] as? Map<*, *>
+            val androidClientInfo = clientInfo?.get("android_client_info") as? Map<*, *>
+            androidClientInfo?.get("package_name") == packageName
+        } ?: return@runCatching false
+    val oauthClients = client["oauth_client"] as? List<*> ?: return@runCatching false
+    val clientTypes = oauthClients
+        .mapNotNull { it as? Map<*, *> }
+        .mapNotNull { it["client_type"]?.toString() }
+        .toSet()
+    "1" in clientTypes && "3" in clientTypes
+}.getOrDefault(false)
 
 plugins {
     alias(libs.plugins.android.application)
@@ -40,11 +62,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.amberagent"
+        applicationId = baseApplicationId
         minSdk = 26
         targetSdk = 37
-        versionCode = 325
-        versionName = "1.6.2"
+        versionCode = 328
+        versionName = "1.6.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId
@@ -106,6 +128,7 @@ android {
             buildConfigField("Boolean", "NOTION_LIKE", "false")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured(baseApplicationId).toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
         }
         debug {
@@ -115,6 +138,7 @@ android {
             buildConfigField("Boolean", "NOTION_LIKE", "false")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.debug").toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
         create("notion") {
@@ -126,6 +150,7 @@ android {
             buildConfigField("Boolean", "NOTION_LIKE", "true")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.notion").toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
         create("baseline") {
@@ -140,6 +165,7 @@ android {
             buildConfigField("Boolean", "NOTION_LIKE", "false")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.debug").toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
     }
@@ -264,6 +290,10 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+    implementation(libs.play.services.auth)
     implementation(libs.androidx.profileinstaller)
 
     // Compose

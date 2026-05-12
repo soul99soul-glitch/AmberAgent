@@ -278,8 +278,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(HugeIcons.Database02) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_data_backup_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_data_backup)) },
+                        supportingContent = { Text("Google 云同步、本地加密备份与完整数据恢复") },
+                        headlineContent = { Text("同步与备份") },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },

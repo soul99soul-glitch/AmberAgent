@@ -50,6 +50,9 @@ mcp = "0.8.4"
 pebble = "4.1.1"
 browser = "1.10.0"
 security-crypto = "1.1.0-alpha07"
+credentials = "1.6.0"
+googleid = "1.1.1"
+play-services-auth = "21.4.0"
 appcompat = "1.7.1"
 material = "1.13.0"
 ucrop = "2.2.11-native"
@@ -143,6 +146,10 @@ modelcontextprotocol-kotlin-sdk = { module = "io.modelcontextprotocol:kotlin-sdk
 pebble = { module = "io.pebbletemplates:pebble", version.ref = "pebble" }
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
+androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
+googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 ucrop = { group = "com.github.yalantis", name = "ucrop", version.ref = "ucrop" }
