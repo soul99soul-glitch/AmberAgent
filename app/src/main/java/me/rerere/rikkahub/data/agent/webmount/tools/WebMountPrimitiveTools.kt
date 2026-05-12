@@ -1268,8 +1268,12 @@ class WebMountPrimitiveTools(
                 }
                 var oauthCleared = false
                 if (site.authKind == AuthKind.OAUTH) {
-                    oauthStore.clearToken(siteId)
-                    oauthStore.clearCredentials(siteId)
+                    // Use the explicit OAuth provider id mapping (e.g.
+                    // feishu_docs site → "feishu" provider) so we clear the
+                    // tokens at the right key in the OAuth store.
+                    val providerId = site.oauthProviderId ?: siteId
+                    oauthStore.clearToken(providerId)
+                    oauthStore.clearCredentials(providerId)
                     oauthCleared = true
                 }
                 // Also drop the synthesized profile, if any, so the agent's

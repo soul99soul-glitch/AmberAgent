@@ -39,6 +39,16 @@ data class UserSite(
     val nativeAdapterId: String? = null,
     val iconKey: String? = null,
     val addedAtMs: Long = 0L,
+    /**
+     * For OAuth-backed sites, the id under which the OAuth provider is
+     * registered with [me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient].
+     * Defaults to null (= same as [id]). 飞书 is the canonical case:
+     * UserSite.id is "feishu_docs" (matches the adapter / station id) but
+     * the OAuth provider registers as "feishu" — without this remap the
+     * "Edit credentials" / "Connect" buttons silently look up a nonexistent
+     * provider and the dialog closes itself in the same frame.
+     */
+    val oauthProviderId: String? = null,
 )
 
 @Serializable

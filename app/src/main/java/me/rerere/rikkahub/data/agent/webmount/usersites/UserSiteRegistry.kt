@@ -114,13 +114,26 @@ class UserSiteRegistry(context: Context) {
             // Promote them to COOKIE on first read after the upgrade and
             // persist so it sticks.
             val migrated = parsed.map { site ->
-                if (site.id.startsWith("user_") &&
-                    site.authKind == AuthKind.ANONYMOUS &&
-                    site.loginCookieName == null &&
-                    site.nativeAdapterId == null
+                var next = site
+                // Migration A: user-added sites added before the "需要登录" Switch
+                // defaulted to ANONYMOUS + no cookie → bump to COOKIE so the
+                // login button reappears.
+                if (next.id.startsWith("user_") &&
+                    next.authKind == AuthKind.ANONYMOUS &&
+                    next.loginCookieName == null &&
+                    next.nativeAdapterId == null
                 ) {
-                    site.copy(authKind = AuthKind.COOKIE)
-                } else site
+                    next = next.copy(authKind = AuthKind.COOKIE)
+                }
+                // Migration B: feishu_docs OAuth provider id remap. Older rows
+                // saved this UserSite without oauthProviderId, so the page's
+                // OAuth lookup (using site.id "feishu_docs") returned null and
+                // the 编辑凭据 dialog dismissed itself on open. Backfill the
+                // mapping for the canonical case.
+                if (next.id == "feishu_docs" && next.oauthProviderId == null) {
+                    next = next.copy(oauthProviderId = "feishu")
+                }
+                next
             }
             if (migrated != parsed) {
                 Log.i(TAG, "Migrated ${migrated.size - parsed.count { it.authKind == AuthKind.COOKIE || it.authKind == AuthKind.OAUTH }} user sites: ANONYMOUS → COOKIE")
@@ -221,6 +234,9 @@ class UserSiteRegistry(context: Context) {
                 authKind = AuthKind.OAUTH,
                 nativeAdapterId = "feishu_docs",
                 iconKey = "feishu_docs",
+                // OAuth provider registers as "feishu" (FeishuOAuthProvider.id);
+                // UserSite.id is "feishu_docs". Remap so the page's lookup hits.
+                oauthProviderId = "feishu",
             ),
         )
     }

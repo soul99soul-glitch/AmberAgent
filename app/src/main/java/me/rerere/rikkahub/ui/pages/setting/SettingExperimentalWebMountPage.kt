@@ -234,6 +234,12 @@ fun SettingExperimentalWebMountPage(
                         sites.forEachIndexed { index, site ->
                             // Recompose OAuth-dependent state when token store updates.
                             @Suppress("UNUSED_EXPRESSION") oauthRevision
+                            // Per-user feedback: OAuth sites (飞书) should ALSO
+                            // expose the cookie-based Sign-in path — that's the
+                            // "basic" route. OAuth (Edit credentials + Connect)
+                            // is the advanced route for users registering their
+                            // own bot. The two paths coexist on the same row.
+                            val oauthProviderId = site.oauthProviderId ?: site.id
                             UserSiteCard(
                                 site = site,
                                 stationState = states[site.id],
@@ -242,10 +248,10 @@ fun SettingExperimentalWebMountPage(
                                 webMountManager = webMountManager,
                                 cookieRevision = cookieRevision,
                                 busy = site.id in busyStations,
-                                onSignIn = if (site.authKind == AuthKind.COOKIE) {
+                                onSignIn = if (site.authKind != AuthKind.ANONYMOUS) {
                                     { loginDialogSite = site }
                                 } else null,
-                                onSignOut = if (site.authKind == AuthKind.COOKIE) {
+                                onSignOut = if (site.authKind != AuthKind.ANONYMOUS) {
                                     {
                                         val urls = collectKnownUrlsFor(site, webMountManager)
                                         val cleared = cookieProvider.clearCookiesFor(urls)
@@ -260,7 +266,7 @@ fun SettingExperimentalWebMountPage(
                                     {
                                         scope.launch {
                                             runCatching {
-                                                val result = oauthClient.connect(site.id)
+                                                val result = oauthClient.connect(oauthProviderId)
                                                 when (result) {
                                                     is WebMountOAuthClient.ConnectResult.Success ->
                                                         toaster.show(connectedTemplate.format(site.displayName))
@@ -275,7 +281,7 @@ fun SettingExperimentalWebMountPage(
                                 } else null,
                                 onDisconnect = if (site.authKind == AuthKind.OAUTH) {
                                     {
-                                        oauthClient.disconnect(site.id)
+                                        oauthClient.disconnect(oauthProviderId)
                                         toaster.show(disconnectedTemplate.format(site.displayName))
                                     }
                                 } else null,
@@ -296,20 +302,16 @@ fun SettingExperimentalWebMountPage(
                                 },
                                 onDelete = {
                                     if (userSiteRegistry.remove(site.id)) {
-                                        // Plan v2 review W-2 fix: wipe ALL data
-                                        // associated with this site so "delete"
-                                        // is honest.
+                                        // Wipe ALL data tied to this site.
                                         if (site.authKind == AuthKind.OAUTH) {
-                                            oauthStore.clearToken(site.id)
-                                            oauthStore.clearCredentials(site.id)
+                                            oauthStore.clearToken(oauthProviderId)
+                                            oauthStore.clearCredentials(oauthProviderId)
                                         }
-                                        if (site.authKind == AuthKind.COOKIE) {
-                                            val urls = collectKnownUrlsFor(site, webMountManager)
-                                            cookieProvider.clearCookiesFor(urls)
-                                        }
-                                        // Also drop the agent-synthesized profile
-                                        // for this site if one exists (matches
-                                        // wm_site_remove's behavior).
+                                        // OAuth sites can also accumulate cookies
+                                        // from the basic Sign-in path, so always
+                                        // clear those too.
+                                        val urls = collectKnownUrlsFor(site, webMountManager)
+                                        cookieProvider.clearCookiesFor(urls)
                                         profileRegistry.remove(site.id)
                                         cookieRevision++
                                         toaster.show(deletedTemplate.format(site.displayName))
@@ -346,12 +348,16 @@ fun SettingExperimentalWebMountPage(
     }
 
     oauthEditDialog?.let { site ->
-        val provider = oauthClient.provider(site.id)
+        // Bug fix: OAuth providers are keyed by their own id ("feishu"), not
+        // the UserSite id ("feishu_docs"). Use the explicit oauthProviderId
+        // mapping with site.id as a fallback for sites where they match.
+        val providerId = site.oauthProviderId ?: site.id
+        val provider = oauthClient.provider(providerId)
         if (provider == null) {
             oauthEditDialog = null
         } else {
             @Suppress("UNUSED_EXPRESSION") oauthRevision
-            val existing = oauthStore.getCredentials(site.id)
+            val existing = oauthStore.getCredentials(providerId)
             OAuthEditDialog(
                 siteName = site.displayName,
                 initialAppId = existing?.appId.orEmpty(),
@@ -364,9 +370,9 @@ fun SettingExperimentalWebMountPage(
                         toaster.show(appIdRequiredMessage)
                     } else {
                         oauthStore.putCredentials(
-                            site.id,
+                            providerId,
                             OAuthAppCredentials(
-                                provider = site.id,
+                                provider = providerId,
                                 appId = appId.trim(),
                                 appSecret = appSecret.trim().ifBlank { null },
                                 scope = scopeText.trim().ifBlank { null },
@@ -439,11 +445,12 @@ private fun UserSiteCard(
         if (urls.isEmpty()) null
         else cookieProvider.getCookies(emptyList(), urls).value(name) != null
     }
+    val oauthProviderIdLocal = site.oauthProviderId ?: site.id
     val hasToken = if (site.authKind == AuthKind.OAUTH) {
-        oauthStore.getToken(site.id) != null
+        oauthStore.getToken(oauthProviderIdLocal) != null
     } else false
     val hasCredentials = if (site.authKind == AuthKind.OAUTH) {
-        oauthStore.getCredentials(site.id) != null
+        oauthStore.getCredentials(oauthProviderIdLocal) != null
     } else false
 
     Column(
