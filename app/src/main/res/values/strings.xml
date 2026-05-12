@@ -1158,7 +1158,7 @@
   <string name="assistant_page_local_tools_webview_title">WebView preview tool</string>
   <string name="assistant_page_local_tools_webview_desc">Open URLs in the AmberAgent live operation preview WebView.</string>
   <string name="assistant_page_local_tools_icloud_title">iCloud Drive tools</string>
-  <string name="assistant_page_local_tools_icloud_desc">Use the experimental iCloud Web Mount for configured Obsidian or iCloud Drive files.</string>
+  <string name="assistant_page_local_tools_icloud_desc">Use the experimental iCloud WebMount for configured Obsidian or iCloud Drive files.</string>
   <string name="assistant_page_local_tools_webmount_title">WebMount browser tools</string>
   <string name="assistant_page_local_tools_webmount_desc">Let the agent drive a headless WebView: open URLs, extract DOM, click, type, scroll, screenshot. Off by default. The arbitrary-JS escape hatch (wm_eval) is gated by a separate toggle below.</string>
   <string name="assistant_page_local_tools_webmount_eval_title">WebMount: arbitrary JS (wm_eval)</string>
@@ -1253,9 +1253,9 @@
   <string name="setting_sandbox_page_title">Agent Runtime</string>
   <string name="setting_sandbox_workspace_section">Workspace</string>
   <string name="setting_icloud_section">iCloud Drive Experimental</string>
-  <string name="setting_icloud_title">iCloud Web Mount</string>
+  <string name="setting_icloud_title">iCloud WebMount</string>
   <string name="setting_icloud_desc">Use the iCloud.com WebView session to access Drive without storing your Apple ID password.</string>
-  <string name="setting_icloud_enabled">Enable iCloud Web Mount</string>
+  <string name="setting_icloud_enabled">Enable iCloud WebMount</string>
   <string name="setting_icloud_vault_path">Vault path</string>
   <string name="setting_icloud_vault_path_desc">Use an iCloud Drive path such as Obsidian or Documents/Obsidian. Leave blank only for root probing.</string>
   <string name="setting_icloud_save_path">Save Path</string>
@@ -1361,9 +1361,9 @@
   <string name="setting_webmount_custom_name_label">Site name</string>
   <string name="setting_webmount_custom_url_label">Homepage URL</string>
   <string name="setting_webmount_custom_needs_login_label">Requires login</string>
-  <string name="setting_webmount_custom_needs_login_desc">Turn off only for fully public sites (no account needed). Most sites — Weibo, X, Xiaohongshu, etc. — need login.</string>
+  <string name="setting_webmount_custom_needs_login_desc">When on, the site row gets a Sign-in button — works even if the cookie name field below is blank. Turn off only for fully public read-only sites.</string>
   <string name="setting_webmount_custom_cookie_label">Login cookie name (advanced, optional)</string>
-  <string name="setting_webmount_custom_cookie_supporting">Optional. If you know the cookie set after login (e.g. SESSDATA for Bilibili, z_c0 for Zhihu), the site row will detect signed-in state. Leave blank otherwise.</string>
+  <string name="setting_webmount_custom_cookie_supporting">Leaving this blank does NOT block login — it only means the settings page can\'t show a "signed in" badge. If you know the cookie (e.g. SESSDATA for Bilibili, z_c0 for Zhihu) the status display gets more accurate.</string>
   <string name="setting_webmount_custom_confirm">Add</string>
   <string name="setting_webmount_profile_remove">Remove</string>
   <string name="setting_webmount_profile_origins">Origins</string>

@@ -52,7 +52,10 @@ class UserSiteRegistry(context: Context) {
     @Synchronized
     fun add(site: UserSite): Boolean {
         if (current.any { it.id == site.id }) return false
-        val next = current + site.copy(addedAtMs = System.currentTimeMillis())
+        // Per-user feedback: newly added sites should appear at the top of
+        // the list (newest first), not buried at the bottom under the seed
+        // examples. Prepend rather than append.
+        val next = listOf(site.copy(addedAtMs = System.currentTimeMillis())) + current
         _sites.value = next
         persist(next)
         return true
