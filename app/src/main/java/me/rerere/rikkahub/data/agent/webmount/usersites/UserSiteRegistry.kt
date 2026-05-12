@@ -133,10 +133,22 @@ class UserSiteRegistry(context: Context) {
                 if (next.id == "feishu_docs" && next.oauthProviderId == null) {
                     next = next.copy(oauthProviderId = "feishu")
                 }
+                // Migration C: feishu_docs homepage URL — the original seed
+                // pointed at www.feishu.cn which lands on the marketing /
+                // download page in a bare WebView. Replace with the messenger
+                // entry which works for both fresh-login and already-signed-in
+                // flows. Only touch rows still on the broken default.
+                if (next.id == "feishu_docs" && next.homepageUrl == "https://www.feishu.cn") {
+                    next = next.copy(homepageUrl = "https://www.feishu.cn/messenger/")
+                }
                 next
             }
             if (migrated != parsed) {
-                Log.i(TAG, "Migrated ${migrated.size - parsed.count { it.authKind == AuthKind.COOKIE || it.authKind == AuthKind.OAUTH }} user sites: ANONYMOUS → COOKIE")
+                // W-5 fix: count what actually changed, not "all originally
+                // ANONYMOUS" (which over-counts when some ANONYMOUS rows
+                // didn't qualify for the user_/no-cookie/no-adapter check).
+                val changed = migrated.zip(parsed).count { (m, p) -> m != p }
+                Log.i(TAG, "Migrated $changed user site(s) to current schema (authKind / oauthProviderId backfill)")
                 persist(migrated)
             }
             return migrated
@@ -230,7 +242,12 @@ class UserSiteRegistry(context: Context) {
             UserSite(
                 id = "feishu_docs",
                 displayName = "飞书云文档",
-                homepageUrl = "https://www.feishu.cn",
+                // `www.feishu.cn` lands on the download/marketing page in a
+                // bare WebView (no app session ⇒ Lark assumes you want the
+                // native client). Use the messenger entry — it redirects
+                // to the login page if signed out, then to the user's
+                // tenant home (e.g. mi.feishu.cn/...) once signed in.
+                homepageUrl = "https://www.feishu.cn/messenger/",
                 authKind = AuthKind.OAUTH,
                 nativeAdapterId = "feishu_docs",
                 iconKey = "feishu_docs",

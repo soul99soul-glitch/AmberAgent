@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfileEntry
 import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
+import me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls
 
 /**
  * Browser Primitives tool catalog.
@@ -1100,18 +1101,30 @@ class WebMountPrimitiveTools(
                         buildJsonArray {
                             sites.forEach { site ->
                                 val state = site.nativeAdapterId?.let { manager.states.value[it] }
-                                val profileEntry = site.nativeAdapterId?.let { profileRegistry.byId(it) }
+                                // B-3 fix: profile lookup falls back to site.id
+                                // so synthesized profiles (keyed under user_<slug>)
+                                // are picked up too. Without the fallback,
+                                // wm_profile_synthesize was effectively invisible
+                                // to subsequent wm_stations calls.
+                                val profileEntry = profileRegistry.byId(site.nativeAdapterId ?: site.id)
                                 val loginCookie = site.loginCookieName ?: profileEntry?.profile?.hints?.loginCookie
+                                val urls = collectSiteUrls(site, manager, profileRegistry)
                                 val loggedIn = if (loginCookie != null) {
-                                    val urls = buildSet {
-                                        add(site.homepageUrl)
-                                        profileEntry?.profile?.origins?.let { addAll(it) }
-                                    }.toList()
                                     cookieProvider.getCookies(endpoints = emptyList(), extraUrls = urls).value(loginCookie) != null
                                 } else null
                                 val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
                                 val loginUrl = adapter?.primaryLoginUrl() ?: site.homepageUrl
-                                val needsLogin = site.authKind == AuthKind.COOKIE && loggedIn != true
+                                // B-4 fix: OAuth sites also report needs_login
+                                // when no token is stored, with a login_helper
+                                // pointing the agent at the same deep link.
+                                val oauthProviderId = site.oauthProviderId ?: site.id
+                                val oauthTokenMissing = site.authKind == AuthKind.OAUTH &&
+                                    oauthStore.getToken(oauthProviderId) == null
+                                val needsLogin = when (site.authKind) {
+                                    AuthKind.COOKIE -> loggedIn != true
+                                    AuthKind.OAUTH -> oauthTokenMissing || loggedIn == false
+                                    AuthKind.ANONYMOUS -> false
+                                }
                                 add(buildJsonObject {
                                     put("id", site.id)
                                     put("display_name", site.displayName)
@@ -1122,7 +1135,11 @@ class WebMountPrimitiveTools(
                                     state?.let {
                                         put("status", it.status.wireName)
                                         put("capability", it.capability.wireName)
-                                        put("enabled", it.enabled)
+                                        // W-1 fix: drop the misleading `enabled`
+                                        // field. Plan v2 gates by UserSiteRegistry
+                                        // membership, not WebMountManager.setEnabled,
+                                        // so this old per-station flag no longer
+                                        // tracks whether tools are exposed.
                                         it.message?.let { msg -> put("message", msg) }
                                         if (it.updatedAtMillis > 0) put("updated_at_ms", it.updatedAtMillis)
                                     }
@@ -1132,6 +1149,9 @@ class WebMountPrimitiveTools(
                                         put("profile_trust", it.trust.name.lowercase())
                                     }
                                     loggedIn?.let { put("logged_in", it) }
+                                    if (site.authKind == AuthKind.OAUTH) {
+                                        put("oauth_token_present", !oauthTokenMissing)
+                                    }
                                     if (needsLogin) {
                                         put("needs_login", true)
                                         put("login_helper", buildJsonObject {
@@ -1139,6 +1159,7 @@ class WebMountPrimitiveTools(
                                             put("intent", "amberagent://webmount/login?station=${site.id}")
                                             put("login_url", loginUrl)
                                             put("label", site.displayName)
+                                            put("auth_kind", site.authKind.name.lowercase())
                                         })
                                     }
                                 })
@@ -1218,11 +1239,12 @@ class WebMountPrimitiveTools(
         name = "wm_site_remove",
         description = """
             Remove a website from the user's WebMount Stations list. Also clears the site's
-            cookies (for cookie-auth sites) and OAuth credentials + tokens (for OAuth sites)
-            so 'delete' is honest. Pass the `site_id` from wm_stations. Built-in seed sites
-            can be re-added later via the settings page's "Restore examples" button or the
-            wm_site_add tool. Requires explicit human approval per invocation — destructive
-            action.
+            cookies, OAuth credentials + tokens, and any agent-synthesized profile so
+            'delete' is honest. Pass the `site_id` from wm_stations. Built-in seed sites
+            (hackernews / reddit / github / bilibili / juejin / zhihu / feishu_docs) can be
+            re-added later via the settings page's "Restore examples" button — NOT via
+            wm_site_add, which always creates a custom `user_<slug>` entry without native
+            adapter wiring. Requires explicit human approval per invocation.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
@@ -1252,30 +1274,20 @@ class WebMountPrimitiveTools(
                     }.toString()))
                 }
                 // Mirror the settings page's delete behavior so "remove" wipes
-                // ALL data tied to this site — cookies + OAuth.
-                var cookiesCleared = 0
-                if (site.authKind == AuthKind.COOKIE) {
-                    val urls = buildSet {
-                        add(site.homepageUrl)
-                        site.nativeAdapterId?.let { manager.adapterOf(it) }?.endpoints?.forEach {
-                            add(it.origin)
-                            add(it.apiBase)
-                            add(it.loginUrl)
-                            addAll(it.cookieUrls)
-                        }
-                    }.filter { it.isNotBlank() }.distinct()
-                    cookiesCleared = cookieProvider.clearCookiesFor(urls)
-                }
-                var oauthCleared = false
-                if (site.authKind == AuthKind.OAUTH) {
-                    // Use the explicit OAuth provider id mapping (e.g.
-                    // feishu_docs site → "feishu" provider) so we clear the
-                    // tokens at the right key in the OAuth store.
-                    val providerId = site.oauthProviderId ?: siteId
-                    oauthStore.clearToken(providerId)
-                    oauthStore.clearCredentials(providerId)
-                    oauthCleared = true
-                }
+                // ALL data tied to this site — cookies + OAuth + profile.
+                // B-2 fix: use shared collectSiteUrls so synthesized-profile
+                // extra origins are included in the cookie-clear set.
+                // B-5 fix: drop the per-authKind guards. Both clearToken and
+                // clearCookiesFor are no-ops when nothing exists, so unconditional
+                // calls are safe AND prevent leaks when a site's kind flipped.
+                val urls = collectSiteUrls(site, manager, profileRegistry)
+                val cookiesCleared = cookieProvider.clearCookiesFor(urls)
+                val providerId = site.oauthProviderId ?: siteId
+                val hadOauthToken = oauthStore.getToken(providerId) != null
+                val hadOauthCreds = oauthStore.getCredentials(providerId) != null
+                oauthStore.clearToken(providerId)
+                oauthStore.clearCredentials(providerId)
+                val oauthCleared = hadOauthToken || hadOauthCreds
                 // Also drop the synthesized profile, if any, so the agent's
                 // "knowledge" of this site doesn't outlive the site itself.
                 val profileRemoved = profileRegistry.remove(siteId)

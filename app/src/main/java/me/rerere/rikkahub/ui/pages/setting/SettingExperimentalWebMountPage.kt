@@ -123,6 +123,7 @@ fun SettingExperimentalWebMountPage(
 
     val signedInTemplate = stringResource(R.string.setting_webmount_login_dialog_signed_in)
     val notReadyTemplate = stringResource(R.string.setting_webmount_login_dialog_not_ready)
+    val unknownStatusTemplate = stringResource(R.string.setting_webmount_login_dialog_unknown_status)
     val signedOutTemplate = stringResource(R.string.setting_webmount_signed_out_toast)
     val noCookiesMessage = stringResource(R.string.setting_webmount_signed_out_nothing)
     val deletedTemplate = stringResource(R.string.setting_webmount_site_deleted_toast)
@@ -246,6 +247,7 @@ fun SettingExperimentalWebMountPage(
                                 cookieProvider = cookieProvider,
                                 oauthStore = oauthStore,
                                 webMountManager = webMountManager,
+                                profileRegistry = profileRegistry,
                                 cookieRevision = cookieRevision,
                                 busy = site.id in busyStations,
                                 onSignIn = if (site.authKind != AuthKind.ANONYMOUS) {
@@ -253,7 +255,7 @@ fun SettingExperimentalWebMountPage(
                                 } else null,
                                 onSignOut = if (site.authKind != AuthKind.ANONYMOUS) {
                                     {
-                                        val urls = collectKnownUrlsFor(site, webMountManager)
+                                        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
                                         val cleared = cookieProvider.clearCookiesFor(urls)
                                         cookieRevision++
                                         toaster.show(
@@ -302,15 +304,15 @@ fun SettingExperimentalWebMountPage(
                                 },
                                 onDelete = {
                                     if (userSiteRegistry.remove(site.id)) {
-                                        // Wipe ALL data tied to this site.
-                                        if (site.authKind == AuthKind.OAUTH) {
-                                            oauthStore.clearToken(oauthProviderId)
-                                            oauthStore.clearCredentials(oauthProviderId)
-                                        }
-                                        // OAuth sites can also accumulate cookies
-                                        // from the basic Sign-in path, so always
-                                        // clear those too.
-                                        val urls = collectKnownUrlsFor(site, webMountManager)
+                                        // B-5 fix: drop the authKind guard so a
+                                        // site whose kind flipped during its
+                                        // lifetime (e.g. once OAuth, now COOKIE)
+                                        // doesn't leak OAuth state. clearToken /
+                                        // clearCredentials are no-ops when no
+                                        // entry exists.
+                                        oauthStore.clearToken(oauthProviderId)
+                                        oauthStore.clearCredentials(oauthProviderId)
+                                        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
                                         cookieProvider.clearCookiesFor(urls)
                                         profileRegistry.remove(site.id)
                                         cookieRevision++
@@ -335,14 +337,21 @@ fun SettingExperimentalWebMountPage(
             onDismiss = {
                 loginDialogSite = null
                 cookieRevision++  // B-1 fix: force row re-probe of CookieManager
-                val captured = site.loginCookieName?.let { cookieName ->
-                    val urls = collectKnownUrlsFor(site, webMountManager)
+                // Three states, not two:
+                //   - cookie name known + present → "已登录"
+                //   - cookie name known + absent → "尚未检测到登录态"
+                //   - cookie name NOT configured → can't tell; don't lie either way
+                val cookieName = site.loginCookieName
+                val captured = if (cookieName != null) {
+                    val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
                     cookieProvider.getCookies(emptyList(), urls).value(cookieName) != null
-                } == true
-                toaster.show(
-                    if (captured) signedInTemplate.format(site.displayName)
-                    else notReadyTemplate.format(site.displayName)
-                )
+                } else null
+                val message = when (captured) {
+                    true -> signedInTemplate.format(site.displayName)
+                    false -> notReadyTemplate.format(site.displayName)
+                    null -> unknownStatusTemplate.format(site.displayName)
+                }
+                toaster.show(message)
             },
         )
     }
@@ -422,6 +431,7 @@ private fun UserSiteCard(
     cookieProvider: WebMountCookieProvider,
     oauthStore: WebMountOAuthTokenStore,
     webMountManager: WebMountManager,
+    profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry,
     /** Bumped by the parent on cookie-state changes so this row re-probes. */
     cookieRevision: Int,
     busy: Boolean,
@@ -441,7 +451,7 @@ private fun UserSiteCard(
     // onDismiss probe — no asymmetry between the row label and the toast.
     @Suppress("UNUSED_EXPRESSION") cookieRevision
     val loggedIn = site.loginCookieName?.let { name ->
-        val urls = collectKnownUrlsFor(site, webMountManager)
+        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
         if (urls.isEmpty()) null
         else cookieProvider.getCookies(emptyList(), urls).value(name) != null
     }
@@ -857,22 +867,16 @@ private fun AddCustomSiteDialog(
 // ----------------------------------------------------------------------------
 
 /**
- * Collect every URL the cookie provider might need to probe for this site:
- * its homepage + any adapter-declared origins / cookie URLs. Used for both
- * sign-out (clear all of them) and login probe (check any of them).
+ * Compatibility wrapper — kept so the page's existing call sites stay
+ * unchanged. Delegates to the shared
+ * [me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls]
+ * which also includes synthesized-profile origins (Plan-v2 review B-2).
  */
-private fun collectKnownUrlsFor(site: UserSite, manager: WebMountManager): List<String> {
-    val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
-    return buildSet {
-        add(site.homepageUrl)
-        adapter?.endpoints?.forEach { endpoint ->
-            add(endpoint.origin)
-            add(endpoint.apiBase)
-            add(endpoint.loginUrl)
-            addAll(endpoint.cookieUrls)
-        }
-    }.filter { it.isNotBlank() }.distinct()
-}
+private fun collectKnownUrlsFor(
+    site: UserSite,
+    manager: WebMountManager,
+    profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry,
+): List<String> = me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls(site, manager, profileRegistry)
 
 private fun iconForIconKey(iconKey: String?) = when (iconKey) {
     "hackernews" -> HugeIcons.News01

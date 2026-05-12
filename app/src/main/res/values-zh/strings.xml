@@ -805,6 +805,7 @@
   <string name="setting_webmount_login_dialog_title">登录 %1$s</string>
   <string name="setting_webmount_login_dialog_signed_in">已登录 —— 捕获到 %1$s 的 cookie。</string>
   <string name="setting_webmount_login_dialog_not_ready">尚未检测到 %1$s 的登录态 —— 完成网页登录后再次点击"登录"。</string>
+  <string name="setting_webmount_login_dialog_unknown_status">%1$s 登录窗口已关闭。该站点没配置登录 cookie 名,设置页无法自动确认登录状态 —— 如果你登录成功了,直接用就行。</string>
   <!-- Plan v2 网站统一列表字符串 -->
   <string name="setting_webmount_section_sites">我的网站</string>
   <string name="setting_webmount_sites_empty">还没有网站。点 "+ 添加网站" 或 "恢复示例" 开始。</string>
