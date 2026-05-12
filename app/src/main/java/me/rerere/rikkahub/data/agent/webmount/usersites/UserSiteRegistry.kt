@@ -98,12 +98,32 @@ class UserSiteRegistry(context: Context) {
         val raw = prefs.getString(KEY_SITES, null)
         val seeded = prefs.getBoolean(KEY_SEEDED, false)
         if (raw != null) {
-            return runCatching {
+            val parsed = runCatching {
                 json.decodeFromString(ListSerializer(UserSite.serializer()), raw)
             }.getOrElse {
                 Log.w(TAG, "Failed to decode user sites — falling back to seeds", it)
-                seedOnce()
+                return seedOnce()
             }
+            // Migration: user-added sites added before the AddCustomSiteDialog
+            // grew a "需要登录" switch defaulted to ANONYMOUS unless the user
+            // typed in a cookie name. In practice virtually every user-added
+            // site needs login, so they ended up with no Sign-in button.
+            // Promote them to COOKIE on first read after the upgrade and
+            // persist so it sticks.
+            val migrated = parsed.map { site ->
+                if (site.id.startsWith("user_") &&
+                    site.authKind == AuthKind.ANONYMOUS &&
+                    site.loginCookieName == null &&
+                    site.nativeAdapterId == null
+                ) {
+                    site.copy(authKind = AuthKind.COOKIE)
+                } else site
+            }
+            if (migrated != parsed) {
+                Log.i(TAG, "Migrated ${migrated.size - parsed.count { it.authKind == AuthKind.COOKIE || it.authKind == AuthKind.OAUTH }} user sites: ANONYMOUS → COOKIE")
+                persist(migrated)
+            }
+            return migrated
         }
         if (!seeded) return seedOnce()
         // Marked seeded already but raw is missing — user cleared everything.

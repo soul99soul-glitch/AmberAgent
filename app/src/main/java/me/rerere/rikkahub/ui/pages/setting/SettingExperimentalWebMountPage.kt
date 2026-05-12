@@ -380,13 +380,13 @@ fun SettingExperimentalWebMountPage(
     if (addSiteDialogOpen) {
         AddCustomSiteDialog(
             onDismiss = { addSiteDialogOpen = false },
-            onAdd = { name, url, cookieName ->
+            onAdd = { name, url, needsLogin, cookieName ->
                 val ok = userSiteRegistry.add(
                     UserSite(
                         id = "user_" + slugify(name),
                         displayName = name,
                         homepageUrl = url,
-                        authKind = if (cookieName.isNullOrBlank()) AuthKind.ANONYMOUS else AuthKind.COOKIE,
+                        authKind = if (needsLogin) AuthKind.COOKIE else AuthKind.ANONYMOUS,
                         loginCookieName = cookieName?.takeIf { it.isNotBlank() },
                         nativeAdapterId = null,
                         iconKey = null,
@@ -743,10 +743,11 @@ private fun OAuthEditDialog(
 @Composable
 private fun AddCustomSiteDialog(
     onDismiss: () -> Unit,
-    onAdd: (name: String, url: String, cookieName: String?) -> Unit,
+    onAdd: (name: String, url: String, needsLogin: Boolean, cookieName: String?) -> Unit,
 ) {
     var nameInput by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
+    var needsLogin by remember { mutableStateOf(true) }
     var cookieInput by remember { mutableStateOf("") }
     val urlValid = urlInput.startsWith("http://") || urlInput.startsWith("https://")
     val canSubmit = nameInput.isNotBlank() && urlValid
@@ -776,9 +777,36 @@ private fun AddCustomSiteDialog(
                     isError = urlInput.isNotBlank() && !urlValid,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Per-user feedback: most user-added sites need login (微博, X,
+                // 小红书 etc.). The old "leave blank for public sites"
+                // helper text confused users who didn't know their site's
+                // cookie name but did know it needed login — they ended up
+                // with no Sign-in button. Make it an explicit toggle.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.setting_webmount_custom_needs_login_label),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            stringResource(R.string.setting_webmount_custom_needs_login_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = needsLogin,
+                        onCheckedChange = { needsLogin = it },
+                    )
+                }
                 OutlinedTextField(
                     value = cookieInput,
                     onValueChange = { cookieInput = it },
+                    enabled = needsLogin,
                     label = { Text(stringResource(R.string.setting_webmount_custom_cookie_label)) },
                     placeholder = { Text("SUB") },
                     singleLine = true,
@@ -796,7 +824,12 @@ private fun AddCustomSiteDialog(
             TextButton(
                 enabled = canSubmit,
                 onClick = {
-                    onAdd(nameInput.trim(), urlInput.trim(), cookieInput.trim().ifBlank { null })
+                    onAdd(
+                        nameInput.trim(),
+                        urlInput.trim(),
+                        needsLogin,
+                        cookieInput.trim().ifBlank { null }.takeIf { needsLogin },
+                    )
                 },
             ) {
                 Text(stringResource(R.string.setting_webmount_custom_confirm))

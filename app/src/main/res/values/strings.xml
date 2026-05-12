@@ -1360,8 +1360,10 @@
   <string name="setting_webmount_custom_dialog_helper">Add any website by URL. After adding, the agent can open it with wm_open and read its content. For sign-in-required sites, name the login cookie so the agent knows when you are signed in.</string>
   <string name="setting_webmount_custom_name_label">Site name</string>
   <string name="setting_webmount_custom_url_label">Homepage URL</string>
-  <string name="setting_webmount_custom_cookie_label">Login cookie name (optional)</string>
-  <string name="setting_webmount_custom_cookie_supporting">e.g. SESSDATA for Bilibili, z_c0 for Zhihu. Leave blank for public sites.</string>
+  <string name="setting_webmount_custom_needs_login_label">Requires login</string>
+  <string name="setting_webmount_custom_needs_login_desc">Turn off only for fully public sites (no account needed). Most sites — Weibo, X, Xiaohongshu, etc. — need login.</string>
+  <string name="setting_webmount_custom_cookie_label">Login cookie name (advanced, optional)</string>
+  <string name="setting_webmount_custom_cookie_supporting">Optional. If you know the cookie set after login (e.g. SESSDATA for Bilibili, z_c0 for Zhihu), the site row will detect signed-in state. Leave blank otherwise.</string>
   <string name="setting_webmount_custom_confirm">Add</string>
   <string name="setting_webmount_profile_remove">Remove</string>
   <string name="setting_webmount_profile_origins">Origins</string>

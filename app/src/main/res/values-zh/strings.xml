@@ -878,8 +878,10 @@
   <string name="setting_webmount_custom_dialog_helper">输入任意网站 URL 即可添加。添加后 agent 就能用 wm_open 打开它并读取内容。如果网站需要登录,把登录后种下的 cookie 名字也填上,agent 就能识别登录态。</string>
   <string name="setting_webmount_custom_name_label">站点名称</string>
   <string name="setting_webmount_custom_url_label">主页 URL</string>
-  <string name="setting_webmount_custom_cookie_label">登录 cookie 名 (可选)</string>
-  <string name="setting_webmount_custom_cookie_supporting">例如 B 站填 SESSDATA、知乎填 z_c0。公开网站留空即可。</string>
+  <string name="setting_webmount_custom_needs_login_label">需要登录</string>
+  <string name="setting_webmount_custom_needs_login_desc">只有完全公开 (无需账号) 的网站才关掉。微博、X、小红书等绝大多数网站都需要登录。</string>
+  <string name="setting_webmount_custom_cookie_label">登录 cookie 名 (高级,可选)</string>
+  <string name="setting_webmount_custom_cookie_supporting">可选。如果你知道登录后种下的 cookie 名 (例如 B 站 SESSDATA、知乎 z_c0),填上后该站行能识别"已登录"状态。不知道就留空。</string>
   <string name="setting_webmount_custom_confirm">添加</string>
   <string name="setting_webmount_profile_remove">移除</string>
   <string name="setting_webmount_profile_origins">Origin</string>
