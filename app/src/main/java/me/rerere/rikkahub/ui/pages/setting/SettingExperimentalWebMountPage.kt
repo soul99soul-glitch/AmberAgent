@@ -938,9 +938,17 @@ private fun iconForIconKey(iconKey: String?) = when (iconKey) {
 }
 
 /**
- * Install the /webmount slash command into the global QuickMessages list.
- * Idempotent — returns false if a quick message titled "webmount" already
- * exists, so re-tapping the button doesn't duplicate.
+ * Install the /webmount slash command into the global QuickMessages list AND
+ * subscribe every assistant to it (assistant.quickMessageIds), since the chat
+ * input's slash panel filters by per-assistant subscription — a quick message
+ * that exists globally but isn't in the current assistant's quickMessageIds
+ * will silently not appear.
+ *
+ * Idempotent: re-tapping returns false. Also back-fills the subscription if a
+ * prior buggy install left an orphan QuickMessage (in global list but in no
+ * assistant's id set) — in that case we keep the existing QuickMessage and
+ * just patch the assistant subscriptions, and return true so the toast tells
+ * the user something actually happened.
  *
  * The template is a system-style instruction that frames whatever follows
  * (the user's actual task) so the agent uses WebMount tools by default,
@@ -952,8 +960,7 @@ private suspend fun installWebMountSlashCommand(
     settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore,
 ): Boolean {
     val current = settingsStore.settingsFlow.value
-    val already = current.quickMessages.any { it.title.equals("webmount", ignoreCase = true) }
-    if (already) return false
+    val existing = current.quickMessages.firstOrNull { it.title.equals("webmount", ignoreCase = true) }
     val template = """
         请用 WebMount 工具帮我完成下面这件事。准则:
         1. 先调 wm_stations 看我现在哪些网站可用、登录态如何。
@@ -966,11 +973,20 @@ private suspend fun installWebMountSlashCommand(
 
         我的任务:
     """.trimIndent()
-    val newQuickMessage = me.rerere.rikkahub.data.model.QuickMessage(
+    val quickMessage = existing ?: me.rerere.rikkahub.data.model.QuickMessage(
         title = "webmount",
         content = template + "\n",  // trailing newline so cursor lands on a fresh line
     )
-    settingsStore.update { it.copy(quickMessages = it.quickMessages + newQuickMessage) }
+    val allSubscribed = current.assistants.all { quickMessage.id in it.quickMessageIds }
+    if (existing != null && allSubscribed) return false
+    settingsStore.update { s ->
+        val nextMessages = if (existing == null) s.quickMessages + quickMessage else s.quickMessages
+        val nextAssistants = s.assistants.map { a ->
+            if (quickMessage.id in a.quickMessageIds) a
+            else a.copy(quickMessageIds = a.quickMessageIds + quickMessage.id)
+        }
+        s.copy(quickMessages = nextMessages, assistants = nextAssistants)
+    }
     return true
 }
 
