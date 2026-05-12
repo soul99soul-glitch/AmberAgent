@@ -1051,10 +1051,17 @@ class WebMountPrimitiveTools(
         description = """
             List every website in the user's WebMount Stations list — both built-in (HN, Reddit,
             GitHub, Bilibili, 掘金, 知乎, 飞书云文档) and any user-added custom sites. For each
-            entry: id, display_name, url, auth_kind (anonymous / cookie / oauth), logged_in
-            probe (if a login cookie hint is known), and — for built-in sites with a native
-            adapter — the station's runtime status (read_only / read_write / login_required /
-            degraded / ...). Read-only and side-effect-free.
+            entry: id, display_name, url, auth_kind (anonymous / cookie / oauth), and a
+            `login_status` field with three explicit values:
+              • "logged_in"  — probed and confirmed signed in
+              • "logged_out" — probed and confirmed signed out
+              • "unknown"    — the site has no configured login-cookie name, so the registry
+                CANNOT determine sign-in state. Do NOT assume the user is signed out — they
+                might be perfectly signed in via the WebView. When unknown, attempt the action
+                anyway (wm_open + wm_extract) and only report "not signed in" if the page
+                itself shows a login wall.
+            Built-in sites with a native adapter also include status / capability / message.
+            Read-only and side-effect-free.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
@@ -1120,11 +1127,31 @@ class WebMountPrimitiveTools(
                                 val oauthProviderId = site.oauthProviderId ?: site.id
                                 val oauthTokenMissing = site.authKind == AuthKind.OAUTH &&
                                     oauthStore.getToken(oauthProviderId) == null
-                                val needsLogin = when (site.authKind) {
-                                    AuthKind.COOKIE -> loggedIn != true
-                                    AuthKind.OAUTH -> oauthTokenMissing || loggedIn == false
-                                    AuthKind.ANONYMOUS -> false
+                                // Three-state login signal:
+                                //   "logged_in"  — probed and the cookie / token is present
+                                //   "logged_out" — probed and absent
+                                //   "unknown"    — couldn't probe (no cookie name configured)
+                                //
+                                // The pre-fix code conflated "unknown" with "logged_out" and
+                                // emitted `needs_login: true` whenever the probe came back
+                                // null — so a user who added a site manually without filling
+                                // the cookie-name field got told "未登录" by the agent even
+                                // when they were signed in. Now `needs_login` requires
+                                // positive evidence of being logged out.
+                                val loginStatus = when (site.authKind) {
+                                    AuthKind.COOKIE -> when (loggedIn) {
+                                        true -> "logged_in"
+                                        false -> "logged_out"
+                                        null -> "unknown"
+                                    }
+                                    AuthKind.OAUTH -> when {
+                                        !oauthTokenMissing -> "logged_in"
+                                        oauthTokenMissing -> "logged_out"
+                                        else -> "unknown"
+                                    }
+                                    AuthKind.ANONYMOUS -> "logged_in" // public — always usable
                                 }
+                                val needsLogin = loginStatus == "logged_out"
                                 add(buildJsonObject {
                                     put("id", site.id)
                                     put("display_name", site.displayName)
@@ -1149,6 +1176,9 @@ class WebMountPrimitiveTools(
                                         put("profile_trust", it.trust.name.lowercase())
                                     }
                                     loggedIn?.let { put("logged_in", it) }
+                                    // Explicit three-state — agent should NOT assume the
+                                    // user is logged out when login_status == "unknown".
+                                    put("login_status", loginStatus)
                                     if (site.authKind == AuthKind.OAUTH) {
                                         put("oauth_token_present", !oauthTokenMissing)
                                     }

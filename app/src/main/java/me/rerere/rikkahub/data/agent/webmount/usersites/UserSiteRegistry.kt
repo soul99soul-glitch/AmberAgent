@@ -61,6 +61,24 @@ class UserSiteRegistry(context: Context) {
         return true
     }
 
+    /**
+     * Update an existing site in place. Returns the new entry on success or
+     * null if no site with that id exists. Used by the WebView login flow to
+     * auto-fill the loginCookieName once we've inferred it from the cookie
+     * diff.
+     */
+    @Synchronized
+    fun update(id: String, transform: (UserSite) -> UserSite): UserSite? {
+        val current = _sites.value
+        val existing = current.firstOrNull { it.id == id } ?: return null
+        val next = transform(existing)
+        if (next == existing) return existing
+        val updated = current.map { if (it.id == id) next else it }
+        _sites.value = updated
+        persist(updated)
+        return next
+    }
+
     @Synchronized
     fun remove(id: String): Boolean {
         val current = _sites.value

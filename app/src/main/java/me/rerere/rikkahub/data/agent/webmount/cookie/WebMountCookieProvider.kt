@@ -56,6 +56,54 @@ class WebMountCookieProvider {
     }
 
     /**
+     * Snapshot the cookie name → value map across the given URLs. Used by
+     * the post-WebView-login flow to diff cookies set during the dialog
+     * lifetime and infer which one represents the session token.
+     */
+    fun snapshotCookieEntries(urls: List<String>): Map<String, String> {
+        val cookieManager = CookieManager.getInstance()
+        val entries = linkedMapOf<String, String>()
+        urls.distinct().forEach { url ->
+            cookieManager.getCookie(url)?.split(";")
+                ?.map { it.trim() }
+                ?.filter { it.contains("=") }
+                ?.forEach { cookie ->
+                    val name = cookie.substringBefore("=").trim()
+                    if (name.isNotBlank()) {
+                        entries[name] = cookie.substringAfter("=").trim()
+                    }
+                }
+        }
+        return entries
+    }
+
+    /**
+     * Heuristic: given the new cookies set during login, pick the one most
+     * likely to represent the session token. Preference order:
+     *  1. Name matches `*sess*` / `*auth*` / `*token*` / `*user*` (case-insensitive)
+     *  2. Longest value (session tokens are long, flags are short)
+     *  3. Stable lexicographic tiebreak
+     * Returns null if no candidate has a value >= 8 chars (anything shorter
+     * is almost certainly a tracking flag, not a session).
+     */
+    fun guessSessionCookieName(newCookies: Map<String, String>): String? {
+        val candidates = newCookies.filter { (_, v) -> v.length >= 8 }
+        if (candidates.isEmpty()) return null
+        val nameHints = setOf("sess", "auth", "token", "user")
+        return candidates.entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, String>> { (name, _) ->
+                    val lower = name.lowercase()
+                    if (nameHints.any { lower.contains(it) }) 1 else 0
+                }
+                    .thenByDescending { it.value.length }
+                    .thenBy { it.key }
+            )
+            .first()
+            .key
+    }
+
+    /**
      * Clear every cookie the system has for the given URLs. Used by the
      * WebMount Stations panel's per-station "Sign out" action.
      *

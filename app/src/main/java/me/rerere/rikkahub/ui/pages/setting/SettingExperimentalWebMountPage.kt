@@ -106,6 +106,10 @@ fun SettingExperimentalWebMountPage(
     // Per-site UI state.
     var busyStations by remember { mutableStateOf<Set<String>>(emptySet()) }
     var loginDialogSite by remember { mutableStateOf<UserSite?>(null) }
+    // Pre-login cookie snapshot — captured the moment user taps Sign-in.
+    // The dismiss handler diffs against post-snapshot to infer the session
+    // cookie name and backfills site.loginCookieName when it was empty.
+    var preLoginCookies by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var oauthEditDialog by remember { mutableStateOf<UserSite?>(null) }
     var addSiteDialogOpen by remember { mutableStateOf(false) }
     // Phase 2 Plan v2 review B-1 fix: cookie-state revision counter. The
@@ -251,7 +255,14 @@ fun SettingExperimentalWebMountPage(
                                 cookieRevision = cookieRevision,
                                 busy = site.id in busyStations,
                                 onSignIn = if (site.authKind != AuthKind.ANONYMOUS) {
-                                    { loginDialogSite = site }
+                                    {
+                                        // Capture pre-login cookies so we can
+                                        // diff after the dialog dismisses and
+                                        // infer the session cookie name.
+                                        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+                                        preLoginCookies = cookieProvider.snapshotCookieEntries(urls)
+                                        loginDialogSite = site
+                                    }
                                 } else null,
                                 onSignOut = if (site.authKind != AuthKind.ANONYMOUS) {
                                     {
@@ -336,20 +347,36 @@ fun SettingExperimentalWebMountPage(
             title = site.displayName,
             onDismiss = {
                 loginDialogSite = null
-                cookieRevision++  // B-1 fix: force row re-probe of CookieManager
-                // Three states, not two:
-                //   - cookie name known + present → "已登录"
-                //   - cookie name known + absent → "尚未检测到登录态"
-                //   - cookie name NOT configured → can't tell; don't lie either way
-                val cookieName = site.loginCookieName
-                val captured = if (cookieName != null) {
-                    val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
-                    cookieProvider.getCookies(emptyList(), urls).value(cookieName) != null
+                cookieRevision++
+
+                val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+                val postCookies = cookieProvider.snapshotCookieEntries(urls)
+                val newCookies = postCookies.filterKeys { it !in preLoginCookies }
+                preLoginCookies = emptyMap()
+
+                // If the user didn't configure a cookie name AND we detected a
+                // newly-set session-like cookie during the login session, save
+                // it back so the row's "logged_in" badge starts working without
+                // any further intervention. Toast tells the user what happened.
+                var autoInferredName: String? = null
+                if (site.loginCookieName.isNullOrBlank()) {
+                    val guess = cookieProvider.guessSessionCookieName(newCookies)
+                    if (guess != null) {
+                        userSiteRegistry.update(site.id) { it.copy(loginCookieName = guess) }
+                        autoInferredName = guess
+                    }
+                }
+
+                val effectiveCookieName = autoInferredName ?: site.loginCookieName
+                val captured = if (effectiveCookieName != null) {
+                    postCookies[effectiveCookieName] != null
                 } else null
-                val message = when (captured) {
-                    true -> signedInTemplate.format(site.displayName)
-                    false -> notReadyTemplate.format(site.displayName)
-                    null -> unknownStatusTemplate.format(site.displayName)
+                val message = when {
+                    autoInferredName != null && captured == true ->
+                        "已登录 $autoInferredName cookie 已识别并保存为 ${site.displayName} 的登录标记"
+                    captured == true -> signedInTemplate.format(site.displayName)
+                    captured == false -> notReadyTemplate.format(site.displayName)
+                    else -> unknownStatusTemplate.format(site.displayName)
                 }
                 toaster.show(message)
             },
