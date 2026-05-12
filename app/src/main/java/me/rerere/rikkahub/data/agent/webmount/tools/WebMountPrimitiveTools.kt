@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.agent.tools.boolean
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
@@ -144,6 +145,7 @@ class WebMountPrimitiveTools(
         signedFetchTool,
         siteAddTool,
         siteRemoveTool,
+        profileSynthesizeTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -1270,14 +1272,154 @@ class WebMountPrimitiveTools(
                     oauthStore.clearCredentials(siteId)
                     oauthCleared = true
                 }
+                // Also drop the synthesized profile, if any, so the agent's
+                // "knowledge" of this site doesn't outlive the site itself.
+                val profileRemoved = profileRegistry.remove(siteId)
                 val payload = buildJsonObject {
                     put("ok", true)
                     put("site_id", siteId)
                     put("display_name", site.displayName)
                     put("cookies_cleared", cookiesCleared)
                     put("oauth_cleared", oauthCleared)
+                    put("profile_removed", profileRemoved)
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
+            }
+        },
+    )
+
+    // --------------------------------------------------------- wm_profile_synthesize
+
+    /**
+     * Phase 2 plan-v2 follow-up — let the agent generate a Site Profile for
+     * a user-added site so subsequent `wm_open` / `wm_state` calls return the
+     * site's hints (login_cookie / selectors / rate-limit shape) inline via
+     * the `applicable_profile` field, matching the experience users get for
+     * the 12 built-in profiles.
+     *
+     * Idempotent: re-running with refined hints overwrites the previously
+     * synthesized profile (same id namespace). Refuses to shadow built-in
+     * profile ids — agent should improve the built-in profiles via PR
+     * instead of overriding them at runtime.
+     */
+    private val profileSynthesizeTool = Tool(
+        name = "wm_profile_synthesize",
+        description = """
+            Build and persist a Site Profile for a user-added site based on what the agent
+            has learned about it (login cookie name, content selectors, additional origins).
+            The profile is saved under the user-imported namespace and surfaces inline in
+            future `wm_open` / `wm_state` outputs as `applicable_profile.hints`, so the
+            agent's next pass on this site is one tool call instead of N. Idempotent —
+            re-call with refined hints to overwrite. Refuses built-in profile ids.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("site_id", stringProp("The site id from wm_stations (must be a user-added site, e.g. 'user_weibo')."))
+                    put("login_cookie", stringProp("Optional: name of the cookie set after login (e.g. SUB for Weibo)."))
+                    put("interactive_selectors", buildJsonObject {
+                        put("type", "object")
+                        put("description", "Optional friendly-name → CSS selector map (e.g. { hot_list: '.HotItem', post_title: 'h3.title' }).")
+                    })
+                    put("extra_origins", buildJsonObject {
+                        put("type", "array")
+                        put("items", buildJsonObject { put("type", "string") })
+                        put("description", "Optional additional origins to claim beyond the site's homepage (e.g. ['https://m.weibo.cn', 'https://weibo.cn']).")
+                    })
+                    put("notes", stringProp("Optional free-form note shown in the settings audit UI."))
+                },
+                required = listOf("site_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_profile_synthesize", "WebMount 生成站点 Profile", input) {
+                val siteId = input.requiredString("site_id")
+                val userSite = userSiteRegistry.byId(siteId)
+                    ?: error("No site with id '$siteId' is registered. Add it with wm_site_add first or pick an existing id from wm_stations.")
+                // Block synthesis for native-adapter sites — they already have
+                // a curated built-in profile; agent shouldn't override at runtime.
+                if (userSite.nativeAdapterId != null) {
+                    return@track listOf(UIMessagePart.Text(buildJsonObject {
+                        put("ok", false)
+                        put("site_id", siteId)
+                        put("error", "Site '$siteId' is backed by a native adapter — its profile is curated and built-in. Synthesis is only for user-added sites.")
+                    }.toString()))
+                }
+                val loginCookie = input.string("login_cookie")?.takeIf { it.isNotBlank() }
+                val rawSelectors = (input.jsonObject)["interactive_selectors"] as? JsonObject
+                val selectors: Map<String, String> = rawSelectors?.let { obj ->
+                    obj.entries.mapNotNull { entry ->
+                        val v = entry.value as? JsonPrimitive ?: return@mapNotNull null
+                        val content = v.contentOrNull ?: return@mapNotNull null
+                        entry.key to content
+                    }.toMap()
+                } ?: emptyMap()
+                val extraOriginsRaw = (input.jsonObject)["extra_origins"] as? kotlinx.serialization.json.JsonArray
+                val extraOrigins = extraOriginsRaw?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                    .orEmpty()
+                val notes = input.string("notes")
+                val homepageOrigin = ProfileRegistry.extractOrigin(userSite.homepageUrl)
+                    ?: error("Cannot derive origin from homepage URL '${userSite.homepageUrl}'")
+                val origins = (listOf(homepageOrigin) + extraOrigins.mapNotNull(ProfileRegistry::extractOrigin))
+                    .distinct()
+                val permissions = buildList {
+                    if (loginCookie != null) {
+                        add("read_cookie:$loginCookie")
+                        add("detect_login")
+                    }
+                }
+                // Build profile JSON using the same schema as built-in profiles.
+                val profileJson = buildJsonObject {
+                    put("id", siteId)
+                    put("name", userSite.displayName)
+                    put("version", 1)
+                    put("origins", buildJsonArray { origins.forEach { add(JsonPrimitive(it)) } })
+                    put("capabilities", buildJsonArray { add(JsonPrimitive("read")) })
+                    val hints = buildJsonObject {
+                        if (loginCookie != null) {
+                            put("login_cookie", loginCookie)
+                        }
+                        if (selectors.isNotEmpty()) {
+                            put("interactive_selectors", buildJsonObject {
+                                selectors.forEach { (k, v) -> put(k, v) }
+                            })
+                        }
+                    }
+                    put("hints", hints)
+                    put("permissions", buildJsonArray { permissions.forEach { add(JsonPrimitive(it)) } })
+                    put("notes", notes ?: "Synthesized by agent for ${userSite.displayName}")
+                }.toString()
+                val result = profileRegistry.importJson(profileJson)
+                val response = when (result) {
+                    is me.rerere.rikkahub.data.agent.webmount.profile.ImportResult.Imported ->
+                        buildJsonObject {
+                            put("ok", true)
+                            put("profile_id", result.profile.id)
+                            put("origins_count", result.profile.origins.size)
+                            put("selectors_count", selectors.size)
+                            put("login_cookie_set", loginCookie != null)
+                            put("sha256", result.sha256Hex.take(16))
+                        }
+                    is me.rerere.rikkahub.data.agent.webmount.profile.ImportResult.ConflictWithBuiltIn ->
+                        buildJsonObject {
+                            put("ok", false)
+                            put("site_id", siteId)
+                            put("error", "Profile id '${result.id}' collides with a built-in profile. Built-ins are curated and can't be overridden at runtime.")
+                        }
+                    is me.rerere.rikkahub.data.agent.webmount.profile.ImportResult.ParseError ->
+                        buildJsonObject {
+                            put("ok", false)
+                            put("site_id", siteId)
+                            put("error", "Synthesized JSON failed to parse: ${result.message}")
+                        }
+                    is me.rerere.rikkahub.data.agent.webmount.profile.ImportResult.ValidationError ->
+                        buildJsonObject {
+                            put("ok", false)
+                            put("site_id", siteId)
+                            put("error", "Synthesized profile failed validation: ${result.message}")
+                        }
+                }
+                listOf(UIMessagePart.Text(response.toString()))
             }
         },
     )

@@ -220,6 +220,20 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = false
         }
 
+        "wm_profile_synthesize" -> {
+            // Writes a Site Profile to the user-imported namespace. Reversible
+            // (profile deleted with the site or by re-synthesizing). The profile
+            // only enriches wm_open/wm_state output with hints — it cannot grant
+            // signing or arbitrary-JS powers (synthesize doesn't accept scripts,
+            // so the resulting profile carries no call_page_fn permissions).
+            // Auto-approve so the agent can iterate on hints across a chat turn.
+            mutates = true
+            risk = ToolRisk.Normal
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
+        }
+
         "wm_signed_fetch" -> {
             // Phase 2 M2.2: profile-driven signed fetch. The risk is
             // method-dependent — GET/HEAD reads are safe (user's own

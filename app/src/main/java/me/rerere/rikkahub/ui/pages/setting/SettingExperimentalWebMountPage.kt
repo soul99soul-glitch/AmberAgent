@@ -94,6 +94,7 @@ fun SettingExperimentalWebMountPage(
     oauthStore: WebMountOAuthTokenStore = koinInject(),
     userSiteRegistry: UserSiteRegistry = koinInject(),
     cookieProvider: WebMountCookieProvider = koinInject(),
+    profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val sites by userSiteRegistry.sites.collectAsStateWithLifecycle()
@@ -297,10 +298,7 @@ fun SettingExperimentalWebMountPage(
                                     if (userSiteRegistry.remove(site.id)) {
                                         // Plan v2 review W-2 fix: wipe ALL data
                                         // associated with this site so "delete"
-                                        // is honest. OAuth credentials + tokens
-                                        // were silently surviving the delete and
-                                        // would auto-attach if the user later
-                                        // re-added the same site id.
+                                        // is honest.
                                         if (site.authKind == AuthKind.OAUTH) {
                                             oauthStore.clearToken(site.id)
                                             oauthStore.clearCredentials(site.id)
@@ -309,6 +307,10 @@ fun SettingExperimentalWebMountPage(
                                             val urls = collectKnownUrlsFor(site, webMountManager)
                                             cookieProvider.clearCookiesFor(urls)
                                         }
+                                        // Also drop the agent-synthesized profile
+                                        // for this site if one exists (matches
+                                        // wm_site_remove's behavior).
+                                        profileRegistry.remove(site.id)
                                         cookieRevision++
                                         toaster.show(deletedTemplate.format(site.displayName))
                                     }
