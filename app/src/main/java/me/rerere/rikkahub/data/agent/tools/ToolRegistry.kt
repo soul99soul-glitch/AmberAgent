@@ -197,6 +197,29 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = false
         }
 
+        "wm_site_add" -> {
+            // Plan v2: agent-driven site add. Reversible (user can delete in
+            // the settings page or via wm_site_remove). Doesn't grant the
+            // agent new capabilities — agent already had wm_open for any URL.
+            // Auto-approve so bulk-add scenarios ("add these 10 sites I'm
+            // pasting") don't require 10 confirmations.
+            mutates = true
+            risk = ToolRisk.Normal
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
+        }
+
+        "wm_site_remove" -> {
+            // Destructive: clears cookies + OAuth credentials + tokens for
+            // the site. Always require explicit per-call approval.
+            mutates = true
+            risk = ToolRisk.Sensitive
+            needsApproval = true
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
+
         "wm_signed_fetch" -> {
             // Phase 2 M2.2: profile-driven signed fetch. The risk is
             // method-dependent — GET/HEAD reads are safe (user's own

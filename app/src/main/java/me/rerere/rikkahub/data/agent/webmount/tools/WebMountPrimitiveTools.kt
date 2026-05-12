@@ -18,12 +18,15 @@ import me.rerere.rikkahub.data.agent.tools.string
 import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
+import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewScreenshot
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.SiteProfileEntry
+import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
+import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 
 /**
@@ -54,6 +57,7 @@ class WebMountPrimitiveTools(
     private val cookieProvider: WebMountCookieProvider,
     private val profileBridge: ProfileBridge,
     private val userSiteRegistry: UserSiteRegistry,
+    private val oauthStore: WebMountOAuthTokenStore,
 ) {
 
     /**
@@ -138,6 +142,8 @@ class WebMountPrimitiveTools(
         screenshotTool,
         stationsTool,
         signedFetchTool,
+        siteAddTool,
+        siteRemoveTool,
     )
 
     // -------------------------------------------------------------- wm_open
@@ -1040,50 +1046,49 @@ class WebMountPrimitiveTools(
     private val stationsTool = Tool(
         name = "wm_stations",
         description = """
-            List every WebMount station registered in this app along with its current status
-            (enabled, authenticated, read_only/read_write/login_required/...), display name,
-            and the auth methods it supports. Read-only and side-effect-free; safe to call
-            before deciding whether to use an adapter tool (e.g. github_repo_search) versus
-            a generic primitive (wm_open + wm_extract). Includes `applicable_profile_id` and
-            `has_profile` slots reserved for Phase 2 M2.1 (currently always null/false).
+            List every website in the user's WebMount Stations list — both built-in (HN, Reddit,
+            GitHub, Bilibili, 掘金, 知乎, 飞书云文档) and any user-added custom sites. For each
+            entry: id, display_name, url, auth_kind (anonymous / cookie / oauth), logged_in
+            probe (if a login cookie hint is known), and — for built-in sites with a native
+            adapter — the station's runtime status (read_only / read_write / login_required /
+            degraded / ...). Read-only and side-effect-free.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("include_disabled", booleanProp("Include stations the user has not enabled. Default true."))
-                    put("status_filter", stringProp("Optional wire status to filter by: not_configured / login_required / probing / read_only / read_write / degraded / error."))
+                    put("auth_kind_filter", stringProp("Optional filter: 'anonymous' | 'cookie' | 'oauth'."))
+                    put("status_filter", stringProp("Optional native-station status filter: read_only / read_write / login_required / degraded / error / not_configured / probing. Only applies to sites with a native adapter."))
                 },
                 required = emptyList(),
             )
         },
         execute = { input ->
             track("wm_stations", "WebMount 站点列表", input) {
-                val includeDisabled = input.boolean("include_disabled") ?: true
-                val rawFilter = input.string("status_filter")?.lowercase()?.takeIf { it.isNotBlank() }
-                // M2.0 review W-5 fix: validate status_filter against the
-                // enum's wireName set so a typo like "online" doesn't silently
-                // produce zero results — surface a warning the agent can act on.
+                val authKindFilter = input.string("auth_kind_filter")?.lowercase()?.takeIf { it.isNotBlank() }
+                val rawStatusFilter = input.string("status_filter")?.lowercase()?.takeIf { it.isNotBlank() }
                 val validStatuses = me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus.entries
                     .map { it.wireName }
                     .toSet()
-                val statusFilter = rawFilter?.takeIf { it in validStatuses }
-                val unknownFilter = rawFilter != null && statusFilter == null
-                // Plan v2: only list stations whose UserSite is still in the
-                // user's list. Removing a site from the WebMount Stations
-                // panel makes its station vanish from the agent's view too.
-                val activeIds = userSiteRegistry.activeNativeAdapterIds()
-                val states = manager.states.value.values
+                val statusFilter = rawStatusFilter?.takeIf { it in validStatuses }
+                val unknownStatusFilter = rawStatusFilter != null && statusFilter == null
+                // Plan v2: source from the user's site list (single source of truth). Each
+                // UserSite is decorated with the native adapter's station state (if any) +
+                // a cookie-presence probe.
+                val sites = userSiteRegistry.sites.value
                     .asSequence()
-                    .filter { it.id in activeIds }
-                    .filter { includeDisabled || it.enabled }
-                    .filter { statusFilter == null || it.status.wireName == statusFilter }
+                    .filter { site -> authKindFilter == null || site.authKind.name.lowercase() == authKindFilter }
+                    .filter { site ->
+                        if (statusFilter == null) return@filter true
+                        val state = site.nativeAdapterId?.let { manager.states.value[it] }
+                        state?.status?.wireName == statusFilter
+                    }
                     .toList()
                 val payload = buildJsonObject {
-                    put("count", states.size)
-                    if (unknownFilter) {
+                    put("count", sites.size)
+                    if (unknownStatusFilter) {
                         put(
                             "warning",
-                            "Unknown status_filter '$rawFilter'. Valid values: " +
+                            "Unknown status_filter '$rawStatusFilter'. Valid values: " +
                                 validStatuses.sorted().joinToString(", ") +
                                 ". Returning unfiltered results."
                         )
@@ -1091,62 +1096,186 @@ class WebMountPrimitiveTools(
                     put(
                         "stations",
                         buildJsonArray {
-                            states.forEach { s ->
-                                // Phase 2 M2.1: profile lookup by station id (built-in profiles
-                                // share ids with their native adapters: hackernews, reddit, juejin,
-                                // github, bilibili, zhihu, feishu_docs). Stations without a
-                                // matching profile (e.g. an iCloud-style standalone) still show
-                                // up here with has_profile=false.
-                                val profileEntry = profileRegistry.byId(s.id)
-                                val loginCookie = profileEntry?.profile?.hints?.loginCookie
+                            sites.forEach { site ->
+                                val state = site.nativeAdapterId?.let { manager.states.value[it] }
+                                val profileEntry = site.nativeAdapterId?.let { profileRegistry.byId(it) }
+                                val loginCookie = site.loginCookieName ?: profileEntry?.profile?.hints?.loginCookie
                                 val loggedIn = if (loginCookie != null) {
-                                    cookieProvider.getCookies(
-                                        endpoints = emptyList(),
-                                        extraUrls = profileEntry.profile.origins,
-                                    ).value(loginCookie) != null
+                                    val urls = buildSet {
+                                        add(site.homepageUrl)
+                                        profileEntry?.profile?.origins?.let { addAll(it) }
+                                    }.toList()
+                                    cookieProvider.getCookies(endpoints = emptyList(), extraUrls = urls).value(loginCookie) != null
                                 } else null
-                                val station = manager.adapterOf(s.id)
-                                val loginUrl = station?.primaryLoginUrl()
-                                val needsLogin = loginCookie != null && loggedIn == false
+                                val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
+                                val loginUrl = adapter?.primaryLoginUrl() ?: site.homepageUrl
+                                val needsLogin = site.authKind == AuthKind.COOKIE && loggedIn != true
                                 add(buildJsonObject {
-                                    put("id", s.id)
-                                    put("display_name", s.displayName)
-                                    put("enabled", s.enabled)
-                                    put("status", s.status.wireName)
-                                    put("capability", s.capability.wireName)
-                                    put("auth_methods", buildJsonArray {
-                                        s.authMethods.forEach { add(JsonPrimitive(it.wireName)) }
-                                    })
-                                    s.message?.let { put("message", it) }
-                                    if (s.updatedAtMillis > 0) put("updated_at_ms", s.updatedAtMillis)
-                                    put("has_profile", profileEntry != null)
-                                    if (profileEntry != null) {
-                                        put("applicable_profile_id", profileEntry.profile.id)
-                                        put(
-                                            "profile_capabilities",
-                                            buildJsonArray {
-                                                profileEntry.profile.effectiveCapabilities()
-                                                    .forEach { add(JsonPrimitive(it)) }
-                                            }
-                                        )
-                                        put("profile_trust", profileEntry.trust.name.lowercase())
-                                    } else {
-                                        put("applicable_profile_id", JsonNull)
+                                    put("id", site.id)
+                                    put("display_name", site.displayName)
+                                    put("url", site.homepageUrl)
+                                    put("auth_kind", site.authKind.name.lowercase())
+                                    put("user_added", site.nativeAdapterId == null)
+                                    site.nativeAdapterId?.let { put("native_adapter_id", it) }
+                                    state?.let {
+                                        put("status", it.status.wireName)
+                                        put("capability", it.capability.wireName)
+                                        put("enabled", it.enabled)
+                                        it.message?.let { msg -> put("message", msg) }
+                                        if (it.updatedAtMillis > 0) put("updated_at_ms", it.updatedAtMillis)
+                                    }
+                                    profileEntry?.let {
+                                        put("has_profile", true)
+                                        put("applicable_profile_id", it.profile.id)
+                                        put("profile_trust", it.trust.name.lowercase())
                                     }
                                     loggedIn?.let { put("logged_in", it) }
                                     if (needsLogin) {
                                         put("needs_login", true)
                                         put("login_helper", buildJsonObject {
-                                            put("station_id", s.id)
-                                            put("intent", "amberagent://webmount/login?station=${s.id}")
-                                            loginUrl?.let { put("login_url", it) }
-                                            put("label", s.displayName)
+                                            put("station_id", site.id)
+                                            put("intent", "amberagent://webmount/login?station=${site.id}")
+                                            put("login_url", loginUrl)
+                                            put("label", site.displayName)
                                         })
                                     }
                                 })
                             }
                         }
                     )
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
+            }
+        },
+    )
+
+    // ----------------------------------------------------------- wm_site_add
+
+    private val siteAddTool = Tool(
+        name = "wm_site_add",
+        description = """
+            Add a website to the user's WebMount Stations list so the agent (and the user, via
+            the settings page) can manage it. The site becomes available immediately — use
+            wm_open + wm_extract on it. Setting `needs_login=true` (default) adds a Sign-in
+            button on the settings page; the agent can prompt the user to log in there.
+            Reversible — the user can delete the site at any time. Idempotent on duplicate id.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("name", stringProp("Display name shown to the user (e.g. '微博', 'Hacker News')."))
+                    put("url", stringProp("Homepage / sign-in URL (http or https)."))
+                    put("needs_login", booleanProp("True (default) means the site needs a sign-in cookie. Set false for fully public read-only sites."))
+                    put("cookie_name", stringProp("Optional: name of the cookie set after login (e.g. SESSDATA). Lets the settings page show 'Signed in' status. Login still works without it."))
+                },
+                required = listOf("name", "url"),
+            )
+        },
+        execute = { input ->
+            track("wm_site_add", "WebMount 新增网站", input) {
+                val name = input.requiredString("name").trim()
+                require(name.isNotBlank()) { "name must not be blank" }
+                val url = input.requiredString("url").trim()
+                require(url.startsWith("http://") || url.startsWith("https://")) {
+                    "url must be an http(s) URL"
+                }
+                val needsLogin = input.boolean("needs_login") ?: true
+                val cookieName = input.string("cookie_name")?.takeIf { it.isNotBlank() && needsLogin }
+                val id = "user_" + name
+                    .lowercase(java.util.Locale.ROOT)
+                    .replace(Regex("[^a-z0-9]+"), "_")
+                    .trim('_')
+                    .ifBlank { "site" }
+                    .take(40)
+                val site = UserSite(
+                    id = id,
+                    displayName = name,
+                    homepageUrl = url,
+                    authKind = if (needsLogin) AuthKind.COOKIE else AuthKind.ANONYMOUS,
+                    loginCookieName = cookieName,
+                    nativeAdapterId = null,
+                    iconKey = null,
+                )
+                val ok = userSiteRegistry.add(site)
+                val payload = buildJsonObject {
+                    put("ok", ok)
+                    put("site_id", id)
+                    put("display_name", name)
+                    put("url", url)
+                    put("auth_kind", site.authKind.name.lowercase())
+                    if (!ok) put("error", "A site with id '$id' already exists. Pick a different name or remove the existing entry first.")
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
+            }
+        },
+    )
+
+    // -------------------------------------------------------- wm_site_remove
+
+    private val siteRemoveTool = Tool(
+        name = "wm_site_remove",
+        description = """
+            Remove a website from the user's WebMount Stations list. Also clears the site's
+            cookies (for cookie-auth sites) and OAuth credentials + tokens (for OAuth sites)
+            so 'delete' is honest. Pass the `site_id` from wm_stations. Built-in seed sites
+            can be re-added later via the settings page's "Restore examples" button or the
+            wm_site_add tool. Requires explicit human approval per invocation — destructive
+            action.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("site_id", stringProp("The site id from wm_stations (e.g. 'bilibili' or 'user_weibo')."))
+                },
+                required = listOf("site_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_site_remove", "WebMount 删除网站", input) {
+                val siteId = input.requiredString("site_id")
+                val site = userSiteRegistry.byId(siteId)
+                if (site == null) {
+                    return@track listOf(UIMessagePart.Text(buildJsonObject {
+                        put("ok", false)
+                        put("site_id", siteId)
+                        put("error", "No site with id '$siteId' is registered.")
+                    }.toString()))
+                }
+                val removed = userSiteRegistry.remove(siteId)
+                if (!removed) {
+                    return@track listOf(UIMessagePart.Text(buildJsonObject {
+                        put("ok", false)
+                        put("site_id", siteId)
+                        put("error", "Failed to remove site '$siteId' (registry rejected the change).")
+                    }.toString()))
+                }
+                // Mirror the settings page's delete behavior so "remove" wipes
+                // ALL data tied to this site — cookies + OAuth.
+                var cookiesCleared = 0
+                if (site.authKind == AuthKind.COOKIE) {
+                    val urls = buildSet {
+                        add(site.homepageUrl)
+                        site.nativeAdapterId?.let { manager.adapterOf(it) }?.endpoints?.forEach {
+                            add(it.origin)
+                            add(it.apiBase)
+                            add(it.loginUrl)
+                            addAll(it.cookieUrls)
+                        }
+                    }.filter { it.isNotBlank() }.distinct()
+                    cookiesCleared = cookieProvider.clearCookiesFor(urls)
+                }
+                var oauthCleared = false
+                if (site.authKind == AuthKind.OAUTH) {
+                    oauthStore.clearToken(siteId)
+                    oauthStore.clearCredentials(siteId)
+                    oauthCleared = true
+                }
+                val payload = buildJsonObject {
+                    put("ok", true)
+                    put("site_id", siteId)
+                    put("display_name", site.displayName)
+                    put("cookies_cleared", cookiesCleared)
+                    put("oauth_cleared", oauthCleared)
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
             }

@@ -319,6 +319,7 @@ val appModule = module {
             cookieProvider = get(),
             profileBridge = get(),
             userSiteRegistry = get(),
+            oauthStore = get(),
         )
     }
 
