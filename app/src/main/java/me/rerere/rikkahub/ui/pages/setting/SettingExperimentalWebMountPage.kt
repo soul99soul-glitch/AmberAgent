@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.os.Build
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -35,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -61,6 +64,8 @@ import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountUserAgents
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountWebViewCompat
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
@@ -68,6 +73,7 @@ import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
+import me.rerere.rikkahub.data.agent.webmount.usersites.loginCookieCandidatesFor
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
@@ -260,11 +266,6 @@ fun SettingExperimentalWebMountPage(
                         sites.forEachIndexed { index, site ->
                             // Recompose OAuth-dependent state when token store updates.
                             @Suppress("UNUSED_EXPRESSION") oauthRevision
-                            // Per-user feedback: OAuth sites (飞书) should ALSO
-                            // expose the cookie-based Sign-in path — that's the
-                            // "basic" route. OAuth (Edit credentials + Connect)
-                            // is the advanced route for users registering their
-                            // own bot. The two paths coexist on the same row.
                             val oauthProviderId = site.oauthProviderId ?: site.id
                             UserSiteCard(
                                 site = site,
@@ -289,6 +290,10 @@ fun SettingExperimentalWebMountPage(
                                     {
                                         val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
                                         val cleared = cookieProvider.clearCookiesFor(urls)
+                                        if (site.authKind == AuthKind.OAUTH) {
+                                            oauthClient.disconnect(oauthProviderId)
+                                            oauthRevision++
+                                        }
                                         cookieRevision++
                                         toaster.show(
                                             if (cleared > 0) signedOutTemplate.format(site.displayName, cleared)
@@ -366,7 +371,23 @@ fun SettingExperimentalWebMountPage(
         WebMountLoginDialog(
             url = site.homepageUrl,
             title = site.displayName,
+            stationId = site.id,
+            onClearSession = {
+                val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+                val cleared = cookieProvider.clearCookiesFor(urls)
+                if (site.authKind == AuthKind.OAUTH) {
+                    oauthClient.disconnect(site.oauthProviderId ?: site.id)
+                    oauthRevision++
+                }
+                cookieRevision++
+                preLoginCookies = emptyMap()
+                toaster.show(
+                    if (cleared > 0) signedOutTemplate.format(site.displayName, cleared)
+                    else noCookiesMessage.format(site.displayName)
+                )
+            },
             onDismiss = {
+                CookieManager.getInstance().flush()
                 loginDialogSite = null
                 cookieRevision++
 
@@ -374,23 +395,32 @@ fun SettingExperimentalWebMountPage(
                 val postCookies = cookieProvider.snapshotCookieEntries(urls)
                 val newCookies = postCookies.filterKeys { it !in preLoginCookies }
                 preLoginCookies = emptyMap()
+                val preferredCookieNames = loginCookieCandidatesFor(site)
 
                 // If the user didn't configure a cookie name AND we detected a
                 // newly-set session-like cookie during the login session, save
                 // it back so the row's "logged_in" badge starts working without
                 // any further intervention. Toast tells the user what happened.
                 var autoInferredName: String? = null
-                if (site.loginCookieName.isNullOrBlank()) {
-                    val guess = cookieProvider.guessSessionCookieName(newCookies)
+                val savedCookieMissing = site.loginCookieName?.let { postCookies[it] == null } ?: true
+                if (site.loginCookieName.isNullOrBlank() || savedCookieMissing) {
+                    val guessSourceCookies = if (preferredCookieNames.isNotEmpty()) postCookies else newCookies
+                    val guess = cookieProvider.guessSessionCookieName(
+                        newCookies = guessSourceCookies,
+                        preferredNames = preferredCookieNames,
+                    )
                     if (guess != null) {
                         userSiteRegistry.update(site.id) { it.copy(loginCookieName = guess) }
                         autoInferredName = guess
                     }
                 }
 
-                val effectiveCookieName = autoInferredName ?: site.loginCookieName
-                val captured = if (effectiveCookieName != null) {
-                    postCookies[effectiveCookieName] != null
+                val effectiveCookieNames = buildList {
+                    autoInferredName?.let { add(it) }
+                    addAll(preferredCookieNames)
+                }.distinct()
+                val captured = if (effectiveCookieNames.isNotEmpty()) {
+                    effectiveCookieNames.any { postCookies[it] != null }
                 } else null
                 val message = when {
                     autoInferredName != null && captured == true ->
@@ -501,7 +531,18 @@ private fun UserSiteCard(
     val loggedIn = site.loginCookieName?.let { name ->
         val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
         if (urls.isEmpty()) null
-        else cookieProvider.getCookies(emptyList(), urls).value(name) != null
+        else {
+            val bundle = cookieProvider.getCookies(emptyList(), urls)
+            (listOf(name) + loginCookieCandidatesFor(site)).distinct()
+                .any { bundle.value(it) != null }
+        }
+    } ?: loginCookieCandidatesFor(site).takeIf { it.isNotEmpty() }?.let { names ->
+        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+        if (urls.isEmpty()) null
+        else {
+            val bundle = cookieProvider.getCookies(emptyList(), urls)
+            names.any { bundle.value(it) != null }
+        }
     }
     val oauthProviderIdLocal = site.oauthProviderId ?: site.id
     val hasToken = if (site.authKind == AuthKind.OAUTH) {
@@ -563,7 +604,6 @@ private fun UserSiteCard(
         stationState?.message?.takeIf { it.isNotBlank() }?.let { msg ->
             ExperimentNote(text = msg)
         }
-
         ExperimentActionRow {
             if (onSignIn != null) {
                 ExperimentActionButton(
@@ -576,11 +616,18 @@ private fun UserSiteCard(
                     onClick = onSignIn,
                 )
             }
-            if (onSignOut != null && loggedIn == true) {
+            val clearState = onSignOut
+            val showClearState = clearState != null && (
+                loggedIn == true || hasToken || site.authKind == AuthKind.OAUTH
+                )
+            if (showClearState) {
                 ExperimentActionButton(
-                    text = stringResource(R.string.setting_webmount_sign_out),
+                    text = stringResource(
+                        if (loggedIn == true || hasToken) R.string.setting_webmount_sign_out
+                        else R.string.setting_webmount_clear_session
+                    ),
                     enabled = !busy,
-                    onClick = onSignOut,
+                    onClick = clearState,
                 )
             }
             if (onConnect != null && !hasToken) {
@@ -681,14 +728,33 @@ private fun SiteStatusPill(
 private fun WebMountLoginDialog(
     url: String,
     title: String,
+    stationId: String?,
+    onClearSession: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val loginUserAgent = remember(context, stationId, url) {
+        WebMountUserAgents.loginUserAgent(context, stationId, url)
+    }
     val state = rememberWebViewState(
         url = url,
         settings = {
+            javaScriptEnabled = true
             domStorageEnabled = true
+            databaseEnabled = true
+            loadsImagesAutomatically = true
+            cacheMode = WebSettings.LOAD_DEFAULT
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            javaScriptCanOpenWindowsAutomatically = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            WebMountWebViewCompat.applyBrowserLikeSettings(this)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                safeBrowsingEnabled = true
+            }
             builtInZoomControls = true
             displayZoomControls = false
+            loginUserAgent?.let { userAgentString = it }
         },
     )
     Dialog(
@@ -721,6 +787,26 @@ private fun WebMountLoginDialog(
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.weight(1f),
                         )
+                        if (onClearSession != null) {
+                            TextButton(
+                                onClick = {
+                                    onClearSession()
+                                    state.webView?.apply {
+                                        stopLoading()
+                                        clearCache(true)
+                                        clearHistory()
+                                        clearFormData()
+                                        evaluateJavascript(
+                                            "try{localStorage.clear();sessionStorage.clear();}catch(e){}",
+                                            null,
+                                        )
+                                    }
+                                    state.reload()
+                                },
+                            ) {
+                                Text(stringResource(R.string.setting_webmount_clear_session))
+                            }
+                        }
                         IconButton(onClick = onDismiss) {
                             Icon(
                                 imageVector = HugeIcons.Cancel01,
@@ -737,6 +823,22 @@ private fun WebMountLoginDialog(
                         onCreated = { webView ->
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+                            WebMountWebViewCompat.injectFeishuCompatibility(webView, url)
+                        },
+                        onProgressChanged = { webView, progress ->
+                            if (progress >= 25) {
+                                WebMountWebViewCompat.injectFeishuCompatibility(
+                                    webView,
+                                    webView?.url ?: state.currentUrl ?: url,
+                                )
+                            }
+                        },
+                        onPageFinished = { webView, finishedUrl ->
+                            CookieManager.getInstance().flush()
+                            WebMountWebViewCompat.injectFeishuCompatibility(
+                                webView,
+                                finishedUrl ?: state.currentUrl ?: url,
+                            )
                         },
                     )
                 }

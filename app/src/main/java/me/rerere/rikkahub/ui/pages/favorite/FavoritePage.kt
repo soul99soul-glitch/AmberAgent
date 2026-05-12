@@ -2,20 +2,19 @@ package me.rerere.rikkahub.ui.pages.favorite
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Favourite
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -42,6 +42,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
+import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceBorder
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.navigateToChatPage
@@ -59,6 +64,7 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
     val favorites = vm.nodeFavorites.collectAsStateWithLifecycle().value
     val favoriteRemovedText = stringResource(R.string.favorite_page_removed)
     val undoText = stringResource(R.string.history_page_undo)
+    val workspace = workspaceColors()
 
     Scaffold(
         topBar = {
@@ -77,28 +83,26 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
             SnackbarHost(hostState = snackbarHostState)
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspace.canvas,
     ) { innerPadding ->
         if (favorites.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center,
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = innerPadding + PaddingValues(16.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.favorite_page_no_favorites),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                )
+                item { FavoriteEmptyState() }
             }
             return@Scaffold
         }
 
         LazyColumn(
-            contentPadding = innerPadding + PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = innerPadding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
+            item {
+                FavoriteHeader(count = favorites.size)
+            }
             items(favorites, key = { it.id }) { item ->
                 SwipeableFavoriteCard(
                     item = item,
@@ -119,10 +123,74 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
                         .animateItem(),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun FavoriteHeader(count: Int) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Favourite,
+                tone = WorkspaceTone.Accent,
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = stringResource(R.string.favorite_page_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = workspace.ink,
+                )
+                Text(
+                    text = stringResource(R.string.favorite_page_count, count),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoriteEmptyState() {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Favourite,
+                tone = WorkspaceTone.Neutral,
+            )
+            Text(
+                text = stringResource(R.string.favorite_page_no_favorites),
+                style = MaterialTheme.typography.titleSmall,
+                color = workspace.ink,
+            )
+            Text(
+                text = stringResource(R.string.favorite_page_empty_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = workspace.muted,
+            )
         }
     }
 }
@@ -137,6 +205,7 @@ private fun SwipeableFavoriteCard(
     val dismissState = rememberSwipeToDismissBoxState(
         initialValue = SwipeToDismissBoxValue.Settled,
     )
+    val workspace = workspaceColors()
 
     LaunchedEffect(dismissState.currentValue) {
         when (dismissState.currentValue) {
@@ -155,8 +224,8 @@ private fun SwipeableFavoriteCard(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        MaterialTheme.colorScheme.errorContainer,
-                        RoundedCornerShape(12.dp)
+                        workspace.redContainer,
+                        RoundedCornerShape(8.dp)
                     )
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd,
@@ -164,7 +233,7 @@ private fun SwipeableFavoriteCard(
                 Icon(
                     imageVector = HugeIcons.Delete01,
                     contentDescription = stringResource(R.string.assistant_page_remove),
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    tint = workspace.red,
                 )
             }
         },
@@ -184,35 +253,46 @@ private fun FavoriteCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    val workspace = workspaceColors()
+    val dateText = Instant.ofEpochMilli(item.createdAt).toLocalDateTime()
+
+    Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
     ) {
-        SelectionContainer {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Favourite,
+                tone = WorkspaceTone.Accent,
+            )
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
                     text = item.conversationTitle.ifBlank { stringResource(R.string.favorite_page_untitled_conversation) },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = workspace.ink,
                 )
-                val dateText = Instant.ofEpochMilli(item.createdAt).toLocalDateTime()
                 Text(
                     text = item.preview,
-                    maxLines = 4,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
                 )
-                Text(
+                WorkspaceStatusPill(
                     text = dateText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    tone = WorkspaceTone.Neutral,
                 )
             }
         }

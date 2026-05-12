@@ -52,6 +52,7 @@ import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
 import me.rerere.rikkahub.data.agent.live.LiveModeManager
+import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliModelCouncilRunner
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
@@ -360,7 +361,11 @@ val appModule = module {
     }
 
     single {
-        ModelCouncilManager(get(), get(), get(), get(), get<ProviderModelCouncilTextRunner>(), get())
+        ExternalCliModelCouncilRunner(get())
+    }
+
+    single {
+        ModelCouncilManager(get(), get(), get(), get(), get<ProviderModelCouncilTextRunner>(), get(), get())
     }
 
     single {

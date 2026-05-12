@@ -144,7 +144,6 @@ import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.FullScreen
@@ -152,7 +151,6 @@ import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Video01
-import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
@@ -172,9 +170,14 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
 import me.rerere.rikkahub.data.context.ContextFootprintEstimator
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.data.usage.ProviderUsageClient
+import me.rerere.rikkahub.data.usage.ProviderUsageMetric
+import me.rerere.rikkahub.data.usage.ProviderUsageStatus
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
@@ -228,6 +231,7 @@ fun ChatInput(
     onSendClick: (PendingUserMessageMode) -> Unit,
     onLongSendClick: (PendingUserMessageMode) -> Unit,
     onOpenQueue: () -> Unit = {},
+    onCompactContext: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
     val providerManager = koinInject<ProviderManager>()
@@ -310,6 +314,9 @@ fun ChatInput(
     val usageClient = remember(context, httpClient) {
         OpenAICodexOAuthClient(httpClient, OpenAICodexAuthStore(context))
     }
+    val providerUsageClient = remember(httpClient) {
+        ProviderUsageClient(httpClient)
+    }
     val scope = rememberCoroutineScope()
     val selectedChatModelId = assistant.chatModelId ?: settings.chatModelId
     val chatModel = remember(settings.providers, selectedChatModelId) {
@@ -319,18 +326,22 @@ fun ChatInput(
         chatModel?.findProvider(settings.providers)
     }
 
-    suspend fun refreshCodexUsage() {
+    suspend fun refreshUsage() {
         val openAIProvider = chatProvider as? ProviderSetting.OpenAI
-        if (openAIProvider?.authMode != OpenAIAuthMode.CODEX_OAUTH) {
+        if (openAIProvider == null) {
             usageStatus = ComposerUsageStatus()
-            usageError = context.getString(R.string.chat_input_usage_codex_oauth_required)
+            usageError = context.getString(R.string.chat_input_usage_openai_compatible_required)
             return
         }
 
         usageLoading = true
         usageError = null
         runCatching {
-            usageClient.fetchUsage(openAIProvider.id).toComposerUsageStatus(context)
+            if (openAIProvider.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+                usageClient.fetchUsage(openAIProvider.id).toComposerUsageStatus(context)
+            } else {
+                providerUsageClient.fetchUsage(openAIProvider, chatModel).toComposerUsageStatus()
+            }
         }.onSuccess {
             usageStatus = it
         }.onFailure {
@@ -480,7 +491,7 @@ fun ChatInput(
 
     if (showUsageSheet) {
         LaunchedEffect(showUsageSheet, chatProvider.providerRoutingKey()) {
-            refreshCodexUsage()
+            refreshUsage()
         }
         ComposerUsageSheet(
             status = usageStatus,
@@ -488,7 +499,7 @@ fun ChatInput(
             error = usageError,
             onRefresh = {
                 scope.launch {
-                    refreshCodexUsage()
+                    refreshUsage()
                 }
             },
             onDismissRequest = { showUsageSheet = false },
@@ -545,6 +556,7 @@ fun ChatInput(
                         state = state,
                         onSendMessage = { sendMessage() },
                         onUsageClick = { showUsageSheet = true },
+                        onCompactContext = onCompactContext,
                     )
 
                     Row(
@@ -723,13 +735,10 @@ private fun ContextUsageIndicator(
     val workspace = workspaceColors()
     val currentMessages = conversation.currentMessages
     val contextFingerprint = ContextFootprintEstimator.inputFingerprint(currentMessages)
-    val latestExactPromptTokens = remember(contextFingerprint) {
-        ContextFootprintEstimator.latestExactPromptUsage(currentMessages)
-    }
     val estimatedTokens = remember(contextFingerprint) {
         ContextFootprintEstimator.estimateConversationInputTokens(conversation)
     }
-    val usedTokens = latestExactPromptTokens ?: estimatedTokens
+    val usedTokens = estimatedTokens
     val contextWindow = remember(model?.modelId, model?.contextWindowTokens) {
         model?.contextWindowTokens ?: model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
     }
@@ -784,13 +793,15 @@ private fun Int.formatContextTokens(): String = when {
 }
 
 private data class ComposerUsageStatus(
+    val title: String? = null,
     val planType: String? = null,
+    val metrics: List<Pair<String, ComposerUsageMetric>> = emptyList(),
     val fiveHourQuota: ComposerUsageMetric? = null,
     val weeklyQuota: ComposerUsageMetric? = null,
     val cacheHitRate: ComposerUsageMetric? = null,
 ) {
     val hasData: Boolean
-        get() = fiveHourQuota != null || weeklyQuota != null || cacheHitRate != null
+        get() = metrics.isNotEmpty() || fiveHourQuota != null || weeklyQuota != null || cacheHitRate != null
 }
 
 private data class ComposerUsageMetric(
@@ -800,9 +811,27 @@ private data class ComposerUsageMetric(
 
 private fun OpenAICodexUsageStatus.toComposerUsageStatus(context: Context): ComposerUsageStatus {
     return ComposerUsageStatus(
+        title = context.getString(R.string.chat_input_usage_sheet_title),
         planType = planType,
         fiveHourQuota = fiveHour?.toComposerUsageMetric(context),
         weeklyQuota = weekly?.toComposerUsageMetric(context),
+    )
+}
+
+private fun ProviderUsageStatus.toComposerUsageStatus(): ComposerUsageStatus {
+    return ComposerUsageStatus(
+        title = title,
+        planType = planType,
+        metrics = metrics.map { metric ->
+            metric.label to metric.toComposerUsageMetric()
+        },
+    )
+}
+
+private fun ProviderUsageMetric.toComposerUsageMetric(): ComposerUsageMetric {
+    return ComposerUsageMetric(
+        percent = percent,
+        detail = detail,
     )
 }
 
@@ -977,7 +1006,7 @@ private fun ComposerUsageSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource(R.string.chat_input_usage_sheet_title),
+                    text = status.title ?: stringResource(R.string.chat_input_usage_sheet_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = workspace.ink,
                     modifier = Modifier.weight(1f),
@@ -1015,9 +1044,15 @@ private fun ComposerUsageSheet(
                     color = workspace.muted,
                 )
             } else {
-                status.fiveHourQuota?.let { UsageMetricRow(label = "5h", metric = it) }
-                status.weeklyQuota?.let { UsageMetricRow(label = "weekly", metric = it) }
-                status.cacheHitRate?.let { UsageMetricRow(label = "cache", metric = it) }
+                if (status.metrics.isNotEmpty()) {
+                    status.metrics.forEach { (label, metric) ->
+                        UsageMetricRow(label = label, metric = metric)
+                    }
+                } else {
+                    status.fiveHourQuota?.let { UsageMetricRow(label = "5h", metric = it) }
+                    status.weeklyQuota?.let { UsageMetricRow(label = "weekly", metric = it) }
+                    status.cacheHitRate?.let { UsageMetricRow(label = "cache", metric = it) }
+                }
             }
         }
     }
@@ -2293,8 +2328,9 @@ private fun SandboxActivityUiState.terminalTranscript(): String = buildString {
 }
 
 private val HTTP_URL_REGEX = Regex("https?://[^\\s\"'<>),]+")
-private const val MAX_SLASH_COMMANDS = 6
+private const val MAX_SLASH_COMMANDS = 9
 private const val MAX_SLASH_COMMAND_TITLE_CHARS = 32
+private const val DYNAMIC_SLASH_COMMAND_MIN_QUERY_CHARS = 2
 private val ComposerButtonSize = 44.dp
 private val ComposerButtonIconSize = 28.dp
 private val ComposerModelGroupHeight = 48.dp
@@ -2340,13 +2376,30 @@ private fun TextInputRow(
     state: ChatInputState,
     onSendMessage: () -> Unit,
     onUsageClick: () -> Unit,
+    onCompactContext: () -> Unit,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
+    val skillManager: SkillManager = koinInject()
     val assistant = settings.getCurrentAssistant()
     val workspace = workspaceColors()
     val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
         settings.getQuickMessagesOfAssistant(assistant)
+    }
+    val enabledSkills by produceState(
+        initialValue = emptyList<SkillMetadata>(),
+        key1 = assistant.enabledSkills,
+        key2 = skillManager,
+    ) {
+        value = if (assistant.enabledSkills.isEmpty()) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                skillManager.listSkills()
+                    .filter { skill -> skill.name in assistant.enabledSkills }
+                    .sortedBy { skill -> skill.name.lowercase(Locale.getDefault()) }
+            }
+        }
     }
 
     Column(
@@ -2380,19 +2433,21 @@ private fun TextInputRow(
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
         val slashQuery = state.textContent.text.toString().slashCommandQuery()
-        val showUsageCommand = slashQuery?.let { query ->
-            query.isNotBlank() && (
-                "usage".startsWith(query, ignoreCase = true) ||
-                "用量".startsWith(query, ignoreCase = true)
-                )
-        } == true
-        val slashCommands = remember(quickMessages, slashQuery) {
+        val allSlashCommands = remember(
+            quickMessages,
+            enabledSkills,
+            settings.agentRuntime.subAgent.enabled,
+            settings.agentRuntime.modelCouncil.enabled,
+        ) {
+            buildSlashCommandItems(
+                quickMessages = quickMessages,
+                enabledSkills = enabledSkills,
+                subAgentEnabled = settings.agentRuntime.subAgent.enabled,
+            )
+        }
+        val slashCommands = remember(allSlashCommands, slashQuery) {
             slashQuery?.let { query ->
-                quickMessages.filter { quickMessage ->
-                    query.isBlank() ||
-                        quickMessage.title.contains(query, ignoreCase = true) ||
-                        quickMessage.content.contains(query, ignoreCase = true)
-                }
+                filterSlashCommandItems(allSlashCommands, query)
             }.orEmpty()
         }
         val receiveContentListener = remember(
@@ -2431,17 +2486,38 @@ private fun TextInputRow(
                 }
             }
         }
-        if (isFocused && slashQuery != null) {
+        val slashVisible = isFocused && slashQuery != null
+        androidx.compose.animation.AnimatedVisibility(
+            visible = slashVisible,
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(150)
+            ) + androidx.compose.animation.slideInVertically(
+                animationSpec = androidx.compose.animation.core.tween(150),
+                initialOffsetY = { it / 4 }
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(100)
+            ) + androidx.compose.animation.slideOutVertically(
+                animationSpec = androidx.compose.animation.core.tween(100),
+                targetOffsetY = { it / 4 }
+            ),
+        ) {
             SlashCommandPanel(
-                quickMessages = slashCommands,
-                hasAnyCommand = quickMessages.isNotEmpty() || showUsageCommand,
-                showUsageCommand = showUsageCommand,
-                onUsageClick = {
-                    state.setMessageText("")
-                    onUsageClick()
-                },
-                onSelect = { quickMessage ->
-                    state.setMessageText(quickMessage.content)
+                commands = slashCommands,
+                hasAnyCommand = allSlashCommands.isNotEmpty(),
+                onSelect = { command ->
+                    when (val action = command.action) {
+                        SlashCommandAction.ClearInput -> state.clearInput()
+                        SlashCommandAction.CompactContext -> {
+                            state.clearInput()
+                            onCompactContext()
+                        }
+                        is SlashCommandAction.InsertText -> state.setMessageText(action.text)
+                        SlashCommandAction.OpenUsage -> {
+                            state.clearInput()
+                            onUsageClick()
+                        }
+                    }
                 },
             )
         }
@@ -2457,21 +2533,21 @@ private fun TextInputRow(
             else detectMentionContextFor(mentionTextSnapshot, mentionSelection.start)
         }
         val mentionVisible = isFocused && mentionState != null
-        val mentionMatches = if (mentionVisible && mentionState != null) {
+        val mentionMatches = mentionState?.takeIf { mentionVisible }?.let { activeMention ->
             remember(
                 settings.agentRuntime.subAgent.enabled,
                 settings.agentRuntime.modelCouncil.enabled,
-                mentionState.query,
+                activeMention.query,
             ) {
                 filterMentionRoleItems(
                     items = buildMentionRoleItems(
                         subAgentEnabled = settings.agentRuntime.subAgent.enabled,
                         modelCouncilEnabled = settings.agentRuntime.modelCouncil.enabled,
                     ),
-                    query = mentionState.query,
+                    query = activeMention.query,
                 )
             }
-        } else emptyList()
+        } ?: emptyList()
         androidx.compose.animation.AnimatedVisibility(
             visible = mentionVisible,
             enter = androidx.compose.animation.fadeIn(
@@ -2549,20 +2625,7 @@ private fun TextInputRow(
                 }
             } else {
                 {
-                    Surface(
-                        modifier = Modifier.size(24.dp),
-                        shape = RoundedCornerShape(5.dp),
-                        color = workspace.blueContainer,
-                        contentColor = workspace.blue,
-                        border = BorderStroke(1.dp, workspace.hairline),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "/",
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
-                    }
+                    SlashCommandLeadingMark()
                 }
             },
         )
@@ -2576,11 +2639,9 @@ private fun TextInputRow(
 
 @Composable
 private fun SlashCommandPanel(
-    quickMessages: List<QuickMessage>,
+    commands: List<SlashCommandItem>,
     hasAnyCommand: Boolean,
-    showUsageCommand: Boolean,
-    onUsageClick: () -> Unit,
-    onSelect: (QuickMessage) -> Unit,
+    onSelect: (SlashCommandItem) -> Unit,
 ) {
     val workspace = workspaceColors()
     Surface(
@@ -2597,26 +2658,18 @@ private fun SlashCommandPanel(
                     text = stringResource(R.string.chat_input_slash_command_empty)
                 )
 
-                quickMessages.isEmpty() && !showUsageCommand -> SlashCommandEmptyRow(
+                commands.isEmpty() -> SlashCommandEmptyRow(
                     text = stringResource(R.string.chat_input_slash_command_no_match)
                 )
 
                 else -> {
-                    if (showUsageCommand) {
-                        SlashUsageCommandRow(onClick = onUsageClick)
-                        if (quickMessages.isNotEmpty()) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(start = 58.dp),
-                                color = workspace.hairline,
-                            )
-                        }
-                    }
-                    quickMessages.take(MAX_SLASH_COMMANDS).forEachIndexed { index, quickMessage ->
+                    val shownCommands = commands.take(MAX_SLASH_COMMANDS)
+                    shownCommands.forEachIndexed { index, command ->
                         SlashCommandRow(
-                            quickMessage = quickMessage,
-                            onClick = { onSelect(quickMessage) },
+                            command = command,
+                            onClick = { onSelect(command) },
                         )
-                        if (index < quickMessages.take(MAX_SLASH_COMMANDS).lastIndex) {
+                        if (index < shownCommands.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = 58.dp),
                                 color = workspace.hairline,
@@ -2624,55 +2677,6 @@ private fun SlashCommandPanel(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SlashUsageCommandRow(
-    onClick: () -> Unit,
-) {
-    val workspace = workspaceColors()
-    Surface(
-        onClick = onClick,
-        color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Surface(
-                modifier = Modifier.size(30.dp),
-                shape = RoundedCornerShape(6.dp),
-                color = workspace.blueContainer,
-                contentColor = workspace.blue,
-                border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.14f)),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = HugeIcons.ChartColumn,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "/usage",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "5h / weekly / cache",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
     }
@@ -2680,7 +2684,7 @@ private fun SlashUsageCommandRow(
 
 @Composable
 private fun SlashCommandRow(
-    quickMessage: QuickMessage,
+    command: SlashCommandItem,
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
@@ -2697,27 +2701,29 @@ private fun SlashCommandRow(
             Surface(
                 modifier = Modifier.size(30.dp),
                 shape = RoundedCornerShape(6.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-                border = BorderStroke(1.dp, workspace.hairline),
+                color = if (command.accent) workspace.blueContainer else workspace.row,
+                contentColor = if (command.accent) workspace.blue else workspace.muted,
+                border = BorderStroke(
+                    1.dp,
+                    if (command.accent) workspace.blue.copy(alpha = 0.14f) else workspace.hairline
+                ),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
-                        text = "/",
+                        text = command.marker,
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                val fallbackTitle = stringResource(R.string.extension_content_unnamed)
                 Text(
-                    text = "/${quickMessage.slashTitle(fallbackTitle)}",
+                    text = "/${command.title}",
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = quickMessage.content,
+                    text = command.description,
                     style = MaterialTheme.typography.bodySmall,
                     color = workspace.muted,
                     maxLines = 1,
@@ -2748,7 +2754,7 @@ private fun QuickMessageButton(
         onClick = {
             expanded = !expanded
         }) {
-        Icon(HugeIcons.Zap, null)
+        SlashCommandLeadingMark()
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
@@ -2787,11 +2793,142 @@ private fun QuickMessageButton(
     }
 }
 
+@Composable
+private fun SlashCommandLeadingMark() {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.size(24.dp),
+        shape = RoundedCornerShape(5.dp),
+        color = workspace.blueContainer,
+        contentColor = workspace.blue,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = "/",
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
 private fun String.slashCommandQuery(): String? {
     if (!startsWith("/")) return null
     val query = drop(1)
     return query.takeIf { it.none { char -> char.isWhitespace() } }
 }
+
+private sealed interface SlashCommandAction {
+    data object ClearInput : SlashCommandAction
+    data object CompactContext : SlashCommandAction
+    data object OpenUsage : SlashCommandAction
+    data class InsertText(val text: String) : SlashCommandAction
+}
+
+private data class SlashCommandItem(
+    val id: String,
+    val title: String,
+    val description: String,
+    val action: SlashCommandAction,
+    val marker: String = "/",
+    val minQueryChars: Int = 0,
+    val accent: Boolean = false,
+)
+
+private fun buildSlashCommandItems(
+    quickMessages: List<QuickMessage>,
+    enabledSkills: List<SkillMetadata>,
+    subAgentEnabled: Boolean,
+): List<SlashCommandItem> = buildList {
+    add(
+        SlashCommandItem(
+            id = "core.clear",
+            title = "clear",
+            description = "清空当前输入框",
+            action = SlashCommandAction.ClearInput,
+        )
+    )
+    add(
+        SlashCommandItem(
+            id = "core.compact",
+            title = "compact",
+            description = "立即压缩当前对话上下文",
+            action = SlashCommandAction.CompactContext,
+        )
+    )
+    if (subAgentEnabled) {
+        add(
+            SlashCommandItem(
+                id = "core.subagent",
+                title = "subagent",
+                description = "引导 Agent 按任务需要灵活使用 SubAgent",
+                action = SlashCommandAction.InsertText(
+                    "请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；" +
+                        "等待它们返回后，再综合成一个可执行的结论："
+                ),
+            )
+        )
+    }
+    add(
+        SlashCommandItem(
+            id = "core.usage",
+            title = "usage",
+            description = "查看 5h / weekly / cache 用量",
+            action = SlashCommandAction.OpenUsage,
+            minQueryChars = 1,
+            accent = true,
+        )
+    )
+    quickMessages.forEach { quickMessage ->
+        val title = quickMessage.slashTitle("quick")
+        add(
+            SlashCommandItem(
+                id = "quick.${quickMessage.id}",
+                title = title,
+                description = quickMessage.content,
+                action = SlashCommandAction.InsertText(quickMessage.content),
+                marker = "Q",
+                minQueryChars = DYNAMIC_SLASH_COMMAND_MIN_QUERY_CHARS,
+            )
+        )
+    }
+    enabledSkills.forEach { skill ->
+        add(
+            SlashCommandItem(
+                id = "skill.${skill.name}",
+                title = skill.name,
+                description = skill.description.ifBlank { "调用这个 Skill 处理当前任务" },
+                action = SlashCommandAction.InsertText(skill.toSlashCommandPrompt()),
+                marker = "S",
+                minQueryChars = DYNAMIC_SLASH_COMMAND_MIN_QUERY_CHARS,
+            )
+        )
+    }
+}
+
+private fun filterSlashCommandItems(
+    items: List<SlashCommandItem>,
+    query: String,
+): List<SlashCommandItem> {
+    val normalized = query.trim()
+    return items.filter { command ->
+        if (normalized.length < command.minQueryChars) {
+            false
+        } else if (normalized.isBlank()) {
+            true
+        } else {
+            command.title.startsWith(normalized, ignoreCase = true) ||
+                command.title.contains(normalized, ignoreCase = true) ||
+                command.description.contains(normalized, ignoreCase = true)
+        }
+    }
+}
+
+private fun SkillMetadata.toSlashCommandPrompt(): String =
+    "请先调用 use_skill(\"${name.escapeForPromptString()}\")，然后按这个 skill 的说明继续完成："
+
+private fun String.escapeForPromptString(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"")
 
 private const val MAX_MENTIONS = 9
 

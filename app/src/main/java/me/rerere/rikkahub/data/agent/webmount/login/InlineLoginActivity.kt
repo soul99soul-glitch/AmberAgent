@@ -4,10 +4,12 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,6 +20,8 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountUserAgents
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountWebViewCompat
 import org.koin.android.ext.android.inject
 
 /**
@@ -71,6 +75,7 @@ class InlineLoginActivity : Activity() {
         }
         loginCookieName = adapter.endpoints.firstOrNull()
             ?.requiredCookieNames?.firstOrNull()
+        val loginUserAgent = WebMountUserAgents.loginUserAgent(this, adapter.id, loginUrl)
 
         // Build the UI programmatically — no XML needed for one-shot view.
         val root = LinearLayout(this).apply {
@@ -102,11 +107,30 @@ class InlineLoginActivity : Activity() {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
-                userAgentString = settings.userAgentString // keep default Chrome UA
+                loadsImagesAutomatically = true
+                cacheMode = WebSettings.LOAD_DEFAULT
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                javaScriptCanOpenWindowsAutomatically = true
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                WebMountWebViewCompat.applyBrowserLikeSettings(this)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    safeBrowsingEnabled = true
+                }
+                loginUserAgent?.let { userAgentString = it }
             }
-            webChromeClient = WebChromeClient()
+            webChromeClient = object : WebChromeClient() {
+                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                    super.onProgressChanged(view, newProgress)
+                    if (newProgress >= 25) {
+                        WebMountWebViewCompat.injectFeishuCompatibility(view, view?.url ?: loginUrl)
+                    }
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
+                    CookieManager.getInstance().flush()
+                    WebMountWebViewCompat.injectFeishuCompatibility(view, url ?: loginUrl)
                     refreshStatus(url)
                 }
             }
@@ -151,14 +175,16 @@ class InlineLoginActivity : Activity() {
     }
 
     override fun onDestroy() {
+        // Persist captured cookies before tearing down the WebView. Some
+        // providers set session cookies late in the final redirect; flushing
+        // first avoids losing them when Android reclaims the renderer.
+        CookieManager.getInstance().flush()
         webView?.apply {
             stopLoading()
             settings.javaScriptEnabled = false
             destroy()
         }
         webView = null
-        // Persist captured cookies to disk before the system reclaims us.
-        CookieManager.getInstance().flush()
         super.onDestroy()
     }
 

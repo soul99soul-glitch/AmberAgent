@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1935,28 +1936,7 @@ private fun ModelCouncilRunSheet(
             }
 
             taskObjective?.takeIf { it.isNotBlank() }?.let { objective ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    color = workspace.row,
-                    border = BorderStroke(1.dp, workspace.hairline),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = "议题",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = workspace.faint,
-                        )
-                        Text(
-                            text = objective,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = workspace.ink,
-                        )
-                    }
-                }
+                CouncilObjectiveCard(objective = objective)
             }
 
             if (seatTabs.isNotEmpty()) {
@@ -2046,6 +2026,72 @@ private fun ModelCouncilRunSheet(
 }
 
 private data class CouncilTabEntry(val key: String, val label: String)
+
+@Composable
+private fun CouncilObjectiveCard(objective: String) {
+    val workspace = workspaceColors()
+    val shouldCollapse = remember(objective) { objective.shouldCollapseCouncilObjective() }
+    var expanded by remember(objective) { mutableStateOf(!shouldCollapse) }
+    val objectiveScrollState = rememberScrollState()
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .clickable(enabled = shouldCollapse) { expanded = !expanded },
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.row,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "议题",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspace.faint,
+                    modifier = Modifier.weight(1f),
+                )
+                if (shouldCollapse) {
+                    Text(
+                        text = if (expanded) "收起" else "展开",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.blue,
+                    )
+                }
+            }
+            Text(
+                text = objective,
+                style = MaterialTheme.typography.bodySmall,
+                color = workspace.ink,
+                maxLines = if (expanded) Int.MAX_VALUE else COUNCIL_OBJECTIVE_COLLAPSED_LINES,
+                overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
+                modifier = if (expanded && shouldCollapse) {
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(objectiveScrollState)
+                } else {
+                    Modifier.fillMaxWidth()
+                },
+            )
+        }
+    }
+}
+
+private fun String.shouldCollapseCouncilObjective(): Boolean {
+    val lineCount = lineSequence().count()
+    return length > COUNCIL_OBJECTIVE_COLLAPSE_CHARS || lineCount > COUNCIL_OBJECTIVE_COLLAPSE_LINES
+}
+
+private const val COUNCIL_OBJECTIVE_COLLAPSED_LINES = 3
+private const val COUNCIL_OBJECTIVE_COLLAPSE_LINES = 5
+private const val COUNCIL_OBJECTIVE_COLLAPSE_CHARS = 180
 
 /** Pull the synthesizer's final text from the latest read/wait result (`result.finalRecommendation`). */
 private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): String {

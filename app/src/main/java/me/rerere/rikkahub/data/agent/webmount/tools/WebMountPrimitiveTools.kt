@@ -30,6 +30,7 @@ import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 import me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls
+import me.rerere.rikkahub.data.agent.webmount.usersites.loginCookieCandidatesFor
 
 /**
  * Browser Primitives tool catalog.
@@ -48,8 +49,10 @@ import me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls
  * **Default OFF**: the LocalTools aggregator only includes these when the
  * user enables `LocalToolOption.WebMount` per assistant. `wm_eval` requires
  * an additional `LocalToolOption.WebMountEval` opt-in (Phase 2 M2.0.2)
- * and is flagged `Tool.mandatoryApproval = true` (M2.0.1) so the per-call
- * human approval prompt cannot be bypassed by any auto-approve setting.
+ * and is flagged `Tool.mandatoryApproval = true` (M2.0.1) so ordinary
+ * auto-approval and run-trust cannot bypass the prompt. The separate
+ * high-risk auto-approval setting remains the user's explicit unattended
+ * execution override.
  */
 class WebMountPrimitiveTools(
     private val pool: WebViewPool,
@@ -600,9 +603,9 @@ class WebMountPrimitiveTools(
             ⚠️ HIGH RISK. Evaluate arbitrary JavaScript in the WebMount session and return the
             result. The script runs INSIDE the page's origin with full DOM access — it can read
             any data the user has on that site (cookies, sessionStorage, localStorage), perform
-            same-origin fetches with credentials, and mutate the page. This tool ALWAYS requires
-            per-call human approval and cannot be bypassed by any auto-approve setting or prior
-            in-run trust. Prefer the specific primitives (wm_click / wm_type / wm_extract /
+            same-origin fetches with credentials, and mutate the page. Ordinary auto-approval and
+            in-run trust cannot bypass its approval gate; only explicit high-risk auto-approval
+            can run it unattended. Prefer the specific primitives (wm_click / wm_type / wm_extract /
             wm_find) when they suffice. The expression's return value is JSON-serialized;
             non-serializable values fall back to String() coercion.
         """.trimIndent().replace("\n", " "),
@@ -1115,9 +1118,14 @@ class WebMountPrimitiveTools(
                                 // to subsequent wm_stations calls.
                                 val profileEntry = profileRegistry.byId(site.nativeAdapterId ?: site.id)
                                 val loginCookie = site.loginCookieName ?: profileEntry?.profile?.hints?.loginCookie
+                                val loginCookieNames = buildList {
+                                    loginCookie?.let { add(it) }
+                                    addAll(loginCookieCandidatesFor(site))
+                                }.distinct()
                                 val urls = collectSiteUrls(site, manager, profileRegistry)
-                                val loggedIn = if (loginCookie != null) {
-                                    cookieProvider.getCookies(endpoints = emptyList(), extraUrls = urls).value(loginCookie) != null
+                                val loggedIn = if (loginCookieNames.isNotEmpty()) {
+                                    val bundle = cookieProvider.getCookies(endpoints = emptyList(), extraUrls = urls)
+                                    loginCookieNames.any { bundle.value(it) != null }
                                 } else null
                                 val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
                                 val loginUrl = adapter?.primaryLoginUrl() ?: site.homepageUrl

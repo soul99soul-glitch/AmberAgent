@@ -69,6 +69,9 @@ class BilibiliTools(private val client: BilibiliClient) {
                 listOf(UIMessagePart.Text(buildJsonObject {
                     put("bvid", video.bvid)
                     put("aid", video.aid)
+                    if (video.bvid.isNotBlank()) {
+                        put("url", "https://m.bilibili.com/video/${video.bvid}")
+                    }
                     put("title", video.title)
                     video.desc?.let { put("desc", it.take(2_000)) }
                     video.ownerName?.let { put("owner_name", it) }
@@ -141,6 +144,7 @@ class BilibiliTools(private val client: BilibiliClient) {
                             add(buildJsonObject {
                                 item.bvid?.let { put("bvid", it) }
                                 item.aid?.let { put("aid", it) }
+                                item.bvid?.let { put("url", "https://m.bilibili.com/video/$it") }
                                 put("title", item.title)
                                 item.authorName?.let { put("author_name", it) }
                                 item.cover?.let { put("cover", it) }
@@ -158,6 +162,9 @@ class BilibiliTools(private val client: BilibiliClient) {
         put("bvid", v.bvid)
         put("aid", v.aid)
         put("title", v.title)
+        if (v.bvid.isNotBlank()) {
+            put("url", "https://m.bilibili.com/video/${v.bvid}")
+        }
         v.ownerName?.let { put("owner_name", it) }
         v.ownerMid?.let { put("owner_mid", it) }
         v.pic?.let { put("pic", it) }

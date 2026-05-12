@@ -14,6 +14,7 @@ const val DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS = 180_000L
 const val DEFAULT_MODEL_COUNCIL_TOTAL_TIMEOUT_MS = 8 * 60_000L
 const val DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS = 12_000
 const val DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS = 180_000L
+const val MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER = "00000000-0000-0000-0000-000000000000"
 
 @Serializable
 data class ModelCouncilRuntimeSetting(
@@ -37,11 +38,28 @@ data class ModelCouncilSeat(
     val role: String,
     @SerialName("model_id")
     val modelId: Uuid,
+    @SerialName("runner_type")
+    val runnerType: ModelCouncilSeatRunner = ModelCouncilSeatRunner.PROVIDER_MODEL,
     @SerialName("system_prompt")
     val systemPrompt: String = "",
     @SerialName("output_budget_chars")
     val outputBudgetChars: Int = DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS,
+    @SerialName("external_tool")
+    val externalTool: String = "",
+    @SerialName("external_runtime")
+    val externalRuntime: String = "",
+    @SerialName("external_model")
+    val externalModel: String = "",
 )
+
+@Serializable
+enum class ModelCouncilSeatRunner {
+    @SerialName("provider_model")
+    PROVIDER_MODEL,
+
+    @SerialName("external_cli")
+    EXTERNAL_CLI,
+}
 
 @Serializable
 enum class ModelCouncilMode {

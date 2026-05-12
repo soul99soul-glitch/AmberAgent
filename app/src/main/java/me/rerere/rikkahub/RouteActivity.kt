@@ -37,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -78,6 +80,7 @@ import me.rerere.rikkahub.ui.hooks.containsPreference
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
+import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
@@ -317,9 +320,17 @@ class RouteActivity : ComponentActivity() {
         }
 
         ShareHandler(backStack, currentIntent)
+        val appUriHandler = remember {
+            object : UriHandler {
+                override fun openUri(uri: String) {
+                    this@RouteActivity.openUrl(uri)
+                }
+            }
+        }
 
         SharedTransitionLayout {
             CompositionLocalProvider(
+                LocalUriHandler provides appUriHandler,
                 LocalNavController provides Navigator(backStack),
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,

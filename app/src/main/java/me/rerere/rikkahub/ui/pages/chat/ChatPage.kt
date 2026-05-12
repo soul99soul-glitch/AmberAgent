@@ -597,6 +597,14 @@ private fun ChatPageContent(
                         }
                         inputState.clearInput()
                     },
+                    onCompactContext = {
+                        vm.handleCompressContext(
+                            additionalPrompt = "",
+                            targetTokens = setting.agentRuntime.contextCompaction.maxSummaryTokens,
+                            keepRecentMessages = (setting.agentRuntime.contextCompaction.keepRecentTurns * 2)
+                                .coerceAtLeast(16),
+                        )
+                    },
                     onUpdateChatModel = {
                         vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
                     },

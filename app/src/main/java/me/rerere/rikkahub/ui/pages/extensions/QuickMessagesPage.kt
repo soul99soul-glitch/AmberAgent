@@ -11,17 +11,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -48,6 +50,12 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceBorder
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -56,6 +64,7 @@ import org.koin.androidx.compose.koinViewModel
 fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
     val settings = vm.settings.collectAsStateWithLifecycle().value
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val workspace = workspaceColors()
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<QuickMessage?>(null) }
     var deleteTarget by remember { mutableStateOf<QuickMessage?>(null) }
@@ -65,49 +74,36 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
             TopAppBar(
                 title = { Text(stringResource(R.string.assistant_page_quick_messages)) },
                 navigationIcon = { BackButton() },
+                actions = {
+                    IconButton(onClick = { showAddDialog = true }) {
+                        Icon(
+                            imageVector = HugeIcons.Add01,
+                            contentDescription = stringResource(R.string.quick_messages_page_empty_action),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(HugeIcons.Add01, contentDescription = null)
-            }
-        },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspace.canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            item {
+                QuickMessagesHeader(
+                    count = settings.quickMessages.size,
+                    onAdd = { showAddDialog = true },
+                )
+            }
             if (settings.quickMessages.isEmpty()) {
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Zap,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = stringResource(R.string.quick_messages_page_empty_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = stringResource(R.string.quick_messages_page_empty_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    QuickMessagesEmptyState(onAdd = { showAddDialog = true })
                 }
             }
 
@@ -166,57 +162,139 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
 }
 
 @Composable
+private fun QuickMessagesHeader(
+    count: Int,
+    onAdd: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Zap,
+                tone = WorkspaceTone.Accent,
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = stringResource(R.string.assistant_page_quick_messages),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = workspace.ink,
+                )
+                Text(
+                    text = stringResource(R.string.quick_messages_page_count, count),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
+            }
+            WorkspaceTextButton(
+                text = stringResource(R.string.quick_messages_page_empty_action),
+                onClick = onAdd,
+                tone = WorkspaceTone.Accent,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickMessagesEmptyState(
+    onAdd: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Zap,
+                tone = WorkspaceTone.Neutral,
+            )
+            Text(
+                text = stringResource(R.string.quick_messages_page_empty_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = workspace.ink,
+            )
+            Text(
+                text = stringResource(R.string.quick_messages_page_empty_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = workspace.muted,
+            )
+            WorkspaceTextButton(
+                text = stringResource(R.string.quick_messages_page_empty_action),
+                onClick = onAdd,
+                tone = WorkspaceTone.Accent,
+            )
+        }
+    }
+}
+
+@Composable
 private fun QuickMessageCard(
     quickMessage: QuickMessage,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val workspace = workspaceColors()
 
-    Card(
+    Surface(
+        onClick = onEdit,
         modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+                .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = HugeIcons.Zap,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary,
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Zap,
+                tone = WorkspaceTone.Accent,
             )
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
                     text = quickMessage.title.ifBlank { stringResource(R.string.quick_messages_page_untitled) },
-                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = quickMessage.content.ifBlank { stringResource(R.string.quick_messages_page_empty_content) },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = workspace.muted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(
-                        imageVector = HugeIcons.MoreVertical,
-                        contentDescription = stringResource(R.string.skills_page_more_actions),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
+                WorkspaceIconButton(
+                    onClick = { menuExpanded = true },
+                    icon = HugeIcons.MoreVertical,
+                    contentDescription = stringResource(R.string.skills_page_more_actions),
+                    showBorder = false,
+                    containerColor = workspace.paper,
+                )
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
@@ -263,6 +341,7 @@ private fun EditQuickMessageDialog(
     onDismiss: () -> Unit,
     onConfirm: (title: String, content: String) -> Unit,
 ) {
+    val workspace = workspaceColors()
     var quickMessageTitle by rememberSaveable(initialQuickMessage?.id) {
         mutableStateOf(initialQuickMessage?.title ?: "")
     }
@@ -272,20 +351,26 @@ private fun EditQuickMessageDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        shape = RoundedCornerShape(8.dp),
+        containerColor = workspace.paper,
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = workspace.ink,
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
+                NotionQuickMessageField(
                     value = quickMessageTitle,
                     onValueChange = { quickMessageTitle = it },
-                    modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.assistant_page_quick_message_title)) },
                     singleLine = true,
                 )
-                OutlinedTextField(
+                NotionQuickMessageField(
                     value = quickMessageContent,
                     onValueChange = { quickMessageContent = it },
-                    modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.assistant_page_quick_message_content)) },
                     minLines = 4,
                     maxLines = 8,
@@ -296,14 +381,53 @@ private fun EditQuickMessageDialog(
             TextButton(
                 onClick = { onConfirm(quickMessageTitle.trim(), quickMessageContent.trim()) },
                 enabled = quickMessageTitle.isNotBlank() && quickMessageContent.isNotBlank(),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = workspace.blue,
+                    disabledContentColor = workspace.faint,
+                ),
             ) {
                 Text(stringResource(R.string.assistant_page_save))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = workspace.muted),
+            ) {
                 Text(stringResource(R.string.cancel))
             }
         },
+    )
+}
+
+@Composable
+private fun NotionQuickMessageField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: @Composable (() -> Unit),
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = false,
+    minLines: Int = 1,
+    maxLines: Int = 1,
+) {
+    val workspace = workspaceColors()
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        label = label,
+        singleLine = singleLine,
+        minLines = minLines,
+        maxLines = maxLines,
+        shape = RoundedCornerShape(6.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = workspace.note,
+            unfocusedContainerColor = workspace.note,
+            focusedBorderColor = workspace.blue,
+            unfocusedBorderColor = workspace.hairline,
+            focusedLabelColor = workspace.blue,
+            unfocusedLabelColor = workspace.muted,
+            cursorColor = workspace.blue,
+        ),
     )
 }

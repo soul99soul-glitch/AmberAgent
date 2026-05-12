@@ -39,10 +39,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -76,6 +78,7 @@ import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
+import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
@@ -335,6 +338,10 @@ private fun HtmlParagraphContent(
     val hasInlineMath = element.select("span.math").any { it.attr("inline") == "true" }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
+    val context = LocalContext.current
+    val onClickUrl: (String) -> Unit = remember(context) {
+        { url -> context.openUrl(url) }
+    }
 
     val (annotatedString, inlineContents) = remember(
         element.outerHtml(),
@@ -343,6 +350,7 @@ private fun HtmlParagraphContent(
         density,
         textStyle,
         onClickCitation,
+        onClickUrl,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -355,6 +363,7 @@ private fun HtmlParagraphContent(
                     style = textStyle,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
+                    onClickUrl = onClickUrl,
                 )
             }
         }
@@ -696,6 +705,10 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
+    val context = LocalContext.current
+    val onClickUrl: (String) -> Unit = remember(context) {
+        { url -> context.openUrl(url) }
+    }
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }
     val (annotatedString, inlineContents) = remember(
@@ -705,6 +718,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
         density,
         textStyle,
         onClickCitation,
+        onClickUrl,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -717,6 +731,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
                     style = textStyle,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
+                    onClickUrl = onClickUrl,
                 )
             }
         }
@@ -774,6 +789,10 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                     val textStyle = LocalTextStyle.current
                     val density = LocalDensity.current
                     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+                    val context = LocalContext.current
+                    val onClickUrl: (String) -> Unit = remember(context) {
+                        { url -> context.openUrl(url) }
+                    }
                     val (annotated, inlineContents) = remember(
                         node.outerHtml(),
                         enableLatexRendering,
@@ -781,6 +800,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         density,
                         textStyle,
                         onClickCitation,
+                        onClickUrl,
                     ) {
                         val contents = mutableMapOf<String, InlineTextContent>()
                         val text = buildAnnotatedString {
@@ -792,6 +812,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                                 style = textStyle,
                                 enableLatexRendering = enableLatexRendering,
                                 onClickCitation = onClickCitation,
+                                onClickUrl = onClickUrl,
                             )
                         }
                         text to contents
@@ -813,6 +834,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     style: TextStyle,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
+    onClickUrl: (String) -> Unit,
 ) {
     when (node) {
         is TextNode -> append(node.text())
@@ -824,6 +846,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             style = style,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
+            onClickUrl = onClickUrl,
         )
     }
 }
@@ -836,6 +859,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     style: TextStyle,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
+    onClickUrl: (String) -> Unit,
 ) {
     val cssStyle = element.attr("style").takeIf { it.isNotBlank() }?.let {
         parseInlineSpanStyle(
@@ -854,6 +878,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             style = inheritedStyle,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
+            onClickUrl = onClickUrl,
         )
     }
 
@@ -939,7 +964,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                         color = colorScheme.primary,
                         textDecoration = TextDecoration.Underline,
                     ).merge(cssStyle ?: SpanStyle())
-                    withLink(LinkAnnotation.Url(href)) {
+                    withLink(openUrlLinkAnnotation(href, onClickUrl)) {
                         withStyle(linkStyle) {
                             recurseChildren(element, style.merge(linkStyle.asTextStyle()))
                         }
@@ -1448,6 +1473,16 @@ private fun parseFontWeight(weightString: String): FontWeight? {
         "900" -> FontWeight.W900
         else -> null
     }
+}
+
+private fun openUrlLinkAnnotation(url: String, onClickUrl: (String) -> Unit): LinkAnnotation.Url {
+    return LinkAnnotation.Url(
+        url = url,
+        linkInteractionListener = LinkInteractionListener { annotation ->
+            val target = (annotation as? LinkAnnotation.Url)?.url ?: url
+            onClickUrl(target)
+        },
+    )
 }
 
 private fun parseFontStyle(fontStyle: String): FontStyle? {

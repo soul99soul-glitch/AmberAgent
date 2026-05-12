@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.agent.tools
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -120,8 +121,9 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     val baseRisk = risk()
     var mutates = baseMutates
     var risk = baseRisk
-    var needsApproval = mandatoryApproval || needsApproval || baseMutates || baseRisk == ToolRisk.High
-    var autoApprovable = !mandatoryApproval && allowsAutoApproval && baseRisk != ToolRisk.High
+    var mandatoryApprovalEffective = mandatoryApproval
+    var needsApproval = mandatoryApprovalEffective || needsApproval || baseMutates || baseRisk == ToolRisk.High
+    var autoApprovable = !mandatoryApprovalEffective && allowsAutoApproval && baseRisk != ToolRisk.High
     var concurrencySafe = concurrencySafe()
 
     when (name) {
@@ -248,6 +250,17 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
             concurrencySafe = safe
         }
+
+        "model_council_start" -> {
+            if (input.containsExternalCliCouncilSeat() || input.allowsExternalCliCouncil()) {
+                mutates = true
+                risk = ToolRisk.Sensitive
+                needsApproval = true
+                autoApprovable = false
+                concurrencySafe = false
+                mandatoryApprovalEffective = true
+            }
+        }
     }
 
     val category = category()
@@ -284,7 +297,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         requiresForegroundAppPackage = foregroundRequirement,
         speculativeEligible = speculativeBlockReason == null,
         speculativeBlockReason = speculativeBlockReason,
-        mandatoryApproval = mandatoryApproval,
+        mandatoryApproval = mandatoryApprovalEffective,
     )
 }
 
@@ -442,6 +455,32 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
 
 private fun JsonElement?.stringValue(name: String): String? =
     runCatching { this?.jsonObject?.get(name)?.jsonPrimitive?.contentOrNull }.getOrNull()
+
+private fun JsonElement?.booleanValue(name: String): Boolean =
+    runCatching { this?.jsonObject?.get(name)?.jsonPrimitive?.contentOrNull?.equals("true", ignoreCase = true) }
+        .getOrNull() == true
+
+private fun JsonElement?.containsExternalCliCouncilSeat(): Boolean {
+    val root = runCatching { this?.jsonObject }.getOrNull() ?: return false
+    val task = runCatching { root["task"]?.jsonObject }.getOrNull() ?: root
+    return task["planned_seats"].containsExternalCliSeat() || task["seats"].containsExternalCliSeat()
+}
+
+private fun JsonElement?.allowsExternalCliCouncil(): Boolean {
+    val root = runCatching { this?.jsonObject }.getOrNull() ?: return false
+    val task = runCatching { root["task"]?.jsonObject }.getOrNull()
+    return this.booleanValue("allow_external_cli") || task.booleanValue("allow_external_cli")
+}
+
+private fun JsonElement?.containsExternalCliSeat(): Boolean {
+    val seats = runCatching { this?.jsonArray }.getOrNull() ?: return false
+    return seats.any { item ->
+        val seat = runCatching { item.jsonObject }.getOrNull() ?: return@any false
+        val runnerType = seat["runner_type"]?.jsonPrimitive?.contentOrNull?.lowercase(Locale.ROOT).orEmpty()
+        val externalTool = seat["external_tool"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        runnerType in setOf("external_cli", "cli", "gemini_cli") || externalTool.isNotBlank()
+    }
+}
 
 private fun List<UIMessagePart>.enforceOutputBudget(maxChars: Int): List<UIMessagePart> {
     var remaining = maxChars

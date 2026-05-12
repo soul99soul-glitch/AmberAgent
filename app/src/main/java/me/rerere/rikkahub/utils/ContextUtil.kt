@@ -76,16 +76,205 @@ fun Context.writeClipboardText(text: String) {
  * Open a url
  */
 fun Context.openUrl(url: String) {
-    Log.i(TAG, "openUrl: $url")
+    val normalizedUrl = normalizeExternalUrl(url)
+    Log.i(TAG, "openUrl: $normalizedUrl")
+    if (normalizedUrl.isBlank()) return
+    val parsedUri = normalizedUrl.toUri()
+    val bilibiliLink = parsedUri.toBilibiliLink()
+    val fallbackUri = bilibiliLink?.webUri ?: parsedUri
+
+    if (bilibiliLink != null) {
+        if (tryOpenBilibiliUrl(bilibiliLink.appUris)) return
+        if (tryOpenExternalUrl(fallbackUri)) return
+    }
+
     runCatching {
         val intent = CustomTabsIntent.Builder()
             .setShowTitle(true)
             .build()
-        intent.launchUrl(this, url.toUri())
+        intent.launchUrl(this, fallbackUri)
     }.onFailure {
-        it.printStackTrace()
-        Toast.makeText(this, "Failed to open URL: $url", Toast.LENGTH_SHORT).show()
+        runCatching {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, fallbackUri)
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                    .withContextLaunchFlags(this)
+            )
+        }.onFailure { fallbackError ->
+            fallbackError.printStackTrace()
+            Toast.makeText(this, "Failed to open URL: $normalizedUrl", Toast.LENGTH_SHORT).show()
+        }
     }
+}
+
+internal fun normalizeExternalUrl(rawUrl: String): String {
+    val trimmed = rawUrl
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#34;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("\\&", "&")
+        .replace("\\(", "(")
+        .replace("\\)", ")")
+        .replace("\u200B", "")
+        .replace("\u200C", "")
+        .replace("\u200D", "")
+        .replace("\uFEFF", "")
+        .trim()
+        .trim('<', '>', '"', '\'', '`')
+        .trimMarkdownUrlTail()
+    if (trimmed.isBlank()) return ""
+    return when {
+        trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) ||
+            trimmed.startsWith("bilibili://", ignoreCase = true) -> trimmed
+
+        trimmed.startsWith("www.", ignoreCase = true) ||
+            trimmed.startsWith("m.", ignoreCase = true) ||
+            trimmed.startsWith("b23.tv", ignoreCase = true) -> "https://$trimmed"
+
+        else -> trimmed
+    }
+}
+
+private fun String.trimMarkdownUrlTail(): String {
+    var result = this
+    while (result.startsWith("(") && result.endsWith(")") && result.count { it == '(' } < result.count { it == ')' } + 1) {
+        result = result.substring(1, result.lastIndex).trim()
+    }
+    while (result.isNotEmpty()) {
+        val last = result.last()
+        val shouldTrim = when (last) {
+            ')' -> result.count { it == ')' } > result.count { it == '(' }
+            ']' -> result.count { it == ']' } > result.count { it == '[' }
+            '}' -> result.count { it == '}' } > result.count { it == '{' }
+            '>' -> true
+            '。', '，', '、', ',', ';' -> true
+            else -> false
+        }
+        if (!shouldTrim) break
+        result = result.dropLast(1).trimEnd()
+    }
+    return result
+}
+
+private fun Context.tryOpenBilibiliUrl(uris: List<Uri>): Boolean {
+    val appCandidates = listOf(
+        "tv.danmaku.bili",
+        "com.bilibili.app.in",
+        "com.bilibili.app.blue",
+    )
+    appCandidates.forEach { packageName ->
+        uris.forEach { uri ->
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .setPackage(packageName)
+                .withContextLaunchFlags(this)
+            if (runCatching { startActivity(intent) }.isSuccess) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private fun Context.tryOpenExternalUrl(uri: Uri): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW, uri)
+        .addCategory(Intent.CATEGORY_BROWSABLE)
+        .withContextLaunchFlags(this)
+    return runCatching { startActivity(intent) }.isSuccess
+}
+
+private data class BilibiliLink(
+    val appUris: List<Uri>,
+    val webUri: Uri,
+)
+
+private fun Uri.toBilibiliLink(): BilibiliLink? {
+    val scheme = scheme?.lowercase()
+    if (scheme == "bilibili") {
+        val webUri = toBilibiliDeepLinkWebUri() ?: return BilibiliLink(appUris = listOf(this), webUri = this)
+        return BilibiliLink(appUris = listOf(webUri, this).distinct(), webUri = webUri)
+    }
+    if (scheme != "http" && scheme != "https") return null
+    val host = host?.lowercase()?.removePrefix("www.") ?: return null
+    if (host == "b23.tv") return BilibiliLink(appUris = listOf(this), webUri = this)
+    if (host != "bilibili.com" && host != "m.bilibili.com") return null
+
+    val videoId = pathSegments
+        .dropWhile { !it.equals("video", ignoreCase = true) }
+        .drop(1)
+        .firstOrNull()
+        ?.takeIf { it.startsWith("BV", ignoreCase = true) || it.startsWith("av", ignoreCase = true) }
+
+    if (videoId != null) {
+        val webUri = buildBilibiliVideoWebUri(videoId)
+        return BilibiliLink(
+            appUris = listOf(webUri, buildBilibiliVideoAppUri(videoId)).distinct(),
+            webUri = webUri,
+        )
+    }
+    return BilibiliLink(appUris = listOf(this), webUri = this)
+}
+
+private fun Uri.toBilibiliDeepLinkWebUri(): Uri? {
+    val host = host?.lowercase() ?: return null
+    val firstPath = pathSegments.firstOrNull()
+    return when (host) {
+        "video" -> {
+            val rawVideoId = firstPath ?: return null
+            val videoId = when {
+                rawVideoId.startsWith("BV", ignoreCase = true) -> rawVideoId
+                rawVideoId.startsWith("av", ignoreCase = true) -> rawVideoId
+                rawVideoId.all { it.isDigit() } -> "av$rawVideoId"
+                else -> return null
+            }
+            buildBilibiliVideoWebUri(videoId)
+        }
+
+        "space" -> {
+            val mid = firstPath?.takeIf { it.all { char -> char.isDigit() } } ?: return null
+            buildUpon()
+                .scheme("https")
+                .authority("space.bilibili.com")
+                .path(null)
+                .appendPath(mid)
+                .build()
+        }
+
+        else -> null
+    }
+}
+
+private fun Uri.buildBilibiliVideoAppUri(videoId: String): Uri {
+    val builder = Uri.Builder()
+        .scheme("bilibili")
+        .authority("video")
+        .appendPath(videoId)
+    encodedQuery?.let { builder.encodedQuery(it) }
+    encodedFragment?.let { builder.encodedFragment(it) }
+    return builder.build()
+}
+
+private fun Uri.buildBilibiliVideoWebUri(videoId: String): Uri {
+    val builder = Uri.Builder()
+        .scheme("https")
+        .authority("www.bilibili.com")
+        .appendPath("video")
+        .appendPath(videoId)
+    encodedQuery?.let { builder.encodedQuery(it) }
+    encodedFragment?.let { builder.encodedFragment(it) }
+    return builder.build()
+}
+
+private fun Intent.withContextLaunchFlags(context: Context): Intent {
+    if (context !is Activity) {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return this
 }
 
 fun Context.getActivity(): Activity? {

@@ -37,5 +37,6 @@ internal fun collectSiteUrls(
             addAll(endpoint.cookieUrls)
         }
         profile?.origins?.let { addAll(it) }
+        addAll(extraLoginProbeUrlsFor(site))
     }.filter { it.isNotBlank() }.distinct()
 }

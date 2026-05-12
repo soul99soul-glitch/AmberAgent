@@ -26,16 +26,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import me.rerere.rikkahub.ui.components.table.DataTable
+import me.rerere.rikkahub.utils.openUrl
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -52,18 +56,14 @@ fun SimpleHtmlBlock(
         }
     }
 
-    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
 
     Column(modifier = modifier) {
         document.body().childNodes().forEach { node ->
             RenderNode(
                 node = node,
                 onLinkClick = { url ->
-                    try {
-                        uriHandler.openUri(url)
-                    } catch (e: Exception) {
-                        // Handle link click error silently
-                    }
+                    context.openUrl(url)
                 }
             )
         }
@@ -365,8 +365,10 @@ private fun processElementNodes(
                     "a" -> {
                         val href = node.attr("href")
                         val start = builder.length
-                        processElementNodes(node, builder, onLinkClick)
                         if (href.isNotEmpty()) {
+                            builder.withLink(openUrlLinkAnnotation(href, onLinkClick)) {
+                                processElementNodes(node, builder, onLinkClick)
+                            }
                             builder.addStyle(
                                 SpanStyle(
                                     color = Color.Blue,
@@ -375,12 +377,8 @@ private fun processElementNodes(
                                 start,
                                 builder.length
                             )
-                            builder.addStringAnnotation(
-                                tag = "URL",
-                                annotation = href,
-                                start = start,
-                                end = builder.length
-                            )
+                        } else {
+                            processElementNodes(node, builder, onLinkClick)
                         }
                     }
 
@@ -444,6 +442,16 @@ private fun processElementNodes(
             }
         }
     }
+}
+
+private fun openUrlLinkAnnotation(url: String, onClickUrl: (String) -> Unit): LinkAnnotation.Url {
+    return LinkAnnotation.Url(
+        url = url,
+        linkInteractionListener = LinkInteractionListener { annotation ->
+            val target = (annotation as? LinkAnnotation.Url)?.url ?: url
+            onClickUrl(target)
+        },
+    )
 }
 
 private fun parseInlineStyle(style: String): SpanStyle? {

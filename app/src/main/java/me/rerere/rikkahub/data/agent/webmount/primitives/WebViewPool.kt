@@ -13,6 +13,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import me.rerere.rikkahub.data.agent.webmount.core.WebMountWebViewCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -176,6 +177,7 @@ class WebViewPool(
         loadWithOverviewMode = true
         mediaPlaybackRequiresUserGesture = true
         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        WebMountWebViewCompat.applyBrowserLikeSettings(this)
         @Suppress("DEPRECATION")
         allowFileAccess = false
         allowContentAccess = false
@@ -237,6 +239,8 @@ class WebViewPool(
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
+            android.webkit.CookieManager.getInstance().flush()
+            WebMountWebViewCompat.injectFeishuCompatibility(view, url)
             handle.reinjectBridge()
             handle.onPageFinished(url ?: "", view?.title)
         }
@@ -258,6 +262,9 @@ class WebViewPool(
         private val handle: SessionHandle,
     ) : WebChromeClient() {
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
+            if (newProgress >= 25) {
+                WebMountWebViewCompat.injectFeishuCompatibility(view, view?.url)
+            }
             handle.onLoadProgress(newProgress)
         }
 

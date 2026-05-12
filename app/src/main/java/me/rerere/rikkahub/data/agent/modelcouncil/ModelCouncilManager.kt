@@ -1,8 +1,10 @@
 package me.rerere.rikkahub.data.agent.modelcouncil
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -34,6 +36,8 @@ import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
 import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
 import me.rerere.rikkahub.data.agent.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.task.toQueueState
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -108,12 +112,121 @@ class ProviderModelCouncilTextRunner(
     }
 }
 
+class ExternalCliModelCouncilRunner(
+    private val terminalRuntime: TerminalRuntime,
+) {
+    suspend fun generate(
+        seat: ModelCouncilSeat,
+        systemPrompt: String,
+        userPrompt: String,
+        timeoutMs: Long,
+        outputBudgetChars: Int,
+        onChunk: (String) -> Unit = {},
+    ): String {
+        var terminalJobId: String? = null
+        try {
+            val command = ModelCouncilExternalCliCommandBuilder.build(
+                seat = seat,
+                prompt = buildExternalCliPrompt(systemPrompt, userPrompt),
+                timeoutMs = timeoutMs,
+            )
+            val output = StringBuilder()
+            var inCliOutput = false
+            var cliOutputEnded = false
+            val started = terminalRuntime.startJob(
+                command = command,
+                timeoutMillis = timeoutMs,
+                runtime = TerminalRuntimeKind.fromWire(seat.externalRuntime),
+                toolName = "model_council_external_cli",
+                title = "Model Council 外部 CLI · ${seat.name}",
+                syncWorkspace = false,
+                flushWorkspace = false,
+                outputCallback = { line ->
+                    when (ModelCouncilExternalCliCommandBuilder.marker(line)) {
+                        ModelCouncilExternalCliCommandBuilder.Marker.BEGIN -> {
+                            inCliOutput = true
+                        }
+
+                        ModelCouncilExternalCliCommandBuilder.Marker.END -> {
+                            cliOutputEnded = true
+                        }
+
+                        ModelCouncilExternalCliCommandBuilder.Marker.NONE -> Unit
+                    }
+                    if (inCliOutput && !cliOutputEnded) {
+                        ModelCouncilExternalCliCommandBuilder.extractLiveLine(line)?.let { contentLine ->
+                            if (contentLine.isNotBlank()) {
+                                if (output.isNotEmpty()) output.append('\n')
+                                output.append(contentLine)
+                                onChunk(output.toString().take(outputBudgetChars))
+                            }
+                        }
+                    }
+                },
+            )
+            terminalJobId = started.jobId
+            val finished = if (started.running) {
+                terminalRuntime.waitJob(started.jobId, timeoutMs + MODEL_COUNCIL_EXTERNAL_CLI_WAIT_GRACE_MS)
+            } else {
+                started
+            }
+            val cliOutput = ModelCouncilExternalCliCommandBuilder.extractFinalOutput(finished.outputTail).trim()
+            if (finished.exitCode != 0) {
+                error(
+                    finished.error
+                        ?: cliOutput.ifBlank {
+                            finished.outputTail.take(1_000)
+                                .ifBlank { "External CLI seat failed with exit code ${finished.exitCode}." }
+                        },
+                )
+            }
+            val parsed = cliOutput.ifBlank { finished.outputTail }.trim()
+            return parsed.take(outputBudgetChars)
+        } catch (error: CancellationException) {
+            terminalJobId?.let { id ->
+                withContext(NonCancellable) {
+                    stopExternalCliJobIfRunning(id)
+                }
+            }
+            throw error
+        } finally {
+            terminalJobId?.let { id ->
+                withContext(NonCancellable) {
+                    stopExternalCliJobIfRunning(id)
+                }
+            }
+        }
+    }
+
+    private suspend fun stopExternalCliJobIfRunning(jobId: String) {
+        runCatching {
+            val snapshot = terminalRuntime.readJob(jobId)
+            if (snapshot.running) {
+                terminalRuntime.stopJob(jobId, "Model Council external CLI seat stopped.")
+            }
+        }
+    }
+
+    private fun buildExternalCliPrompt(systemPrompt: String, userPrompt: String): String = """
+        $systemPrompt
+
+        You are running as an external CLI participant in AmberAgent Model Council.
+        Important:
+        - Return only the seat analysis text.
+        - Do not execute tools or modify files.
+        - Do not ask follow-up questions.
+
+        $userPrompt
+    """.trimIndent()
+}
+
 class ModelCouncilManager(
     context: Context,
     private val appScope: AppScope,
     private val settingsStore: SettingsStore,
     private val json: Json,
-    private val runner: ModelCouncilTextRunner,
+    private val modelRunner: ModelCouncilTextRunner,
+    private val externalCliRunner: ExternalCliModelCouncilRunner,
     private val agentTaskStore: AgentTaskStore,
 ) {
     private val runDir = File(context.filesDir, "amberagent/model-council/runs").also { it.mkdirs() }
@@ -420,15 +533,13 @@ class ModelCouncilManager(
                 val priorPrefix = priorPrefixBySeat[seat.seatId].orEmpty()
                 val result = runCatching {
                     withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                        runner.generate(
+                        generateSeatReply(
                             settings = settings,
-                            modelId = seat.modelId,
+                            setting = setting,
+                            seat = seat,
                             systemPrompt = systemPrompt,
                             userPrompt = promptForSeat(seat),
-                            outputBudgetChars = seat.outputBudgetChars,
-                            onChunk = { running ->
-                                seatFlow?.value = priorPrefix + running
-                            },
+                            onChunk = { running -> seatFlow?.value = priorPrefix + running },
                         )
                     }
                 }
@@ -478,7 +589,7 @@ class ModelCouncilManager(
         val synthFlow = seatLiveTextFlows[runId]?.get(SYNTHESIZER_SEAT_KEY)
         val text = runCatching {
             withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                runner.generate(
+                modelRunner.generate(
                     settings = settings,
                     modelId = synthesisModelId,
                     systemPrompt = "你是 AmberAgent 的 Model Council 裁判。只综合证据，不引入未给出的事实。",
@@ -503,6 +614,33 @@ class ModelCouncilManager(
             perSeatSummaries = turns.map { turn ->
                 "${turn.seatName} (${turn.status.name.lowercase()}): ${(turn.content.ifBlank { turn.error }).take(700)}"
             },
+        )
+    }
+
+    private suspend fun generateSeatReply(
+        settings: Settings,
+        setting: ModelCouncilRuntimeSetting,
+        seat: ModelCouncilSeat,
+        systemPrompt: String,
+        userPrompt: String,
+        onChunk: (String) -> Unit,
+    ): String = when (seat.runnerType) {
+        ModelCouncilSeatRunner.PROVIDER_MODEL -> modelRunner.generate(
+            settings = settings,
+            modelId = seat.modelId,
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            outputBudgetChars = seat.outputBudgetChars,
+            onChunk = onChunk,
+        )
+
+        ModelCouncilSeatRunner.EXTERNAL_CLI -> externalCliRunner.generate(
+            seat = seat,
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            timeoutMs = setting.seatTimeoutMs.coerceAtLeast(1_000L),
+            outputBudgetChars = seat.outputBudgetChars,
+            onChunk = onChunk,
         )
     }
 
@@ -745,3 +883,116 @@ private fun StringBuilder.appendLines(lines: List<String>) {
         lines.forEach { appendLine("- $it") }
     }
 }
+
+internal object ModelCouncilExternalCliCommandBuilder {
+    private const val OUTPUT_BEGIN = "__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__"
+    private const val OUTPUT_END = "__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_END__"
+    private val safeCliModelRegex = Regex("[A-Za-z0-9._:/+-]{1,120}")
+
+    enum class Marker { NONE, BEGIN, END }
+
+    fun build(seat: ModelCouncilSeat, prompt: String, timeoutMs: Long): String {
+        require(seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
+            "External CLI command requires runner_type=external_cli."
+        }
+        val tool = seat.externalTool.ifBlank { "gemini_cli" }
+        require(tool == "gemini_cli") {
+            "Unsupported external_tool: $tool. Currently supported: gemini_cli."
+        }
+        val boundedPrompt = prompt.take(MODEL_COUNCIL_EXTERNAL_CLI_PROMPT_CHARS)
+        val timeoutSeconds = (timeoutMs / 1_000L).coerceAtLeast(1L).coerceAtMost(24 * 60 * 60)
+        val promptDelimiter = "AMBERAGENT_COUNCIL_PROMPT_${Uuid.random().toString().replace("-", "")}"
+        val modelArg = seat.externalModel
+            .takeIf { it.isNotBlank() }
+            ?.also { require(safeCliModelRegex.matches(it)) { "Unsafe external_model: $it" } }
+            ?.let { " --model ${it.shellSingleQuoted()}" }
+            .orEmpty()
+        return buildString {
+            appendLine("set -u")
+            appendLine("if ! command -v gemini >/dev/null 2>&1; then")
+            appendLine("  echo 'gemini CLI not found in this runtime. Install Gemini CLI in Termux/selected runtime or use provider model seats.' >&2")
+            appendLine("  exit 127")
+            appendLine("fi")
+            appendLine("tmp_root=\"./.amberagent-council-cli-${'$'}$\"")
+            appendLine("mkdir -p \"${'$'}tmp_root/home\" \"${'$'}tmp_root/work\"")
+            appendLine("cli_pid=\"\"")
+            appendLine("stop_cli_tree() {")
+            appendLine("  if [ -n \"${'$'}cli_pid\" ] && kill -0 \"${'$'}cli_pid\" >/dev/null 2>&1; then")
+            appendLine("    if command -v pkill >/dev/null 2>&1; then")
+            appendLine("      pkill -TERM -P \"${'$'}cli_pid\" >/dev/null 2>&1 || true")
+            appendLine("    fi")
+            appendLine("    kill -TERM \"-${'$'}cli_pid\" >/dev/null 2>&1 || true")
+            appendLine("    kill -TERM \"${'$'}cli_pid\" >/dev/null 2>&1 || true")
+            appendLine("    sleep 2")
+            appendLine("    if command -v pkill >/dev/null 2>&1; then")
+            appendLine("      pkill -KILL -P \"${'$'}cli_pid\" >/dev/null 2>&1 || true")
+            appendLine("    fi")
+            appendLine("    kill -KILL \"-${'$'}cli_pid\" >/dev/null 2>&1 || true")
+            appendLine("    kill -KILL \"${'$'}cli_pid\" >/dev/null 2>&1 || true")
+            appendLine("  fi")
+            appendLine("}")
+            appendLine("cleanup() { stop_cli_tree; rm -rf \"${'$'}tmp_root\"; }")
+            appendLine("trap cleanup EXIT INT TERM")
+            appendLine("export HOME=\"${'$'}tmp_root/home\"")
+            appendLine("export GEMINI_CLI_HOME=\"${'$'}tmp_root/home/.gemini\"")
+            appendLine("export NO_COLOR=1")
+            appendLine("prompt_file=\"${'$'}tmp_root/prompt.txt\"")
+            appendLine("cat > \"${'$'}prompt_file\" <<'$promptDelimiter'")
+            appendLine(boundedPrompt)
+            appendLine(promptDelimiter)
+            appendLine("cd \"${'$'}tmp_root/work\"")
+            appendLine("printf '%s\\n' '$OUTPUT_BEGIN'")
+            appendLine("if command -v setsid >/dev/null 2>&1; then")
+            appendLine("  setsid gemini --skip-trust --approval-mode plan --output-format text$modelArg --prompt \"${'$'}(cat \"${'$'}prompt_file\")\" &")
+            appendLine("else")
+            appendLine("  gemini --skip-trust --approval-mode plan --output-format text$modelArg --prompt \"${'$'}(cat \"${'$'}prompt_file\")\" &")
+            appendLine("fi")
+            appendLine("cli_pid=${'$'}!")
+            appendLine("(")
+            appendLine("  sleep $timeoutSeconds")
+            appendLine("  if kill -0 \"${'$'}cli_pid\" >/dev/null 2>&1; then")
+            appendLine("    echo 'External CLI seat timed out after ${timeoutSeconds}s; stopping gemini.' >&2")
+            appendLine("    stop_cli_tree")
+            appendLine("  fi")
+            appendLine(") &")
+            appendLine("watchdog_pid=${'$'}!")
+            appendLine("wait \"${'$'}cli_pid\"")
+            appendLine("status=${'$'}?")
+            appendLine("kill \"${'$'}watchdog_pid\" >/dev/null 2>&1 || true")
+            appendLine("wait \"${'$'}watchdog_pid\" >/dev/null 2>&1 || true")
+            appendLine("printf '\\n%s\\n' '$OUTPUT_END'")
+            appendLine("exit \"${'$'}status\"")
+        }
+    }
+
+    fun extractLiveLine(line: String): String? {
+        val trimmed = line.trim()
+        if (trimmed == OUTPUT_BEGIN || trimmed == OUTPUT_END) return null
+        if (line.contains("Preparing /workspace mirror") || line.contains("Starting ")) return null
+        return line.takeIf { it.isNotBlank() }
+    }
+
+    fun marker(line: String): Marker = when (line.trim()) {
+        OUTPUT_BEGIN -> Marker.BEGIN
+        OUTPUT_END -> Marker.END
+        else -> Marker.NONE
+    }
+
+    fun extractFinalOutput(output: String): String {
+        val start = output.indexOf(OUTPUT_BEGIN)
+        if (start < 0) return ""
+        val bodyStart = start + OUTPUT_BEGIN.length
+        val end = output.indexOf(OUTPUT_END, startIndex = bodyStart)
+        return if (end >= 0) {
+            output.substring(bodyStart, end)
+        } else {
+            output.substring(bodyStart)
+        }.trim()
+    }
+
+    private fun String.shellSingleQuoted(): String =
+        "'" + replace("'", "'\"'\"'") + "'"
+}
+
+private const val MODEL_COUNCIL_EXTERNAL_CLI_PROMPT_CHARS = 24_000
+private const val MODEL_COUNCIL_EXTERNAL_CLI_WAIT_GRACE_MS = 1_000L

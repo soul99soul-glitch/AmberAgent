@@ -42,21 +42,24 @@ class ModelCouncilValidatorTest {
         }.exceptionOrNull()
 
         assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("2.."))
+        assertTrue(error!!.message!!.contains("default seat"))
     }
 
     @Test
-    fun nonChatModelIsRejected() {
-        val council = ModelCouncilRuntimeSetting(
-            enabled = true,
-            defaultSeats = listOf(
-                seat("a", modelAId),
-                seat("image", imageModelId),
-            )
-        )
+    fun explicitNonChatModelIsRejected() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
 
         val error = runCatching {
-            ModelCouncilValidator.parseTask(taskInput(), settings(council), council)
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seats = buildJsonArray {
+                        add(tempSeat("supporter", imageModelId.toString()))
+                        add(tempSeat("opponent", modelAId.toString()))
+                    }
+                ),
+                settings = settings(council),
+                councilSetting = council,
+            )
         }.exceptionOrNull()
 
         assertTrue(error is IllegalArgumentException)
@@ -64,7 +67,7 @@ class ModelCouncilValidatorTest {
     }
 
     @Test
-    fun compareUsesOneRoundAndDefaultSeats() {
+    fun compareUsesOneRoundAndAutoInjectedSeats() {
         val council = ModelCouncilRuntimeSetting(
             enabled = true,
             defaultSeats = listOf(seat("a", modelAId), seat("b", modelBId)),
@@ -75,7 +78,272 @@ class ModelCouncilValidatorTest {
 
         assertEquals(ModelCouncilMode.COMPARE, spec.mode)
         assertEquals(1, spec.rounds)
+        assertTrue(spec.seats.any { it.role == "supporter" })
+        assertTrue(spec.seats.any { it.role == "opponent" })
+        assertTrue(spec.seats.any { it.role == "judge" })
+    }
+
+    @Test
+    fun defaultModeSkipsExternalCoreSeatsUnlessExplicitlyAllowed() {
+        val council = ModelCouncilRuntimeSetting(
+            enabled = true,
+            defaultSeats = listOf(
+                seat("external-supporter", modelAId).copy(
+                    role = "supporter",
+                    runnerType = ModelCouncilSeatRunner.EXTERNAL_CLI,
+                    externalTool = "gemini_cli",
+                ),
+                seat("base", modelAId),
+            ),
+        )
+
+        val spec = ModelCouncilValidator.parseTask(taskInput(mode = "compare"), settings(council), council)
+        val supporter = spec.seats.single { it.role == "supporter" }
+
+        assertEquals(ModelCouncilSeatRunner.PROVIDER_MODEL, supporter.runnerType)
+        assertTrue(spec.seats.none { it.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI })
+    }
+
+    @Test
+    fun defaultModeSkipsStaleAndNonChatDefaultSeats() {
+        val staleModelId = Uuid.parse("44444444-4444-4444-4444-444444444444")
+        val council = ModelCouncilRuntimeSetting(
+            enabled = true,
+            defaultSeats = listOf(
+                seat("image-lens", imageModelId).copy(role = "risk"),
+                seat("stale-lens", staleModelId).copy(role = "engineering"),
+                seat("base", modelAId),
+            ),
+        )
+
+        val spec = ModelCouncilValidator.parseTask(taskInput(mode = "compare"), settings(council), council)
+
+        assertTrue(spec.seats.none { it.modelId == imageModelId })
+        assertTrue(spec.seats.none { it.modelId == staleModelId })
+    }
+
+    @Test
+    fun agentPlannedSeatsResolveModelRefAndAutoRotateFallback() {
+        val council = ModelCouncilRuntimeSetting(
+            enabled = true,
+            defaultSeats = listOf(seat("kimi-default", modelBId), seat("deepseek-default", modelAId)),
+        )
+
+        val spec = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seatStrategy = "agent_planned",
+                plannedSeats = buildJsonArray {
+                    add(plannedSeat(name = "事实整理", role = "research", modelRef = "Model A"))
+                    add(plannedSeat(name = "风险审查", role = "risk"))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
         assertEquals(2, spec.seats.size)
+        assertEquals(modelAId, spec.seats[0].modelId)
+        assertEquals(modelAId, spec.seats[1].modelId)
+        assertEquals("事实整理", spec.seats[0].name)
+        assertTrue(spec.seats[0].systemPrompt.contains("focus"))
+    }
+
+    @Test
+    fun agentPlannedSeatsCanFallbackToCurrentChatModelWithoutDefaultSeats() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        val spec = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seatStrategy = "agent_planned",
+                plannedSeats = buildJsonArray {
+                    add(plannedSeat(name = "A", role = "a"))
+                    add(plannedSeat(name = "B", role = "b"))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
+        assertEquals(listOf(modelAId, modelAId), spec.seats.map { it.modelId })
+    }
+
+    @Test
+    fun agentPlannedSeatsCanIncludeGeminiCliParticipantWithoutDefaultSeats() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        val spec = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seatStrategy = "agent_planned",
+                allowExternalCli = true,
+                plannedSeats = buildJsonArray {
+                    add(
+                        plannedSeat(
+                            name = "Gemini CLI",
+                            role = "external_reviewer",
+                            runnerType = "external_cli",
+                            externalTool = "gemini_cli",
+                            externalRuntime = "termux_external",
+                            externalModel = "gemini-2.5-pro",
+                        )
+                    )
+                    add(plannedSeat(name = "本地裁判", role = "judge"))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
+        assertEquals(2, spec.seats.size)
+        assertEquals(ModelCouncilSeatRunner.EXTERNAL_CLI, spec.seats[0].runnerType)
+        assertEquals("gemini_cli", spec.seats[0].externalTool)
+        assertEquals("termux_external", spec.seats[0].externalRuntime)
+        assertEquals("gemini-2.5-pro", spec.seats[0].externalModel)
+        assertEquals(ModelCouncilSeatRunner.PROVIDER_MODEL, spec.seats[1].runnerType)
+    }
+
+    @Test
+    fun agentPlannedSeatsDeduplicateSeatIds() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        val spec = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seatStrategy = "agent_planned",
+                plannedSeats = buildJsonArray {
+                    add(plannedSeat(name = "A", role = "critic", seatId = "critic"))
+                    add(plannedSeat(name = "B", role = "critic", seatId = "critic"))
+                    add(plannedSeat(name = "C", role = "critic", seatId = "critic-2"))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
+        assertEquals(listOf("critic", "critic-2", "critic-2-2"), spec.seats.map { it.seatId })
+    }
+
+    @Test
+    fun unknownSeatStrategyIsRejected() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        val error = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(seatStrategy = "agent_planend"),
+                settings = settings(council),
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertTrue(error!!.message!!.contains("seat_strategy"))
+    }
+
+    @Test
+    fun externalCliCommandWrapsPromptAndRejectsUnsafeModelArg() {
+        val seat = seat("gemini", modelAId).copy(
+            runnerType = ModelCouncilSeatRunner.EXTERNAL_CLI,
+            externalTool = "gemini_cli",
+            externalModel = "gemini-2.5-pro",
+        )
+
+        val command = ModelCouncilExternalCliCommandBuilder.build(seat, "hello ' world", timeoutMs = 5_000L)
+
+        assertTrue(command.contains("gemini --skip-trust --approval-mode plan --output-format text"))
+        assertTrue(command.contains("setsid gemini --skip-trust"))
+        assertTrue(command.contains("--model 'gemini-2.5-pro'"))
+        assertTrue(command.contains("trap cleanup EXIT INT TERM"))
+        assertTrue(command.contains("sleep 5"))
+        assertTrue(command.contains("pkill -TERM -P \"${'$'}cli_pid\""))
+        assertTrue(command.contains("kill -TERM \"-${'$'}cli_pid\""))
+        assertTrue(command.contains("export HOME="))
+        assertTrue(command.contains("cd \"${'$'}tmp_root/work\""))
+        assertTrue(command.contains("hello ' world"))
+        assertTrue(command.contains("__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__"))
+
+        val error = runCatching {
+            ModelCouncilExternalCliCommandBuilder.build(seat.copy(externalModel = "x; rm -rf /"), "hello", timeoutMs = 5_000L)
+        }.exceptionOrNull()
+        assertTrue(error is IllegalArgumentException)
+    }
+
+    @Test
+    fun externalCliSeatsRequireExplicitAllowFlagAndSafeModelArg() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        val withoutAllow = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seatStrategy = "agent_planned",
+                    plannedSeats = buildJsonArray {
+                        add(plannedSeat("Gemini", "external", runnerType = "external_cli", externalTool = "gemini_cli"))
+                        add(plannedSeat("Judge", "judge"))
+                    },
+                ),
+                settings = settings(council),
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(withoutAllow is IllegalArgumentException)
+        assertTrue(withoutAllow!!.message!!.contains("allow_external_cli"))
+
+        val unsafeModel = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seatStrategy = "agent_planned",
+                    allowExternalCli = true,
+                    plannedSeats = buildJsonArray {
+                        add(
+                            plannedSeat(
+                                "Gemini",
+                                "external",
+                                runnerType = "external_cli",
+                                externalTool = "gemini_cli",
+                                externalModel = "x; rm -rf /",
+                            )
+                        )
+                        add(plannedSeat("Judge", "judge"))
+                    },
+                ),
+                settings = settings(council),
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(unsafeModel is IllegalArgumentException)
+        assertTrue(unsafeModel!!.message!!.contains("Unsafe external_model"))
+    }
+
+    @Test
+    fun allExternalAgentPlannedSeatsStillRequireSynthesisChatModel() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+        val noChatSettings = settings(council).copy(
+            chatModelId = imageModelId,
+            providers = listOf(
+                ProviderSetting.OpenAI(
+                    models = listOf(
+                        Model(id = imageModelId, modelId = "image", displayName = "Image", type = ModelType.IMAGE),
+                    )
+                )
+            ),
+        )
+
+        val error = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seatStrategy = "agent_planned",
+                    allowExternalCli = true,
+                    plannedSeats = buildJsonArray {
+                        add(plannedSeat("Gemini A", "external-a", runnerType = "external_cli", externalTool = "gemini_cli"))
+                        add(plannedSeat("Gemini B", "external-b", runnerType = "external_cli", externalTool = "gemini_cli"))
+                    },
+                ),
+                settings = noChatSettings,
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("synthesis model"))
     }
 
     @Test
@@ -126,10 +394,16 @@ class ModelCouncilValidatorTest {
     private fun taskInput(
         mode: String = "compare",
         seats: kotlinx.serialization.json.JsonArray? = null,
+        seatStrategy: String? = null,
+        plannedSeats: kotlinx.serialization.json.JsonArray? = null,
+        allowExternalCli: Boolean = false,
         rounds: Int? = null,
     ) = buildJsonObject {
         put("mode", mode)
         put("objective", "Judge the plan.")
+        if (allowExternalCli) put("allow_external_cli", true)
+        seatStrategy?.let { put("seat_strategy", it) }
+        plannedSeats?.let { put("planned_seats", it) }
         seats?.let { put("seats", it) }
         rounds?.let { put("rounds", it) }
     }
@@ -137,5 +411,26 @@ class ModelCouncilValidatorTest {
     private fun tempSeat(role: String, modelId: String) = buildJsonObject {
         put("role", role)
         put("model_id", modelId)
+    }
+
+    private fun plannedSeat(
+        name: String,
+        role: String,
+        seatId: String? = null,
+        modelRef: String? = null,
+        runnerType: String? = null,
+        externalTool: String? = null,
+        externalRuntime: String? = null,
+        externalModel: String? = null,
+    ) = buildJsonObject {
+        seatId?.let { put("seat_id", it) }
+        put("name", name)
+        put("role", role)
+        put("system_prompt", "Please focus on $role.")
+        modelRef?.let { put("model_ref", it) }
+        runnerType?.let { put("runner_type", it) }
+        externalTool?.let { put("external_tool", it) }
+        externalRuntime?.let { put("external_runtime", it) }
+        externalModel?.let { put("external_model", it) }
     }
 }

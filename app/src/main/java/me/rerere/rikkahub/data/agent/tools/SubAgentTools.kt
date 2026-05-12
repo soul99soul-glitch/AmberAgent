@@ -72,10 +72,10 @@ class SubAgentTools(
                 // formatting of other built-in roles for tonal consistency.
                 if (subAgentManager.isModelCouncilEnabled()) {
                     appendLine("@council (Model Council)")
-                    appendLine("- @oracle 的多模型加强版：3 个核心席位（支持者 / 反对者 / 裁判）+ 按议题挑选的领域 lens 并行辩论后综合。")
+                    appendLine("- @oracle 的多模型加强版：可用 agent_planned 自动设计 3-5 个议题相关席位，也可把 Gemini CLI 作为 external_cli 临时席位。")
                     appendLine("  何时调用：长期影响重大、单一 oracle 不够稳的关键决策 • 想要多视角对比 • 高风险/不可逆操作前的合议。")
                     appendLine("  何时不要：常规深思（直接 @oracle）• 时间紧 • 答案已经很清楚 • 简单任务。")
-                    appendLine("  调用方式：model_council_start（用 extra_lens 数组按议题挑 lens：商业 → product/marketing/pr，技术 → engineering/risk，UX → ux/product，写作判断 → 不加 lens）→ model_council_wait → model_council_read。")
+                    appendLine("  调用方式：优先 model_council_start(seat_strategy=\"agent_planned\", planned_seats=[name/role/system_prompt/model_ref? 或 runner_type=external_cli/external_tool=gemini_cli]) → model_council_wait → model_council_read。")
                     appendLine()
                 }
             }
@@ -198,7 +198,7 @@ internal fun buildMentionOverrideDirective(mentioned: List<String>): String {
         appendLine("=== USER MENTION OVERRIDE ===")
         val subAgentMentions = mentioned.filterNot { it == "council" }
         if ("council" in mentioned) {
-            appendLine("The user explicitly invoked @council. You MUST call model_council_start for this turn, using the user's message as the council objective. Choose extra_lens by topic when helpful, then use model_council_wait/read and synthesize the verdict.")
+            appendLine("The user explicitly invoked @council. You MUST call model_council_start for this turn, using the user's message as the council objective. Prefer seat_strategy=\"agent_planned\" with 3-5 planned_seats tailored to the topic; each planned seat should include name, role, system_prompt, and optional model_ref when the user named a model. If the user asks for a terminal/Gemini CLI participant, set allow_external_cli=true and add a planned seat with runner_type=\"external_cli\", external_tool=\"gemini_cli\", and optional external_runtime/external_model. Then use model_council_wait/read and synthesize the verdict.")
         }
         if (subAgentMentions.isNotEmpty()) {
             if (subAgentMentions.size == 1) {

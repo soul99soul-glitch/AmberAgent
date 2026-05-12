@@ -84,4 +84,35 @@ class WebMountCookieProviderTest {
         assertTrue(bundle.hasAll(setOf("A")))
         assertFalse(bundle.hasAll(setOf("A", "C")))
     }
+
+    @Test
+    fun guessSessionCookieNamePrefersKnownDurableCookie() {
+        val provider = WebMountCookieProvider()
+
+        val guessed = provider.guessSessionCookieName(
+            newCookies = mapOf(
+                "WEIBOCN_FROM" to "1110006030",
+                "SUB" to "_2A25long-lived-session",
+                "XSRF-TOKEN" to "short",
+            ),
+            preferredNames = listOf("SUB", "SUBP", "SSOLoginState"),
+        )
+
+        assertEquals("SUB", guessed)
+    }
+
+    @Test
+    fun pickPresentCookieNameSkipsDeletedValues() {
+        val provider = WebMountCookieProvider()
+
+        val picked = provider.pickPresentCookieName(
+            cookies = mapOf(
+                "SUB" to "deleted",
+                "SUBP" to "lasting",
+            ),
+            preferredNames = listOf("SUB", "SUBP"),
+        )
+
+        assertEquals("SUBP", picked)
+    }
 }

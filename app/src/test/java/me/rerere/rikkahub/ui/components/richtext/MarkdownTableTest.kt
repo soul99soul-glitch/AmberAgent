@@ -27,6 +27,25 @@ class MarkdownTableTest {
         assertEquals(listOf(listOf("1", "Amber")), tableData?.rows)
     }
 
+    @Test
+    fun `gfm table keeps markdown links intact`() {
+        val content = """
+            | 排名 | 标题 |
+            | --- | --- |
+            | 1 | [《无能的郝哥》](https://m.bilibili.com/video/BV1abc?spm_id_from=333.337) |
+        """.trimIndent()
+        val table = findTable(
+            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
+        )
+
+        val tableData = extractMarkdownTableData(table ?: error("table missing"), content)
+        assertNotNull(tableData)
+        assertEquals(
+            "[《无能的郝哥》](https://m.bilibili.com/video/BV1abc?spm_id_from=333.337)",
+            tableData?.rows?.single()?.get(1),
+        )
+    }
+
     private fun findTable(node: ASTNode): ASTNode? {
         if (node.type == GFMElementTypes.TABLE) return node
         return node.children.firstNotNullOfOrNull(::findTable)

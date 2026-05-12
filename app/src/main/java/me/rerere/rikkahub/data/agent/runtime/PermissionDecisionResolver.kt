@@ -108,15 +108,23 @@ class PermissionDecisionResolver {
         if (policy.hardBlocked) {
             return decision(PermissionDecisionAction.DENY, policy.reason ?: "Tool invocation is blocked.", "policy", policy)
         }
-        // Mandatory approval gate — wins over all auto-approve toggles AND
-        // prior in-run trust. Even if the user enabled both "auto-approve
-        // tools" and "auto-approve high-risk tools", a tool flagged
-        // mandatoryApproval (currently only wm_eval) must surface a human
-        // confirmation per invocation.
+        // Mandatory approval gate — stricter than regular auto-approval and
+        // prior in-run trust, but still respects the explicit "auto approve
+        // high-risk tools" setting. Users who enable both toggles are opting
+        // into unattended execution for tools like WebMount eval and external
+        // CLI council seats.
         if (policy.mandatoryApproval) {
+            if (autoApproveTools && autoApproveHighRiskTools) {
+                return decision(
+                    PermissionDecisionAction.ALLOW,
+                    "Mandatory approval was bypassed by explicit high-risk auto-approval settings.",
+                    "settings_high_risk_mandatory",
+                    policy,
+                )
+            }
             return decision(
                 PermissionDecisionAction.ASK,
-                "Tool requires explicit human approval per invocation and cannot be auto-approved.",
+                "Tool requires explicit human approval unless high-risk auto-approval is enabled.",
                 "mandatory_approval",
                 policy,
             )

@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.data.context
 
-import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
@@ -26,7 +25,6 @@ object ContextFootprintEstimator {
         messages.forEach { message ->
             mix(message.id.hashCode().toLong())
             mix(message.role.name.hashCode().toLong())
-            mix((message.usage?.promptTokens ?: 0).toLong())
             mix(message.parts.size.toLong())
             message.parts.forEach { part ->
                 mix(part.inputFootprintFingerprint())
@@ -84,11 +82,4 @@ object ContextFootprintEstimator {
         UIMessagePart.Search -> 10_000L
     }
 
-    fun latestExactPromptUsage(messages: List<UIMessage>): Int? {
-        val latestAssistantIndex = messages.indexOfLast {
-            it.role == MessageRole.ASSISTANT && (it.usage?.promptTokens ?: 0) > 0
-        }
-        if (latestAssistantIndex < 0 || latestAssistantIndex != messages.lastIndex) return null
-        return messages[latestAssistantIndex].usage?.promptTokens?.takeIf { it > 0 }
-    }
 }

@@ -86,7 +86,11 @@ class WebMountCookieProvider {
      * Returns null if no candidate has a value >= 8 chars (anything shorter
      * is almost certainly a tracking flag, not a session).
      */
-    fun guessSessionCookieName(newCookies: Map<String, String>): String? {
+    fun guessSessionCookieName(
+        newCookies: Map<String, String>,
+        preferredNames: List<String> = emptyList(),
+    ): String? {
+        pickPresentCookieName(newCookies, preferredNames)?.let { return it }
         val candidates = newCookies.filter { (_, v) -> v.length >= 8 }
         if (candidates.isEmpty()) return null
         val nameHints = setOf("sess", "auth", "token", "user")
@@ -101,6 +105,17 @@ class WebMountCookieProvider {
             )
             .first()
             .key
+    }
+
+    fun pickPresentCookieName(
+        cookies: Map<String, String>,
+        preferredNames: List<String>,
+    ): String? {
+        preferredNames.forEach { name ->
+            val value = cookies[name]?.takeIf { it.isUsableCookieValue() }
+            if (value != null) return name
+        }
+        return null
     }
 
     /**
@@ -137,6 +152,15 @@ class WebMountCookieProvider {
     }
 
     companion object {
+        private fun String.isUsableCookieValue(): Boolean {
+            val normalized = trim().lowercase()
+            return normalized.isNotBlank() &&
+                normalized != "deleted" &&
+                normalized != "expired" &&
+                normalized != "null" &&
+                normalized != "none"
+        }
+
         internal fun mergeCookieHeaderInto(raw: String, target: MutableMap<String, String>) {
             raw.split(";")
                 .map { it.trim() }

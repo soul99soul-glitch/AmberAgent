@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.rikkahub.R
 import me.rerere.hugeicons.stroke.Book03
+import me.rerere.hugeicons.stroke.Favourite
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -58,6 +59,12 @@ fun ExtensionsPage() {
                         leadingContent = { Icon(HugeIcons.Zap, null) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_quick_messages)) },
                         supportingContent = { Text(stringResource(R.string.extensions_page_quick_messages_desc)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.Favorite) },
+                        leadingContent = { Icon(HugeIcons.Favourite, null) },
+                        headlineContent = { Text(stringResource(R.string.favorite_page_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_favorites_desc)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Prompts) },

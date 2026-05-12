@@ -51,25 +51,15 @@ class ContextFootprintEstimatorTest {
     }
 
     @Test
-    fun exactPromptUsageOnlyAppliesToLatestAssistantMessage() {
-        val assistant = UIMessage.assistant("done").copy(
-            usage = TokenUsage(promptTokens = 1234, completionTokens = 56)
-        )
-
-        assertEquals(1234, ContextFootprintEstimator.latestExactPromptUsage(listOf(assistant)))
-        assertEquals(null, ContextFootprintEstimator.latestExactPromptUsage(listOf(assistant, UIMessage.user("next"))))
-    }
-
-    @Test
-    fun fingerprintChangesWhenUsageChangesButNotWhenReasoningGrows() {
+    fun fingerprintIgnoresUsageAndReasoningGrowth() {
         val base = UIMessage.assistant("done")
         val withUsage = base.copy(usage = TokenUsage(promptTokens = 1234, completionTokens = 56))
         val withShortReasoning = base.copy(parts = base.parts + UIMessagePart.Reasoning("thinking"))
         val withLongReasoning = base.copy(parts = base.parts + UIMessagePart.Reasoning("thinking".repeat(1000)))
 
-        assertTrue(
-            ContextFootprintEstimator.inputFingerprint(listOf(base)) !=
-                ContextFootprintEstimator.inputFingerprint(listOf(withUsage))
+        assertEquals(
+            ContextFootprintEstimator.inputFingerprint(listOf(base)),
+            ContextFootprintEstimator.inputFingerprint(listOf(withUsage))
         )
         assertEquals(
             ContextFootprintEstimator.inputFingerprint(listOf(withShortReasoning)),

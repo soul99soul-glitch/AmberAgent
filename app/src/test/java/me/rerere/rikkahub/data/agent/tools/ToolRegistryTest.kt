@@ -290,6 +290,43 @@ class ToolRegistryTest {
     }
 
     @Test
+    fun modelCouncilExternalCliRequiresMandatoryApproval() {
+        val registry = ToolRegistry.from(listOf(stubTool("model_council_start")))
+
+        val normalPolicy = registry.evaluateInvocation(
+            "model_council_start",
+            Json.parseToJsonElement("""{"seat_strategy":"agent_planned","planned_seats":[{"name":"A"},{"name":"B"}]}""")
+        )!!
+        val externalPolicy = registry.evaluateInvocation(
+            "model_council_start",
+            Json.parseToJsonElement(
+                """
+                {
+                  "seat_strategy": "agent_planned",
+                  "allow_external_cli": true,
+                  "planned_seats": [
+                    {"name": "Gemini", "runner_type": "external_cli", "external_tool": "gemini_cli"},
+                    {"name": "Judge"}
+                  ]
+                }
+                """.trimIndent()
+            )
+        )!!
+        val nestedAllowPolicy = registry.evaluateInvocation(
+            "model_council_start",
+            Json.parseToJsonElement("""{"task":{"allow_external_cli":true}}""")
+        )!!
+
+        assertTrue(!normalPolicy.needsApproval)
+        assertTrue(externalPolicy.needsApproval)
+        assertTrue(externalPolicy.mutates)
+        assertTrue(externalPolicy.mandatoryApproval)
+        assertTrue(!externalPolicy.autoApprovable)
+        assertEquals(ToolRisk.Sensitive, externalPolicy.risk)
+        assertTrue(nestedAllowPolicy.mandatoryApproval)
+    }
+
+    @Test
     fun externalFileToolsUseExternalCategoryAndApproval() {
         val registry = ToolRegistry.from(
             listOf(

@@ -151,13 +151,17 @@ class UserSiteRegistry(context: Context) {
                 if (next.id == "feishu_docs" && next.oauthProviderId == null) {
                     next = next.copy(oauthProviderId = "feishu")
                 }
-                // Migration C: feishu_docs homepage URL — the original seed
-                // pointed at www.feishu.cn which lands on the marketing /
-                // download page in a bare WebView. Replace with the messenger
-                // entry which works for both fresh-login and already-signed-in
-                // flows. Only touch rows still on the broken default.
-                if (next.id == "feishu_docs" && next.homepageUrl == "https://www.feishu.cn") {
-                    next = next.copy(homepageUrl = "https://www.feishu.cn/messenger/")
+                // Migration C: feishu_docs homepage URL. Marketing /
+                // messenger entries often hit Feishu's "unsupported browser"
+                // gate in embedded WebView. The wiki entry goes straight
+                // through Feishu passport and behaves closer to mobile Chrome.
+                if (next.id == "feishu_docs" &&
+                    (
+                        next.homepageUrl == "https://www.feishu.cn" ||
+                            next.homepageUrl == "https://www.feishu.cn/messenger/"
+                        )
+                ) {
+                    next = next.copy(homepageUrl = FEISHU_DOCS_HOME)
                 }
                 next
             }
@@ -260,12 +264,9 @@ class UserSiteRegistry(context: Context) {
             UserSite(
                 id = "feishu_docs",
                 displayName = "飞书云文档",
-                // `www.feishu.cn` lands on the download/marketing page in a
-                // bare WebView (no app session ⇒ Lark assumes you want the
-                // native client). Use the messenger entry — it redirects
-                // to the login page if signed out, then to the user's
-                // tenant home (e.g. mi.feishu.cn/...) once signed in.
-                homepageUrl = "https://www.feishu.cn/messenger/",
+                // The wiki entry redirects through Feishu passport and avoids
+                // the WebView-hostile messenger/download path.
+                homepageUrl = FEISHU_DOCS_HOME,
                 authKind = AuthKind.OAUTH,
                 nativeAdapterId = "feishu_docs",
                 iconKey = "feishu_docs",
@@ -274,5 +275,7 @@ class UserSiteRegistry(context: Context) {
                 oauthProviderId = "feishu",
             ),
         )
+
+        private const val FEISHU_DOCS_HOME = "https://www.feishu.cn/wiki"
     }
 }

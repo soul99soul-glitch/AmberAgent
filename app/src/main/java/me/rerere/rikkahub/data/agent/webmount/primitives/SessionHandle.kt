@@ -204,10 +204,10 @@ class SessionHandle internal constructor(
      * Phase 2 M2.2 — silent eval channel for synchronous JS expressions.
      *
      * Runs [script] via [evalRaw] without going through the [Tool] approval
-     * gate. The agent's `wm_eval` tool always requires per-call human
-     * approval (mandatoryApproval=true); this internal channel is reserved
-     * for **host-defined** helpers. Callers MUST have validated the
-     * profile's permissions + origin first — see
+     * gate. The agent's `wm_eval` tool is gated by mandatoryApproval, with
+     * only explicit high-risk auto-approval allowed to run it unattended; this
+     * internal channel is reserved for **host-defined** helpers. Callers MUST
+     * have validated the profile's permissions + origin first — see
      * [me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge].
      *
      * **NOTE**: `evaluateJavascript` returns the JSON-stringified value of
@@ -401,4 +401,3 @@ class SessionHandle internal constructor(
         private val JSON: Json = Json
     }
 }
-

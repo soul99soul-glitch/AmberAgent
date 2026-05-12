@@ -101,9 +101,10 @@ sealed class LocalToolOption {
      *
      * `wm_eval` runs arbitrary JavaScript inside a logged-in WebView origin —
      * it can read cookies / sessionStorage / localStorage, perform same-origin
-     * fetches with credentials, and mutate the page. The framework guarantees
-     * a per-call human approval prompt via Tool.mandatoryApproval, but the
-     * conservative default is to keep the tool entirely out of the agent's
+     * fetches with credentials, and mutate the page. The framework routes it
+     * through Tool.mandatoryApproval, so ordinary auto-approval cannot run it;
+     * only the explicit high-risk auto-approval setting may bypass the prompt.
+     * The conservative default is to keep the tool entirely out of the agent's
      * catalog unless the user opts in here.
      */
     @Serializable

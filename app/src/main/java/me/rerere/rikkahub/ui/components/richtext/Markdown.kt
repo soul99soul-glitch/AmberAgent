@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.components.richtext
 
-import android.content.Intent
 import android.os.Trace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -48,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -67,7 +67,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
-import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -80,6 +79,7 @@ import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
+import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
@@ -610,8 +610,7 @@ private fun MarkdownNode(
                 color = MaterialTheme.colorScheme.primary,
                 textDecoration = TextDecoration.Underline,
                 modifier = modifier.clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, linkDest.toUri())
-                    context.startActivity(intent)
+                    context.openUrl(linkDest)
                 })
         }
 
@@ -940,6 +939,10 @@ private fun Paragraph(
 
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
+    val context = LocalContext.current
+    val onClickUrl: (String) -> Unit = remember(context) {
+        { url -> context.openUrl(url) }
+    }
     FlowRow(
         modifier = modifier
             .fillWidthIf(LocalMarkdownFillWidth.current)
@@ -948,7 +951,7 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
-        val annotatedString = remember(content, enableLatexRendering) {
+        val annotatedString = remember(content, enableLatexRendering, onClickUrl) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -961,6 +964,7 @@ private fun Paragraph(
                         density = density,
                         trim = trim,
                         enableLatexRendering = enableLatexRendering,
+                        onClickUrl = onClickUrl,
                     )
                 }
             }
@@ -1068,13 +1072,14 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     style: TextStyle,
     enableLatexRendering: Boolean = true,
     onClickCitation: (String) -> Unit = {},
+    onClickUrl: (String) -> Unit = {},
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
 
         node.type == GFMTokenTypes.GFM_AUTOLINK -> {
             val link = node.getTextInNode(content)
-            withLink(LinkAnnotation.Url(link)) {
+            withLink(openUrlLinkAnnotation(link, onClickUrl)) {
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                     append(link)
                 }
@@ -1105,7 +1110,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         density = density,
                         style = style,
                         enableLatexRendering = enableLatexRendering,
-                        onClickCitation = onClickCitation
+                        onClickCitation = onClickCitation,
+                        onClickUrl = onClickUrl,
                     )
                 }
             }
@@ -1122,7 +1128,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         density = density,
                         style = style,
                         enableLatexRendering = enableLatexRendering,
-                        onClickCitation = onClickCitation
+                        onClickCitation = onClickCitation,
+                        onClickUrl = onClickUrl,
                     )
                 }
             }
@@ -1139,7 +1146,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         density = density,
                         style = style,
                         enableLatexRendering = enableLatexRendering,
-                        onClickCitation = onClickCitation
+                        onClickCitation = onClickCitation,
+                        onClickUrl = onClickUrl,
                     )
                 }
             }
@@ -1188,7 +1196,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     appendInlineContent("citation:$linkDest")
                 }
             } else {
-                withLink(LinkAnnotation.Url(linkDest)) {
+                withLink(openUrlLinkAnnotation(linkDest, onClickUrl)) {
                     withStyle(
                         SpanStyle(
                             color = colorScheme.primary, textDecoration = TextDecoration.Underline
@@ -1203,7 +1211,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         node.type == MarkdownElementTypes.AUTOLINK -> {
             val links = node.children.trim(MarkdownTokenTypes.LT, 1).trim(MarkdownTokenTypes.GT, 1)
             links.fastForEach { link ->
-                withLink(LinkAnnotation.Url(link.getTextInNode(content))) {
+                withLink(openUrlLinkAnnotation(link.getTextInNode(content), onClickUrl)) {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                         append(link.getTextInNode(content))
                     }
@@ -1270,11 +1278,22 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     density = density,
                     style = style,
                     enableLatexRendering = enableLatexRendering,
-                    onClickCitation = onClickCitation
+                    onClickCitation = onClickCitation,
+                    onClickUrl = onClickUrl,
                 )
             }
         }
     }
+}
+
+private fun openUrlLinkAnnotation(url: String, onClickUrl: (String) -> Unit): LinkAnnotation.Url {
+    return LinkAnnotation.Url(
+        url = url,
+        linkInteractionListener = LinkInteractionListener { annotation ->
+            val target = (annotation as? LinkAnnotation.Url)?.url ?: url
+            onClickUrl(target)
+        },
+    )
 }
 
 private fun ASTNode.getTextInNode(text: String): String {

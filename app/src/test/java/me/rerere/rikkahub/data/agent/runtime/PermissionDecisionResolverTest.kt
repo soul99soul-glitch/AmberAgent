@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.runtime
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.tools.ToolRisk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -55,14 +56,29 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
-    fun mandatoryApprovalCannotBeBypassedByDoubleAutoApproveToggles() {
-        // Phase 2 M2.0.1: even with BOTH "auto-approve tools" AND "auto-approve
-        // high-risk tools" enabled, mandatoryApproval forces a human prompt.
+    fun mandatoryApprovalCanBeBypassedByExplicitHighRiskAutoApprove() {
+        // The high-risk toggle is intentionally the broad "run unattended"
+        // switch. mandatoryApproval still blocks regular auto approval and
+        // run-trust, but users who enable both toggles have opted into it.
         val decision = resolver.resolve(
             toolDef = mandatoryTool("wm_eval"),
             tool = toolCall("wm_eval"),
             autoApproveTools = true,
             autoApproveHighRiskTools = true,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_high_risk_mandatory", decision.source)
+        assertTrue(decision.trace.policy!!.mandatoryApproval)
+    }
+
+    @Test
+    fun mandatoryApprovalStillRequiresPromptWithRegularAutoApproveOnly() {
+        val decision = resolver.resolve(
+            toolDef = mandatoryTool("wm_eval"),
+            tool = toolCall("wm_eval"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
         )
 
         assertEquals(PermissionDecisionAction.ASK, decision.action)
@@ -74,7 +90,8 @@ class PermissionDecisionResolverTest {
     fun mandatoryApprovalOverridesPriorRunTrust() {
         // Even if the user previously approved this tool earlier in the same
         // run ("trust this tool for the rest of this conversation"), a
-        // mandatoryApproval tool must re-ask per invocation.
+        // mandatoryApproval tool must re-ask per invocation unless the
+        // user has enabled the explicit high-risk auto-approval override.
         val decision = resolver.resolve(
             toolDef = mandatoryTool("wm_eval"),
             tool = toolCall("wm_eval"),
@@ -85,6 +102,36 @@ class PermissionDecisionResolverTest {
 
         assertEquals(PermissionDecisionAction.ASK, decision.action)
         assertEquals("mandatory_approval", decision.source)
+    }
+
+    @Test
+    fun externalCliCouncilSeatCanUseHighRiskAutoApproval() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("model_council_start", allowsAutoApproval = false),
+            tool = toolCall(
+                name = "model_council_start",
+                input = """
+                    {
+                      "allow_external_cli": true,
+                      "planned_seats": [
+                        {
+                          "name": "Gemini CLI",
+                          "runner_type": "external_cli",
+                          "external_tool": "gemini_cli"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+            ),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+
+        val policy = decision.trace.policy!!
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_high_risk_mandatory", decision.source)
+        assertEquals(ToolRisk.Sensitive, policy.risk)
+        assertTrue(policy.mandatoryApproval)
     }
 
     private fun approvalTool(name: String, allowsAutoApproval: Boolean = true) = Tool(
@@ -104,9 +151,9 @@ class PermissionDecisionResolverTest {
         execute = { emptyList() },
     )
 
-    private fun toolCall(name: String) = UIMessagePart.Tool(
+    private fun toolCall(name: String, input: String = "{}") = UIMessagePart.Tool(
         toolCallId = "call_$name",
         toolName = name,
-        input = "{}",
+        input = input,
     )
 }

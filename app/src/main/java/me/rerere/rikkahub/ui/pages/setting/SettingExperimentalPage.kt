@@ -71,9 +71,11 @@ import me.rerere.rikkahub.data.agent.icloud.ICLOUD_GLOBAL_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS
+import me.rerere.rikkahub.data.agent.modelcouncil.MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeat
+import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeatRunner
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
@@ -635,22 +637,29 @@ fun SettingExperimentalModelCouncilPage(
         }
     }
 
-    fun addSeat() {
-        val model = chatModels.firstOrNull() ?: return
+    fun addSeat(runnerType: ModelCouncilSeatRunner = ModelCouncilSeatRunner.PROVIDER_MODEL) {
+        val model = chatModels.firstOrNull()
+        if (runnerType == ModelCouncilSeatRunner.PROVIDER_MODEL && model == null) return
         // Pick a lens preset first — core seats (supporter/opponent/judge) are auto-injected
         // at runtime, so users don't need to manually add them. Skip lenses already in use.
         val usedRoleIds = council.defaultSeats.map {
             ModelCouncilRolePresets.byName(it.role)?.id ?: it.role
         }.toSet()
         val preset = ModelCouncilRolePresets.lensPresets.firstOrNull { it.id !in usedRoleIds }
-            ?: ModelCouncilRolePresets.lensPresets.first()
+        val customIndex = council.defaultSeats.size + 1
         val seat = ModelCouncilSeat(
             seatId = Uuid.random().toString(),
-            name = preset.name,
-            role = preset.id,  // store canonical id; byName tolerates legacy aliases
-            modelId = model.id,
-            systemPrompt = preset.prompt,
+            name = preset?.name ?: if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
+                "Gemini CLI 席位"
+            } else {
+                "自定义席位 $customIndex"
+            },
+            role = preset?.id ?: "custom-$customIndex",  // store canonical id; byName tolerates legacy aliases
+            modelId = model?.id ?: Uuid.parse(MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER),
+            runnerType = runnerType,
+            systemPrompt = preset?.prompt ?: "请从这个席位的独特视角评估议题，给出清晰、可验证、不过度发散的判断。",
             outputBudgetChars = council.outputBudgetChars,
+            externalTool = if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) "gemini_cli" else "",
         )
         update { current -> current.copy(defaultSeats = current.defaultSeats + seat) }
     }
@@ -736,7 +745,9 @@ fun SettingExperimentalModelCouncilPage(
                             index = index,
                             seat = seat,
                             settingsProviders = settings.providers,
-                            onModelSelected = { model -> updateSeat(seat.seatId) { it.copy(modelId = model.id) } },
+                            onSeatChanged = { next ->
+                                updateSeat(seat.seatId) { next }
+                            },
                             onPresetSelected = { preset ->
                                 updateSeat(seat.seatId) {
                                     it.copy(
@@ -753,23 +764,22 @@ fun SettingExperimentalModelCouncilPage(
                             },
                         )
                     }
-                    // Disable add when all 6 lens presets are already used (we'd otherwise create
-                    // a duplicate of the first lens). Core seats are auto-injected at run time, so
-                    // they're not pickable from this UI.
-                    val usedRoleIds = council.defaultSeats.map {
-                        ModelCouncilRolePresets.byName(it.role)?.id ?: it.role
-                    }.toSet()
-                    val allLensTaken = ModelCouncilRolePresets.lensPresets.all { it.id in usedRoleIds }
                     ExperimentActionRow {
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_model_council_add_seat),
                             primary = council.defaultSeats.isEmpty(),
                             enabled = chatModels.isNotEmpty() &&
-                                council.defaultSeats.size < council.maxSeats &&
-                                !allLensTaken,
-                            onClick = { addSeat() },
+                                council.defaultSeats.size < council.maxSeats,
+                            onClick = { addSeat(ModelCouncilSeatRunner.PROVIDER_MODEL) },
+                        )
+                        ExperimentActionButton(
+                            text = "添加 Gemini CLI 席位",
+                            enabled = chatModels.isNotEmpty() &&
+                                council.defaultSeats.size < council.maxSeats,
+                            onClick = { addSeat(ModelCouncilSeatRunner.EXTERNAL_CLI) },
                         )
                     }
+                    ExperimentNote(text = "Gemini CLI 席位只会在本轮议会工具调用显式允许外部 CLI 时参与；启动本地终端进程前会要求人工确认。")
                 }
             }
             item {
@@ -829,56 +839,194 @@ private fun ModelCouncilSeatEditor(
     index: Int,
     seat: ModelCouncilSeat,
     settingsProviders: List<me.rerere.ai.provider.ProviderSetting>,
-    onModelSelected: (Model) -> Unit,
+    onSeatChanged: (ModelCouncilSeat) -> Unit,
     onPresetSelected: (me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePreset) -> Unit,
     onDelete: () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val runnerOptions = listOf(ModelCouncilSeatRunner.PROVIDER_MODEL, ModelCouncilSeatRunner.EXTERNAL_CLI)
+    val runtimeOptions = listOf("", "builtin_alpine", "android_shell", "termux_external")
+    val selectedRuntime = seat.externalRuntime.takeIf { it in runtimeOptions }.orEmpty()
+    val firstChatModel = remember(settingsProviders) {
+        settingsProviders.flatMap { it.models }.firstOrNull { it.type == ModelType.CHAT }
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = workspace.row,
+        color = workspace.paper,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.setting_model_council_seat_label, index + 1, seat.name),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = workspace.ink,
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = workspace.row,
+                    contentColor = workspace.faint,
+                    border = BorderStroke(1.dp, workspace.hairline),
+                ) {
+                    Text(
+                        text = "#${index + 1}",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                    )
+                }
+                Column(
                     modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = seat.name.ifBlank { "未命名席位" },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
+                            "外部 CLI · ${seat.externalTool.ifBlank { "gemini_cli" }}"
+                        } else {
+                            "模型席位 · ${ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspace.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 ExperimentActionButton(
                     text = stringResource(R.string.delete),
                     enabled = true,
                     onClick = onDelete,
                 )
             }
-            ModelSelector(
-                modelId = seat.modelId,
-                providers = settingsProviders,
-                type = ModelType.CHAT,
-                compact = true,
+
+            OutlinedTextField(
+                value = seat.name,
+                onValueChange = { value -> onSeatChanged(seat.copy(name = value.take(40))) },
+                label = { Text("席位名") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                onSelect = onModelSelected,
             )
-            Select(
-                options = ModelCouncilRolePresets.presets,
-                selectedOption = ModelCouncilRolePresets.byName(seat.role) ?: ModelCouncilRolePresets.presets.first(),
-                onOptionSelected = onPresetSelected,
+
+            ModelCouncilPropertyRow(label = "席位类型") {
+                Select(
+                    options = runnerOptions,
+                    selectedOption = seat.runnerType,
+                    onOptionSelected = { runner ->
+                        onSeatChanged(
+                            seat.copy(
+                                runnerType = runner,
+                                modelId = if (
+                                    runner == ModelCouncilSeatRunner.PROVIDER_MODEL &&
+                                    settingsProviders.flatMap { it.models }.none { it.id == seat.modelId && it.type == ModelType.CHAT }
+                                ) {
+                                    firstChatModel?.id ?: seat.modelId
+                                } else {
+                                    seat.modelId
+                                },
+                                externalTool = if (runner == ModelCouncilSeatRunner.EXTERNAL_CLI) {
+                                    seat.externalTool.ifBlank { "gemini_cli" }
+                                } else {
+                                    ""
+                                },
+                            )
+                        )
+                    },
+                    optionToString = {
+                        when (it) {
+                            ModelCouncilSeatRunner.PROVIDER_MODEL -> "模型"
+                            ModelCouncilSeatRunner.EXTERNAL_CLI -> "Gemini CLI"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            ModelCouncilPropertyRow(label = "角色预设") {
+                Select(
+                    options = ModelCouncilRolePresets.presets,
+                    selectedOption = ModelCouncilRolePresets.byName(seat.role) ?: ModelCouncilRolePresets.presets.first(),
+                    onOptionSelected = onPresetSelected,
+                    modifier = Modifier.fillMaxWidth(),
+                    optionToString = { it.name },
+                )
+            }
+
+            if (seat.runnerType == ModelCouncilSeatRunner.PROVIDER_MODEL) {
+                ModelCouncilPropertyRow(label = "模型") {
+                    ModelSelector(
+                        modelId = seat.modelId,
+                        providers = settingsProviders,
+                        type = ModelType.CHAT,
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        onSelect = { model -> onSeatChanged(seat.copy(modelId = model.id)) },
+                    )
+                }
+            } else {
+                ModelCouncilPropertyRow(label = "运行时") {
+                    Select(
+                        options = runtimeOptions,
+                        selectedOption = selectedRuntime,
+                        onOptionSelected = { runtime -> onSeatChanged(seat.copy(externalRuntime = runtime)) },
+                        optionToString = {
+                            when (it) {
+                                "" -> "跟随终端设置"
+                                "builtin_alpine" -> "内置 Alpine"
+                                "android_shell" -> "Android Shell"
+                                "termux_external" -> "Termux"
+                                else -> it
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                OutlinedTextField(
+                    value = seat.externalModel,
+                    onValueChange = { value -> onSeatChanged(seat.copy(externalModel = value.take(120))) },
+                    label = { Text("Gemini CLI 模型参数（可选）") },
+                    placeholder = { Text("例如 gemini-2.5-pro") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ExperimentNote(text = "外部 CLI 席位会在终端运行时中隔离执行。手机上需要对应运行时能找到 gemini 命令。")
+            }
+
+            OutlinedTextField(
+                value = seat.systemPrompt,
+                onValueChange = { value -> onSeatChanged(seat.copy(systemPrompt = value.take(2_000))) },
+                label = { Text("席位提示词") },
+                minLines = 3,
+                maxLines = 6,
                 modifier = Modifier.fillMaxWidth(),
-                optionToString = { it.name },
             )
         }
+    }
+}
+
+@Composable
+private fun ModelCouncilPropertyRow(
+    label: String,
+    content: @Composable () -> Unit,
+) {
+    val workspace = workspaceColors()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = workspace.faint,
+        )
+        content()
     }
 }
 
@@ -1257,27 +1405,27 @@ fun SettingExperimentalOfficeProPage(
                                         },
                                     )
                                 }
-                                if (doc.lastCheckedAt != null) {
+                                doc.lastCheckedAt?.let { lastCheckedAt ->
                                     Text(
                                         text = stringResource(
                                             R.string.setting_officepro_doc_last_checked,
-                                            formatOfficeProjectUpdatedAt(doc.lastCheckedAt!!),
+                                            formatOfficeProjectUpdatedAt(lastCheckedAt),
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = workspaceColors().faint,
                                     )
                                 }
-                                if (doc.lastChangedAt != null) {
+                                doc.lastChangedAt?.let { lastChangedAt ->
                                     Text(
                                         text = stringResource(
                                             R.string.setting_officepro_doc_last_changed,
-                                            formatOfficeProjectUpdatedAt(doc.lastChangedAt!!),
+                                            formatOfficeProjectUpdatedAt(lastChangedAt),
                                             doc.changeThreshold,
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = workspaceColors().faint,
                                     )
-                                } else {
+                                } ?: run {
                                     Text(
                                         text = stringResource(R.string.setting_officepro_doc_no_change),
                                         style = MaterialTheme.typography.bodySmall,

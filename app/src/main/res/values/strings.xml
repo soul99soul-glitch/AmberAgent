@@ -233,6 +233,7 @@
   <string name="chat_input_usage_loading">Loading usage…</string>
   <string name="chat_input_usage_no_data">No usage data</string>
   <string name="chat_input_usage_codex_oauth_required">/usage is available when the current chat model uses an OpenAI Codex OAuth provider.</string>
+  <string name="chat_input_usage_openai_compatible_required">/usage currently supports OpenAI-compatible providers only.</string>
   <string name="chat_input_usage_plan">Plan: %1$s</string>
   <string name="chat_input_usage_percent_used">%1$d%% used</string>
   <string name="chat_input_usage_reset_detail">reset %1$s · %2$s</string>
@@ -370,6 +371,8 @@
   <string name="extensions_page_section_extensions">Extensions</string>
   <string name="extensions_page_title">Extensions</string>
   <string name="favorite_page_no_favorites">No favorites yet</string>
+  <string name="favorite_page_empty_hint">Saved conversation snippets will appear here</string>
+  <string name="favorite_page_count">%d saved snippets</string>
   <string name="favorite_page_removed">Favorite removed</string>
   <string name="favorite_page_title">Favorites</string>
   <string name="favorite_page_untitled_conversation">Untitled Conversation</string>
@@ -557,8 +560,10 @@
   <string name="quick_messages_page_delete_title">Delete Quick Message</string>
   <string name="quick_messages_page_edit_title">Edit Quick Message</string>
   <string name="quick_messages_page_empty_content">No content</string>
-  <string name="quick_messages_page_empty_hint">Tap the + button at the bottom right to add a quick message</string>
+  <string name="quick_messages_page_empty_action">Add Quick Message</string>
+  <string name="quick_messages_page_empty_hint">Create reusable snippets that can be inserted from the composer.</string>
   <string name="quick_messages_page_empty_title">No Quick Messages</string>
+  <string name="quick_messages_page_count">%d quick messages</string>
   <string name="quick_messages_page_untitled">Untitled</string>
   <string name="reasoning_auto">Auto</string>
   <string name="reasoning_auto_desc">Let the model automatically determine reasoning level.</string>
@@ -783,6 +788,7 @@
   <string name="setting_page_dynamic_color_desc">Use dynamic color</string>
   <string name="setting_page_extensions">Extensions</string>
   <string name="setting_page_extensions_desc">Manage quick messages and prompts</string>
+  <string name="setting_page_favorites_desc">Review saved conversation snippets</string>
   <string name="setting_page_general_settings">General Settings</string>
   <string name="setting_page_agent_runtime">Agent Settings</string>
   <string name="setting_page_agent_memory">Core Memory</string>
@@ -1305,6 +1311,7 @@
   <string name="setting_webmount_sign_in_again">Sign in again</string>
   <string name="setting_webmount_oauth_edit_credentials">Edit credentials</string>
   <string name="setting_webmount_oauth_edit_title">OAuth credentials for %1$s</string>
+  <string name="setting_webmount_oauth_web_login_blocked_hint">This station requires OAuth. Embedded web sign-in is blocked by the provider; use Edit credentials, then Connect.</string>
   <!-- Status pills -->
   <string name="setting_webmount_pill_public">Public</string>
   <string name="setting_webmount_pill_signed_in">Signed in</string>
@@ -1316,6 +1323,7 @@
   <string name="setting_webmount_pill_error">Error</string>
   <string name="setting_webmount_pill_unknown">—</string>
   <string name="setting_webmount_sign_out">Sign out</string>
+  <string name="setting_webmount_clear_session">Clear state</string>
   <string name="setting_webmount_signed_out_toast">Signed out of %1$s — cleared %2$d cookie(s).</string>
   <string name="setting_webmount_signed_out_nothing">No cookies to clear for %1$s.</string>
   <string name="setting_webmount_last_updated">Last updated</string>
