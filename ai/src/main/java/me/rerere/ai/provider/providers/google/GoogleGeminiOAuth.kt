@@ -327,9 +327,22 @@ class GoogleGeminiOAuthClient(
 /**
  * Seed model IDs to put into [me.rerere.ai.provider.ProviderSetting.Google.models] right
  * after a successful Gemini OAuth login, so the user lands on a usable provider without
- * having to type model names. Mirrors what [defaultCodexOAuthModelList] does on the codex
- * side. Commit #4 will replace this with a real `cloudcode-pa:listAvailableModels` call;
- * for now we hardcode the public-facing Gemini family the gemini-cli ships with.
+ * having to type model names.
+ *
+ * **Why hardcoded:** there is no public "list available models" endpoint for the
+ * cloudcode-pa OAuth path. The CodeAssistServer's full method list
+ * (streamGenerateContent / generateContent / onboardUser / loadCodeAssist /
+ * countTokens / retrieveUserQuota / ...) has no listModels method, and `loadCodeAssist`
+ * itself only returns tier info (FREE / LEGACY / STANDARD), not a model list. The
+ * adjacent `generativelanguage.googleapis.com/v1beta/models` ListModels endpoint exists
+ * but expects API-key auth — calling it with the gemini-cli OAuth bearer returns
+ * `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT` because that path wants the
+ * `generative-language.retriever` scope and our token only carries `cloud-platform`.
+ *
+ * Reference: google-gemini/gemini-cli's own `packages/core/src/config/models.ts`
+ * also hardcodes the family — we mirror it. Update this list when the upstream cli
+ * adds/drops a tier-FREE-eligible model. The 2.0-flash family was dropped upstream;
+ * 2.5-flash-lite and the 3.x previews replaced it.
  */
 fun defaultGeminiOAuthModelList(): List<me.rerere.ai.provider.Model> {
     return GEMINI_OAUTH_FALLBACK_MODEL_IDS.map { id ->
@@ -343,6 +356,7 @@ fun defaultGeminiOAuthModelList(): List<me.rerere.ai.provider.Model> {
 private val GEMINI_OAUTH_FALLBACK_MODEL_IDS = listOf(
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-exp",
+    "gemini-2.5-flash-lite",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
 )
