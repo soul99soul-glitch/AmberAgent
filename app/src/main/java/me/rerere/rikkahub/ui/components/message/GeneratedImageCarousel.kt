@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -102,28 +104,25 @@ fun GeneratedImageCarousel(
                 onLongClick = { actionSheetTarget = image },
             )
         } else {
-            // Multi-image: each card ~85% width, ~10dp peek for the next card.
+            // Multi-image: each card ~85% width with a 16dp leading inset so
+            // the previous card's trailing edge can peek into view as the
+            // user scrolls — gives ~10% peek on the right-most card and a
+            // visible affordance that the row is scrollable.
             val cardWidth = (containerWidth.value * 0.85f).dp
             LazyRow(
                 state = rememberLazyListState(),
-                contentPadding = PaddingValues(end = 0.dp),
+                contentPadding = PaddingValues(start = 0.dp, end = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(images) { image ->
                     val index = images.indexOf(image)
-                    Surface(
-                        modifier = Modifier
-                            .heightIn(min = 180.dp),
-                        color = workspace.paper,
-                    ) {
-                        ImageCard(
-                            url = image.url,
-                            widthDp = cardWidth,
-                            heightCapDp = (cardWidth.value * 1.4f).dp.coerceAtMost(360.dp),
-                            onClick = { lightboxStartIndex = index },
-                            onLongClick = { actionSheetTarget = image },
-                        )
-                    }
+                    ImageCard(
+                        url = image.url,
+                        widthDp = cardWidth,
+                        heightCapDp = (cardWidth.value * 1.4f).dp.coerceAtMost(360.dp),
+                        onClick = { lightboxStartIndex = index },
+                        onLongClick = { actionSheetTarget = image },
+                    )
                 }
             }
         }
@@ -200,6 +199,9 @@ private fun ImageCard(
 ) {
     val workspace = workspaceColors()
     Surface(
+        modifier = Modifier
+            .width(widthDp)
+            .heightIn(max = heightCapDp),
         shape = RoundedCornerShape(16.dp),
         color = workspace.paper,
         border = BorderStroke(1.dp, workspace.hairline),
@@ -209,13 +211,12 @@ private fun ImageCard(
             contentDescription = null,
             contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = onLongClick,
-                )
-                .heightIn(max = heightCapDp)
-                .padding(0.dp),
+                ),
         )
     }
 }
@@ -231,7 +232,7 @@ private fun ActionRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -254,6 +255,15 @@ private fun ActionRow(
 private fun copyImageToClipboard(context: Context, url: String) {
     val uri = resolveContentUri(context, url)
     val clip = ClipData.newUri(context.contentResolver, "image", uri)
+    // Grant temporary read access to the clipboard host so paste targets
+    // (other apps' input fields, screenshot tools, etc.) can decode the file.
+    // Without this, the pasted URI is unusable on Android 10+ scoped storage.
+    val description = clip.description
+    description?.extras = description?.extras?.apply {
+        putInt("flags", Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } ?: android.os.PersistableBundle().apply {
+        putInt("flags", Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(clip)
 }
