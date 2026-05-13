@@ -6,6 +6,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.data.model.QuickMessage
 import kotlin.uuid.Uuid
 
 // Stable UUIDs for the two image-generation models we seed into the built-in
@@ -44,6 +45,37 @@ internal val SeedGeminiImageModel = Model(
     type = ModelType.IMAGE,
     inputModalities = listOf(Modality.TEXT),
     outputModalities = listOf(Modality.IMAGE),
+)
+
+// Stable UUIDs for the three visual-routing slash commands. Each command's
+// content prefixes a route tag the GenerativeUiPlanner picks up at Layer 0,
+// forcing the corresponding render path regardless of the prompt's wording.
+//   /draw    → [ROUTE:image]   → generate_image tool
+//   /diagram → [ROUTE:diagram] → show-widget SVG
+//   /slide   → [ROUTE:slides]  → show-widget slides renderer
+//
+// Trailing newline so the cursor lands on a fresh line after the tag, and
+// the user can type their prompt unprefixed.
+internal val SeedDrawQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e01")
+internal val SeedDiagramQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e02")
+internal val SeedSlideQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e03")
+
+internal val SeedRoutingQuickMessages: List<QuickMessage> = listOf(
+    QuickMessage(
+        id = SeedDrawQuickMessageId,
+        title = "draw",
+        content = "[ROUTE:image]\n",
+    ),
+    QuickMessage(
+        id = SeedDiagramQuickMessageId,
+        title = "diagram",
+        content = "[ROUTE:diagram]\n",
+    ),
+    QuickMessage(
+        id = SeedSlideQuickMessageId,
+        title = "slide",
+        content = "[ROUTE:slides]\n",
+    ),
 )
 
 val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")

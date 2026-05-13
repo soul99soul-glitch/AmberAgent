@@ -171,6 +171,13 @@ class SettingsStore(
         // the next save flow.
         val SEEDED_IMAGE_MODELS_V1 = booleanPreferencesKey("seeded_image_models_v1")
 
+        // Same one-shot pattern for the visual-routing slash commands
+        // (/draw / /diagram / /slide). Seeded into settings.quickMessages
+        // global pool and subscribed by every existing assistant on the
+        // first load that sees this version <1.
+        val SEEDED_ROUTING_QUICK_MESSAGES_V1 =
+            booleanPreferencesKey("seeded_routing_quick_messages_v1")
+
         // 赞助提醒
         val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
     }
@@ -288,6 +295,8 @@ class SettingsStore(
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
                 imageModelsSeededVersion = if (preferences[SEEDED_IMAGE_MODELS_V1] == true) 1 else 0,
+                routingQuickMessagesSeededVersion =
+                    if (preferences[SEEDED_ROUTING_QUICK_MESSAGES_V1] == true) 1 else 0,
             )
         }
         .map {
@@ -349,12 +358,32 @@ class SettingsStore(
                         }
                     } else provider
                 }
-            val assistants = it.assistants.ifEmpty { DEFAULT_ASSISTANTS }.toMutableList()
+            val assistantsRaw = it.assistants.ifEmpty { DEFAULT_ASSISTANTS }.toMutableList()
             DEFAULT_ASSISTANTS.forEach { defaultAssistant ->
-                if (assistants.none { it.id == defaultAssistant.id }) {
-                    assistants.add(defaultAssistant.copy())
+                if (assistantsRaw.none { it.id == defaultAssistant.id }) {
+                    assistantsRaw.add(defaultAssistant.copy())
                 }
             }
+
+            // One-time seed for the /draw /diagram /slide visual-routing
+            // slash commands. Append the three QuickMessages to the global
+            // pool (skipping any already present by stable UUID), then make
+            // sure every assistant subscribes to them via quickMessageIds.
+            // Gated by `routingQuickMessagesSeededVersion` so users who
+            // remove them don't get them resurrected.
+            val shouldSeedRoutingQuickMessages = it.routingQuickMessagesSeededVersion < 1
+            val routingSeedIds = SeedRoutingQuickMessages.map { qm -> qm.id }.toSet()
+            val nextQuickMessages = if (shouldSeedRoutingQuickMessages) {
+                val existingIds = it.quickMessages.map { qm -> qm.id }.toSet()
+                it.quickMessages + SeedRoutingQuickMessages.filter { qm -> qm.id !in existingIds }
+            } else it.quickMessages
+            val assistants = if (shouldSeedRoutingQuickMessages) {
+                assistantsRaw.map { assistant ->
+                    val missing = routingSeedIds - assistant.quickMessageIds
+                    if (missing.isEmpty()) assistant
+                    else assistant.copy(quickMessageIds = assistant.quickMessageIds + missing)
+                }.toMutableList()
+            } else assistantsRaw
             val ttsProviders = it.ttsProviders
                 .filterNot { provider -> provider.id in REMOVED_DEFAULT_TTS_PROVIDER_IDS }
                 .ifEmpty { DEFAULT_TTS_PROVIDERS }
@@ -367,6 +396,7 @@ class SettingsStore(
             it.copy(
                 providers = providers,
                 assistants = assistants.withAmberAgentAssistantBranding(),
+                quickMessages = nextQuickMessages,
                 ttsProviders = ttsProviders,
                 selectedTTSProviderId = if (ttsProviders.any { provider -> provider.id == it.selectedTTSProviderId }) {
                     it.selectedTTSProviderId
@@ -377,6 +407,8 @@ class SettingsStore(
                 // has run; persisted on the next settings save via the
                 // SEEDED_IMAGE_MODELS_V1 pref.
                 imageModelsSeededVersion = if (shouldSeedImageModels) 1 else it.imageModelsSeededVersion,
+                routingQuickMessagesSeededVersion =
+                    if (shouldSeedRoutingQuickMessages) 1 else it.routingQuickMessagesSeededVersion,
             )
         }
         .map { settings ->
@@ -515,6 +547,9 @@ class SettingsStore(
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
             if (settings.imageModelsSeededVersion > 0) {
                 preferences[SEEDED_IMAGE_MODELS_V1] = true
+            }
+            if (settings.routingQuickMessagesSeededVersion > 0) {
+                preferences[SEEDED_ROUTING_QUICK_MESSAGES_V1] = true
             }
         }
     }
@@ -659,6 +694,13 @@ data class Settings(
      * [PreferencesStore.SEEDED_IMAGE_MODELS_V1]; not user-facing.
      */
     val imageModelsSeededVersion: Int = 0,
+    /**
+     * Same one-shot pattern, for the visual-routing slash commands
+     * (/draw / /diagram / /slide). Bumped once the three QuickMessages are
+     * appended to settings.quickMessages and subscribed by every assistant.
+     * Persisted as [PreferencesStore.SEEDED_ROUTING_QUICK_MESSAGES_V1].
+     */
+    val routingQuickMessagesSeededVersion: Int = 0,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

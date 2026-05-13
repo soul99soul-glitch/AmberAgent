@@ -1140,15 +1140,24 @@ class LocalTools(
     private fun buildImageGenTool(conversationId: Uuid): Tool = Tool(
         name = "generate_image",
         description = """
-            Generate one or more images from a text prompt using the user's
-            configured image-generation model. Use this whenever the user asks
-            you to draw, paint, illustrate, sketch, create a picture, visualize,
-            or produce any visual content. The user sees the images inline in
-            this conversation and can save / share / regenerate them.
-            Prefer English prompts with specific subject, style, composition,
-            lighting cues — image models follow them more reliably. Generated
-            images are bound to this conversation; deleting the conversation
-            removes them.
+            Generate photographic, painted, illustrated, or otherwise textured
+            raster imagery from a text prompt using the user's configured
+            image-generation model. USE THIS FOR: landscapes, portraits, photo-
+            realistic scenes, paintings (oil / watercolor / ink), concept art,
+            illustrations, posters, book / album covers, wallpapers, character
+            art, food photography, product mockups with realistic lighting and
+            texture — anything where the value of the result depends on visual
+            depth, lighting, texture, or aesthetic richness that vector code
+            cannot fake. DO NOT USE FOR: flowcharts, architecture diagrams, org
+            charts, sequence / class / state diagrams, mind maps, ER diagrams,
+            schematics, simple icons, line-art logos, math / data plots, code
+            snippets, or any structural visualization where precision and
+            editability matter more than visual richness — emit an SVG
+            show-widget block for those instead. Prefer detailed English
+            prompts that specify subject, style, composition, lighting, and
+            mood — image models follow them more reliably. Generated images
+            are bound to this conversation; deleting the conversation removes
+            them. The user sees them inline and can save / share long-press.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(

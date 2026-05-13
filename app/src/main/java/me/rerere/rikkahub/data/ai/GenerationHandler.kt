@@ -376,7 +376,16 @@ class GenerationHandler(
                 appendLine()
                 append(prompt)
             }
-            GenerativeUiPlanner.buildPrompt(settings.agentRuntime.generativeUi, messages).takeIf { it.isNotBlank() }?.let { prompt ->
+            // Inform the planner whether generate_image is actually in the
+            // tool catalog for this turn — the AMBIGUOUS / IMAGE_GEN prompts
+            // tailor themselves accordingly (e.g. tell the user to configure
+            // an image-gen model if the route requires one but none is wired).
+            val hasImageGenTool = tools.any { it.name == "generate_image" }
+            GenerativeUiPlanner.buildPrompt(
+                setting = settings.agentRuntime.generativeUi,
+                messages = messages,
+                hasImageGenTool = hasImageGenTool,
+            ).takeIf { it.isNotBlank() }?.let { prompt ->
                 appendLine()
                 append(prompt)
             }
