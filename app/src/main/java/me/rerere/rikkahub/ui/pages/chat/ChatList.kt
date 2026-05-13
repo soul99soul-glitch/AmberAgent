@@ -2,11 +2,12 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.ArrowDownDouble
-import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
+import com.composables.icons.lucide.ArrowDownToLine
+import com.composables.icons.lucide.ArrowUpToLine
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.ChevronUp
+import com.composables.icons.lucide.Lucide
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
@@ -1723,7 +1724,9 @@ private fun BoxScope.MessageJumper(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.ArrowUpDouble,
+                        // 跳到顶：arrow-up-to-line 用带横线的端点字形，比双 chevron 更
+                        // 明确表达「到达边界」语义。
+                        imageVector = Lucide.ArrowUpToLine,
                         contentDescription = null,
                         tint = iconTint,
                         modifier = Modifier.size(18.dp),
@@ -1745,7 +1748,8 @@ private fun BoxScope.MessageJumper(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.ArrowUp01,
+                        // 上一条：chevron 无 stem 形态，与 ArrowUpToLine 区分「步进 vs 端点」
+                        imageVector = Lucide.ChevronUp,
                         contentDescription = null,
                         tint = iconTint,
                         modifier = Modifier.size(18.dp),
@@ -1765,7 +1769,7 @@ private fun BoxScope.MessageJumper(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.ArrowDown01,
+                        imageVector = Lucide.ChevronDown,
                         contentDescription = null,
                         tint = iconTint,
                         modifier = Modifier.size(18.dp),
@@ -1785,7 +1789,7 @@ private fun BoxScope.MessageJumper(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.ArrowDownDouble,
+                        imageVector = Lucide.ArrowDownToLine,
                         contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
                         tint = iconTint,
                         modifier = Modifier.size(18.dp),
