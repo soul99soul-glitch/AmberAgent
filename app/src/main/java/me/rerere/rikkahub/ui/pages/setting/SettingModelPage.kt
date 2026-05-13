@@ -559,6 +559,13 @@ private fun ModelTaskSetting(
         title = title,
         description = description,
         icon = icon,
+        trailing = {
+            WorkspaceTextButton(
+                text = stringResource(R.string.setting_model_page_parameters),
+                onClick = onOpenParams,
+                tone = WorkspaceTone.Accent,
+            )
+        },
     ) {
         ModelPickerRow(
             description = if (followsChatModel) {
@@ -578,13 +585,6 @@ private fun ModelTaskSetting(
             preferredInputModality = preferredInputModality,
             onClear = onClear,
             onSelect = onSelect,
-            trailingContent = {
-                WorkspaceTextButton(
-                    text = stringResource(R.string.setting_model_page_parameters),
-                    onClick = onOpenParams,
-                    tone = WorkspaceTone.Accent,
-                )
-            },
         )
     }
 }
@@ -595,6 +595,12 @@ private fun SettingModelRow(
     description: String,
     icon: ImageVector,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
+    // Header-right slot for the per-task "参数" button (and anything similar).
+    // Lives on the title/description row so that the model-picker row below
+    // has a uniform structure across all tasks — without this, rows missing
+    // a trailing button (翻译 / 生图) caused the model-picker chip to shift
+    // its position relative to rows that did have one.
+    trailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Column(
@@ -623,6 +629,7 @@ private fun SettingModelRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            trailing?.invoke()
         }
         content()
     }
@@ -643,8 +650,11 @@ private fun ModelPickerRow(
     modelType: ModelType = ModelType.CHAT,
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
-    trailingContent: (@Composable () -> Unit)? = null,
 ) {
+    // Pure picker row — no trailing slot. The "参数" button used to live here
+    // which shifted the ModelSelector's horizontal position based on whether
+    // a button was present; that's now hoisted to SettingModelRow.trailing so
+    // every picker row across the page lines up.
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -657,27 +667,18 @@ private fun ModelPickerRow(
                 color = workspaceColors().muted,
             )
         }
-        Row(
+        ModelSelector(
+            modelId = modelId,
+            type = modelType,
+            onSelect = onSelect,
+            providers = providers,
+            allowClear = allowClear,
+            emptyLabel = emptyLabel,
+            clearContentDescription = clearContentDescription,
+            preferredInputModality = preferredInputModality,
+            onClear = onClear,
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                ModelSelector(
-                    modelId = modelId,
-                    type = modelType,
-                    onSelect = onSelect,
-                    providers = providers,
-                    allowClear = allowClear,
-                    emptyLabel = emptyLabel,
-                    clearContentDescription = clearContentDescription,
-                    preferredInputModality = preferredInputModality,
-                    onClear = onClear,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            trailingContent?.invoke()
-        }
+        )
     }
 }
 
