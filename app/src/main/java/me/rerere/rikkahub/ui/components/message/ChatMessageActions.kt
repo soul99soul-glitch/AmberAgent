@@ -203,12 +203,18 @@ private fun MessageActionIconButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // Borderless variant — message-row actions sit under every bubble, so the
+    // outlined paper-and-hairline look was reading as "hardware control panel"
+    // clutter. Tap feedback is still provided by Surface's ripple, just without
+    // the resting-state outline.
     WorkspaceIconButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.size(34.dp),
         icon = imageVector,
         contentDescription = contentDescription,
+        showBorder = false,
+        containerColor = Color.Transparent,
     )
 }
 

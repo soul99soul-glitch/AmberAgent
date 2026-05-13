@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -239,7 +240,10 @@ fun ChatInput(
     val coroutineScope = rememberCoroutineScope()
     val workspace = workspaceColors()
     val hazeTintColor = workspace.paper
-    val composerShape = RoundedCornerShape(8.dp)
+    // Plan B redesign: bumped from 8dp to 22dp so the composer reads as a
+    // "floating card" and the bottom corners no longer collide visually with
+    // phones that have a heavily rounded display edge.
+    val composerShape = RoundedCornerShape(22.dp)
     val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE && !timelineScrolling
 
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -513,6 +517,10 @@ fun ChatInput(
             modifier = modifier
                 .imePadding()
                 .navigationBarsPadding()
+                // 6dp breathing room below the gesture/nav inset — keeps the
+                // 22dp rounded corners clear of devices with aggressive screen
+                // rounding so the card never looks "bitten" at the bottom.
+                .padding(bottom = 6.dp)
                 .padding(horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -572,46 +580,47 @@ fun ChatInput(
                                 .height(ComposerModelGroupHeight),
                             contentAlignment = Alignment.BottomStart,
                         ) {
-                            Row(
-                                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                verticalAlignment = Alignment.Bottom,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                horizontalAlignment = Alignment.Start,
                             ) {
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                                    horizontalAlignment = Alignment.Start,
+                                ContextUsageIndicator(
+                                    conversation = conversation,
+                                    model = chatModel,
+                                    modifier = Modifier.padding(start = 3.dp),
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
-                                    ContextUsageIndicator(
-                                        conversation = conversation,
-                                        model = chatModel,
-                                        modifier = Modifier.padding(start = 3.dp),
+                                    // Plan A core fix: weight(1f, fill=false) lets the
+                                    // model chip take whatever leftover width remains
+                                    // after the reasoning chip claims its natural size,
+                                    // so the reasoning chip is NEVER clipped — and long
+                                    // model names ellipsize via the chip's existing
+                                    // maxLines=1 + Ellipsis overflow rule.
+                                    ModelSelector(
+                                        modelId = assistant.chatModelId ?: settings.chatModelId,
+                                        providers = settings.providers,
+                                        onSelect = {
+                                            onUpdateChatModel(it)
+                                            dismissExpand()
+                                        },
+                                        type = ModelType.CHAT,
+                                        compact = true,
+                                        modifier = Modifier.weight(1f, fill = false),
                                     )
-                                    Row(
-                                        verticalAlignment = Alignment.Bottom,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
-                                        ModelSelector(
-                                            modelId = assistant.chatModelId ?: settings.chatModelId,
-                                            providers = settings.providers,
-                                            onSelect = {
-                                                onUpdateChatModel(it)
-                                                dismissExpand()
-                                            },
-                                            type = ModelType.CHAT,
-                                            compact = true,
-                                            modifier = Modifier,
-                                        )
-                                        ReasoningLevelChip(
-                                            reasoningLevel = assistant.reasoningLevel,
-                                            model = chatModel,
-                                            provider = chatProvider,
-                                            onUpdateReasoningLevel = {
-                                                onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                            },
-                                        )
-                                    }
+                                    ReasoningLevelChip(
+                                        reasoningLevel = assistant.reasoningLevel,
+                                        model = chatModel,
+                                        provider = chatProvider,
+                                        onUpdateReasoningLevel = {
+                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                        },
+                                    )
                                 }
-
                             }
                         }
 
@@ -645,23 +654,33 @@ fun ChatInput(
                                 )
                         ) {
                             val isQueueSend = loading && !state.isEmpty()
-                            val containerColor = when {
+                            // Pull empty state down to nearly-transparent + heavily-faded
+                            // icon so the send button visibly recedes when there is
+                            // nothing to send. Active states (blue when ready / blue
+                            // when queueing / amber when streaming) keep full
+                            // saturation, so the transition into "go" reads as a
+                            // distinct state change instead of a faint hairline tweak.
+                            val targetContainer = when {
                                 isQueueSend -> workspace.blue
                                 loading -> workspace.amberContainer
-                                state.isEmpty() -> workspace.row
+                                state.isEmpty() -> Color.Transparent
                                 else -> workspace.blue
                             }
-                            val contentColor = when {
+                            val targetContent = when {
                                 isQueueSend -> Color.White
                                 loading -> workspace.amber
-                                state.isEmpty() -> workspace.faint
+                                state.isEmpty() -> workspace.faint.copy(alpha = 0.55f)
                                 else -> Color.White
                             }
+                            val targetBorder = if (state.isEmpty()) workspace.hairline else Color.Transparent
+                            val containerColor by animateColorAsState(targetContainer, label = "sendContainer")
+                            val contentColor by animateColorAsState(targetContent, label = "sendContent")
+                            val borderColor by animateColorAsState(targetBorder, label = "sendBorder")
                             Surface(
                                 modifier = Modifier.fillMaxSize(),
                                 shape = RoundedCornerShape(8.dp),
                                 color = containerColor,
-                                border = BorderStroke(1.dp, if (state.isEmpty()) workspace.hairline else Color.Transparent),
+                                border = BorderStroke(1.dp, borderColor),
                                 content = {})
                             if (loading && state.isEmpty()) {
                                 KeepScreenOn()
@@ -972,7 +991,7 @@ private fun ComposerStatusChip(
             ) {
                 Text(
                     text = text,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

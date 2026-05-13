@@ -151,7 +151,7 @@ fun ModelSelector(
                                 ?: stringResource(R.string.model_list_select_model),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         )
                     }
                 }
