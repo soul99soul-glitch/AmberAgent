@@ -1156,6 +1156,10 @@
   <string name="setting_model_page_translate_model">翻译模型</string>
   <string name="setting_model_page_translate_model_desc">用于翻译功能的模型</string>
   <string name="setting_model_page_translate_prompt_vars">变量: 原始文本: {source_text}, 目标语言: {target_lang}</string>
+  <string name="setting_model_page_image_gen_model">生图模型</string>
+  <string name="setting_model_page_image_gen_model_desc">generate_image 工具的全局默认生图模型。助手设置中可单独覆盖；此处留空且助手也没设的话，生图工具不会启用。</string>
+  <string name="setting_model_page_image_gen_model_empty">未配置</string>
+  <string name="setting_model_page_image_gen_model_clear">清除生图模型</string>
   <string name="setting_page_about">关于</string>
   <string name="setting_page_about_desc">关于本APP</string>
   <string name="setting_page_assistant">助手</string>

@@ -56,6 +56,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Earth
 import me.rerere.hugeicons.stroke.FileZip
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Message01
 import me.rerere.hugeicons.stroke.MessageMultiple01
 import me.rerere.hugeicons.stroke.Notebook01
@@ -140,6 +141,8 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                     ModelSectionDivider()
                     DefaultTranslationModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
+                    DefaultImageGenerationModelSetting(settings = settings, vm = vm)
+                    ModelSectionDivider()
                     DefaultOcrModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
                     DefaultCompressModelSetting(settings = settings, vm = vm)
@@ -188,6 +191,38 @@ private fun DefaultChatModelSetting(
             providers = settings.providers,
             onSelect = {
                 vm.updateSettings(settings.copy(chatModelId = it.id))
+            },
+        )
+    }
+}
+
+@Composable
+private fun DefaultImageGenerationModelSetting(
+    settings: Settings,
+    vm: SettingVM,
+) {
+    SettingModelRow(
+        title = stringResource(R.string.setting_model_page_image_gen_model),
+        description = stringResource(R.string.setting_model_page_image_gen_model_desc),
+        icon = HugeIcons.MagicWand01,
+    ) {
+        ModelPickerRow(
+            description = null,
+            modelId = settings.imageGenerationModelId,
+            providers = settings.providers,
+            // Filter by IMAGE so the picker only shows gpt-image-2 / Nano
+            // Banana / Codex Image — not chat models. Keep allowClear so the
+            // user can opt out globally (assistants still resolve via their
+            // per-assistant override, fallback to no tool if both are null).
+            allowClear = true,
+            modelType = ModelType.IMAGE,
+            emptyLabel = stringResource(R.string.setting_model_page_image_gen_model_empty),
+            clearContentDescription = stringResource(R.string.setting_model_page_image_gen_model_clear),
+            onClear = {
+                vm.updateSettings(settings.copy(imageGenerationModelId = DEFAULT_AUTO_MODEL_ID))
+            },
+            onSelect = {
+                vm.updateSettings(settings.copy(imageGenerationModelId = it.id))
             },
         )
     }
@@ -596,6 +631,10 @@ private fun ModelPickerRow(
     emptyLabel: String? = null,
     clearContentDescription: String? = null,
     preferredInputModality: Modality? = null,
+    // Default keeps every existing call site picking CHAT models. Image-gen
+    // global default (the only IMAGE-type row on this page so far) overrides
+    // to filter the dropdown so only image-output models appear.
+    modelType: ModelType = ModelType.CHAT,
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
@@ -620,7 +659,7 @@ private fun ModelPickerRow(
             Box(modifier = Modifier.weight(1f)) {
                 ModelSelector(
                     modelId = modelId,
-                    type = ModelType.CHAT,
+                    type = modelType,
                     onSelect = onSelect,
                     providers = providers,
                     allowClear = allowClear,

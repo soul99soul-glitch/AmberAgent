@@ -683,6 +683,10 @@
   <string name="setting_model_page_translate_model">Модель перевода</string>
   <string name="setting_model_page_translate_model_desc">Модель, используемая для функций перевода</string>
   <string name="setting_model_page_translate_prompt_vars">Переменные: Исходный текст: {source_text}, Целевой язык: {target_lang}</string>
+  <string name="setting_model_page_image_gen_model">Модель генерации изображений</string>
+  <string name="setting_model_page_image_gen_model_desc">Глобальная модель по умолчанию для инструмента чата generate_image. Ассистенты могут переопределять её в своих настройках. Если оставить пустым и в ассистенте тоже не задано — генерация изображений будет отключена.</string>
+  <string name="setting_model_page_image_gen_model_empty">Не настроено</string>
+  <string name="setting_model_page_image_gen_model_clear">Очистить модель генерации изображений</string>
   <string name="setting_page_about">О приложении</string>
   <string name="setting_page_about_desc">Об этом приложении</string>
   <string name="setting_page_assistant">Ассистент</string>

@@ -683,6 +683,10 @@
   <string name="setting_model_page_translate_model">번역 모델</string>
   <string name="setting_model_page_translate_model_desc">번역 기능에 사용되는 모델</string>
   <string name="setting_model_page_translate_prompt_vars">변수: 원문: {source_text}, 대상 언어: {target_lang}</string>
+  <string name="setting_model_page_image_gen_model">이미지 생성 모델</string>
+  <string name="setting_model_page_image_gen_model_desc">generate_image 도구의 전역 기본 모델. 어시스턴트 설정에서 개별 재정의 가능. 비워두고 어시스턴트도 미설정이면 이미지 생성이 비활성화됩니다.</string>
+  <string name="setting_model_page_image_gen_model_empty">미설정</string>
+  <string name="setting_model_page_image_gen_model_clear">이미지 생성 모델 지우기</string>
   <string name="setting_page_about">정보</string>
   <string name="setting_page_about_desc">앱 정보</string>
   <string name="setting_page_assistant">어시스턴트</string>

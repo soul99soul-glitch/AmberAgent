@@ -683,6 +683,10 @@
   <string name="setting_model_page_translate_model">翻訳モデル</string>
   <string name="setting_model_page_translate_model_desc">翻訳機能に使用されるモデル</string>
   <string name="setting_model_page_translate_prompt_vars">変数: 原文テキスト: {source_text}, 対象言語: {target_lang}</string>
+  <string name="setting_model_page_image_gen_model">画像生成モデル</string>
+  <string name="setting_model_page_image_gen_model_desc">generate_image チャットツールのグローバル既定モデル。アシスタント設定で個別に上書き可能。ここを空のままにし、アシスタント側でも未設定の場合は画像生成は無効になります。</string>
+  <string name="setting_model_page_image_gen_model_empty">未設定</string>
+  <string name="setting_model_page_image_gen_model_clear">画像生成モデルをクリア</string>
   <string name="setting_page_about">アプリについて</string>
   <string name="setting_page_about_desc">このアプリについて</string>
   <string name="setting_page_assistant">アシスタント</string>
