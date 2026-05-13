@@ -42,10 +42,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -1704,7 +1706,15 @@ private fun BoxScope.MessageJumper(
         val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
         val iconTint = MaterialTheme.colorScheme.onSurfaceVariant
         Surface(
-            modifier = Modifier.padding(8.dp),
+            // width(IntrinsicSize.Min) is load-bearing here. Material3 HorizontalDivider
+            // defaults to fillMaxWidth, which would otherwise propagate "fill the parent"
+            // up through Column and stretch the floating card across the entire chat
+            // area. Asking the Surface for its min-intrinsic width clamps Column to the
+            // max of its children's minIntrinsicWidth — the 36dp IconButtons — which is
+            // what we actually want the divider to inherit.
+            modifier = Modifier
+                .padding(8.dp)
+                .width(IntrinsicSize.Min),
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(
