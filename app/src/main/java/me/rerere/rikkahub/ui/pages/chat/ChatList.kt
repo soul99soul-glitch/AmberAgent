@@ -1697,87 +1697,100 @@ private fun BoxScope.MessageJumper(
             targetOffsetX = { if (onLeft) -it * 2 else it * 2 },
         )
     ) {
-        Column(
+        // Notion-like 浮动导航：单个 12dp 圆角卡片 + hairline outline + 内部
+        // 用细 divider 分组 4 个 IconButton，配色走 onSurfaceVariant 灰阶，避免
+        // 之前那种 4 个独立圆形蓝色蒙层与整体 surface/outline 体系冲突。
+        val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+        val iconTint = MaterialTheme.colorScheme.onSurfaceVariant
+        Surface(
             modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+            ),
+            tonalElevation = 1.dp,
+            shadowElevation = 1.dp,
         ) {
-            Surface(
-                onClick = {
-                    scope.launch {
-                        state.scrollToItem(0)
-                    }
-                },
-                shape = CircleShape,
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f)
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowUpDouble,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(4.dp)
+            Column {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            state.scrollToItem(0)
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ArrowUpDouble,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                HorizontalDivider(
+                    color = dividerColor,
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(horizontal = 6.dp),
                 )
-            }
-            Surface(
-                onClick = {
-                    scope.launch {
-                        state.animateScrollToItem(
-                            (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
-                                0
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            state.animateScrollToItem(
+                                (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(0)
                             )
-                        )
-                    }
-                },
-                shape = CircleShape,
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f)
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowUp01,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(4.dp)
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ArrowUp01,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                HorizontalDivider(
+                    color = dividerColor,
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(horizontal = 6.dp),
                 )
-            }
-            Surface(
-                onClick = {
-                    scope.launch {
-                        state.animateScrollToItem(state.firstVisibleItemIndex + 1)
-                    }
-                },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f)
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowDown01,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(4.dp)
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            state.animateScrollToItem(state.firstVisibleItemIndex + 1)
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ArrowDown01,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                HorizontalDivider(
+                    color = dividerColor,
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(horizontal = 6.dp),
                 )
-            }
-            Surface(
-                onClick = {
-                    scope.launch {
-                        state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
-                    }
-                },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowDownDouble,
-                    contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
-                    modifier = Modifier
-                        .padding(4.dp)
-                )
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ArrowDownDouble,
+                        contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
+                        tint = iconTint,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
