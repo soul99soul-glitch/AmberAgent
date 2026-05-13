@@ -1,9 +1,11 @@
 package me.rerere.rikkahub.data.usage
 
+import android.util.Base64
 import android.webkit.CookieManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.OpenAIAuthMode
@@ -60,13 +62,31 @@ class ProviderUsageClient(
 
     private suspend fun fetchKimiUsage(provider: ProviderSetting.OpenAI): ProviderUsageStatus {
         if (provider.authMode == OpenAIAuthMode.KIMI_CODING_PLAN) {
-            val authToken = provider.apiKey.trim().ifBlank {
-                CookieManager.getInstance().getCookie("https://www.kimi.com")
-                    ?.cookieValue("kimi-auth")
-                    .orEmpty()
+            // Coding Plan quota lives in Moonshot's *subscription* auth domain, not the
+            // Open Platform sk- API key domain. The two are not interoperable: chat
+            // completions accept sk-, the billing endpoint at www.kimi.com only accepts
+            // a kimi-auth JWT obtained by a web login. Forcing an sk- key into the
+            // Authorization header here returns HTTP 401 REASON_INVALID_AUTH_TOKEN —
+            // which is exactly what users were hitting before. Filter sk- out and
+            // require the WebMount-captured cookie. (See docs/kimi.md in
+            // steipete/CodexBar for the authoritative protocol reference.)
+            val pastedKey = provider.apiKey.trim()
+            val cookieToken = CookieManager.getInstance().getCookie("https://www.kimi.com")
+                ?.cookieValue("kimi-auth")
+                ?.takeIf { it.isNotBlank() }
+            val authToken = when {
+                cookieToken != null -> cookieToken
+                pastedKey.isNotBlank() && !pastedKey.startsWith("sk-") -> pastedKey
+                else -> ""
             }
             if (authToken.isBlank()) {
-                error("Kimi Coding Plan 需要 kimi-auth 登录态。请先在 WebView/WebMount 登录 https://www.kimi.com。")
+                error(
+                    if (pastedKey.startsWith("sk-")) {
+                        "sk- API Key 无法查询 Coding Plan 用量（Moonshot 订阅与开放平台是两套独立鉴权）。请在设置 → WebMount 登录 https://www.kimi.com 后再试。"
+                    } else {
+                        "Kimi Coding Plan 需要 kimi-auth 登录态。请先在设置 → WebMount 登录 https://www.kimi.com。"
+                    }
+                )
             }
             return fetchKimiCodingPlan(authToken)
         }
@@ -74,12 +94,19 @@ class ProviderUsageClient(
     }
 
     private suspend fun fetchKimiCodingPlan(authToken: String): ProviderUsageStatus {
+        // The billing gateway gates on three device-scoped headers besides Authorization:
+        // x-msh-device-id / x-msh-session-id / x-traffic-id, all of which live inside the
+        // kimi-auth JWT's payload (device_id / ssid / sub). Without them the server may
+        // return 401 even with a valid bearer. Decode the middle JWT segment, surface the
+        // three fields, and inject them. Reference: steipete/CodexBar KimiUsageFetcher.swift.
+        val deviceHeaders = parseKimiAuthClaims(authToken)
         val body = JSONObject()
             .put("scope", JSONArray().put("FEATURE_CODING"))
             .toString()
             .toRequestBody(JSON_MEDIA_TYPE)
         val request = Request.Builder()
             .url("https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages")
+            .addHeader("Accept", "*/*")
             .addHeader("Content-Type", "application/json")
             .addHeader("Authorization", "Bearer $authToken")
             .addHeader("Cookie", "kimi-auth=$authToken")
@@ -87,8 +114,15 @@ class ProviderUsageClient(
             .addHeader("Referer", "https://www.kimi.com/code/console")
             .addHeader("User-Agent", DESKTOP_CHROME_UA)
             .addHeader("connect-protocol-version", "1")
-            .addHeader("x-language", "zh-CN")
+            // x-language stays en-US (zh-CN occasionally tripped the gateway's geo guard).
+            .addHeader("x-language", "en-US")
             .addHeader("x-msh-platform", "web")
+            .addHeader("r-timezone", TimeZone.getDefault().id)
+            .apply {
+                deviceHeaders.deviceId?.let { addHeader("x-msh-device-id", it) }
+                deviceHeaders.sessionId?.let { addHeader("x-msh-session-id", it) }
+                deviceHeaders.trafficId?.let { addHeader("x-traffic-id", it) }
+            }
             .post(body)
             .build()
         val response = client.newCall(request).await()
@@ -444,6 +478,36 @@ class ProviderUsageClient(
     private fun Long.formatResetDetail(): String {
         val millis = if (this < 10_000_000_000L) this * 1000L else this
         return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
+    }
+
+    /** Three claims extracted from the kimi-auth JWT payload — the Kimi billing gateway
+     *  cross-checks them against the bearer token to confirm the request really came
+     *  from a logged-in browser. All three are optional in the parse path (we add only
+     *  the ones we manage to decode); a fully malformed JWT just degrades to "no
+     *  device headers, server probably rejects, error surfaced to user". */
+    private data class KimiAuthClaims(
+        val deviceId: String?,
+        val sessionId: String?,
+        val trafficId: String?,
+    )
+
+    /** Decode the middle segment of a `header.payload.signature` JWT (Base64URL with
+     *  optional padding) and pull out `device_id` / `ssid` / `sub`. Catches any decode
+     *  error and returns nulls — the upstream branch already raises a clear "请重新登录"
+     *  if the request later 401s, so we don't want to throw twice. */
+    private fun parseKimiAuthClaims(jwt: String): KimiAuthClaims {
+        val empty = KimiAuthClaims(null, null, null)
+        val parts = jwt.split(".")
+        if (parts.size < 2) return empty
+        return runCatching {
+            val payloadBytes = Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+            val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
+            KimiAuthClaims(
+                deviceId = payload.optString("device_id").takeIf { it.isNotBlank() },
+                sessionId = payload.optString("ssid").takeIf { it.isNotBlank() },
+                trafficId = payload.optString("sub").takeIf { it.isNotBlank() },
+            )
+        }.getOrDefault(empty)
     }
 
     private companion object {
