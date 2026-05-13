@@ -114,7 +114,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: model=${params.model.modelId}, messages=${messages.size}")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -162,11 +162,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
-
-        requestBody["messages"]!!.jsonArray.forEach {
-            Log.i(TAG, "streamText: $it")
-        }
+        Log.i(TAG, "streamText: model=${params.model.modelId}, messages=${messages.size}, stream=true")
 
         val listener = object : EventSourceListener() {
             override fun onEvent(
@@ -175,12 +171,42 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, data=$data")
-                if (data == "[DONE]") {
-                    return
+                try {
+                    handleStreamEvent(id, type, data)
+                } catch (error: OutOfMemoryError) {
+                    Log.e(TAG, "Claude stream exhausted app heap; canceling stream")
+                    eventSource.cancel()
+                    close(error)
+                } catch (error: Throwable) {
+                    Log.e(TAG, "Claude stream event failed: ${error.message.orEmpty()}")
+                    eventSource.cancel()
+                    close(error)
                 }
+            }
+
+            private fun handleStreamEvent(
+                id: String?,
+                type: String?,
+                data: String
+            ) {
+                logStreamEvent(type, data)
+                if (data == "[DONE]") return
 
                 val dataJson = json.parseToJsonElement(data).jsonObject
+                when (type) {
+                    "message_stop" -> {
+                        Log.d(TAG, "Stream ended")
+                        close()
+                        return
+                    }
+
+                    "error" -> {
+                        val error = dataJson["error"]?.parseErrorDetail()
+                        close(error)
+                        return
+                    }
+                }
+
                 val deltaMessage = parseMessage(buildJsonArray {
                     val contentBlockObj = dataJson["content_block"]?.jsonObject
                     val deltaObj = dataJson["delta"]?.jsonObject
@@ -192,6 +218,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 })
                 val tokenUsage = parseTokenUsage(dataJson)
+                if (deltaMessage.parts.isEmpty() && tokenUsage == null) return
+
                 val messageChunk = MessageChunk(
                     id = id ?: "",
                     model = "",
@@ -205,20 +233,6 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     ),
                     usage = tokenUsage
                 )
-
-                when (type) {
-                    "message_stop" -> {
-                        Log.d(TAG, "Stream ended")
-                        close()
-                    }
-
-                    "error" -> {
-                        val eventData = json.parseToJsonElement(data).jsonObject
-                        val error = eventData["error"]?.parseErrorDetail()
-                        close(error)
-                    }
-                }
-
                 trySend(messageChunk)
             }
 
@@ -557,6 +571,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             role = MessageRole.ASSISTANT,
             parts = parts
         )
+    }
+
+    private fun logStreamEvent(type: String?, data: String) {
+        if (!Log.isLoggable(TAG, Log.VERBOSE)) return
+        val preview = data.take(512).replace("\n", "\\n")
+        val suffix = if (data.length > preview.length) "..." else ""
+        Log.v(TAG, "onEvent: type=$type, chars=${data.length}, data=$preview$suffix")
     }
 
     private fun parseTokenUsage(bodyJson: JsonObject?): TokenUsage? {

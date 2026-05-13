@@ -66,7 +66,7 @@ import java.util.Locale
 import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
-private const val STREAM_UI_FLUSH_INTERVAL_MS = 50L
+private const val STREAM_UI_FLUSH_INTERVAL_MS = 200L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS = 5_000L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS = 800
 // "Did the model produce real prose?" threshold for skipping the local fallback widget
