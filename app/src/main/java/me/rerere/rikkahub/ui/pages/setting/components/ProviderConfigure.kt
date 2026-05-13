@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,25 @@ import kotlin.reflect.KClass
 fun ProviderConfigure(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
+    /**
+     * Picker passes `true` when the user picked an OAuth quick-start row. The editor's
+     * OpenAI / Google subforms react by firing their OAuth handler in a LaunchedEffect on
+     * first composition, so the user lands directly in the device-code / browser flow
+     * instead of having to click the auth-mode segmented row themselves. Default `false`
+     * for the "edit existing provider" call sites where the user is just tweaking fields.
+     *
+     * Must be paired with [onAutoStartConsumed]: a one-shot semantic. Without consumption,
+     * a user type-switch (OpenAI → Google → OpenAI) would destroy & recreate
+     * ProviderConfigureOpenAI, its LaunchedEffect would re-enter with the same true flag,
+     * and a fresh device-code request would fire unprompted. The callback writes the flag
+     * back to `false` in the parent's state the moment the auto-fire decision is taken,
+     * so the second composition sees `false` via rememberUpdatedState and stays idle.
+     */
+    autoStartOAuth: Boolean = false,
+    /** Invoked exactly once by the subform's LaunchedEffect when it commits to running
+     *  the OAuth auto-flow. Parent uses it to clear its `autoStartOAuth` state. See the
+     *  [autoStartOAuth] docstring for the lifecycle reason. */
+    onAutoStartConsumed: () -> Unit = {},
     /**
      * Immediate top-level commit — used by **async outcomes the user can't undo**, like a
      * successful Codex OAuth login or a `listModels` refresh. Without this, those results
@@ -117,6 +137,8 @@ fun ProviderConfigure(
                     provider = provider,
                     onEdit = onEdit,
                     onCommit = { effectiveCommit(it) },
+                    autoStartOAuth = autoStartOAuth,
+                    onAutoStartConsumed = onAutoStartConsumed,
                 )
             }
 
@@ -291,6 +313,12 @@ private fun ColumnScope.ProviderConfigureOpenAI(
     onEdit: (provider: ProviderSetting.OpenAI) -> Unit,
     /** Top-level commit, used by Codex OAuth login / model refresh — see ProviderConfigure docs. */
     onCommit: (provider: ProviderSetting.OpenAI) -> Unit = onEdit,
+    /** Picker's "Sign in with ChatGPT" row sets this true so the OAuth flow runs the
+     *  moment the editor opens, without forcing the user to also click the in-form
+     *  login button. See [ProviderConfigure] docs. */
+    autoStartOAuth: Boolean = false,
+    /** One-shot reset callback — see [ProviderConfigure] docs. */
+    onAutoStartConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
@@ -303,6 +331,101 @@ private fun ColumnScope.ProviderConfigureOpenAI(
     var oauthBusy by remember(provider.id) { mutableStateOf(false) }
     var oauthDeviceCode by remember(provider.id) { mutableStateOf<String?>(null) }
     var oauthVerificationUrl by remember(provider.id) { mutableStateOf<String?>(null) }
+
+    // OAuth body shared between the in-form "Sign in" button and the picker's
+    // autoStartOAuth path.
+    //
+    // Reentrancy safety: both call sites read `oauthBusy` before any suspension point;
+    // Compose dispatches button onClick and LaunchedEffect bodies on Main, so the
+    // read-then-write pair runs atomically within a single dispatch turn. Concurrent
+    // double-trigger on Main is therefore impossible — the second caller sees
+    // `oauthBusy == true` and short-circuits.
+    //
+    // Cancel-on-dispose: the lambda may suspend inside `pollDeviceCode` (long poll up
+    // to ~15 minutes). If the user closes the dialog or switches provider type during
+    // that wait, ProviderConfigureOpenAI leaves composition, `rememberCoroutineScope`
+    // tears down launched coroutines, and the LaunchedEffect parent is cancelled — the
+    // final `onCommit(provider.copy(...))` line below is therefore never reached with
+    // a stale `provider` snapshot.
+    val runCodexLogin: suspend () -> Unit = body@{
+        if (oauthBusy) return@body
+        oauthBusy = true
+        try {
+            val authorization = oauthClient.requestDeviceCode()
+            oauthDeviceCode = authorization.userCode
+            oauthVerificationUrl = authorization.verificationUrl
+            context.writeClipboardText(authorization.userCode)
+            context.openUrl(authorization.verificationUrl)
+            toaster.show(
+                context.getString(
+                    R.string.setting_provider_page_codex_oauth_code_copied,
+                    authorization.userCode
+                ),
+                type = ToastType.Info,
+            )
+            oauthTokens = oauthClient.pollDeviceCode(provider.id, authorization)
+            oauthDeviceCode = null
+            oauthVerificationUrl = null
+            // listModels MAY throw (network, OAuth race, server side problems).
+            // Fall back to bundled defaults so the candidate pool is never empty.
+            val fetchedModels = runCatching {
+                providerManager.getProviderByType(provider)
+                    .listModels(provider.codexOAuthReadyCopy())
+                    .sortedBy { it.modelId }
+            }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
+            // First-login: pick the first fetched model so the Models tab isn't empty.
+            // Subsequent logins / refreshes: leave selection alone (user-driven).
+            val newSelection = if (provider.models.withoutCodexReviewModels().isEmpty()) {
+                listOfNotNull(fetchedModels.firstOrNull())
+            } else {
+                provider.models.withoutCodexReviewModels()
+            }
+            onCommit(provider.copy(models = newSelection))
+            toaster.show(
+                context.getString(
+                    R.string.setting_provider_page_codex_oauth_login_success_with_models,
+                    fetchedModels.size
+                ),
+                type = ToastType.Success,
+            )
+        } catch (e: Exception) {
+            toaster.show(
+                context.getString(
+                    R.string.setting_provider_page_codex_oauth_login_failed,
+                    e.message ?: e.toString()
+                ),
+                type = ToastType.Error,
+            )
+        } finally {
+            oauthBusy = false
+        }
+    }
+
+    // Auto-fire when picker said "the user wants OAuth".
+    //
+    // Keyed only on `provider.id` (not on `autoStartOAuth`) so the LaunchedEffect's
+    // own coroutine doesn't get cancelled the moment we consume the flag. We commit
+    // to running the flow right away, fire `onAutoStartConsumed` to flip the parent's
+    // state to false, then carry on with `runCodexLogin()` in the same coroutine.
+    //
+    // The `latestAutoStart` indirection lets a recomposition (e.g. user typed into
+    // the name field while polling) update the value without restarting the effect.
+    // If the user type-switches to Google and back, ProviderConfigureOpenAI is
+    // destroyed → recreated; the new LaunchedEffect enters fresh and sees
+    // `latestAutoStart == false` (already consumed in the parent) → stays idle.
+    val latestAutoStart by rememberUpdatedState(autoStartOAuth)
+    val latestOnAutoStartConsumed by rememberUpdatedState(onAutoStartConsumed)
+    LaunchedEffect(provider.id) {
+        if (
+            latestAutoStart &&
+            provider.authMode == OpenAIAuthMode.CODEX_OAUTH &&
+            oauthTokens == null &&
+            !oauthBusy
+        ) {
+            latestOnAutoStartConsumed()
+            runCodexLogin()
+        }
+    }
 
     provider.description()
 
@@ -569,62 +692,7 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         ) {
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    scope.launch {
-                        oauthBusy = true
-                        try {
-                            val authorization = oauthClient.requestDeviceCode()
-                            oauthDeviceCode = authorization.userCode
-                            oauthVerificationUrl = authorization.verificationUrl
-                            context.writeClipboardText(authorization.userCode)
-                            context.openUrl(authorization.verificationUrl)
-                            toaster.show(
-                                context.getString(
-                                    R.string.setting_provider_page_codex_oauth_code_copied,
-                                    authorization.userCode
-                                ),
-                                type = ToastType.Info,
-                            )
-                            oauthTokens = oauthClient.pollDeviceCode(provider.id, authorization)
-                            oauthDeviceCode = null
-                            oauthVerificationUrl = null
-                            // listModels MAY throw (network, OAuth race, server side problems).
-                            // Fall back to bundled defaults so the candidate pool is never empty.
-                            val fetchedModels = runCatching {
-                                providerManager.getProviderByType(provider)
-                                    .listModels(provider.codexOAuthReadyCopy())
-                                    .sortedBy { it.modelId }
-                            }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
-                            // Only seed `provider.models` with ONE default model on first login
-                            // (user has nothing selected yet). On subsequent logins / refreshes
-                            // we leave `provider.models` alone — the user picks from the
-                            // "available models" sheet (driven by listModels) themselves.
-                            // Earlier code merged ALL fetched models into provider.models, which
-                            // pre-selected everything and made the unselect-all action useless.
-                            val newSelection = if (provider.models.withoutCodexReviewModels().isEmpty()) {
-                                listOfNotNull(fetchedModels.firstOrNull())
-                            } else {
-                                provider.models.withoutCodexReviewModels()
-                            }
-                            onCommit(provider.copy(models = newSelection))
-                            val modelCount = fetchedModels.size
-                            toaster.show(
-                                context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, modelCount),
-                                type = ToastType.Success,
-                            )
-                        } catch (e: Exception) {
-                            toaster.show(
-                                context.getString(
-                                    R.string.setting_provider_page_codex_oauth_login_failed,
-                                    e.message ?: e.toString()
-                                ),
-                                type = ToastType.Error,
-                            )
-                        } finally {
-                            oauthBusy = false
-                        }
-                    }
-                },
+                onClick = { scope.launch { runCodexLogin() } },
                 enabled = !oauthBusy,
             ) {
                 Text(stringResource(R.string.setting_provider_page_codex_oauth_login))

@@ -433,8 +433,14 @@ private fun AddButton(
     // once the user had deleted them, because nothing in the editor lets the user choose a
     // brand directly. The picker sheet is now the single discovery point for both.
     var showPicker by remember { mutableStateOf(false) }
+    // Picker's OAuth quick-start rows ask the editor to auto-trigger the OAuth handler
+    // the moment it composes, so the user doesn't have to switch tabs / pick auth mode
+    // again after already telling the picker "I want OAuth". Reset on each dismiss/
+    // confirm so a subsequent non-OAuth template doesn't inherit a stale `true`.
+    var autoStartOAuth by remember { mutableStateOf(false) }
     val dialogState = useEditState<ProviderSetting> {
         onAdd(it)
+        autoStartOAuth = false
     }
 
     IconButton(
@@ -447,8 +453,9 @@ private fun AddButton(
         ProviderTemplatePickerSheet(
             existingProviderIds = existingProviderIds,
             onDismiss = { showPicker = false },
-            onPick = { initial ->
+            onPick = { initial, requestAutoStart ->
                 showPicker = false
+                autoStartOAuth = requestAutoStart
                 dialogState.open(initial)
             },
         )
@@ -457,6 +464,7 @@ private fun AddButton(
     if (dialogState.isEditing) {
         AlertDialog(
             onDismissRequest = {
+                autoStartOAuth = false
                 dialogState.dismiss()
             },
             title = {
@@ -464,7 +472,11 @@ private fun AddButton(
             },
             text = {
                 dialogState.currentState?.let {
-                    ProviderConfigure(it) { newState ->
+                    ProviderConfigure(
+                        provider = it,
+                        autoStartOAuth = autoStartOAuth,
+                        onAutoStartConsumed = { autoStartOAuth = false },
+                    ) { newState ->
                         dialogState.currentState = newState
                     }
                 }
@@ -481,6 +493,7 @@ private fun AddButton(
             dismissButton = {
                 TextButton(
                     onClick = {
+                        autoStartOAuth = false
                         dialogState.dismiss()
                     }
                 ) {

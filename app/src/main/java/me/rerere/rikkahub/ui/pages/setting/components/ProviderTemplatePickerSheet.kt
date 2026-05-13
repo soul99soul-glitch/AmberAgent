@@ -16,6 +16,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -28,12 +29,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.SlidersHorizontal
+import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.fixedBaseUrl
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.rikkahub.R
@@ -41,54 +49,57 @@ import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.context.LocalToaster
 import kotlin.uuid.Uuid
 
 /**
- * Bottom sheet shown by the provider list "+" button. Replaces the previous one-step
- * AlertDialog that defaulted to a blank `ProviderSetting.OpenAI()`.
+ * Bottom sheet shown by the provider list "+" button. Three sections:
  *
- * Two sections:
- *  - **Bundled brands**: every entry in [DEFAULT_PROVIDERS] that is *not yet* in the user's
- *    list (filtered by id). Picking one opens the editor pre-filled with the bundled config
- *    (brand-tagged, correct base URL, balance options, etc.) — same UUID as the default, so
- *    if the user later deletes it the entry reappears here for one-tap restore.
- *  - **Custom**: blank `ProviderSetting.OpenAI()` / `Google()` / `Claude()` for users
- *    bringing their own gateway. These get a fresh UUID per click.
+ *  - **OAuth quick-start** (always visible, 2 rows): "Sign in with ChatGPT" and "Sign in with
+ *    Google". Picking one returns a pre-configured provider together with `autoStartOAuth =
+ *    true`, so the editor that opens immediately triggers the OAuth flow without forcing the
+ *    user to first add a generic provider and then dig into the auth-mode segmented row.
+ *    Permanently visible so OAuth is discoverable on first launch, even when the default
+ *    OpenAI / Gemini entries are still in the user's provider list.
  *
- * The picker hands the chosen initial state back via [onPick]; the caller is responsible
- * for showing the editor dialog. The sheet itself awaits its own hide animation before
- * notifying so the dialog never opens on top of an in-flight slide-down.
+ *  - **Built-in brands** (rows = DEFAULT_PROVIDERS not yet in the user's list, filtered by
+ *    id): brand-tagged entries the user has previously deleted, here for one-tap restore.
+ *    Hidden entirely when nothing is filterable.
+ *
+ *  - **Custom** (always visible, 1 row): a blank `ProviderSetting.OpenAI()` that the user
+ *    can retype in the editor — the editor's top type segmented row lets them switch to
+ *    Google / Claude. Used to be 3 rows (OpenAI / Google / Claude), but that duplicated the
+ *    editor's own type selector and made the picker feel cluttered.
+ *
+ * Picker hands the chosen initial state back via [onPick]; the caller is responsible for
+ * showing the editor dialog. Sheet awaits its hide animation before notifying so the dialog
+ * never opens on top of an in-flight slide-down.
  */
 @Composable
 fun ProviderTemplatePickerSheet(
     existingProviderIds: Set<Uuid>,
     onDismiss: () -> Unit,
-    onPick: (ProviderSetting) -> Unit,
+    onPick: (initial: ProviderSetting, autoStartOAuth: Boolean) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val toaster = LocalToaster.current
+    val geminiPendingToast = stringResource(R.string.setting_provider_page_template_oauth_gemini_pending_toast)
 
-    // Filter: only show bundled templates the user doesn't already have. Compare by id so
-    // "delete then re-add" returns the entry to the picker on the next render — no extra
-    // "user-removed defaults" persistence needed. Keyed on a small `Set<Uuid>`, not the full
-    // provider list, so unrelated edits (typing in apiKey, refreshing models) don't refire
-    // the filter.
     val bundledTemplates = remember(existingProviderIds) {
         DEFAULT_PROVIDERS.filter { it.id !in existingProviderIds }
     }
 
-    // Guard against double-tap: the row onClick launches a coroutine that suspends on
-    // `sheetState.hide()`. A second tap before that returns would fire `onPick` twice and
-    // overwrite the AlertDialog's initial state mid-open — visually the user sees the
-    // wrong template land in the editor.
+    // Guard against double-tap: row onClick suspends on `sheetState.hide()`. A second tap
+    // before that returns would fire `onPick` twice and overwrite the dialog's initial state.
     var picking by remember { mutableStateOf(false) }
 
-    val closeAndPick: (ProviderSetting) -> Unit = pick@ { initial ->
+    val closeAndPick: (ProviderSetting, Boolean) -> Unit = pick@{ initial, autoStart ->
         if (picking) return@pick
         picking = true
         scope.launch {
             sheetState.hide()
-            onPick(initial)
+            onPick(initial, autoStart)
         }
     }
 
@@ -109,14 +120,15 @@ fun ProviderTemplatePickerSheet(
             }
         }
     ) {
-        // Wrap-height + cap so the sheet sizes to its contents. With only the 3 custom
-        // rows (all bundled templates already added), the previous `fillMaxHeight(0.85f)`
-        // left a giant blank area below the list.
+        // Cap raised from 560dp (old 2-section sheet) to 640dp because the new layout
+        // is guaranteed to render at least 3 sections — 2 OAuth rows, optional Built-in
+        // section, and 1 Custom row — even before bundled brands show up. 640dp keeps
+        // the sheet from filling a tall phone when bundled is empty.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight()
-                .heightIn(max = 560.dp)
+                .heightIn(max = 640.dp)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -131,6 +143,42 @@ fun ProviderTemplatePickerSheet(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // === Section 1: OAuth quick-start (always visible) ===
+                item(key = "section-oauth") {
+                    SectionHeader(stringResource(R.string.setting_provider_page_template_section_oauth))
+                }
+                item(key = "oauth-codex") {
+                    TemplateRow(
+                        name = stringResource(R.string.setting_provider_page_template_oauth_codex_title),
+                        subtitle = stringResource(R.string.setting_provider_page_template_oauth_codex_subtitle),
+                        iconName = "OpenAI",
+                        tagText = "OAuth",
+                        onClick = { closeAndPick(buildCodexOAuthInitial(), true) },
+                    )
+                }
+                item(key = "oauth-gemini") {
+                    // Placeholder row for the upcoming "Sign in with Google" feature.
+                    // Commit #2 wires up GoogleAuthMode + ProviderConfigureGoogle, commit
+                    // #3 lands the loopback / PKCE OAuth implementation, commit #4 hooks
+                    // the cloudcode-pa v1internal endpoint. Until then the row is dimmed
+                    // and clicking it only shows a "coming soon" toast — we do NOT create
+                    // a blank Google provider, because the label says "no API key" and a
+                    // surprise API-key form would be a UX lie (reviewer flag M2).
+                    TemplateRow(
+                        name = stringResource(R.string.setting_provider_page_template_oauth_gemini_title),
+                        subtitle = stringResource(R.string.setting_provider_page_template_oauth_gemini_subtitle),
+                        iconName = "Gemini",
+                        tagText = stringResource(R.string.setting_provider_page_template_oauth_gemini_pending_tag),
+                        dimmed = true,
+                        onClick = { toaster.show(geminiPendingToast, type = ToastType.Info) },
+                    )
+                }
+
+                item(key = "divider-after-oauth") {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                }
+
+                // === Section 2: Built-in brands (filterable) ===
                 if (bundledTemplates.isNotEmpty()) {
                     item(key = "section-bundled") {
                         SectionHeader(stringResource(R.string.setting_provider_page_template_section_bundled))
@@ -139,33 +187,54 @@ fun ProviderTemplatePickerSheet(
                         TemplateRow(
                             name = template.name,
                             tagText = template.brandTagText(),
-                            // Defensive `.copyProvider()` — passes a fresh data-class instance
-                            // instead of the singleton from DEFAULT_PROVIDERS. The editor uses
+                            // Defensive `.copyProvider()`: hand a fresh data-class instance
+                            // instead of the DEFAULT_PROVIDERS singleton — the editor uses
                             // `.copy(...)` everywhere so direct mutation is unlikely, but a
-                            // future change in ProviderConfigure that mutated `var` fields
+                            // future change in ProviderConfigure that mutated a `var` field
                             // would silently corrupt the default for the rest of the session.
-                            onClick = { closeAndPick(template.copyProvider()) },
+                            onClick = { closeAndPick(template.copyProvider(), false) },
                         )
                     }
-                    item(key = "divider") {
+                    item(key = "divider-after-bundled") {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     }
                 }
 
+                // === Section 3: Custom (always visible, single blank row) ===
                 item(key = "section-custom") {
                     SectionHeader(stringResource(R.string.setting_provider_page_template_section_custom))
                 }
-                items(CustomTemplates, key = { "custom-${it.id}" }) { custom ->
+                item(key = "custom-blank") {
                     TemplateRow(
-                        name = stringResource(custom.titleRes),
-                        subtitle = stringResource(custom.subtitleRes),
-                        onClick = { closeAndPick(custom.factory()) },
+                        name = stringResource(R.string.setting_provider_page_template_custom_blank_title),
+                        subtitle = stringResource(R.string.setting_provider_page_template_custom_blank_subtitle),
+                        leadingIcon = Lucide.SlidersHorizontal,
+                        onClick = { closeAndPick(ProviderSetting.OpenAI(), false) },
                     )
                 }
             }
         }
     }
 }
+
+/**
+ * Build the pre-configured OpenAI provider used by the "Sign in with ChatGPT" quick-start.
+ * Mirrors the per-field setup that ProviderConfigureOpenAI's auth-mode segmented row does
+ * when switching to Codex OAuth — pinned baseUrl, `useResponseApi = true`, branded name,
+ * fresh UUID so it never collides with the default OpenAI entry. `baseUrl` resolves via
+ * [OpenAIAuthMode.fixedBaseUrl] so the picker and the editor's segmented branch stay
+ * in lock-step if the backend URL ever changes; `!!` is safe because CODEX_OAUTH is one of
+ * the modes whose `fixedBaseUrl` is non-null by definition.
+ */
+private fun buildCodexOAuthInitial(): ProviderSetting.OpenAI = ProviderSetting.OpenAI(
+    id = Uuid.random(),
+    name = "OpenAI Codex OAuth",
+    baseUrl = OpenAIAuthMode.CODEX_OAUTH.fixedBaseUrl()!!,
+    apiKey = "",
+    useResponseApi = true,
+    authMode = OpenAIAuthMode.CODEX_OAUTH,
+    brand = OpenAIBrand.OPENAI,
+)
 
 @Composable
 private fun SectionHeader(text: String) {
@@ -183,12 +252,28 @@ private fun TemplateRow(
     onClick: () -> Unit,
     subtitle: String? = null,
     tagText: String? = null,
+    /** Override the icon-resolution name (e.g. "Gemini" so AutoAIIcon shows the Google G). */
+    iconName: String = name,
+    /** If non-null, render this vector glyph as the leading icon instead of [AutoAIIcon].
+     *  Used by the Custom row, which doesn't correspond to a real brand and would
+     *  otherwise fall back to a `TextAvatar` showing the row title's first character. */
+    leadingIcon: ImageVector? = null,
+    /** Visual not-yet-available state — used by the placeholder Gemini OAuth row until
+     *  its real implementation lands. Card stays clickable so the caller can still show
+     *  a "coming soon" toast, but text / icon / tag are alpha-faded to signal "this isn't
+     *  a real action yet". */
+    dimmed: Boolean = false,
 ) {
+    val contentAlpha = if (dimmed) 0.55f else 1f
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            containerColor = if (dimmed) {
+                MaterialTheme.colorScheme.surfaceContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            },
         ),
         onClick = onClick,
     ) {
@@ -199,10 +284,23 @@ private fun TemplateRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AutoAIIcon(
-                name = name,
-                modifier = Modifier.size(32.dp),
-            )
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                    modifier = Modifier
+                        .size(28.dp)
+                        .padding(2.dp),
+                )
+            } else {
+                AutoAIIcon(
+                    name = iconName,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .alpha(contentAlpha),
+                )
+            }
             Column(
                 modifier = Modifier
                     .weight(1f),
@@ -213,12 +311,13 @@ private fun TemplateRow(
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
                 )
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -226,7 +325,10 @@ private fun TemplateRow(
             }
             if (tagText != null) {
                 Tag(type = TagType.INFO) {
-                    Text(text = tagText)
+                    Text(
+                        text = tagText,
+                        color = LocalContentColor.current.copy(alpha = contentAlpha),
+                    )
                 }
             }
         }
@@ -234,10 +336,10 @@ private fun TemplateRow(
 }
 
 /**
- * Tag shown next to the brand name in the picker. Only OpenAI-compatible bundled providers
- * with more than just API_KEY auth get a tag — the visual hint is "this entry has special
- * auth modes you might not realize are available". DeepSeek (only API_KEY today) gets no
- * tag because it would just be visual noise.
+ * Tag shown next to brand name in the built-in section. Only OpenAI-compatible bundled
+ * providers with more than just API_KEY auth get a tag — the visual hint is "this entry has
+ * special auth modes you might not realize are available". DeepSeek (only API_KEY today)
+ * gets no tag because it would just be visual noise.
  */
 private fun ProviderSetting.brandTagText(): String? {
     if (this !is ProviderSetting.OpenAI) return null
@@ -247,32 +349,3 @@ private fun ProviderSetting.brandTagText(): String? {
         OpenAIBrand.GENERIC, OpenAIBrand.DEEPSEEK -> null
     }
 }
-
-private data class CustomTemplate(
-    val id: String,
-    val titleRes: Int,
-    val subtitleRes: Int,
-    val factory: () -> ProviderSetting,
-)
-
-private val CustomTemplates: List<CustomTemplate> = listOf(
-    CustomTemplate(
-        id = "openai",
-        titleRes = R.string.setting_provider_page_template_custom_openai_title,
-        subtitleRes = R.string.setting_provider_page_template_custom_openai_subtitle,
-        factory = { ProviderSetting.OpenAI() },
-    ),
-    CustomTemplate(
-        id = "google",
-        titleRes = R.string.setting_provider_page_template_custom_google_title,
-        subtitleRes = R.string.setting_provider_page_template_custom_google_subtitle,
-        factory = { ProviderSetting.Google() },
-    ),
-    CustomTemplate(
-        id = "claude",
-        titleRes = R.string.setting_provider_page_template_custom_claude_title,
-        subtitleRes = R.string.setting_provider_page_template_custom_claude_subtitle,
-        factory = { ProviderSetting.Claude() },
-    ),
-)
-

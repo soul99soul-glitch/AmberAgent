@@ -900,8 +900,20 @@
   <!-- TODO: setting_provider_page_add_codex_oauth is unused after the template-picker refactor; keep one release for safety, then remove. -->
   <string name="setting_provider_page_add_codex_oauth">Codex OAuth</string>
   <string name="setting_provider_page_add_provider_override">Add Provider Override</string>
-  <string name="setting_provider_page_template_section_bundled">Built-in brands (deleted ones reappear here)</string>
+  <!-- Picker OAuth quick-start section: permanently visible so OAuth is discoverable on first run. -->
+  <string name="setting_provider_page_template_section_oauth">Sign in with account</string>
+  <string name="setting_provider_page_template_oauth_codex_title">Sign in with ChatGPT</string>
+  <string name="setting_provider_page_template_oauth_codex_subtitle">No API key — Codex backend</string>
+  <string name="setting_provider_page_template_oauth_gemini_title">Sign in with Google</string>
+  <string name="setting_provider_page_template_oauth_gemini_subtitle">No API key — coming soon</string>
+  <string name="setting_provider_page_template_oauth_gemini_pending_tag">Soon</string>
+  <string name="setting_provider_page_template_oauth_gemini_pending_toast">Gemini OAuth lands in the next update</string>
+  <string name="setting_provider_page_template_section_bundled">Built-in brands</string>
   <string name="setting_provider_page_template_section_custom">Custom</string>
+  <string name="setting_provider_page_template_custom_blank_title">Custom Provider</string>
+  <string name="setting_provider_page_template_custom_blank_subtitle">Choose OpenAI / Google / Claude in the editor</string>
+  <!-- TODO: the per-type custom_* strings below are unused after the picker collapse from 3 rows
+       into 1 generic "Custom Provider" entry; keep one release for safety, then remove. -->
   <string name="setting_provider_page_template_custom_openai_title">OpenAI-compatible</string>
   <string name="setting_provider_page_template_custom_openai_subtitle">Custom base URL</string>
   <string name="setting_provider_page_template_custom_google_title">Google</string>
