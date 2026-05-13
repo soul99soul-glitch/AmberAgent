@@ -76,6 +76,35 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private val serviceAccountTokenProvider by lazy {
         ServiceAccountTokenProvider(client)
     }
+    // Same shape as OpenAIProvider holds its codex oauthClient: lazily construct from
+    // the injected Context (the DI module registers its own singleton too; they share
+    // the underlying SharedPreferences-backed store so token state is consistent).
+    private val geminiOAuthClient: me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient? =
+        context?.let {
+            me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient(
+                client,
+                me.rerere.ai.provider.providers.google.GoogleGeminiAuthStore(it),
+            )
+        }
+
+    private fun isCodeAssistOAuthMode(providerSetting: ProviderSetting.Google): Boolean =
+        providerSetting.authMode == me.rerere.ai.provider.GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH
+
+    /** Resolve the (accessToken, projectId) pair needed to send a v1internal request to
+     *  cloudcode-pa. Lazily onboards the user on first chat (writes projectId into the
+     *  stored tokens) so the user doesn't need a separate "click to onboard" step. */
+    private suspend fun resolveCodeAssistSession(
+        providerSetting: ProviderSetting.Google,
+    ): Pair<String, String> {
+        val client = geminiOAuthClient
+            ?: error("Gemini OAuth 客户端未初始化（GoogleProvider 缺少 Context 注入）。")
+        val tokens = client.ensureOnboarded(providerSetting.id)
+        val accessToken = client.getValidAccessToken(providerSetting.id)
+            ?: error("Gemini OAuth token 不可用，请回到设置重新登录。")
+        val projectId = tokens.projectId
+            ?: error("cloudcode-pa onboarding 没有返回 cloudaicompanionProject，请检查 Google 账号权限。")
+        return accessToken to projectId
+    }
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
         return if (!providerSetting.vertexAI) {
@@ -115,6 +144,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     override suspend fun listModels(providerSetting: ProviderSetting.Google): List<Model> =
         withContext(Dispatchers.IO) {
+            // OAuth path has no public listModels — cloudcode-pa.googleapis.com exposes
+            // streamGenerateContent / generateContent / loadCodeAssist / onboardUser /
+            // countTokens / retrieveUserQuota but no model enumeration. Return the
+            // hardcoded fallback set so the "fetch models" button has something to
+            // refresh into without 404-ing. See [defaultGeminiOAuthModelList] docs.
+            if (isCodeAssistOAuthMode(providerSetting)) {
+                return@withContext me.rerere.ai.provider.providers.google.defaultGeminiOAuthModelList()
+            }
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
             val request = transformRequest(
                 providerSetting = providerSetting,
@@ -158,34 +195,50 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams,
     ): MessageChunk = withContext(Dispatchers.IO) {
         val requestBody = buildCompletionRequestBody(messages, params)
-
-        val url = buildUrl(
-            providerSetting = providerSetting,
-            path = if (providerSetting.vertexAI) {
-                "publishers/google/models/${params.model.modelId}:generateContent"
-            } else {
-                "models/${params.model.modelId}:generateContent"
-            }
-        )
-
-        val request = transformRequest(
-            providerSetting = providerSetting,
-            request = Request.Builder()
-                .url(url)
+        val isOAuth = isCodeAssistOAuthMode(providerSetting)
+        val request = if (isOAuth) {
+            val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
+            geminiOAuthClient!!
+                .generateContent(accessToken, params.model.modelId, projectId, requestBody)
+                .newBuilder()
                 .headers(params.customHeaders.toHeaders())
-                .post(
-                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
-                )
-                .configureReferHeaders(providerSetting.baseUrl)
                 .build()
-        )
+        } else {
+            val url = buildUrl(
+                providerSetting = providerSetting,
+                path = if (providerSetting.vertexAI) {
+                    "publishers/google/models/${params.model.modelId}:generateContent"
+                } else {
+                    "models/${params.model.modelId}:generateContent"
+                }
+            )
+            transformRequest(
+                providerSetting = providerSetting,
+                request = Request.Builder()
+                    .url(url)
+                    .headers(params.customHeaders.toHeaders())
+                    .post(
+                        json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                    )
+                    .configureReferHeaders(providerSetting.baseUrl)
+                    .build()
+            )
+        }
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
             throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
         }
 
-        val bodyStr = response.body?.string() ?: ""
+        val rawBodyStr = response.body?.string() ?: ""
+        // Same unwrap as the SSE path — cloudcode-pa returns {"response": {...standard payload...}}.
+        val bodyStr = if (isOAuth) {
+            runCatching {
+                json.parseToJsonElement(rawBodyStr).jsonObject["response"]?.toString() ?: rawBodyStr
+            }.getOrDefault(rawBodyStr)
+        } else {
+            rawBodyStr
+        }
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         val candidates = bodyJson["candidates"]!!.jsonArray
@@ -214,27 +267,39 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildCompletionRequestBody(messages, params)
-
-        val url = buildUrl(
-            providerSetting = providerSetting,
-            path = if (providerSetting.vertexAI) {
-                "publishers/google/models/${params.model.modelId}:streamGenerateContent"
-            } else {
-                "models/${params.model.modelId}:streamGenerateContent"
-            }
-        ).newBuilder().addQueryParameter("alt", "sse").build()
-
-        val request = transformRequest(
-            providerSetting = providerSetting,
-            request = Request.Builder()
-                .url(url)
+        // OAuth path: cloudcode-pa.googleapis.com/v1internal:streamGenerateContent. The
+        // standard Gemini request body is wrapped in {model, project, request}; the
+        // server's SSE chunks come back wrapped in {"response": {...standard chunk...}}.
+        // Auth is `Authorization: Bearer <access_token>` instead of `x-goog-api-key`.
+        val isOAuth = isCodeAssistOAuthMode(providerSetting)
+        val request = if (isOAuth) {
+            val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
+            geminiOAuthClient!!
+                .streamGenerateContent(accessToken, params.model.modelId, projectId, requestBody)
+                .newBuilder()
                 .headers(params.customHeaders.toHeaders())
-                .post(
-                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
-                )
-                .configureReferHeaders(providerSetting.baseUrl)
                 .build()
-        )
+        } else {
+            val url = buildUrl(
+                providerSetting = providerSetting,
+                path = if (providerSetting.vertexAI) {
+                    "publishers/google/models/${params.model.modelId}:streamGenerateContent"
+                } else {
+                    "models/${params.model.modelId}:streamGenerateContent"
+                }
+            ).newBuilder().addQueryParameter("alt", "sse").build()
+            transformRequest(
+                providerSetting = providerSetting,
+                request = Request.Builder()
+                    .url(url)
+                    .headers(params.customHeaders.toHeaders())
+                    .post(
+                        json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                    )
+                    .configureReferHeaders(providerSetting.baseUrl)
+                    .build()
+            )
+        }
 
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
@@ -248,7 +313,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 Log.i(TAG, "onEvent: $data")
 
                 try {
-                    val jsonData = json.parseToJsonElement(data).jsonObject
+                    val rawJson = json.parseToJsonElement(data).jsonObject
+                    // cloudcode-pa wraps each SSE chunk as `{"response": {...standard...}}`.
+                    // Public generativelanguage emits the standard payload at the top level.
+                    // Detect by inner `response` presence so both wire formats reuse the
+                    // rest of the parser unchanged.
+                    val jsonData = rawJson["response"]?.jsonObject ?: rawJson
                     val reason =
                         jsonData["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
                     if (reason != null) {

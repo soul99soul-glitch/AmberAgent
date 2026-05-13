@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -17,9 +18,16 @@ import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.util.json
 import me.rerere.common.http.await
 import me.rerere.common.oauth.LoopbackOAuthCallbackServer
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -48,6 +56,7 @@ private const val PREF_NAME = "google_gemini_oauth"
 private const val REFRESH_SKEW_MS = 2 * 60 * 1000L
 private const val AUTH_TIMEOUT_MS = 5 * 60 * 1000L
 private const val FALLBACK_TOKEN_LIFETIME_MS = 60 * 60 * 1000L
+private const val LRO_POLL_INTERVAL_MS = 1500L
 private const val TAG = "GoogleGeminiOAuth"
 
 /**
@@ -219,6 +228,193 @@ class GoogleGeminiOAuthClient(
 
     fun logout(providerId: Uuid) {
         authStore.clear(providerId)
+    }
+
+    /**
+     * Resolve the cloudaicompanionProject identifier for the user, calling
+     * `cloudcode-pa:loadCodeAssist` first and, if the user isn't already onboarded
+     * to a tier, falling through to `cloudcode-pa:onboardUser` + LRO poll.
+     * Persists the resolved project + tier into the stored tokens so subsequent
+     * chat requests can wrap the v1internal body without an extra round-trip.
+     *
+     *  Reference: gemini-cli `packages/core/src/code_assist/setup.ts`.
+     *  Behaviour:
+     *   - tokens.projectId non-null and not "" → skip everything (already resolved)
+     *   - else loadCodeAssist → if `cloudaicompanionProject` present → save it
+     *   - else pick FREE tier (or first allowedTier) → onboardUser → poll LRO until
+     *     `done=true` → save `response.cloudaicompanionProject.id`
+     *
+     * Throws on any HTTP failure with a Chinese-readable message.
+     */
+    suspend fun ensureOnboarded(providerId: Uuid): GoogleGeminiAuthTokens {
+        val current = authStore.get(providerId)
+            ?: error("尚未登录 Google OAuth，无法 onboard cloudcode-pa。")
+        if (!current.projectId.isNullOrBlank() && !current.onboardedTier.isNullOrBlank()) {
+            return current
+        }
+        val accessToken = getValidAccessToken(providerId)
+            ?: error("无法刷新 Google OAuth token，请重新登录。")
+
+        // 1) loadCodeAssist — if the user already has a cloudaicompanionProject
+        // (because they previously used gemini-cli or Code Assist on another device),
+        // we get it back here without needing an onboardUser call.
+        val loadResp = postCloudCodeAssistJson(
+            accessToken,
+            ":loadCodeAssist",
+            buildJsonObject {
+                put("cloudaicompanionProject", "") // empty asks server to pick
+                putJsonObject("metadata") {
+                    put("ideType", "IDE_UNSPECIFIED")
+                    put("platform", "PLATFORM_UNSPECIFIED")
+                    put("pluginType", "GEMINI")
+                }
+            },
+        )
+        val currentProject = loadResp["cloudaicompanionProject"]?.jsonPrimitive?.contentOrNull
+        val currentTier = loadResp["currentTier"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+        if (!currentProject.isNullOrBlank() && !currentTier.isNullOrBlank()) {
+            val updated = current.copy(projectId = currentProject, onboardedTier = currentTier)
+            authStore.save(providerId, updated)
+            return updated
+        }
+
+        // 2) onboardUser — pick the first allowed tier (FREE for individual accounts),
+        // server returns a long-running operation we have to poll until done=true.
+        val allowedTiers = loadResp["allowedTiers"]?.let {
+            (it as? kotlinx.serialization.json.JsonArray)?.mapNotNull { item ->
+                item.jsonObject["id"]?.jsonPrimitive?.contentOrNull
+            }
+        }.orEmpty()
+        val chosenTier = allowedTiers.firstOrNull { it == "FREE" }
+            ?: allowedTiers.firstOrNull()
+            ?: "FREE"
+        val onboardResp = postCloudCodeAssistJson(
+            accessToken,
+            ":onboardUser",
+            buildJsonObject {
+                put("tierId", chosenTier)
+                putJsonObject("metadata") {
+                    put("ideType", "IDE_UNSPECIFIED")
+                    put("platform", "PLATFORM_UNSPECIFIED")
+                    put("pluginType", "GEMINI")
+                }
+                currentProject?.let { put("cloudaicompanionProject", it) }
+            },
+        )
+
+        val resolved = pollOnboardOperation(accessToken, onboardResp)
+            ?: error("onboardUser 没有返回 cloudaicompanionProject。原始响应：${onboardResp.toString().take(300)}")
+        val merged = current.copy(projectId = resolved, onboardedTier = chosenTier)
+        authStore.save(providerId, merged)
+        return merged
+    }
+
+    private suspend fun pollOnboardOperation(
+        accessToken: String,
+        initialResponse: JsonObject,
+    ): String? {
+        // Operation may either be done immediately or be a LRO whose `name` we poll
+        // against `:operations.get` (relative path of the resource).
+        var current = initialResponse
+        repeat(20) { iteration ->
+            val done = current["done"]?.jsonPrimitive?.contentOrNull == "true"
+                || current["done"]?.jsonPrimitive?.booleanOrNull == true
+            if (done) {
+                val response = current["response"]?.jsonObject
+                val errorObj = current["error"]?.jsonObject
+                if (errorObj != null) {
+                    error("onboardUser LRO 报错：${errorObj.toString().take(300)}")
+                }
+                return response
+                    ?.get("cloudaicompanionProject")?.jsonObject
+                    ?.get("id")?.jsonPrimitive?.contentOrNull
+                    ?: response?.get("name")?.jsonPrimitive?.contentOrNull
+            }
+            val opName = current["name"]?.jsonPrimitive?.contentOrNull ?: return null
+            delay(LRO_POLL_INTERVAL_MS)
+            // The "name" field is the full resource path "operations/xxxxx"; we POST
+            // to :get to refresh state (Google's Code Assist private API uses POST
+            // for LRO reads, mirroring `setup.ts` in gemini-cli).
+            current = postCloudCodeAssistJson(
+                accessToken,
+                "/$opName",
+                buildJsonObject {},
+                useV1InternalPrefix = false,
+            )
+            Log.d(TAG, "Onboard LRO poll iter=$iteration done=${current["done"]}")
+        }
+        error("onboardUser LRO 轮询 ${LRO_POLL_INTERVAL_MS * 20 / 1000}s 仍未完成")
+    }
+
+    /**
+     * Stream a chat completion through cloudcode-pa's v1internal endpoint. Returns the
+     * raw OkHttp Response so caller (GoogleProvider) can hook its existing SSE parser.
+     * Body is the v1internal wrapper `{ model, project, request: {...} }`; caller passes
+     * the inner standard Gemini-API request payload.
+     */
+    suspend fun streamGenerateContent(
+        accessToken: String,
+        modelId: String,
+        projectId: String,
+        innerRequest: JsonObject,
+    ): Request {
+        val wrapper = buildJsonObject {
+            put("model", modelId)
+            put("project", projectId)
+            put("request", innerRequest)
+        }
+        return Request.Builder()
+            .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal:streamGenerateContent?alt=sse")
+            .header("Authorization", "Bearer $accessToken")
+            .header("Content-Type", "application/json")
+            .post(wrapper.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+    }
+
+    /** Same as [streamGenerateContent] but for the non-streaming generateContent path. */
+    suspend fun generateContent(
+        accessToken: String,
+        modelId: String,
+        projectId: String,
+        innerRequest: JsonObject,
+    ): Request {
+        val wrapper = buildJsonObject {
+            put("model", modelId)
+            put("project", projectId)
+            put("request", innerRequest)
+        }
+        return Request.Builder()
+            .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal:generateContent")
+            .header("Authorization", "Bearer $accessToken")
+            .header("Content-Type", "application/json")
+            .post(wrapper.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+    }
+
+    private suspend fun postCloudCodeAssistJson(
+        accessToken: String,
+        method: String,
+        body: JsonObject,
+        useV1InternalPrefix: Boolean = true,
+    ): JsonObject {
+        val url = if (useV1InternalPrefix) {
+            "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal$method"
+        } else {
+            "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL$method"
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .header("Content-Type", "application/json")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        val response = httpClient.newCall(request).await()
+        val text = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            error("cloudcode-pa $method 失败：HTTP ${response.code} ${text.take(300)}")
+        }
+        return runCatching { json.parseToJsonElement(text).jsonObject }
+            .getOrElse { error("cloudcode-pa $method 响应不是 JSON：${text.take(300)}") }
     }
 
     // ----------------------------------------------------------------------
