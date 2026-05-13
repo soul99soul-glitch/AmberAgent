@@ -99,8 +99,15 @@ class OpenAIProvider(
         }
 
     override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
-        require(providerSetting.authMode == OpenAIAuthMode.API_KEY) {
-            "Codex OAuth does not support balance lookup. Use an OpenAI API Key provider for balance."
+        // Only CODEX_OAUTH has no usable API key — its access token can't hit the
+        // billing endpoints. Coding Plan modes (Zhipu / Kimi / MiMo) authenticate
+        // identically to API_KEY (Bearer with user-pasted key), so let them through;
+        // whether the brand's coding-plan host actually exposes /credits is the brand's
+        // call to make at HTTP level, not ours to short-circuit here. Previously this
+        // check required `== API_KEY` and emitted a "Codex OAuth does not support"
+        // string even for Kimi/Zhipu/MiMo, confusing users who'd never picked Codex.
+        require(providerSetting.authMode != OpenAIAuthMode.CODEX_OAUTH) {
+            "Codex OAuth does not support balance lookup. Use an API Key provider for balance."
         }
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
@@ -170,7 +177,7 @@ class OpenAIProvider(
         params: EmbeddingGenerationParams
     ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
         require(providerSetting.authMode == OpenAIAuthMode.API_KEY) {
-            "Codex OAuth does not support embeddings. Use an OpenAI API Key provider for embeddings."
+            unsupportedAuthModeMessage(providerSetting.authMode, capability = "embeddings")
         }
         require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
 
@@ -227,7 +234,7 @@ class OpenAIProvider(
             "Expected OpenAI provider setting"
         }
         require(providerSetting.authMode == OpenAIAuthMode.API_KEY) {
-            "Codex OAuth does not support image generation. Use an OpenAI API Key provider for images."
+            unsupportedAuthModeMessage(providerSetting.authMode, capability = "image generation")
         }
 
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
@@ -413,4 +420,24 @@ private val OPENAI_CODEX_OAUTH_FALLBACK_MODEL_IDS = listOf(
 fun Model.isCodexOAuthReviewModel(): Boolean {
     return modelId.contains("review", ignoreCase = true) ||
         displayName.contains("review", ignoreCase = true)
+}
+
+/**
+ * Build the "this auth mode does not support X" error string with the *actual* mode label
+ * resolved from the provider's `authMode`, instead of hardcoding "Codex OAuth" for every
+ * non-API_KEY case. Previously every such error said "Codex OAuth does not support …"
+ * even when the user was on a Kimi / Zhipu / MiMo Coding Plan, which made the failure
+ * read like a Codex-specific limitation.
+ */
+internal fun unsupportedAuthModeMessage(authMode: OpenAIAuthMode, capability: String): String {
+    val modeLabel = when (authMode) {
+        OpenAIAuthMode.CODEX_OAUTH -> "Codex OAuth"
+        OpenAIAuthMode.ZHIPU_CODING_PLAN,
+        OpenAIAuthMode.KIMI_CODING_PLAN,
+        OpenAIAuthMode.MIMO_CODING_PLAN -> "Coding Plan"
+        // Unreachable: every caller of this helper guards on `authMode == API_KEY` first;
+        // if we ever get here it's a bug, so emit a recognizable label rather than swallow it.
+        OpenAIAuthMode.API_KEY -> "API Key"
+    }
+    return "$modeLabel does not support $capability. Use an API Key provider for $capability."
 }
