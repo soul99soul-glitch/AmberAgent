@@ -164,6 +164,13 @@ class SettingsStore(
         // 统计
         val LAUNCH_COUNT = intPreferencesKey("launch_count")
 
+        // [Review fix] One-shot flag so the per-load migration that seeds
+        // gpt-image-2 / nano-banana-2 into the built-in OpenAI / Gemini
+        // providers fires exactly once. Without this gate, a user who
+        // intentionally deletes the seeded model gets it resurrected on
+        // the next save flow.
+        val SEEDED_IMAGE_MODELS_V1 = booleanPreferencesKey("seeded_image_models_v1")
+
         // 赞助提醒
         val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
     }
@@ -280,9 +287,16 @@ class SettingsStore(
                 } ?: SyncSettings(),
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
+                imageModelsSeededVersion = if (preferences[SEEDED_IMAGE_MODELS_V1] == true) 1 else 0,
             )
         }
         .map {
+            // [Review fix #3] Run the per-load image-model backfill only once,
+            // gated by Settings.imageModelsSeededVersion (persists via
+            // SEEDED_IMAGE_MODELS_V1 pref). Once a user has touched the seeded
+            // models — kept them, removed them, replaced them — we leave their
+            // provider list alone on subsequent loads.
+            val shouldSeedImageModels = it.imageModelsSeededVersion < 1
             val providers = it.providers
                 .filterNot { provider -> provider.id in REMOVED_DEFAULT_PROVIDER_IDS }
                 .map { provider ->
@@ -309,22 +323,26 @@ class SettingsStore(
                         } else {
                             withMeta
                         }
-                        // One-time backfill: ensure the built-in OpenAI provider exposes
-                        // SeedOpenAIImageModel (gpt-image-2) and built-in Gemini exposes
-                        // SeedGeminiImageModel (Nano Banana 2). New installs ship these in
-                        // DEFAULT_PROVIDERS.models, but existing users won't have them
-                        // because their providers were persisted before this commit.
-                        // Stable seed UUIDs let us detect "already added" robustly; if the
-                        // user removed it on purpose they can clear it again.
-                        when {
+                        // One-time backfill: seed gpt-image-2 / Nano Banana 2
+                        // into the built-in OpenAI / Gemini providers for
+                        // existing installs. [Review fix #4] Dedupe by BOTH
+                        // stable UUID and modelId, so a user who manually
+                        // added `gpt-image-2` with a different UUID doesn't
+                        // end up with two entries after the migration.
+                        if (!shouldSeedImageModels) withBrand
+                        else when {
                             withBrand is me.rerere.ai.provider.ProviderSetting.OpenAI &&
                                 withBrand.id == OpenAIProviderIdRef &&
-                                withBrand.models.none { it.id == SeedOpenAIImageModelId } -> {
+                                withBrand.models.none {
+                                    it.id == SeedOpenAIImageModelId || it.modelId == SeedOpenAIImageModel.modelId
+                                } -> {
                                 withBrand.copy(models = withBrand.models + SeedOpenAIImageModel)
                             }
                             withBrand is me.rerere.ai.provider.ProviderSetting.Google &&
                                 withBrand.id == GeminiProviderIdRef &&
-                                withBrand.models.none { it.id == SeedGeminiImageModelId } -> {
+                                withBrand.models.none {
+                                    it.id == SeedGeminiImageModelId || it.modelId == SeedGeminiImageModel.modelId
+                                } -> {
                                 withBrand.copy(models = withBrand.models + SeedGeminiImageModel)
                             }
                             else -> withBrand
@@ -355,6 +373,10 @@ class SettingsStore(
                 } else {
                     DEFAULT_SYSTEM_TTS_ID
                 },
+                // Flip the seeded flag once the per-load image-model backfill
+                // has run; persisted on the next settings save via the
+                // SEEDED_IMAGE_MODELS_V1 pref.
+                imageModelsSeededVersion = if (shouldSeedImageModels) 1 else it.imageModelsSeededVersion,
             )
         }
         .map { settings ->
@@ -491,6 +513,9 @@ class SettingsStore(
             preferences[SYNC_SETTINGS] = JsonInstant.encodeToString(settings.syncSettings)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
+            if (settings.imageModelsSeededVersion > 0) {
+                preferences[SEEDED_IMAGE_MODELS_V1] = true
+            }
         }
     }
 
@@ -626,6 +651,14 @@ data class Settings(
     val syncSettings: SyncSettings = SyncSettings(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
+    /**
+     * [Review fix #3] Bumped once after the per-load image-model backfill
+     * (gpt-image-2 into OpenAI provider, gemini-3.1-flash-image-preview into
+     * Gemini provider) runs successfully. Without this, deleting the seeded
+     * model would resurrect it on the next save. Persisted as
+     * [PreferencesStore.SEEDED_IMAGE_MODELS_V1]; not user-facing.
+     */
+    val imageModelsSeededVersion: Int = 0,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

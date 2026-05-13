@@ -364,26 +364,33 @@ class OpenAIProvider(
             }
         }.mergeCustomBody(params.customBody)
 
-        val tokens = oauthClient?.getCached(providerSetting.id)
-        val request = Request.Builder()
-            .url("$OPENAI_CODEX_BACKEND_BASE_URL/responses")
-            .headers(params.customHeaders.toHeaders())
-            .addHeader("Authorization", "Bearer ${resolveBearerToken(providerSetting, false)}")
-            .addOpenAICodexBackendHeaders(tokens)
-            .addHeader("OpenAI-Beta", "responses=experimental")
-            .addHeader("Accept", "text/event-stream")
-            .addHeader("Content-Type", "application/json")
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .build()
+        // [Review fix] Build a fresh request after any token refresh so the
+        // ChatGPT-Account-Id header reflects the post-refresh tokens. The
+        // initial request gets the current snapshot; on 401 we rebuild
+        // from scratch with whatever oauthClient has after forceRefresh.
+        // Also use `.header(name, ...)` (replaces) instead of `.addHeader`
+        // for Accept because `addOpenAICodexBackendHeaders` already sets
+        // Accept: application/json — without replacing, OkHttp would emit
+        // both Accept headers and the server may pick the wrong one.
+        fun buildRequest(token: String): Request {
+            val tokens = oauthClient?.getCached(providerSetting.id)
+            return Request.Builder()
+                .url("$OPENAI_CODEX_BACKEND_BASE_URL/responses")
+                .headers(params.customHeaders.toHeaders())
+                .addHeader("Authorization", "Bearer $token")
+                .addOpenAICodexBackendHeaders(tokens)
+                .header("Accept", "text/event-stream")
+                .header("OpenAI-Beta", "responses=experimental")
+                .header("Content-Type", "application/json")
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .build()
+        }
 
-        var response = client.newCall(request).await()
+        var response = client.newCall(buildRequest(resolveBearerToken(providerSetting, false))).await()
         if (response.code == 401) {
             response.close()
             val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
-            response = request.newBuilder()
-                .header("Authorization", "Bearer $retryToken")
-                .build()
-                .let { client.newCall(it).await() }
+            response = client.newCall(buildRequest(retryToken)).await()
         }
         if (!response.isSuccessful) {
             error("Codex image generation failed: ${response.code} ${response.body?.string()}")
