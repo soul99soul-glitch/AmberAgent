@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.ui.components.message
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -640,16 +645,44 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             },
         )
 
-        // generate_image tool: render images directly under the capsule as
-        // big carousel cards. The capsule itself stays so users can tap into
-        // the result sheet to inspect prompt / aspect_ratio metadata.
-        if (isGenerateImage && images.isNotEmpty()) {
+        // generate_image tool: pre-allocate the result area while the tool
+        // is running so we can show an animated dot-grid placeholder card
+        // (same shape as the requested aspect ratio), then crossfade to the
+        // real carousel once images arrive. Skip entirely on FAILED / DENIED
+        // — the capsule itself surfaces those states.
+        if (isGenerateImage && status != AgentToolStatus.FAILED && !isDenied) {
+            val aspectRatioFloat = remember(arguments) {
+                parseAspectRatioFloat(
+                    arguments.jsonObject["aspect_ratio"]?.jsonPrimitive?.contentOrNull
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 32.dp, top = 4.dp),
             ) {
-                GeneratedImageCarousel(images = images)
+                AnimatedContent(
+                    targetState = images.isNotEmpty(),
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(durationMillis = 420)) togetherWith
+                            fadeOut(animationSpec = tween(durationMillis = 260))
+                    },
+                    label = "imageGenSwap",
+                ) { hasImages ->
+                    if (hasImages) {
+                        GeneratedImageCarousel(images = images)
+                    } else {
+                        // Render at ~85% of the available width so the single
+                        // placeholder visually previews the size of one image
+                        // card (matches the multi-image carousel's per-card
+                        // width). aspectRatio modifier inside the placeholder
+                        // pre-allocates the right height.
+                        GeneratedImagePlaceholder(
+                            aspectRatio = aspectRatioFloat,
+                            modifier = Modifier.fillMaxWidth(0.85f),
+                        )
+                    }
+                }
             }
         }
 
