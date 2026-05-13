@@ -27,15 +27,22 @@ import java.net.URLEncoder
  * Uses the v2 OAuth endpoint (`/open-apis/authen/v2/oauth/token`) which
  * accepts the standard OAuth body shape. PKCE is supported via `code_verifier`.
  *
- * The redirect URI registered on the user's app in the 飞书 open platform
- * console must match `amberagent://oauth/feishu` (or whatever the user puts
- * in [OAuthAppCredentials.redirectUri]). Confidential apps include
- * `client_secret`; public/marketplace apps with PKCE may leave it null.
+ * Feishu's developer console does NOT accept custom-scheme redirect URIs —
+ * registering `amberagent://oauth/feishu` silently leaves the allowlist empty
+ * and the authorize endpoint returns error 20029 "redirect_uri 请求不合法"
+ * on every attempt. Per Feishu's official "配置重定向 URL" doc the redirect
+ * must be a complete http(s) URL with exact string match, and Lark's own MCP
+ * SDK uses `http://127.0.0.1:<port>/callback`. We follow the same RFC 8252
+ * loopback pattern: [requiresLoopback] returns true so WebMountOAuthClient
+ * spins up [LoopbackOAuthCallbackServer] on port 53682 before launching the
+ * browser, and the registered redirect_uri must be exactly the constant
+ * [LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI].
  */
 object FeishuOAuthProvider : OAuthProvider {
 
     override val id: String = "feishu"
     override val displayName: String = "飞书"
+    override val requiresLoopback: Boolean = true
 
     private const val AUTHORIZATION_ENDPOINT = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
     private const val TOKEN_ENDPOINT = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
@@ -108,10 +115,13 @@ object FeishuOAuthProvider : OAuthProvider {
     }
 
     override fun setupHint(): String =
-        "1. 去飞书开放平台 (open.feishu.cn) 创建一个应用,在「安全设置 → 重定向 URL」里加入 amberagent://oauth/feishu。" +
-            "2. 把 App ID + App Secret 复制到上方输入框。" +
-            "3. 在「权限管理」里开启所需的云文档 scope (如 docs:doc:read / docs:doc:write)。" +
-            "注意: OAuth 跳转期间请不要后台 AmberAgent — 进程被 Android 杀掉会让 Connect 流程失败,需要重来。"
+        "1. 去飞书开放平台 (open.feishu.cn) 创建一个应用，在「安全设置 → 重定向 URL」里加入：\n" +
+            "   ${LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI}\n" +
+            "   （必须完全一致；飞书不支持自定义 scheme，所以走本地回环 HTTP）。\n" +
+            "2. 把 App ID + App Secret 复制到上方输入框。\n" +
+            "3. 在「权限管理」里开启所需的云文档 scope（如 docs:doc:read / docs:doc:write）。\n" +
+            "提示：授权完成后浏览器会跳回这个本机 URL 取回授权码，AmberAgent 在后台启动一次性回环 server 监听，没有外网暴露。\n" +
+            "注意：OAuth 过程中请不要把 AmberAgent 切到后台被系统杀掉——回环 socket 随进程退出而关闭，被杀后必须从头再来。"
 
     // ----------------------------------------------------------------------
 

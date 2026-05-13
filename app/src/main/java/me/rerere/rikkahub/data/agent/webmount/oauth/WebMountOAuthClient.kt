@@ -91,25 +91,72 @@ class WebMountOAuthClient(
         val state = PkceUtils.randomState()
         val verifier = PkceUtils.generateCodeVerifier()
         val challenge = PkceUtils.s256Challenge(verifier)
-        val authUrl = provider.buildAuthorizationUrl(credentials, state, challenge)
 
-        // Persist BEFORE launching the browser so a process death between
-        // here and the callback can be recovered.
-        pendingStore.put(
-            PendingOAuthEntry(
-                state = state,
-                providerId = providerId,
-                codeVerifier = verifier,
-                startedAtMs = System.currentTimeMillis(),
+        // Loopback providers (Feishu, eventually Google Gemini) need a `http://127.0.0.1:<port>`
+        // redirect URI because the provider's developer console refuses custom scheme. We
+        // spin up the local server BEFORE building the auth URL so a port-bind failure is
+        // surfaced as a clean ConnectResult.Failed instead of going as far as the browser
+        // and then dying mid-OAuth. The server lives only for the duration of this call —
+        // accept() is single-shot, close() in `finally` tears it down even on early return.
+        val loopbackServer: LoopbackOAuthCallbackServer? = if (provider.requiresLoopback) {
+            try {
+                LoopbackOAuthCallbackServer()
+            } catch (error: Throwable) {
+                Log.e(TAG, "Loopback server bind failed for $providerId", error)
+                return ConnectResult.Failed(error.message ?: error.toString())
+            }
+        } else {
+            null
+        }
+        val effectiveCredentials = if (loopbackServer != null) {
+            val userOverride = credentials.redirectUri
+            if (!userOverride.isNullOrBlank() && userOverride != LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI) {
+                // A non-default redirectUri pinned by the user can't actually work for
+                // loopback providers — we have to bind a fixed port and tell the IDP
+                // the matching URL. Log it loudly so the user can find their own mistake
+                // in logcat rather than silently watch a "OAuth failed" toast.
+                Log.w(
+                    TAG,
+                    "Ignoring user-supplied redirectUri='$userOverride' for loopback provider $providerId; " +
+                        "overriding with ${LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI}. " +
+                        "If you wanted to bind a different port, this code path doesn't support that today.",
+                )
+            }
+            credentials.copy(redirectUri = LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI)
+        } else {
+            credentials
+        }
+        val authUrl = provider.buildAuthorizationUrl(effectiveCredentials, state, challenge)
+
+        // Persist BEFORE launching the browser so a process death between here and the
+        // callback can be recovered — for DEEP-LINK providers only. The loopback path
+        // can't be resumed across process death anyway (the bound socket dies with the
+        // process), and the resume collector only listens on dispatcher.events which
+        // loopback never feeds. Putting a PendingOAuthEntry for loopback would just
+        // leave a stale row in encrypted prefs until purgeStale GCs it 15 min later.
+        if (loopbackServer == null) {
+            pendingStore.put(
+                PendingOAuthEntry(
+                    state = state,
+                    providerId = providerId,
+                    codeVerifier = verifier,
+                    startedAtMs = System.currentTimeMillis(),
+                )
             )
-        )
+        }
         inFlight.add(state)
 
         return try {
             runCatching {
                 launchAuth(authUrl)
                 val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) {
-                    dispatcher.events.first { it.provider == providerId && it.state == state }
+                    if (loopbackServer != null) {
+                        // Single-shot server.accept; cancellation propagates to socket close.
+                        loopbackServer.awaitCallback(providerId)
+                    } else {
+                        // Deep-link path: RouteActivity routes amberagent:// callbacks here.
+                        dispatcher.events.first { it.provider == providerId && it.state == state }
+                    }
                 } ?: return ConnectResult.Failed("OAuth callback timed out after ${AUTH_TIMEOUT_MS / 1000}s")
 
                 if (!callback.isSuccess) {
@@ -117,10 +164,18 @@ class WebMountOAuthClient(
                         "Provider returned error: ${callback.error ?: "unknown"} ${callback.errorDescription.orEmpty()}".trim()
                     )
                 }
+                // Loopback path: server can't know the expected state ahead of time, so
+                // verify here. Deep-link path already filtered by state in the events.first
+                // predicate, but a double-check is cheap.
+                if (loopbackServer != null && callback.state != state) {
+                    return ConnectResult.Failed(
+                        "Loopback callback state mismatch (got=${callback.state?.take(6)}…, expected=${state.take(6)}…)"
+                    )
+                }
                 val code = callback.code
                     ?: return ConnectResult.Failed("Provider callback had no `code` param")
 
-                val token = provider.exchangeCode(credentials, code, verifier, http)
+                val token = provider.exchangeCode(effectiveCredentials, code, verifier, http)
                 store.putToken(providerId, token)
                 // M2.0 review B-2 fix: only consume the pending entry on
                 // confirmed exchange success. Timeout / provider-error /
@@ -137,6 +192,9 @@ class WebMountOAuthClient(
             // Only release the in-flight marker — the pending entry is
             // intentionally kept on non-success paths (see B-2 fix above).
             inFlight.remove(state)
+            // Loopback server is single-shot but defensive close() handles the
+            // timeout / early-return / exception paths in one place.
+            loopbackServer?.close()
         }
     }
 

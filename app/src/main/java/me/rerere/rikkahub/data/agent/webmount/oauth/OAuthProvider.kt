@@ -13,8 +13,24 @@ interface OAuthProvider {
     val id: String
     val displayName: String
 
-    /** Default redirect URI: `amberagent://oauth/<id>`. */
-    val defaultRedirectUri: String get() = "amberagent://oauth/$id"
+    /** Some authorization servers refuse custom-scheme redirect URIs and only accept
+     *  loopback HTTP (Feishu rejects `amberagent://` outright; Google's installed-app
+     *  client only allows loopback). When true, [WebMountOAuthClient.connect] spins
+     *  up a [LoopbackOAuthCallbackServer] on the standard port and uses
+     *  [LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI] as the redirect_uri.
+     *  Default false keeps the historical deep-link path for providers that accept it. */
+    val requiresLoopback: Boolean get() = false
+
+    /** Default redirect URI:
+     *   - deep-link providers: `amberagent://oauth/<id>` (RouteActivity intent-filter)
+     *   - loopback providers:  `http://127.0.0.1:53682/callback` (LoopbackOAuthCallbackServer)
+     */
+    val defaultRedirectUri: String
+        get() = if (requiresLoopback) {
+            LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI
+        } else {
+            "amberagent://oauth/$id"
+        }
 
     /**
      * Build the full URL we ask the system browser to open. Implementations
