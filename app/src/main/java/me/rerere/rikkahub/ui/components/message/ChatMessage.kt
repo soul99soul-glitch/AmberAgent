@@ -84,6 +84,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
+import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -1301,10 +1302,12 @@ private fun MessagePartsBlock(
                                                 .padding(start = 15.dp, end = 12.dp, top = 9.dp, bottom = 9.dp)
                                         ) {
                                             MarkdownBlock(
-                                                content = part.text.replaceRegexes(
-                                                    assistant = assistant,
-                                                    scope = AssistantAffectScope.USER,
-                                                    visual = true,
+                                                content = GenerativeUiPlanner.stripVisualRouteTagsForDisplay(
+                                                    part.text.replaceRegexes(
+                                                        assistant = assistant,
+                                                        scope = AssistantAffectScope.USER,
+                                                        visual = true,
+                                                    )
                                                 ),
                                                 fillWidth = false,
                                                 onClickCitation = handleClickCitation

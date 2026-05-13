@@ -223,6 +223,20 @@ object GenerativeUiPlanner {
         }
     }
 
+    /**
+     * Remove the `[ROUTE:image]` / `[ROUTE:diagram]` / `[ROUTE:slides]` tags
+     * (and any single trailing newline) from text before rendering it in the
+     * UI. The Planner / classifyRoute still sees the raw text, but user
+     * message bubbles shouldn't expose this routing metadata to the reader.
+     */
+    fun stripVisualRouteTagsForDisplay(text: String): String =
+        ROUTE_TAG_REGEX.replace(text, "")
+
+    private val ROUTE_TAG_REGEX = Regex(
+        """\[ROUTE:(?:image|diagram|slides)\]\n?""",
+        RegexOption.IGNORE_CASE,
+    )
+
     internal fun isToolMediatedRequest(text: String): Boolean {
         val lower = text.lowercase()
         val explicitDelegation = listOf(

@@ -1142,22 +1142,25 @@ class LocalTools(
         description = """
             Generate photographic, painted, illustrated, or otherwise textured
             raster imagery from a text prompt using the user's configured
-            image-generation model. USE THIS FOR: landscapes, portraits, photo-
+            image-generation model. Best fits: landscapes, portraits, photo-
             realistic scenes, paintings (oil / watercolor / ink), concept art,
             illustrations, posters, book / album covers, wallpapers, character
-            art, food photography, product mockups with realistic lighting and
-            texture — anything where the value of the result depends on visual
-            depth, lighting, texture, or aesthetic richness that vector code
-            cannot fake. DO NOT USE FOR: flowcharts, architecture diagrams, org
-            charts, sequence / class / state diagrams, mind maps, ER diagrams,
-            schematics, simple icons, line-art logos, math / data plots, code
-            snippets, or any structural visualization where precision and
-            editability matter more than visual richness — emit an SVG
-            show-widget block for those instead. Prefer detailed English
+            art, food photography, product mockups — anything where the value
+            of the result depends on visual depth, lighting, texture, or
+            aesthetic richness that vector code cannot fake. For purely
+            structural visualizations — flowcharts, architecture diagrams,
+            org charts, sequence / class / state diagrams, mind maps,
+            schematics, simple line-art logos, math / data plots — prefer
+            emitting an SVG show-widget block instead, since precision and
+            editability matter more than visual richness there. (You CAN
+            still call this tool for those if the user explicitly asks for
+            an artistic / painted / textured rendering of structural content
+            — they want art, not a clean diagram.) Prefer detailed English
             prompts that specify subject, style, composition, lighting, and
             mood — image models follow them more reliably. Generated images
             are bound to this conversation; deleting the conversation removes
-            them. The user sees them inline and can save / share long-press.
+            them. The user sees them inline and can save / share via
+            long-press.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(

@@ -378,7 +378,14 @@ class SettingsStore(
                 it.quickMessages + SeedRoutingQuickMessages.filter { qm -> qm.id !in existingIds }
             } else it.quickMessages
             val assistants = if (shouldSeedRoutingQuickMessages) {
+                // Only subscribe AmberAgent's bundled default assistants
+                // (the IDs in DEFAULT_ASSISTANTS_IDS). User-created
+                // assistants — translation bots, role-play characters,
+                // narrow-purpose helpers — keep their slash panel clean
+                // unless the user explicitly subscribes /draw /diagram
+                // /slide via the standard QuickMessage settings flow.
                 assistantsRaw.map { assistant ->
+                    if (assistant.id !in DEFAULT_ASSISTANTS_IDS) return@map assistant
                     val missing = routingSeedIds - assistant.quickMessageIds
                     if (missing.isEmpty()) assistant
                     else assistant.copy(quickMessageIds = assistant.quickMessageIds + missing)
