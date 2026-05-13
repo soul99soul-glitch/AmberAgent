@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.sync.core
 import android.util.Base64
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -42,6 +43,18 @@ class SyncCrypto {
         }
     }
 
+    fun encrypt(inputFile: File, outputFile: File, passphrase: String, params: SyncEncryptionParams) {
+        val cipher = cipher(Cipher.ENCRYPT_MODE, passphrase, params.kdf, params.cipher)
+        outputFile.parentFile?.mkdirs()
+        inputFile.inputStream().buffered().use { input ->
+            outputFile.outputStream().buffered().use { output ->
+                CipherOutputStream(output, cipher).use { cipherOut ->
+                    input.copyTo(cipherOut)
+                }
+            }
+        }
+    }
+
     fun decrypt(bytes: ByteArray, passphrase: String, manifest: SyncManifest): ByteArray {
         val cipher = cipher(Cipher.DECRYPT_MODE, passphrase, manifest.kdf, manifest.cipher)
         return CipherInputStream(ByteArrayInputStream(bytes), cipher).use { input ->
@@ -49,10 +62,35 @@ class SyncCrypto {
         }
     }
 
+    fun decrypt(inputFile: File, outputFile: File, passphrase: String, manifest: SyncManifest) {
+        val cipher = cipher(Cipher.DECRYPT_MODE, passphrase, manifest.kdf, manifest.cipher)
+        outputFile.parentFile?.mkdirs()
+        inputFile.inputStream().buffered().use { input ->
+            CipherInputStream(input, cipher).use { cipherIn ->
+                outputFile.outputStream().buffered().use { output ->
+                    cipherIn.copyTo(output)
+                }
+            }
+        }
+    }
+
     fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256")
             .digest(bytes)
             .joinToString("") { "%02x".format(it) }
+
+    fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     private fun cipher(
         mode: Int,

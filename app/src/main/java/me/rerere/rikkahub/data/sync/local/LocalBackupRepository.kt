@@ -9,6 +9,7 @@ import me.rerere.rikkahub.data.sync.core.SyncArchiveManager
 import me.rerere.rikkahub.data.sync.core.SyncExportRequest
 import me.rerere.rikkahub.data.sync.core.SyncPreview
 import me.rerere.rikkahub.data.sync.core.SyncRestoreRequest
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -18,26 +19,50 @@ class LocalBackupRepository(
     private val syncArchiveManager: SyncArchiveManager,
 ) {
     suspend fun exportToUri(uri: Uri, request: SyncExportRequest): SyncPreview = withContext(Dispatchers.IO) {
-        val bytes = syncArchiveManager.createArchive(request)
-        context.contentResolver.openOutputStream(uri)?.use { output ->
-            output.write(bytes)
-        } ?: error("无法打开导出文件")
-        syncArchiveManager.inspectArchive(bytes, suggestedFileName())
+        val archiveFile = syncArchiveManager.createArchiveFile(request)
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                archiveFile.inputStream().buffered().use { input -> input.copyTo(output) }
+            } ?: error("无法打开导出文件")
+            syncArchiveManager.inspectArchive(archiveFile, suggestedFileName())
+        } finally {
+            archiveFile.delete()
+        }
     }
 
     suspend fun inspectUri(uri: Uri): SyncPreview = withContext(Dispatchers.IO) {
-        val bytes = readUri(uri)
-        syncArchiveManager.inspectArchive(bytes)
+        val file = copyUriToTempFile(uri)
+        try {
+            syncArchiveManager.inspectArchive(file)
+        } finally {
+            file.delete()
+        }
     }
 
     suspend fun restoreFromUri(uri: Uri, request: SyncRestoreRequest): SyncPreview = withContext(Dispatchers.IO) {
-        val bytes = readUri(uri)
-        syncArchiveManager.restoreArchive(bytes, request)
+        val file = copyUriToTempFile(uri)
+        try {
+            syncArchiveManager.restoreArchive(file, request)
+        } finally {
+            file.delete()
+        }
     }
 
-    private fun readUri(uri: Uri): ByteArray =
-        context.contentResolver.openInputStream(uri)?.use { input -> input.readBytes() }
-            ?: error("无法读取备份文件")
+    private fun copyUriToTempFile(uri: Uri): File {
+        val dir = File(context.cacheDir, "sync-local").apply { mkdirs() }
+        val file = File.createTempFile("amber-import-", ".$SYNC_ARCHIVE_EXTENSION", dir)
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                file.outputStream().buffered().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: error("无法读取备份文件")
+            return file
+        } catch (error: Throwable) {
+            file.delete()
+            throw error
+        }
+    }
 
     companion object {
         fun suggestedFileName(now: Long = System.currentTimeMillis()): String {

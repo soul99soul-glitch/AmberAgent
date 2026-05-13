@@ -73,6 +73,8 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var localExportPassphrase by remember { mutableStateOf("") }
     var showRestorePassphrase by remember { mutableStateOf(false) }
+    val hasGoogleConnection = googleSession != null ||
+        (settings.syncSettings.googleEnabled && settings.syncSettings.googleAccountEmail.isNotBlank())
 
     val googleAuthorizationLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
@@ -157,6 +159,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                 operationState is UiState.Loading -> "正在处理..."
                                 googleMessage.isNotBlank() -> googleMessage
                                 googleSession != null -> "已连接：${googleSession?.label.orEmpty()}"
+                                hasGoogleConnection -> "上次连接：${settings.syncSettings.googleAccountEmail}"
                                 settings.syncSettings.googleAccountEmail.isNotBlank() ->
                                     "上次连接：${settings.syncSettings.googleAccountEmail}"
                                 vm.googleConfigStatus.reason.isNotBlank() -> "Google 同步暂不可用"
@@ -166,8 +169,8 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     },
                     trailingContent = {
                         Text(
-                            if (googleSession != null) "已连接" else "连接",
-                            color = if (googleSession != null) {
+                            if (hasGoogleConnection) "已连接" else "连接",
+                            color = if (hasGoogleConnection) {
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -188,9 +191,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     headlineContent = { Text("上传") },
                     supportingContent = {
                         Text("把当前数据加密保存到 Google Drive")
-                    },
-                    trailingContent = {
-                        Text("上传", color = MaterialTheme.colorScheme.primary)
                     }
                 )
                 item(
@@ -206,9 +206,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     headlineContent = { Text("下载") },
                     supportingContent = {
                         Text("从 Google Drive 恢复到这台设备")
-                    },
-                    trailingContent = {
-                        Text("下载", color = MaterialTheme.colorScheme.primary)
                     }
                 )
             }
@@ -224,9 +221,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                 "把当前数据加密保存成本地文件"
                             }
                         )
-                    },
-                    trailingContent = {
-                        Text("导出", color = MaterialTheme.colorScheme.primary)
                     }
                 )
                 item(
@@ -239,9 +233,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     headlineContent = { Text("导入") },
                     supportingContent = {
                         Text("从本地备份文件恢复到这台设备")
-                    },
-                    trailingContent = {
-                        Text("导入", color = MaterialTheme.colorScheme.primary)
                     }
                 )
             }

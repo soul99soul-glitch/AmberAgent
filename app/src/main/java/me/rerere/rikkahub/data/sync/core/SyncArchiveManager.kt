@@ -28,9 +28,9 @@ import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -49,54 +49,105 @@ class SyncArchiveManager(
     private val redactor = SyncRedactor(json)
 
     suspend fun createArchive(request: SyncExportRequest): ByteArray {
-        require(request.passphrase.isNotBlank()) { "同步口令不能为空" }
-        val settings = settingsStore.settingsFlow.value
-        val builtPayload = buildPayload(settings, request.mode)
-        val params = crypto.newEncryptionParams()
-        val encryptedPayload = crypto.encrypt(builtPayload.bytes, request.passphrase, params)
-        val manifest = SyncManifest(
-            appVersionName = BuildConfig.VERSION_NAME,
-            appVersionCode = BuildConfig.VERSION_CODE.toLong(),
-            createdAt = System.currentTimeMillis(),
-            deviceId = settings.syncSettings.deviceId.ifBlank { "local" },
-            mode = request.mode,
-            remoteRevision = settings.syncSettings.lastRemoteRevision,
-            kdf = params.kdf,
-            cipher = params.cipher,
-            payloadSha256 = crypto.sha256(encryptedPayload),
-        )
-        return zipArchive(manifest, encryptedPayload)
+        val archive = createArchiveFile(request)
+        return try {
+            archive.readBytes()
+        } finally {
+            archive.delete()
+        }
     }
 
-    fun inspectArchive(bytes: ByteArray, fileName: String? = null): SyncPreview {
-        val parsed = parseArchive(bytes)
+    suspend fun createArchiveFile(request: SyncExportRequest): File {
+        require(request.passphrase.isNotBlank()) { "同步口令不能为空" }
+        val settings = settingsStore.settingsFlow.value
+        val payloadFile = tempSyncFile("payload", ".zip")
+        val encryptedPayloadFile = tempSyncFile("payload", ".enc")
+        val archiveFile = tempSyncFile("archive", ".$SYNC_ARCHIVE_EXTENSION")
+        return try {
+            buildPayload(settings, request.mode, payloadFile)
+            val params = crypto.newEncryptionParams()
+            crypto.encrypt(payloadFile, encryptedPayloadFile, request.passphrase, params)
+            val manifest = SyncManifest(
+                appVersionName = BuildConfig.VERSION_NAME,
+                appVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                createdAt = System.currentTimeMillis(),
+                deviceId = settings.syncSettings.deviceId.ifBlank { "local" },
+                mode = request.mode,
+                remoteRevision = settings.syncSettings.lastRemoteRevision,
+                kdf = params.kdf,
+                cipher = params.cipher,
+                payloadSha256 = crypto.sha256(encryptedPayloadFile),
+            )
+            zipArchive(manifest, encryptedPayloadFile, archiveFile)
+            archiveFile
+        } catch (error: Throwable) {
+            archiveFile.delete()
+            throw error
+        } finally {
+            payloadFile.delete()
+            encryptedPayloadFile.delete()
+        }
+    }
+
+    fun inspectArchive(file: File, fileName: String? = file.name): SyncPreview {
+        val parsed = parseArchive(file)
         return SyncPreview(
             manifest = parsed.manifest,
             fileName = fileName,
-            sizeBytes = bytes.size.toLong(),
+            sizeBytes = file.length(),
         )
     }
 
-    suspend fun restoreArchive(bytes: ByteArray, request: SyncRestoreRequest): SyncPreview {
+    suspend fun restoreArchive(file: File, request: SyncRestoreRequest): SyncPreview {
         require(request.passphrase.isNotBlank()) { "同步口令不能为空" }
-        val parsed = parseArchive(bytes)
-        require(crypto.sha256(parsed.encryptedPayload) == parsed.manifest.payloadSha256) {
-            "备份文件校验失败"
+        val encryptedPayloadFile = tempSyncFile("restore-payload", ".enc")
+        val payloadFile = tempSyncFile("restore-payload", ".zip")
+        return try {
+            val parsed = parseArchive(file, encryptedPayloadFile)
+            require(crypto.sha256(encryptedPayloadFile) == parsed.manifest.payloadSha256) {
+                "备份文件校验失败"
+            }
+            crypto.decrypt(encryptedPayloadFile, payloadFile, request.passphrase, parsed.manifest)
+            restorePayload(payloadFile, parsed.manifest)
+            SyncPreview(
+                manifest = parsed.manifest,
+                fileName = file.name,
+                sizeBytes = file.length(),
+            )
+        } finally {
+            encryptedPayloadFile.delete()
+            payloadFile.delete()
         }
-        val payload = crypto.decrypt(parsed.encryptedPayload, request.passphrase, parsed.manifest)
-        restorePayload(payload, parsed.manifest)
-        return SyncPreview(
-            manifest = parsed.manifest,
-            sizeBytes = bytes.size.toLong(),
-        )
+    }
+
+    fun inspectArchive(bytes: ByteArray, fileName: String? = null): SyncPreview {
+        val archiveFile = tempSyncFile("inspect", ".$SYNC_ARCHIVE_EXTENSION")
+        return try {
+            archiveFile.writeBytes(bytes)
+            inspectArchive(archiveFile, fileName)
+        } finally {
+            archiveFile.delete()
+        }
+    }
+
+    suspend fun restoreArchive(bytes: ByteArray, request: SyncRestoreRequest): SyncPreview {
+        val archiveFile = tempSyncFile("restore", ".$SYNC_ARCHIVE_EXTENSION")
+        return try {
+            archiveFile.writeBytes(bytes)
+            restoreArchive(archiveFile, request)
+        } finally {
+            archiveFile.delete()
+        }
     }
 
     private fun buildPayload(
         settings: Settings,
         mode: SyncMode,
-    ): BuiltSyncPayload = ByteArrayOutputStream().use { output ->
+        outputFile: File,
+    ) {
+        outputFile.parentFile?.mkdirs()
         val summaries = mutableListOf<SyncDatasetSummary>()
-        ZipOutputStream(output).use { zip ->
+        ZipOutputStream(FileOutputStream(outputFile).buffered()).use { zip ->
             writeTextEntry(zip, SETTINGS_ENTRY, redactor.encodeSettings(settings, mode))
             summaries += SyncDatasetSummary("settings", recordCount = 1)
 
@@ -112,45 +163,99 @@ class SyncArchiveManager(
 
             val db = database.openHelper.writableDatabase
             SYNC_TABLES.forEach { table ->
-                val rows = exportTable(db, table)
-                writeTextEntry(
-                    zip = zip,
-                    name = "tables/$table.jsonl",
-                    text = rows.joinToString(separator = "\n") { row -> row.toString() },
-                )
-                summaries += SyncDatasetSummary("table:$table", recordCount = rows.size)
+                val rowCount = writeTableEntry(zip, db, table)
+                summaries += SyncDatasetSummary("table:$table", recordCount = rowCount)
             }
 
             val fileSummary = writeFileTrees(zip)
             summaries += fileSummary
             writeTextEntry(zip, PAYLOAD_MANIFEST_ENTRY, json.encodeToString(SyncPayloadManifest(summaries)))
         }
-        BuiltSyncPayload(bytes = output.toByteArray())
     }
 
-    private suspend fun restorePayload(payload: ByteArray, manifest: SyncManifest) {
-        val entries = unzipPayload(payload)
-        val settingsJson = entries[SETTINGS_ENTRY]?.decodeToString()
-            ?: error("同步备份缺少 settings.json")
-        val secretsJson = entries[SECRETS_ENTRY]?.decodeToString()
-        val tableRows = entries
-            .filterKeys { it.startsWith("tables/") && it.endsWith(".jsonl") }
-            .mapKeys { it.key.removePrefix("tables/").removeSuffix(".jsonl") }
-            .mapValues { (_, bytes) ->
-                bytes.decodeToString()
-                    .lineSequence()
-                    .filter { it.isNotBlank() }
-                    .map { json.parseToJsonElement(it).jsonObject }
-                    .toList()
+    private fun writeTableEntry(
+        zip: ZipOutputStream,
+        db: androidx.sqlite.db.SupportSQLiteDatabase,
+        table: String,
+    ): Int {
+        var count = 0
+        zip.putNextEntry(ZipEntry("tables/$table.jsonl"))
+        val cursor = db.query("SELECT * FROM ${table.sqlName()}")
+        cursor.use {
+            while (it.moveToNext()) {
+                if (count > 0) zip.write('\n'.code)
+                val row = cursorRowToJson(table, it).toString()
+                zip.write(row.toByteArray())
+                count += 1
             }
+        }
+        zip.closeEntry()
+        return count
+    }
+
+    private fun tempSyncFile(prefix: String, suffix: String): File {
+        val dir = File(context.cacheDir, "sync").apply { mkdirs() }
+        return File.createTempFile("amber-$prefix-", suffix, dir)
+    }
+
+    private suspend fun restorePayload(payloadFile: File, manifest: SyncManifest) {
+        var settingsJson: String? = null
+        var secretsJson: String? = null
+        val tableRows = linkedMapOf<String, MutableList<JsonObject>>()
+        val stagedFilesRoot = File(context.cacheDir, "sync-restore-stage").canonicalFile
+        stagedFilesRoot.deleteRecursively()
+        stagedFilesRoot.mkdirs()
+
+        ZipInputStream(FileInputStream(payloadFile).buffered()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                requireSafeRelativePath(entry.name)
+                if (!entry.isDirectory) {
+                    when {
+                        entry.name == SETTINGS_ENTRY -> {
+                            settingsJson = zip.readBytes().decodeToString()
+                        }
+
+                        entry.name == SECRETS_ENTRY -> {
+                            secretsJson = zip.readBytes().decodeToString()
+                        }
+
+                        entry.name.startsWith("tables/") && entry.name.endsWith(".jsonl") -> {
+                            val table = entry.name.removePrefix("tables/").removeSuffix(".jsonl")
+                            val rows = tableRows.getOrPut(table) { mutableListOf() }
+                            zip.readBytes()
+                                .decodeToString()
+                                .lineSequence()
+                                .filter { it.isNotBlank() }
+                                .forEach { rows += json.parseToJsonElement(it).jsonObject }
+                        }
+
+                        entry.name.startsWith("files/") -> {
+                            val relativePath = entry.name.removePrefix("files/")
+                            requireSafeRelativePath(relativePath)
+                            val target = File(stagedFilesRoot, relativePath).canonicalFile
+                            require(target.path.startsWith(stagedFilesRoot.path + File.separator)) {
+                                "Invalid file path in sync archive: $relativePath"
+                            }
+                            target.parentFile?.mkdirs()
+                            FileOutputStream(target).buffered().use { output ->
+                                zip.copyTo(output)
+                            }
+                        }
+                    }
+                }
+                zip.closeEntry()
+            }
+        }
+
+        val restoredSettingsJson = settingsJson ?: error("同步备份缺少 settings.json")
 
         val currentSettings = settingsStore.settingsFlow.value
         val restoredSettings = redactor.decodeSettingsForRestore(
-            settingsJson = settingsJson,
+            settingsJson = restoredSettingsJson,
             mode = manifest.mode,
             localSettings = currentSettings,
         ).copy(syncSettings = currentSettings.syncSettings)
-        val stagedFilesRoot = stageFiles(entries)
         try {
             restoreTables(tableRows) {
                 replaceFileTreesFromStage(stagedFilesRoot)
@@ -162,17 +267,6 @@ class SyncArchiveManager(
         filesManager.syncFolder(FileFolders.UPLOAD)
         messageFtsManager.rebuildAllFromDatabase()
         settingsStore.update(restoredSettings)
-    }
-
-    private fun exportTable(db: androidx.sqlite.db.SupportSQLiteDatabase, table: String): List<JsonObject> {
-        val rows = mutableListOf<JsonObject>()
-        val cursor = db.query("SELECT * FROM ${table.sqlName()}")
-        cursor.use {
-            while (it.moveToNext()) {
-                rows += cursorRowToJson(table, it)
-            }
-        }
-        return rows
     }
 
     private fun cursorRowToJson(table: String, cursor: Cursor): JsonObject = buildJsonObject {
@@ -262,26 +356,6 @@ class SyncArchiveManager(
         return SyncDatasetSummary("files", recordCount = count, byteCount = bytes)
     }
 
-    private fun stageFiles(entries: Map<String, ByteArray>): File {
-        val stageRoot = File(context.cacheDir, "sync-restore-stage").canonicalFile
-        stageRoot.deleteRecursively()
-        stageRoot.mkdirs()
-        val filesDir = context.filesDir.canonicalFile
-        entries
-            .filterKeys { it.startsWith("files/") }
-            .forEach { (entryName, bytes) ->
-                val relativePath = entryName.removePrefix("files/")
-                requireSafeRelativePath(relativePath)
-                val target = File(stageRoot, relativePath).canonicalFile
-                require(target.path.startsWith(stageRoot.path + File.separator)) {
-                    "Invalid file path in sync archive: $relativePath"
-                }
-                target.parentFile?.mkdirs()
-                target.writeBytes(bytes)
-            }
-        return stageRoot
-    }
-
     private fun replaceFileTreesFromStage(stageRoot: File) {
         val filesDir = context.filesDir.canonicalFile
         val backupRoot = File(context.cacheDir, "sync-restore-backup").canonicalFile
@@ -330,41 +404,50 @@ class SyncArchiveManager(
         snapshot.openAICodexOAuth?.let { openAICodexAuthStore.restoreRawJsonFromSync(it) }
     }
 
-    private fun zipArchive(manifest: SyncManifest, encryptedPayload: ByteArray): ByteArray =
-        ByteArrayOutputStream().use { output ->
-            ZipOutputStream(output).use { zip ->
-                writeBytesEntry(zip, SYNC_PAYLOAD_ENTRY, encryptedPayload)
-                writeTextEntry(zip, SYNC_MANIFEST_ENTRY, json.encodeToString(manifest))
-            }
-            output.toByteArray()
+    private fun zipArchive(manifest: SyncManifest, encryptedPayloadFile: File, archiveFile: File) {
+        archiveFile.parentFile?.mkdirs()
+        ZipOutputStream(FileOutputStream(archiveFile).buffered()).use { zip ->
+            // Put the small manifest first so preview can read metadata without inflating the payload entry first.
+            writeTextEntry(zip, SYNC_MANIFEST_ENTRY, json.encodeToString(manifest))
+            writeFileEntry(zip, SYNC_PAYLOAD_ENTRY, encryptedPayloadFile)
         }
-
-    private fun parseArchive(bytes: ByteArray): ParsedSyncArchive {
-        val entries = unzipPayload(bytes)
-        val manifestJson = entries[SYNC_MANIFEST_ENTRY]?.decodeToString()
-            ?: error("同步备份缺少 manifest.json")
-        val encryptedPayload = entries[SYNC_PAYLOAD_ENTRY]
-            ?: error("同步备份缺少 payload.enc")
-        val manifest = json.decodeFromString<SyncManifest>(manifestJson)
-        require(manifest.archiveVersion == CURRENT_ARCHIVE_VERSION) {
-            "不支持的同步备份版本：${manifest.archiveVersion}"
-        }
-        return ParsedSyncArchive(manifest = manifest, encryptedPayload = encryptedPayload)
     }
 
-    private fun unzipPayload(bytes: ByteArray): Map<String, ByteArray> {
-        val entries = linkedMapOf<String, ByteArray>()
-        ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+    private fun parseArchive(file: File, payloadTarget: File? = null): ParsedSyncArchive {
+        var manifestJson: String? = null
+        var hasEncryptedPayload = false
+        ZipInputStream(FileInputStream(file).buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 requireSafeRelativePath(entry.name)
                 if (!entry.isDirectory) {
-                    entries[entry.name] = zip.readBytes()
+                    when (entry.name) {
+                        SYNC_MANIFEST_ENTRY -> {
+                            manifestJson = zip.readBytes().decodeToString()
+                        }
+
+                        SYNC_PAYLOAD_ENTRY -> {
+                            hasEncryptedPayload = true
+                            if (payloadTarget != null) {
+                                payloadTarget.parentFile?.mkdirs()
+                                FileOutputStream(payloadTarget).buffered().use { output ->
+                                    zip.copyTo(output)
+                                }
+                            }
+                        }
+                    }
                 }
+                if (payloadTarget == null && manifestJson != null && hasEncryptedPayload) break
                 zip.closeEntry()
             }
         }
-        return entries
+        val manifestJsonValue = manifestJson ?: error("同步备份缺少 manifest.json")
+        require(hasEncryptedPayload) { "同步备份缺少 payload.enc" }
+        val manifest = json.decodeFromString<SyncManifest>(manifestJsonValue)
+        require(manifest.archiveVersion == CURRENT_ARCHIVE_VERSION) {
+            "不支持的同步备份版本：${manifest.archiveVersion}"
+        }
+        return ParsedSyncArchive(manifest = manifest)
     }
 
     private fun normalizeStringForExport(table: String, column: String, value: String): String =
@@ -412,11 +495,6 @@ class SyncArchiveManager(
 
     private data class ParsedSyncArchive(
         val manifest: SyncManifest,
-        val encryptedPayload: ByteArray,
-    )
-
-    private data class BuiltSyncPayload(
-        val bytes: ByteArray,
     )
 
     companion object {

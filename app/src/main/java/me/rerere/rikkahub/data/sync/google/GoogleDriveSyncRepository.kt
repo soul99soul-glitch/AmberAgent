@@ -16,11 +16,13 @@ import me.rerere.rikkahub.data.sync.core.SyncArchiveManager
 import me.rerere.rikkahub.data.sync.core.SyncExportRequest
 import me.rerere.rikkahub.data.sync.core.SyncPreview
 import me.rerere.rikkahub.data.sync.core.SyncRestoreRequest
+import me.rerere.rikkahub.data.sync.core.SYNC_ARCHIVE_EXTENSION
+import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class GoogleDriveSyncRepository(
-    context: Context,
+    private val context: Context,
     private val driveClient: GoogleDriveAppDataClient,
     private val archiveManager: SyncArchiveManager,
 ) {
@@ -33,6 +35,8 @@ class GoogleDriveSyncRepository(
         val result = authorizationClient.authorize(request).awaitTask()
         return result.toAuthorizationOutcome()
     }
+
+    suspend fun restoreAuthorizedSession(): GoogleDriveAuthorizationOutcome = authorizeDrive()
 
     fun completeAuthorization(intent: Intent?): GoogleDriveAuthSession {
         requireNotNull(intent) { "Google 授权结果为空" }
@@ -49,7 +53,6 @@ class GoogleDriveSyncRepository(
         existingFileId: String?,
         expectedRemoteRevision: String?,
     ): GoogleDriveUploadResult = withContext(Dispatchers.IO) {
-        val bytes = archiveManager.createArchive(request)
         val latest = driveClient.findLatest(session.accessToken)
         when {
             existingFileId.isNullOrBlank() && latest != null -> {
@@ -67,30 +70,41 @@ class GoogleDriveSyncRepository(
                 error("Google Drive 云端快照刚刚发生变化，请重新确认后再上传。")
             }
         }
-        val file = driveClient.upload(
-            accessToken = session.accessToken,
-            bytes = bytes,
-            existingFileId = existingFileId,
-        )
-        GoogleDriveUploadResult(
-            file = file,
-            preview = archiveManager.inspectArchive(bytes, file.name),
-        )
+        val archiveFile = archiveManager.createArchiveFile(request)
+        try {
+            val file = driveClient.upload(
+                accessToken = session.accessToken,
+                archiveFile = archiveFile,
+                existingFileId = existingFileId,
+            )
+            GoogleDriveUploadResult(
+                file = file,
+                preview = archiveManager.inspectArchive(archiveFile, file.name),
+            )
+        } finally {
+            archiveFile.delete()
+        }
     }
 
     suspend fun downloadLatest(session: GoogleDriveAuthSession): GoogleDriveDownloadResult = withContext(Dispatchers.IO) {
         val file = driveClient.findLatest(session.accessToken)
             ?: error("Google Drive 云端还没有同步快照")
-        val bytes = driveClient.download(session.accessToken, file.id)
-        GoogleDriveDownloadResult(
-            file = file,
-            bytes = bytes,
-            preview = archiveManager.inspectArchive(bytes, file.name),
-        )
+        val archiveFile = createTempArchiveFile("google-download")
+        try {
+            driveClient.downloadToFile(session.accessToken, file.id, archiveFile)
+            GoogleDriveDownloadResult(
+                file = file,
+                archiveFile = archiveFile,
+                preview = archiveManager.inspectArchive(archiveFile, file.name),
+            )
+        } catch (error: Throwable) {
+            archiveFile.delete()
+            throw error
+        }
     }
 
-    suspend fun restore(bytes: ByteArray, request: SyncRestoreRequest): SyncPreview = withContext(Dispatchers.IO) {
-        archiveManager.restoreArchive(bytes, request)
+    suspend fun restore(archiveFile: File, request: SyncRestoreRequest): SyncPreview = withContext(Dispatchers.IO) {
+        archiveManager.restoreArchive(archiveFile, request)
     }
 
     suspend fun clearCachedToken(accessToken: String) {
@@ -102,6 +116,11 @@ class GoogleDriveSyncRepository(
                     .build()
             ).awaitTask()
         }
+    }
+
+    private fun createTempArchiveFile(prefix: String): File {
+        val dir = File(context.cacheDir, "sync-google").apply { mkdirs() }
+        return File.createTempFile("amber-$prefix-", ".$SYNC_ARCHIVE_EXTENSION", dir)
     }
 
     private fun AuthorizationResult.toAuthorizationOutcome(): GoogleDriveAuthorizationOutcome {
@@ -166,6 +185,6 @@ data class GoogleDriveUploadResult(
 
 data class GoogleDriveDownloadResult(
     val file: GoogleDriveFile,
-    val bytes: ByteArray,
+    val archiveFile: File,
     val preview: SyncPreview,
 )

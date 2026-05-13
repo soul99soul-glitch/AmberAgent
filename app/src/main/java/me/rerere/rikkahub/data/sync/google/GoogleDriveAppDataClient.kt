@@ -11,7 +11,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 
 class GoogleDriveAppDataClient(
     private val httpClient: OkHttpClient,
@@ -38,21 +40,26 @@ class GoogleDriveAppDataClient(
             .maxByOrNull { it.modifiedTime.orEmpty() }
     }
 
-    suspend fun download(accessToken: String, fileId: String): ByteArray {
+    suspend fun downloadToFile(accessToken: String, fileId: String, targetFile: File) {
         val request = Request.Builder()
             .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
             .addHeader("Authorization", "Bearer $accessToken")
             .get()
             .build()
         val response = httpClient.newCall(request).await()
-        val bytes = response.body.bytes()
         if (!response.isSuccessful) {
-            throwDriveError("download", response.code, bytes.decodeToString(), accessToken)
+            val body = response.body.string()
+            throwDriveError("download", response.code, body, accessToken)
         }
-        return bytes
+        targetFile.parentFile?.mkdirs()
+        response.body.byteStream().use { input ->
+            targetFile.outputStream().buffered().use { output ->
+                input.copyTo(output)
+            }
+        }
     }
 
-    suspend fun upload(accessToken: String, bytes: ByteArray, existingFileId: String?): GoogleDriveFile {
+    suspend fun upload(accessToken: String, archiveFile: File, existingFileId: String?): GoogleDriveFile {
         val metadata = buildJsonObject {
             put("name", SYNC_FILE_NAME)
             if (existingFileId.isNullOrBlank()) {
@@ -65,7 +72,7 @@ class GoogleDriveAppDataClient(
                 metadata.toRequestBody("application/json; charset=utf-8".toMediaType())
             )
             .addPart(
-                bytes.toRequestBody("application/vnd.amberagent.backup+zip".toMediaType())
+                archiveFile.asRequestBody("application/vnd.amberagent.backup+zip".toMediaType())
             )
             .build()
         val url = if (existingFileId.isNullOrBlank()) {

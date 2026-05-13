@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.sync.google.GoogleOAuthConfigGate
 import me.rerere.rikkahub.data.sync.google.GoogleOAuthConfigStatus
 import me.rerere.rikkahub.data.sync.local.LocalBackupRepository
 import me.rerere.rikkahub.utils.UiState
+import java.io.File
 import kotlin.uuid.Uuid
 
 class BackupVM(
@@ -53,7 +54,7 @@ class BackupVM(
     val cloudConflict = MutableStateFlow<GoogleCloudConflict?>(null)
     val googleConfigStatus: GoogleOAuthConfigStatus = googleOAuthConfigGate.status()
 
-    private var pendingCloudRestoreBytes: ByteArray? = null
+    private var pendingCloudRestoreFile: File? = null
     private var pendingCloudRestoreRevision: String = ""
     private var pendingCloudUploadRequest: SyncExportRequest? = null
     private var googleAuthorizationInFlight = false
@@ -71,6 +72,7 @@ class BackupVM(
                     )
                 }
             }
+            restoreGoogleSessionIfPossible()
         }
     }
 
@@ -169,7 +171,8 @@ class BackupVM(
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
-                val remote = googleDriveSyncRepository.findLatest(session)
+                val activeSession = refreshGoogleSessionForOperation() ?: session
+                val remote = googleDriveSyncRepository.findLatest(activeSession)
                 val localRevision = settings.value.syncSettings.lastRemoteRevision
                 if (!overwrite && remote != null && remote.revisionKey != localRevision) {
                     pendingCloudUploadRequest = request
@@ -181,7 +184,7 @@ class BackupVM(
                     return@launch
                 }
                 googleDriveSyncRepository.upload(
-                    session = session,
+                    session = activeSession,
                     request = request,
                     existingFileId = remote?.id,
                     expectedRemoteRevision = remote?.revisionKey,
@@ -191,9 +194,9 @@ class BackupVM(
                     current.copy(
                         syncSettings = current.syncSettings.copy(
                             googleEnabled = true,
-                            googleAccountEmail = session.accountEmail,
-                            googleAccountId = session.accountId,
-                            googleDisplayName = session.displayName,
+                            googleAccountEmail = googleSession.value?.accountEmail ?: session.accountEmail,
+                            googleAccountId = googleSession.value?.accountId ?: session.accountId,
+                            googleDisplayName = googleSession.value?.displayName ?: session.displayName,
                             mode = mode,
                             lastUploadAt = System.currentTimeMillis(),
                             lastRemoteRevision = result.file.revisionKey,
@@ -234,9 +237,10 @@ class BackupVM(
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
-                googleDriveSyncRepository.downloadLatest(session)
+                googleDriveSyncRepository.downloadLatest(refreshGoogleSessionForOperation() ?: session)
             }.onSuccess { result ->
-                pendingCloudRestoreBytes = result.bytes
+                pendingCloudRestoreFile?.delete()
+                pendingCloudRestoreFile = result.archiveFile
                 pendingCloudRestoreRevision = result.file.revisionKey
                 pendingCloudRestore.value = true
                 pendingImportPreview.value = result.preview
@@ -251,8 +255,8 @@ class BackupVM(
     }
 
     fun restoreGoogle(passphrase: String) {
-        val bytes = pendingCloudRestoreBytes
-        if (bytes == null) {
+        val archiveFile = pendingCloudRestoreFile
+        if (archiveFile == null) {
             operationState.value = UiState.Error(IllegalStateException("没有待恢复的云端快照"))
             return
         }
@@ -260,11 +264,12 @@ class BackupVM(
             operationState.value = UiState.Loading
             runCatching {
                 googleDriveSyncRepository.restore(
-                    bytes = bytes,
+                    archiveFile = archiveFile,
                     request = SyncRestoreRequest(passphrase = passphrase),
                 )
             }.onSuccess { preview ->
-                pendingCloudRestoreBytes = null
+                pendingCloudRestoreFile?.delete()
+                pendingCloudRestoreFile = null
                 pendingCloudRestore.value = false
                 pendingImportPreview.value = null
                 settingsStore.update { current ->
@@ -367,9 +372,54 @@ class BackupVM(
 
     fun clearPendingImport() {
         pendingImportPreview.value = null
-        pendingCloudRestoreBytes = null
+        pendingCloudRestoreFile?.delete()
+        pendingCloudRestoreFile = null
         pendingCloudRestore.value = false
         pendingCloudRestoreRevision = ""
+    }
+
+    private suspend fun restoreGoogleSessionIfPossible() {
+        val syncSettings = settingsStore.settingsFlow.value.syncSettings
+        if (!syncSettings.googleEnabled || syncSettings.googleAccountEmail.isBlank()) return
+        if (googleAuthorizationInFlight || googleSession.value != null) return
+        googleMessage.value = "正在恢复 Google 连接..."
+        runCatching {
+            googleDriveSyncRepository.restoreAuthorizedSession()
+        }.onSuccess { outcome ->
+            when (outcome) {
+                is GoogleDriveAuthorizationOutcome.Authorized -> {
+                    applyGoogleSession(outcome.session)
+                }
+
+                is GoogleDriveAuthorizationOutcome.ResolutionRequired -> {
+                    googleMessage.value = "上次连接：${syncSettings.googleAccountEmail}，需要点一下重新确认授权。"
+                }
+            }
+        }.onFailure { error ->
+            googleMessage.value = "Google 连接恢复失败：${error.message.orEmpty()}"
+            recordError(error)
+        }
+    }
+
+    private suspend fun refreshGoogleSessionForOperation(): GoogleDriveAuthSession? {
+        val syncSettings = settingsStore.settingsFlow.value.syncSettings
+        if (!syncSettings.googleEnabled && googleSession.value == null) return null
+        return runCatching {
+            googleDriveSyncRepository.restoreAuthorizedSession()
+        }.mapCatching { outcome ->
+            when (outcome) {
+                is GoogleDriveAuthorizationOutcome.Authorized -> {
+                    applyGoogleSession(outcome.session)
+                    outcome.session
+                }
+
+                is GoogleDriveAuthorizationOutcome.ResolutionRequired -> {
+                    googleSession.value
+                }
+            }
+        }.getOrElse {
+            googleSession.value
+        }
     }
 
     private suspend fun applyGoogleSession(session: GoogleDriveAuthSession) {
@@ -404,10 +454,10 @@ class BackupVM(
                 googleDriveSyncRepository.clearCachedToken(error.accessToken)
             }
             googleSession.value = null
+            googleMessage.value = "Google 授权已过期，请点 Google 账号刷新连接。"
             settingsStore.update { current ->
                 current.copy(
                     syncSettings = current.syncSettings.copy(
-                        googleEnabled = false,
                         lastError = error.message.orEmpty()
                     )
                 )
