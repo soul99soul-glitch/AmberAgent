@@ -9,6 +9,7 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import me.rerere.common.oauth.LoopbackOAuthCallbackServer
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountOAuthToken
 import java.util.concurrent.ConcurrentHashMap
@@ -152,7 +153,10 @@ class WebMountOAuthClient(
                 val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) {
                     if (loopbackServer != null) {
                         // Single-shot server.accept; cancellation propagates to socket close.
-                        loopbackServer.awaitCallback(providerId)
+                        // OAuthCallbackResult lives in common (provider-agnostic), wrap it as
+                        // the webmount-flavored OAuthCallback so the rest of this function
+                        // can treat both paths uniformly.
+                        loopbackServer.awaitCallback().toWebMountCallback(providerId)
                     } else {
                         // Deep-link path: RouteActivity routes amberagent:// callbacks here.
                         dispatcher.events.first { it.provider == providerId && it.state == state }
@@ -283,6 +287,19 @@ class WebMountOAuthClient(
             context.startActivity(fallback)
         }
     }
+
+    /** Map the provider-agnostic loopback callback result to webmount's OAuthCallback
+     *  which carries a `provider` tag. The tag is supplied by the caller (always equals
+     *  the in-flight [providerId]), so this is a pure projection — same wire data, just
+     *  tagged for downstream dispatcher routing if anyone wants to re-emit later. */
+    private fun me.rerere.common.oauth.OAuthCallbackResult.toWebMountCallback(providerId: String): OAuthCallback =
+        OAuthCallback(
+            provider = providerId,
+            code = code,
+            state = state,
+            error = error,
+            errorDescription = errorDescription,
+        )
 
     sealed class ConnectResult {
         data class Success(val token: WebMountOAuthToken) : ConnectResult()

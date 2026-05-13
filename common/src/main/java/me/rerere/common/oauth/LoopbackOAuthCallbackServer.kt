@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.oauth
+package me.rerere.common.oauth
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +12,25 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
 import kotlin.coroutines.resume
+
+/**
+ * Provider-agnostic OAuth callback payload. Mirrors the standard authorization-code
+ * response shape: `code` / `state` / `error` / `error_description`. Lives in `common`
+ * so both the WebMount layer (`app` module) and the AI provider OAuth clients (`ai`
+ * module — Codex / Gemini etc.) can speak the same type without one depending on the
+ * other.
+ *
+ * Callers map this into their own domain types if needed (e.g. WebMount's
+ * `OAuthCallback` carries an extra `provider` tag for dispatcher routing).
+ */
+data class OAuthCallbackResult(
+    val code: String?,
+    val state: String?,
+    val error: String?,
+    val errorDescription: String?,
+) {
+    val isSuccess: Boolean get() = error == null && !code.isNullOrBlank()
+}
 
 /**
  * Tiny single-shot HTTP server bound to `127.0.0.1:<port>`, used to capture an OAuth
@@ -33,9 +52,10 @@ import kotlin.coroutines.resume
  *      redirects back. Cancellation closes the socket and unblocks accept().
  *   3. [close] (or `use { }`) tears down the socket on exit.
  *
- * Single-shot: we accept exactly one connection, parse the GET request line,
- * write a static HTML "you can close this tab" page, then stop. Any browser
- * follow-up requests (favicon.ico, prefetcher) hit a closed port — fine.
+ * Single-shot: we accept exactly one OAuth callback (browser probes for favicon /
+ * HEAD prefetch are filtered as 404s and we keep listening), parse the GET request
+ * line, write a static HTML "you can close this tab" page, then stop. Any browser
+ * follow-up requests after the real callback hit a closed port — fine.
  *
  * Port choice: 53682 lines up with what `gh` (GitHub CLI) and several gemini-cli
  * forks use; not IANA-reserved, unlikely to collide with real services. We do
@@ -56,16 +76,15 @@ class LoopbackOAuthCallbackServer(
         )
     }
 
-    /** Block on accept() until the provider redirects back. The returned [OAuthCallback]
-     *  reuses the same shape as [OAuthCallbackDispatcher]'s deep-link path so callers
-     *  don't have to special-case loopback.
+    /** Block on accept() until the provider redirects back. Returns an
+     *  [OAuthCallbackResult] with code/state/error parsed from the query string.
      *
      *  Threading note: `accept()` is a blocking syscall that runs on Dispatchers.IO via
      *  the surrounding `withContext`. The IO pool is sized to 64 threads by default, so
-     *  parking one for the AUTH_TIMEOUT_MS (~5 min) ceiling is fine; if we ever need
+     *  parking one for the typical 5-min OAuth timeout ceiling is fine; if we ever need
      *  more concurrent loopback OAuth flows in flight, swap to a dedicated single-thread
      *  executor or NIO Selector. */
-    suspend fun awaitCallback(providerId: String): OAuthCallback = withContext(Dispatchers.IO) {
+    suspend fun awaitCallback(): OAuthCallbackResult = withContext(Dispatchers.IO) {
         // suspendCancellableCoroutine wires the coroutine cancellation through to a
         // serverSocket.close() — accept() then throws SocketException and we resume
         // with cancellation. Without this, a coroutine cancel (timeout, user aborts)
@@ -81,7 +100,7 @@ class LoopbackOAuthCallbackServer(
                 // 404, close, and accept the next one.
                 while (true) {
                     val client = serverSocket.accept()
-                    val handled = client.use { handleConnection(it, providerId) }
+                    val handled = client.use { handleConnection(it) }
                     if (handled.isCallbackPath) {
                         if (cont.isActive) {
                             cont.resume(handled.callback)
@@ -93,7 +112,7 @@ class LoopbackOAuthCallbackServer(
                             // instead of silently being told "try again".
                             Log.w(
                                 TAG,
-                                "Loopback callback for $providerId received after coroutine cancel; " +
+                                "Loopback OAuth callback received after coroutine cancel; " +
                                     "dropping code (state=${handled.callback.state?.take(6)}…)",
                             )
                         }
@@ -105,8 +124,7 @@ class LoopbackOAuthCallbackServer(
             } catch (error: Throwable) {
                 if (cont.isActive) {
                     cont.resume(
-                        OAuthCallback(
-                            provider = providerId,
+                        OAuthCallbackResult(
                             code = null,
                             state = null,
                             error = "loopback_accept_failed",
@@ -120,7 +138,7 @@ class LoopbackOAuthCallbackServer(
 
     /** Result of one accept() iteration. [isCallbackPath] gates whether we keep listening
      *  or return the parsed callback to the caller. */
-    private data class HandledRequest(val callback: OAuthCallback, val isCallbackPath: Boolean)
+    private data class HandledRequest(val callback: OAuthCallbackResult, val isCallbackPath: Boolean)
 
     override fun close() {
         runCatching { serverSocket.close() }
@@ -128,7 +146,7 @@ class LoopbackOAuthCallbackServer(
 
     // ----------------------------------------------------------------------
 
-    private fun handleConnection(socket: Socket, providerId: String): HandledRequest {
+    private fun handleConnection(socket: Socket): HandledRequest {
         val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
         val requestLine = reader.readLine().orEmpty()
         // Drain headers — must consume until the empty line, otherwise some browsers
@@ -137,18 +155,17 @@ class LoopbackOAuthCallbackServer(
             val header = reader.readLine().orEmpty()
             if (header.isEmpty()) break
         }
-        val handled = parseRequestLine(requestLine, providerId)
+        val handled = parseRequestLine(requestLine)
         writeResponse(socket, handled)
         return handled
     }
 
-    private fun parseRequestLine(line: String, providerId: String): HandledRequest {
+    private fun parseRequestLine(line: String): HandledRequest {
         // "GET /callback?code=xxx&state=yyy HTTP/1.1"
         val parts = line.split(" ")
         if (parts.size < 2) {
             return HandledRequest(
-                callback = OAuthCallback(
-                    provider = providerId,
+                callback = OAuthCallbackResult(
                     code = null,
                     state = null,
                     error = "invalid_request_line",
@@ -166,8 +183,7 @@ class LoopbackOAuthCallbackServer(
         val isCallbackPath = method == "GET" && pathOnly == "/callback"
         if (!isCallbackPath) {
             return HandledRequest(
-                callback = OAuthCallback(
-                    provider = providerId,
+                callback = OAuthCallbackResult(
                     code = null,
                     state = null,
                     error = "ignored_non_callback_path",
@@ -179,8 +195,7 @@ class LoopbackOAuthCallbackServer(
         val queryStart = pathQuery.indexOf('?')
         if (queryStart < 0) {
             return HandledRequest(
-                callback = OAuthCallback(
-                    provider = providerId,
+                callback = OAuthCallbackResult(
                     code = null,
                     state = null,
                     error = "missing_query",
@@ -195,8 +210,7 @@ class LoopbackOAuthCallbackServer(
         // Not an injection vector — the URL is constructed by the IDP on the user's
         // own browser navigating to 127.0.0.1, no external party can shape it.
         return HandledRequest(
-            callback = OAuthCallback(
-                provider = providerId,
+            callback = OAuthCallbackResult(
                 code = params["code"],
                 state = params["state"],
                 error = params["error"],

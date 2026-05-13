@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.agent.webmount.oauth
 import io.ktor.client.HttpClient
 import io.ktor.client.request.headers
 import io.ktor.client.request.post
+import me.rerere.common.oauth.LoopbackOAuthCallbackServer
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType

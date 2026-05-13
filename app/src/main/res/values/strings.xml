@@ -1024,6 +1024,13 @@
   <string name="setting_provider_page_gemini_oauth_not_signed_in">Not signed in. Tap above to start the OAuth flow.</string>
   <string name="setting_provider_page_gemini_oauth_tos">By signing in you accept that this client uses a public OAuth client_id and that Google may treat third-party clients as out-of-policy.</string>
   <string name="setting_provider_page_gemini_oauth_pending_toast">Gemini OAuth implementation is still in progress; try again after the next update.</string>
+  <string name="setting_provider_page_gemini_oauth_signed_in">Signed in to Google.</string>
+  <string name="setting_provider_page_gemini_oauth_signed_in_as">Signed in as %1$s.</string>
+  <string name="setting_provider_page_gemini_oauth_relogin">Sign in again</string>
+  <string name="setting_provider_page_gemini_oauth_logout">Sign out</string>
+  <string name="setting_provider_page_gemini_oauth_logged_out">Signed out of Google.</string>
+  <string name="setting_provider_page_gemini_oauth_login_success">Signed in to Google (%1$s).</string>
+  <string name="setting_provider_page_gemini_oauth_login_failed">Google sign-in failed: %1$s</string>
   <string name="setting_tts_page_add">Add</string>
   <string name="setting_tts_page_add_provider">Add TTS Provider</string>
   <string name="setting_tts_page_add_provider_content_description">Add TTS Provider</string>

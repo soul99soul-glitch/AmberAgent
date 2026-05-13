@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.agent.webmount.oauth
 
 import io.ktor.client.HttpClient
+import me.rerere.common.oauth.LoopbackOAuthCallbackServer
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountOAuthToken
 
 /**

@@ -11,6 +11,8 @@ import io.pebbletemplates.pebble.PebbleEngine
 import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import io.requery.android.database.sqlite.SQLiteCustomExtension
 import kotlinx.serialization.json.Json
+import me.rerere.ai.provider.providers.google.GoogleGeminiAuthStore
+import me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.http.AcceptLanguageBuilder
@@ -302,6 +304,8 @@ val dataSourceModule = module {
     }
 
     single { OpenAICodexAuthStore(context = get()) }
+    single { GoogleGeminiAuthStore(context = get()) }
+    single { GoogleGeminiOAuthClient(httpClient = get(), authStore = get()) }
 
     single {
         SyncArchiveManager(

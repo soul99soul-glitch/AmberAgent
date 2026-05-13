@@ -34,6 +34,9 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.GoogleAuthMode
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.providers.google.GoogleGeminiAuthStore
+import me.rerere.ai.provider.providers.google.GoogleGeminiAuthTokens
+import me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient
 import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.availableAuthModes
@@ -898,10 +901,13 @@ private fun ColumnScope.ProviderConfigureGoogle(
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
-    // Commit #2 stub: real OAuth flow (loopback HTTP server, PKCE, refresh, cloudcode-pa
-    // onboarding) lands in commit #3. Until then both the "Sign in with Google" button and
-    // the autoStartOAuth LaunchedEffect just toast and clear the one-shot flag.
-    val oauthPendingToast = stringResource(R.string.setting_provider_page_gemini_oauth_pending_toast)
+    val scope = rememberCoroutineScope()
+    val geminiAuthStore = koinInject<GoogleGeminiAuthStore>()
+    val geminiOAuthClient = koinInject<GoogleGeminiOAuthClient>()
+    var geminiTokens by remember(provider.id) {
+        mutableStateOf<GoogleGeminiAuthTokens?>(geminiAuthStore.get(provider.id))
+    }
+    var geminiOAuthBusy by remember(provider.id) { mutableStateOf(false) }
     val serviceAccountJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -1142,7 +1148,10 @@ private fun ColumnScope.ProviderConfigureGoogle(
             }
         }
     } else {
-        // OAuth mode skeleton — buttons stub until commit #3 lands the real flow.
+        // Real OAuth flow (commit #3): authorize via LoopbackOAuthCallbackServer on
+        // 127.0.0.1:53682, exchange code+verifier for access/refresh tokens, decode
+        // id_token to surface the email. cloudcode-pa onboarding (loadCodeAssist /
+        // onboardUser) is commit #4's job — until then tokens.projectId stays null.
         Text(
             text = stringResource(R.string.setting_provider_page_gemini_oauth_warning),
             style = MaterialTheme.typography.bodySmall,
@@ -1158,27 +1167,68 @@ private fun ColumnScope.ProviderConfigureGoogle(
             enabled = false,
         )
         Text(
-            text = stringResource(R.string.setting_provider_page_gemini_oauth_not_signed_in),
+            text = geminiTokens?.let { tokens ->
+                tokens.email?.let { stringResource(R.string.setting_provider_page_gemini_oauth_signed_in_as, it) }
+                    ?: stringResource(R.string.setting_provider_page_gemini_oauth_signed_in)
+            } ?: stringResource(R.string.setting_provider_page_gemini_oauth_not_signed_in),
             style = MaterialTheme.typography.bodyMedium,
         )
-        // Button is disabled while the OAuth implementation is pending (commit #3).
-        // Reviewer flag M3: an enabled button that just toasts "implementation pending"
-        // invites repeat-clicks; disable + a "Coming soon" supporting line is more
-        // honest. The toaster is still kept around for the autoStart auto-fire path
-        // below — that fires once on entry, not on user action, so the same anti-
-        // repeat-click argument doesn't apply.
+
+        val runGeminiLogin: suspend () -> Unit = body@{
+            if (geminiOAuthBusy) return@body
+            geminiOAuthBusy = true
+            try {
+                val tokens = geminiOAuthClient.authorize(context, provider.id)
+                geminiTokens = tokens
+                toaster.show(
+                    context.getString(
+                        R.string.setting_provider_page_gemini_oauth_login_success,
+                        tokens.email ?: "Google 账号",
+                    ),
+                    type = ToastType.Success,
+                )
+            } catch (e: Exception) {
+                toaster.show(
+                    context.getString(
+                        R.string.setting_provider_page_gemini_oauth_login_failed,
+                        e.message ?: e.toString(),
+                    ),
+                    type = ToastType.Error,
+                )
+            } finally {
+                geminiOAuthBusy = false
+            }
+        }
+
         OutlinedButton(
-            onClick = {},
-            enabled = false,
+            onClick = { scope.launch { runGeminiLogin() } },
+            enabled = !geminiOAuthBusy,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(stringResource(R.string.setting_provider_page_gemini_oauth_login))
+            Text(
+                if (geminiTokens != null) {
+                    stringResource(R.string.setting_provider_page_gemini_oauth_relogin)
+                } else {
+                    stringResource(R.string.setting_provider_page_gemini_oauth_login)
+                }
+            )
         }
-        Text(
-            text = stringResource(R.string.setting_provider_page_gemini_oauth_pending_toast),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (geminiTokens != null) {
+            OutlinedButton(
+                onClick = {
+                    geminiOAuthClient.logout(provider.id)
+                    geminiTokens = null
+                    toaster.show(
+                        context.getString(R.string.setting_provider_page_gemini_oauth_logged_out),
+                        type = ToastType.Success,
+                    )
+                },
+                enabled = !geminiOAuthBusy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.setting_provider_page_gemini_oauth_logout))
+            }
+        }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.setting_provider_page_gemini_oauth_tos),
@@ -1186,19 +1236,20 @@ private fun ColumnScope.ProviderConfigureGoogle(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        // Same one-shot pattern as the OpenAI side: LaunchedEffect keyed only on
+        // One-shot autoStart path mirrors the OpenAI side: LaunchedEffect keyed only on
         // provider.id, autoStartOAuth read via rememberUpdatedState so the parent's
-        // post-consume reset doesn't cancel this coroutine. Stub for now — commit #3
-        // will replace the toast with the actual OAuth flow.
+        // post-consume reset doesn't cancel the in-flight OAuth coroutine.
         val latestAutoStart by rememberUpdatedState(autoStartOAuth)
         val latestOnAutoStartConsumed by rememberUpdatedState(onAutoStartConsumed)
         LaunchedEffect(provider.id) {
             if (
                 latestAutoStart &&
-                provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH
+                provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH &&
+                geminiTokens == null &&
+                !geminiOAuthBusy
             ) {
                 latestOnAutoStartConsumed()
-                toaster.show(oauthPendingToast, type = ToastType.Info)
+                runGeminiLogin()
             }
         }
     }
