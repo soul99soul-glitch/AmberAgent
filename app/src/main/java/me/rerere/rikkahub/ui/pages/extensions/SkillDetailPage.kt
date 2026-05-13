@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.extensions
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,13 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -35,9 +34,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
@@ -54,6 +56,13 @@ import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
+import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.workspaceBorder
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -83,11 +92,6 @@ fun SkillDetailPage(skillName: String) {
                 colors = CustomColors.topBarColors,
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Lucide.Plus, contentDescription = null)
-            }
-        },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
@@ -95,7 +99,8 @@ fun SkillDetailPage(skillName: String) {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(innerPadding + PaddingValues(8.dp)),
+                .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             mcpConfig?.let { state ->
                 SkillMcpConfigCard(
@@ -107,9 +112,10 @@ fun SkillDetailPage(skillName: String) {
                     },
                 )
             }
-            FileTree(
+            SkillFilesPanel(
                 nodes = tree,
-                depth = 0,
+                fileCount = remember(tree) { tree.countFiles() },
+                onAdd = { showAddDialog = true },
                 onEdit = { editingFile = it },
                 onDelete = { deleteTarget = it },
             )
@@ -166,33 +172,29 @@ private fun SkillMcpConfigCard(
     state: SkillMcpConfigState,
     onImport: () -> Unit,
 ) {
+    val colors = workspaceColors()
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = colors.paper,
+        border = workspaceBorder(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(
-                imageVector = Lucide.FileText,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
+            WorkspaceLeadingIcon(icon = Lucide.FileText, tone = WorkspaceTone.Accent)
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
                     text = stringResource(R.string.skill_detail_page_mcp_config_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colors.ink,
                 )
                 Text(
                     text = state.error ?: stringResource(
@@ -200,14 +202,93 @@ private fun SkillMcpConfigCard(
                         state.serverCount,
                     ),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = colors.muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Button(
-                onClick = onImport,
-                enabled = state.error == null && state.serverCount > 0,
+            if (state.error == null && state.serverCount > 0) {
+                WorkspaceTextButton(
+                    text = stringResource(R.string.skill_detail_page_mcp_config_import),
+                    onClick = onImport,
+                    tone = WorkspaceTone.Accent,
+                )
+            } else {
+                WorkspaceStatusPill(
+                    text = "不可用",
+                    tone = WorkspaceTone.Neutral,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkillFilesPanel(
+    nodes: List<SkillFileNode>,
+    fileCount: Int,
+    onAdd: () -> Unit,
+    onEdit: (SkillFile) -> Unit,
+    onDelete: (SkillFile) -> Unit,
+) {
+    val colors = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = colors.paper,
+        border = workspaceBorder(),
+    ) {
+        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(stringResource(R.string.skill_detail_page_mcp_config_import))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "文件",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = colors.ink,
+                    )
+                    Text(
+                        text = "$fileCount 个文件",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.muted,
+                    )
+                }
+                WorkspaceIconButton(
+                    onClick = onAdd,
+                    icon = Lucide.Plus,
+                    contentDescription = stringResource(R.string.skill_detail_page_new_file),
+                    tone = WorkspaceTone.Accent,
+                    containerColor = colors.blueContainer,
+                )
+            }
+            if (nodes.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "暂无文件",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.muted,
+                    )
+                }
+            } else {
+                FileTree(
+                    nodes = nodes,
+                    depth = 0,
+                    onEdit = onEdit,
+                    onDelete = onDelete,
+                )
             }
         }
     }
@@ -246,51 +327,59 @@ private fun FileItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val colors = workspaceColors()
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onEdit),
+        color = Color.Transparent,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = (16 + depth * 20).dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                .padding(start = (14 + depth * 18).dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(
-                imageVector = Lucide.FileText,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary,
+            WorkspaceLeadingIcon(
+                icon = Lucide.FileText,
+                size = 24.dp,
+                iconSize = 15.dp,
+                tone = WorkspaceTone.Accent,
             )
             Text(
                 text = skillFile.file.name,
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
-                    .padding(start = 8.dp),
+                    .padding(end = 4.dp),
             )
-            Text(
-                text = "${skillFile.file.length()} B",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            WorkspaceStatusPill(text = "${skillFile.file.length()} B")
+            WorkspaceIconButton(
+                onClick = onEdit,
+                icon = Lucide.FilePen,
+                contentDescription = stringResource(R.string.edit),
+                size = 30.dp,
+                iconSize = 15.dp,
+                showBorder = false,
+                containerColor = Color.Transparent,
             )
-            IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = Lucide.FilePen,
-                    contentDescription = stringResource(R.string.edit),
-                    modifier = Modifier.size(16.dp),
-                )
-            }
             if (skillFile.relativePath != "SKILL.md") {
-                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Lucide.Trash2,
-                        contentDescription = stringResource(R.string.delete),
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
+                WorkspaceIconButton(
+                    onClick = onDelete,
+                    icon = Lucide.Trash2,
+                    contentDescription = stringResource(R.string.delete),
+                    size = 30.dp,
+                    iconSize = 15.dp,
+                    showBorder = false,
+                    containerColor = Color.Transparent,
+                    tone = WorkspaceTone.Danger,
+                )
             }
         }
     }
@@ -304,17 +393,19 @@ private fun DirItem(
     onDelete: (SkillFile) -> Unit,
 ) {
     var expanded by rememberSaveable(node.relativePath) { mutableStateOf(false) }
+    val colors = workspaceColors()
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
+        color = Color.Transparent,
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
                     .clickable { expanded = !expanded }
-                    .padding(start = (16 + depth * 20).dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+                    .padding(start = (14 + depth * 18).dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -322,19 +413,21 @@ private fun DirItem(
                     imageVector = if (expanded) Lucide.ChevronDown else Lucide.ChevronRight,
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = colors.faint,
                 )
-                Icon(
-                    imageVector = if (expanded) Lucide.FolderOpen else Lucide.Folder,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.tertiary,
+                WorkspaceLeadingIcon(
+                    icon = if (expanded) Lucide.FolderOpen else Lucide.Folder,
+                    size = 24.dp,
+                    iconSize = 15.dp,
+                    tone = WorkspaceTone.Warning,
                 )
                 Text(
                     text = node.name,
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -382,6 +475,13 @@ private fun EditFileDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
+}
+
+private fun List<SkillFileNode>.countFiles(): Int = sumOf { node ->
+    when (node) {
+        is SkillFileNode.FileNode -> 1
+        is SkillFileNode.DirNode -> node.children.countFiles()
+    }
 }
 
 @Composable

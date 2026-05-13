@@ -47,6 +47,7 @@ class BackupVM(
     val pendingImportPreview = MutableStateFlow<SyncPreview?>(null)
     val googleSession = MutableStateFlow<GoogleDriveAuthSession?>(null)
     val googleMessage = MutableStateFlow("")
+    val localMessage = MutableStateFlow("")
     val pendingGoogleAuthorization = MutableStateFlow<PendingIntent?>(null)
     val pendingCloudRestore = MutableStateFlow(false)
     val cloudConflict = MutableStateFlow<GoogleCloudConflict?>(null)
@@ -305,9 +306,11 @@ class BackupVM(
                         )
                     )
                 }
+                localMessage.value = "已导出本地备份。"
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
+                localMessage.value = "本地导出失败：${error.message.orEmpty()}"
                 recordError(error)
             }
         }
@@ -320,9 +323,11 @@ class BackupVM(
                 localBackupRepository.inspectUri(uri)
             }.onSuccess { preview ->
                 pendingImportPreview.value = preview
+                localMessage.value = "已读取本地备份，确认后可恢复。"
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
+                localMessage.value = "本地导入失败：${error.message.orEmpty()}"
                 recordError(error)
             }
         }
@@ -346,9 +351,11 @@ class BackupVM(
                         )
                     )
                 }
+                localMessage.value = "已恢复本地备份。"
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
+                localMessage.value = "本地恢复失败：${error.message.orEmpty()}"
                 recordError(error)
             }
         }

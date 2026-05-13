@@ -37,9 +37,12 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Download04
+import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Upload02
+import me.rerere.rikkahub.data.sync.core.SYNC_ARCHIVE_MIME
 import me.rerere.rikkahub.data.sync.core.SyncMode
 import me.rerere.rikkahub.data.sync.core.SyncPreview
+import me.rerere.rikkahub.data.sync.local.LocalBackupRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -59,12 +62,16 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val importPreview by vm.pendingImportPreview.collectAsState()
     val googleSession by vm.googleSession.collectAsState()
     val googleMessage by vm.googleMessage.collectAsState()
+    val localMessage by vm.localMessage.collectAsState()
     val pendingGoogleAuthorization by vm.pendingGoogleAuthorization.collectAsState()
     val pendingCloudRestore by vm.pendingCloudRestore.collectAsState()
     val cloudConflict by vm.cloudConflict.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var pendingCloudUploadMode by remember { mutableStateOf<SyncMode?>(null) }
     var pendingGoogleAction by remember { mutableStateOf<GoogleSyncAction?>(null) }
+    var pendingLocalExport by remember { mutableStateOf(false) }
+    var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var localExportPassphrase by remember { mutableStateOf("") }
     var showRestorePassphrase by remember { mutableStateOf(false) }
 
     val googleAuthorizationLauncher = rememberLauncherForActivityResult(
@@ -98,6 +105,24 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     LaunchedEffect(operationState, googleSession) {
         if (googleSession == null && operationState is UiState.Error) {
             pendingGoogleAction = null
+        }
+    }
+
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(SYNC_ARCHIVE_MIME),
+    ) { uri ->
+        if (uri != null) {
+            vm.exportLocal(uri, SyncMode.FULL, localExportPassphrase)
+        }
+        localExportPassphrase = ""
+    }
+
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            pendingImportUri = uri
+            vm.inspectImport(uri)
         }
     }
 
@@ -187,6 +212,39 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     }
                 )
             }
+
+            CardGroup(title = { Text("本地备份") }) {
+                item(
+                    onClick = { pendingLocalExport = true },
+                    leadingContent = { Icon(HugeIcons.Upload02, contentDescription = null) },
+                    headlineContent = { Text("导出") },
+                    supportingContent = {
+                        Text(
+                            localMessage.ifBlank {
+                                "把当前数据加密保存成本地文件"
+                            }
+                        )
+                    },
+                    trailingContent = {
+                        Text("导出", color = MaterialTheme.colorScheme.primary)
+                    }
+                )
+                item(
+                    onClick = {
+                        vm.clearPendingImport()
+                        pendingImportUri = null
+                        openDocumentLauncher.launch(arrayOf(SYNC_ARCHIVE_MIME, "application/zip", "*/*"))
+                    },
+                    leadingContent = { Icon(HugeIcons.FileImport, contentDescription = null) },
+                    headlineContent = { Text("导入") },
+                    supportingContent = {
+                        Text("从本地备份文件恢复到这台设备")
+                    },
+                    trailingContent = {
+                        Text("导入", color = MaterialTheme.colorScheme.primary)
+                    }
+                )
+            }
             Spacer(Modifier.height(12.dp))
         }
     }
@@ -204,11 +262,29 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         )
     }
 
+    if (pendingLocalExport) {
+        PassphraseDialog(
+            title = "设置备份口令",
+            confirmText = "导出",
+            message = "本地备份会包含几乎所有应用数据，并先加密再保存成本地文件。",
+            onDismiss = {
+                pendingLocalExport = false
+                localExportPassphrase = ""
+            },
+            onConfirm = { passphrase ->
+                localExportPassphrase = passphrase
+                pendingLocalExport = false
+                createDocumentLauncher.launch(LocalBackupRepository.suggestedFileName())
+            }
+        )
+    }
+
     importPreview?.let { preview ->
         ImportPreviewDialog(
             preview = preview,
             onDismiss = {
                 vm.clearPendingImport()
+                pendingImportUri = null
             },
             onRestore = { showRestorePassphrase = true },
         )
@@ -221,8 +297,11 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             message = "恢复会替换本机应用数据。恢复前请确认这是你想导入的快照。",
             onDismiss = { showRestorePassphrase = false },
             onConfirm = { passphrase ->
+                val localUri = pendingImportUri
                 if (pendingCloudRestore) {
                     vm.restoreGoogle(passphrase)
+                } else if (localUri != null) {
+                    vm.restoreLocal(localUri, passphrase)
                 }
                 showRestorePassphrase = false
             }
