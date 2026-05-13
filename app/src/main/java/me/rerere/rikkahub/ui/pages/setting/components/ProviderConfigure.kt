@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.GoogleAuthMode
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.OpenAIBrand
@@ -143,7 +144,12 @@ fun ProviderConfigure(
             }
 
             is ProviderSetting.Google -> {
-                ProviderConfigureGoogle(provider, onEdit)
+                ProviderConfigureGoogle(
+                    provider = provider,
+                    onEdit = onEdit,
+                    autoStartOAuth = autoStartOAuth,
+                    onAutoStartConsumed = onAutoStartConsumed,
+                )
             }
 
             is ProviderSetting.Claude -> {
@@ -884,10 +890,18 @@ private fun ColumnScope.ProviderConfigureClaude(
 @Composable
 private fun ColumnScope.ProviderConfigureGoogle(
     provider: ProviderSetting.Google,
-    onEdit: (provider: ProviderSetting.Google) -> Unit
+    onEdit: (provider: ProviderSetting.Google) -> Unit,
+    /** Picker's "Sign in with Google" row sets this true; see [ProviderConfigure] docs. */
+    autoStartOAuth: Boolean = false,
+    /** One-shot reset callback paired with [autoStartOAuth]; see [ProviderConfigure] docs. */
+    onAutoStartConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    // Commit #2 stub: real OAuth flow (loopback HTTP server, PKCE, refresh, cloudcode-pa
+    // onboarding) lands in commit #3. Until then both the "Sign in with Google" button and
+    // the autoStartOAuth LaunchedEffect just toast and clear the one-shot flag.
+    val oauthPendingToast = stringResource(R.string.setting_provider_page_gemini_oauth_pending_toast)
     val serviceAccountJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -939,118 +953,253 @@ private fun ColumnScope.ProviderConfigureGoogle(
         modifier = Modifier.fillMaxWidth()
     )
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically
+    // Auth mode segmented row — mirrors the OpenAI side. API_KEY keeps the existing
+    // Generative Language API key / Vertex AI / service-account fields visible.
+    // GEMINI_CODE_ASSIST_OAUTH pins baseUrl to cloudcode-pa, hides the API-key fields
+    // and exposes a Google sign-in button. Switching modes shuffles baseUrl back to
+    // the per-mode pinned value, matching how OpenAIAuthMode swaps it on toggle.
+    val availableGoogleAuthModes = GoogleAuthMode.entries
+    Text(
+        text = stringResource(R.string.setting_provider_page_google_auth_mode),
+        style = MaterialTheme.typography.labelLarge,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(stringResource(id = R.string.setting_provider_page_vertex_ai), modifier = Modifier.weight(1f))
-        Checkbox(
-            checked = provider.vertexAI,
-            onCheckedChange = {
-                onEdit(provider.copy(vertexAI = it))
-            }
-        )
+        availableGoogleAuthModes.forEachIndexed { index, mode ->
+            SegmentedButton(
+                shape = SegmentedButtonDefaults.itemShape(
+                    index = index,
+                    count = availableGoogleAuthModes.size,
+                ),
+                label = {
+                    Text(
+                        when (mode) {
+                            GoogleAuthMode.API_KEY -> stringResource(R.string.setting_provider_page_google_auth_api_key)
+                            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH ->
+                                stringResource(R.string.setting_provider_page_google_auth_oauth)
+                        }
+                    )
+                },
+                selected = provider.authMode == mode,
+                onClick = {
+                    val pinned = mode.fixedBaseUrl()
+                    val knownPinnedUrls = setOfNotNull(
+                        GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl(),
+                    )
+                    val newProvider = when (mode) {
+                        GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> provider.copy(
+                            authMode = mode,
+                            baseUrl = pinned ?: provider.baseUrl,
+                            // OAuth path doesn't go through Vertex AI; force-off both
+                            // sub-toggles so the API_KEY fields don't bleed visual state
+                            // into OAuth mode when the user toggles back.
+                            vertexAI = false,
+                            useServiceAccount = false,
+                            // Scrub API_KEY-mode secrets when switching to OAuth so a
+                            // subsequent sync/backup snapshot doesn't carry stale
+                            // plaintext credentials the user thinks they've moved off of.
+                            // Reviewer flag H2: provider.copy() without these clears
+                            // would persist whatever the user pasted in API_KEY mode
+                            // into the Serializable JSON forever.
+                            apiKey = "",
+                            privateKey = "",
+                            serviceAccountEmail = "",
+                            projectId = "",
+                        )
+                        GoogleAuthMode.API_KEY -> {
+                            val leavingPinnedMode = provider.baseUrl in knownPinnedUrls
+                            val restoredBaseUrl = if (leavingPinnedMode) {
+                                (provider.resetBaseUrlToDefault() as ProviderSetting.Google).baseUrl
+                            } else {
+                                provider.baseUrl
+                            }
+                            provider.copy(
+                                authMode = mode,
+                                baseUrl = restoredBaseUrl,
+                            )
+                        }
+                    }
+                    onEdit(newProvider)
+                },
+            )
+        }
     }
 
-    if (!(provider.vertexAI && provider.useServiceAccount)) {
-        OutlinedTextField(
-            value = provider.apiKey,
-            onValueChange = {
-                onEdit(provider.copy(apiKey = it.trim()))
-            },
-            label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_key))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
-        )
-    }
-
-    if (!provider.vertexAI) {
-        OutlinedTextField(
-            value = provider.baseUrl,
-            onValueChange = {
-                onEdit(provider.copy(baseUrl = it.trim()))
-            },
-            label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            isError = provider.baseUrl.isNotBlank() && (
-                !provider.baseUrl.isValidBaseUrl() || !provider.baseUrl.endsWith("/v1beta")
-            ),
-            supportingText = if (!provider.baseUrl.endsWith("/v1beta")) {
-                {
-                    Text("The base URL usually ends with `/v1beta`")
-                }
-            } else null
-        )
-    } else {
+    if (provider.authMode == GoogleAuthMode.API_KEY) {
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                stringResource(id = R.string.setting_provider_page_use_service_account),
-                modifier = Modifier.weight(1f)
-            )
+            Text(stringResource(id = R.string.setting_provider_page_vertex_ai), modifier = Modifier.weight(1f))
             Checkbox(
-                checked = provider.useServiceAccount,
+                checked = provider.vertexAI,
                 onCheckedChange = {
-                    onEdit(provider.copy(useServiceAccount = it))
+                    onEdit(provider.copy(vertexAI = it))
                 }
             )
         }
 
-        if (provider.useServiceAccount) {
-            OutlinedButton(
-                onClick = { serviceAccountJsonLauncher.launch(arrayOf("application/json", "*/*")) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.setting_provider_page_import_service_account_json))
-            }
+        if (!(provider.vertexAI && provider.useServiceAccount)) {
             OutlinedTextField(
-                value = provider.serviceAccountEmail,
+                value = provider.apiKey,
                 onValueChange = {
-                    onEdit(provider.copy(serviceAccountEmail = it.trim()))
+                    onEdit(provider.copy(apiKey = it.trim()))
                 },
                 label = {
-                    Text(stringResource(id = R.string.setting_provider_page_service_account_email))
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = provider.privateKey,
-                onValueChange = {
-                    onEdit(provider.copy(privateKey = it.trim()))
-                },
-                label = {
-                    Text(stringResource(id = R.string.setting_provider_page_private_key))
+                    Text(stringResource(id = R.string.setting_provider_page_api_key))
                 },
                 modifier = Modifier.fillMaxWidth(),
-                maxLines = 6,
-                minLines = 3,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+                maxLines = 3,
             )
+        }
+
+        if (!provider.vertexAI) {
             OutlinedTextField(
-                value = provider.location,
+                value = provider.baseUrl,
                 onValueChange = {
-                    onEdit(provider.copy(location = it.trim()))
+                    onEdit(provider.copy(baseUrl = it.trim()))
                 },
                 label = {
-                    // https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#available-regions
-                    Text(stringResource(id = R.string.setting_provider_page_location))
+                    Text(stringResource(id = R.string.setting_provider_page_api_base_url))
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                isError = provider.baseUrl.isNotBlank() && (
+                    !provider.baseUrl.isValidBaseUrl() || !provider.baseUrl.endsWith("/v1beta")
+                ),
+                supportingText = if (!provider.baseUrl.endsWith("/v1beta")) {
+                    {
+                        Text("The base URL usually ends with `/v1beta`")
+                    }
+                } else null
             )
-            OutlinedTextField(
-                value = provider.projectId,
-                onValueChange = {
-                    onEdit(provider.copy(projectId = it.trim()))
-                },
-                label = {
-                    Text(stringResource(id = R.string.setting_provider_page_project_id))
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(id = R.string.setting_provider_page_use_service_account),
+                    modifier = Modifier.weight(1f)
+                )
+                Checkbox(
+                    checked = provider.useServiceAccount,
+                    onCheckedChange = {
+                        onEdit(provider.copy(useServiceAccount = it))
+                    }
+                )
+            }
+
+            if (provider.useServiceAccount) {
+                OutlinedButton(
+                    onClick = { serviceAccountJsonLauncher.launch(arrayOf("application/json", "*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_import_service_account_json))
+                }
+                OutlinedTextField(
+                    value = provider.serviceAccountEmail,
+                    onValueChange = {
+                        onEdit(provider.copy(serviceAccountEmail = it.trim()))
+                    },
+                    label = {
+                        Text(stringResource(id = R.string.setting_provider_page_service_account_email))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = provider.privateKey,
+                    onValueChange = {
+                        onEdit(provider.copy(privateKey = it.trim()))
+                    },
+                    label = {
+                        Text(stringResource(id = R.string.setting_provider_page_private_key))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 6,
+                    minLines = 3,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+                )
+                OutlinedTextField(
+                    value = provider.location,
+                    onValueChange = {
+                        onEdit(provider.copy(location = it.trim()))
+                    },
+                    label = {
+                        // https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#available-regions
+                        Text(stringResource(id = R.string.setting_provider_page_location))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = provider.projectId,
+                    onValueChange = {
+                        onEdit(provider.copy(projectId = it.trim()))
+                    },
+                    label = {
+                        Text(stringResource(id = R.string.setting_provider_page_project_id))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    } else {
+        // OAuth mode skeleton — buttons stub until commit #3 lands the real flow.
+        Text(
+            text = stringResource(R.string.setting_provider_page_gemini_oauth_warning),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = checkNotNull(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl()),
+            onValueChange = {},
+            label = {
+                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = false,
+        )
+        Text(
+            text = stringResource(R.string.setting_provider_page_gemini_oauth_not_signed_in),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        // Button is disabled while the OAuth implementation is pending (commit #3).
+        // Reviewer flag M3: an enabled button that just toasts "implementation pending"
+        // invites repeat-clicks; disable + a "Coming soon" supporting line is more
+        // honest. The toaster is still kept around for the autoStart auto-fire path
+        // below — that fires once on entry, not on user action, so the same anti-
+        // repeat-click argument doesn't apply.
+        OutlinedButton(
+            onClick = {},
+            enabled = false,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.setting_provider_page_gemini_oauth_login))
+        }
+        Text(
+            text = stringResource(R.string.setting_provider_page_gemini_oauth_pending_toast),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.setting_provider_page_gemini_oauth_tos),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // Same one-shot pattern as the OpenAI side: LaunchedEffect keyed only on
+        // provider.id, autoStartOAuth read via rememberUpdatedState so the parent's
+        // post-consume reset doesn't cancel this coroutine. Stub for now — commit #3
+        // will replace the toast with the actual OAuth flow.
+        val latestAutoStart by rememberUpdatedState(autoStartOAuth)
+        val latestOnAutoStartConsumed by rememberUpdatedState(onAutoStartConsumed)
+        LaunchedEffect(provider.id) {
+            if (
+                latestAutoStart &&
+                provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH
+            ) {
+                latestOnAutoStartConsumed()
+                toaster.show(oauthPendingToast, type = ToastType.Info)
+            }
         }
     }
 }

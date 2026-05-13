@@ -36,8 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.SlidersHorizontal
-import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.GoogleAuthMode
 import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
@@ -49,7 +49,6 @@ import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
-import me.rerere.rikkahub.ui.context.LocalToaster
 import kotlin.uuid.Uuid
 
 /**
@@ -83,8 +82,6 @@ fun ProviderTemplatePickerSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
-    val toaster = LocalToaster.current
-    val geminiPendingToast = stringResource(R.string.setting_provider_page_template_oauth_gemini_pending_toast)
 
     val bundledTemplates = remember(existingProviderIds) {
         DEFAULT_PROVIDERS.filter { it.id !in existingProviderIds }
@@ -152,25 +149,23 @@ fun ProviderTemplatePickerSheet(
                         name = stringResource(R.string.setting_provider_page_template_oauth_codex_title),
                         subtitle = stringResource(R.string.setting_provider_page_template_oauth_codex_subtitle),
                         iconName = "OpenAI",
-                        tagText = "OAuth",
+                        tagText = stringResource(R.string.setting_provider_page_template_oauth_tag),
                         onClick = { closeAndPick(buildCodexOAuthInitial(), true) },
                     )
                 }
                 item(key = "oauth-gemini") {
-                    // Placeholder row for the upcoming "Sign in with Google" feature.
-                    // Commit #2 wires up GoogleAuthMode + ProviderConfigureGoogle, commit
-                    // #3 lands the loopback / PKCE OAuth implementation, commit #4 hooks
-                    // the cloudcode-pa v1internal endpoint. Until then the row is dimmed
-                    // and clicking it only shows a "coming soon" toast — we do NOT create
-                    // a blank Google provider, because the label says "no API key" and a
-                    // surprise API-key form would be a UX lie (reviewer flag M2).
+                    // Commit #2: the row is no longer a dimmed placeholder — it builds a
+                    // pre-configured Google provider with authMode = GEMINI_CODE_ASSIST_OAUTH
+                    // and asks the editor to auto-start the OAuth flow on first composition.
+                    // ProviderConfigureGoogle's LaunchedEffect currently stubs the login (toasts
+                    // "implementation pending"); commit #3 will replace that stub with the real
+                    // loopback HTTP server + PKCE + token exchange.
                     TemplateRow(
                         name = stringResource(R.string.setting_provider_page_template_oauth_gemini_title),
                         subtitle = stringResource(R.string.setting_provider_page_template_oauth_gemini_subtitle),
                         iconName = "Gemini",
-                        tagText = stringResource(R.string.setting_provider_page_template_oauth_gemini_pending_tag),
-                        dimmed = true,
-                        onClick = { toaster.show(geminiPendingToast, type = ToastType.Info) },
+                        tagText = stringResource(R.string.setting_provider_page_template_oauth_tag),
+                        onClick = { closeAndPick(buildGeminiOAuthInitial(), true) },
                     )
                 }
 
@@ -234,6 +229,27 @@ private fun buildCodexOAuthInitial(): ProviderSetting.OpenAI = ProviderSetting.O
     useResponseApi = true,
     authMode = OpenAIAuthMode.CODEX_OAUTH,
     brand = OpenAIBrand.OPENAI,
+)
+
+/**
+ * Pre-configured Google provider used by the "Sign in with Google" quick-start.
+ * Mirrors what ProviderConfigureGoogle's auth-mode segmented row does when switching
+ * to Gemini OAuth — pinned baseUrl to cloudcode-pa, vertexAI off, branded name, fresh
+ * UUID so it never collides with the default Gemini entry. Real OAuth flow lands in
+ * commit #3; this factory only stamps the provider so the editor opens already in
+ * OAuth mode.
+ */
+private fun buildGeminiOAuthInitial(): ProviderSetting.Google = ProviderSetting.Google(
+    id = Uuid.random(),
+    name = "Gemini OAuth",
+    baseUrl = GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl()!!,
+    apiKey = "",
+    // The segmented-row OAuth onClick branch explicitly force-offs these for symmetry
+    // with the type-switch path; mirror that here so the factory and the switch path
+    // produce identical providers byte-for-byte (reviewer flag L1).
+    vertexAI = false,
+    useServiceAccount = false,
+    authMode = GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH,
 )
 
 @Composable

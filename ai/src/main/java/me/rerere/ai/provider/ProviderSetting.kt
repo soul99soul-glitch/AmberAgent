@@ -13,6 +13,49 @@ data class BalanceOption(
     val resultPath: String = "data.total_usage", // 余额获取JSON路径
 )
 
+/**
+ * Auth mode for [ProviderSetting.Google]. Mirrors [OpenAIAuthMode]'s "API key vs managed
+ * OAuth" split so the editor UI is symmetric across brands.
+ *
+ *  - API_KEY               : user pastes a Generative Language API key (free tier or
+ *                            paid Vertex API key) into the existing `apiKey` field.
+ *                            All existing Google-related fields stay editable —
+ *                            including the existing `vertexAI` and `useServiceAccount`
+ *                            sub-toggles, which currently live INSIDE API_KEY rather
+ *                            than as first-class enum values. If we ever want Vertex
+ *                            AI / Service Account as standalone authModes the schema
+ *                            migration would have to map old `vertexAI=true` rows to
+ *                            the new enum constants on read.
+ *  - GEMINI_CODE_ASSIST_OAUTH : "Sign in with Google" picker route. Routes calls through
+ *                            cloudcode-pa.googleapis.com (Gemini Code Assist for
+ *                            Individuals free tier — same backend gemini-cli uses).
+ *                            Token lives in GoogleGeminiAuthStore, baseUrl is pinned
+ *                            via [fixedBaseUrl]; apiKey / vertexAI / service-account
+ *                            fields are hidden by the editor and scrubbed on mode entry.
+ */
+@Serializable
+enum class GoogleAuthMode {
+    @SerialName("api_key")
+    API_KEY,
+
+    @SerialName("gemini_code_assist_oauth")
+    GEMINI_CODE_ASSIST_OAUTH,
+}
+
+/**
+ * Fixed base URL for OAuth-managed Google auth modes. Returns null for API_KEY (where
+ * the user-editable baseUrl owns the choice). Used by the picker's Gemini OAuth quick-
+ * start factory and ProviderConfigureGoogle's segmented mode switch so the same URL
+ * literal isn't duplicated across both call sites.
+ */
+fun GoogleAuthMode.fixedBaseUrl(): String? = when (this) {
+    GoogleAuthMode.API_KEY -> null
+    // gemini-cli reaches its free-tier endpoint at this base; the actual paths are
+    // v1internal:loadCodeAssist / v1internal:onboardUser / v1internal:streamGenerateContent
+    // — the provider layer appends those when it knows it's running in OAuth mode.
+    GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> "https://cloudcode-pa.googleapis.com"
+}
+
 @Serializable
 enum class OpenAIAuthMode {
     @SerialName("api_key")
@@ -201,6 +244,13 @@ sealed class ProviderSetting {
         var serviceAccountEmail: String = "", // only for vertex AI service account
         var location: String = "us-central1", // only for vertex AI service account
         var projectId: String = "", // only for vertex AI service account
+        /**
+         * Selects between API_KEY (existing behaviour, all current Google fields apply)
+         * and GEMINI_CODE_ASSIST_OAUTH (token-managed, baseUrl pinned to cloudcode-pa,
+         * apiKey / vertexAI / service-account fields hidden). Old persisted JSON missing
+         * this field deserializes to API_KEY so existing Google providers keep working.
+         */
+        var authMode: GoogleAuthMode = GoogleAuthMode.API_KEY,
     ) : ProviderSetting() {
         override fun addModel(model: Model): ProviderSetting {
             return copy(models = models + model)

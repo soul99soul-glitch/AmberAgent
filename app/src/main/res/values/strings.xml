@@ -905,9 +905,8 @@
   <string name="setting_provider_page_template_oauth_codex_title">Sign in with ChatGPT</string>
   <string name="setting_provider_page_template_oauth_codex_subtitle">No API key — Codex backend</string>
   <string name="setting_provider_page_template_oauth_gemini_title">Sign in with Google</string>
-  <string name="setting_provider_page_template_oauth_gemini_subtitle">No API key — coming soon</string>
-  <string name="setting_provider_page_template_oauth_gemini_pending_tag">Soon</string>
-  <string name="setting_provider_page_template_oauth_gemini_pending_toast">Gemini OAuth lands in the next update</string>
+  <string name="setting_provider_page_template_oauth_gemini_subtitle">No API key — Gemini Code Assist</string>
+  <string name="setting_provider_page_template_oauth_tag">OAuth</string>
   <string name="setting_provider_page_template_section_bundled">Built-in brands</string>
   <string name="setting_provider_page_template_section_custom">Custom</string>
   <string name="setting_provider_page_template_custom_blank_title">Custom Provider</string>
@@ -1016,6 +1015,15 @@
   <string name="setting_provider_page_tool">Tool</string>
   <string name="setting_provider_page_vertex_ai">Vertex AI</string>
   <string name="setting_provider_page_use_service_account">Use Service Account</string>
+  <!-- Gemini OAuth (Sign in with Google) - editor-side strings paired with GoogleAuthMode. -->
+  <string name="setting_provider_page_google_auth_mode">Authentication</string>
+  <string name="setting_provider_page_google_auth_api_key">API Key</string>
+  <string name="setting_provider_page_google_auth_oauth">Gemini OAuth</string>
+  <string name="setting_provider_page_gemini_oauth_warning">Experimental Gemini Code Assist OAuth channel. Routes calls through cloudcode-pa.googleapis.com (free individual tier). Reuses the public gemini-cli client_id and may violate Google\'s third-party-use policy — Google can revoke access at any time.</string>
+  <string name="setting_provider_page_gemini_oauth_login">Sign in with Google</string>
+  <string name="setting_provider_page_gemini_oauth_not_signed_in">Not signed in. Tap above to start the OAuth flow.</string>
+  <string name="setting_provider_page_gemini_oauth_tos">By signing in you accept that this client uses a public OAuth client_id and that Google may treat third-party clients as out-of-policy.</string>
+  <string name="setting_provider_page_gemini_oauth_pending_toast">Gemini OAuth implementation is still in progress; try again after the next update.</string>
   <string name="setting_tts_page_add">Add</string>
   <string name="setting_tts_page_add_provider">Add TTS Provider</string>
   <string name="setting_tts_page_add_provider_content_description">Add TTS Provider</string>
