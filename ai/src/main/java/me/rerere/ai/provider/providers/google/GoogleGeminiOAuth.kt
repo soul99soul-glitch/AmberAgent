@@ -354,9 +354,8 @@ fun defaultGeminiOAuthModelList(): List<me.rerere.ai.provider.Model> {
 }
 
 private val GEMINI_OAUTH_FALLBACK_MODEL_IDS = listOf(
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
+    "gemini-3.1-pro",
+    "gemini-3.1-flash",
+    "gemini-3-pro",
+    "gemini-3-flash",
 )
