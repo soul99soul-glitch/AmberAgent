@@ -622,39 +622,47 @@ fun defaultGeminiOAuthModelList(): List<me.rerere.ai.provider.Model> {
     }
 }
 
-// Model IDs cloudcode-pa actually recognizes, ordered by likelihood of working under
-// a typical user's account. Verified against gemini-cli's `packages/core/src/config/
-// models.ts` on main + real-device dogfooding:
-//   - 3.x preview family is the only thing that reliably serves on accounts
-//     stuck in the "ghost project / standard-tier" state (gemini-cli issues
-//     #22648 / #24937 et al.). Putting these first means the editor's auto-pick
-//     gives the user something that actually works on first login.
-//   - 2.5 family is kept as fallback because non-ghost-project accounts
-//     (fresh Pro / fresh FREE tier) do see capacity for them.
-//   - 3.1 family the user explicitly asked for earlier was removed:
-//     cloudcode-pa returns HTTP 404 "Requested entity was not found" for it
-//     because Code Assist hasn't released those IDs through this endpoint.
-//     They're in OBSOLETE_GEMINI_OAUTH_MODEL_IDS so re-login auto-replaces them.
-// Order matters: first entry is the "soft default" the editor uses when
-// provider.models was empty before login.
+// Model IDs cloudcode-pa actually serves under typical (ghost-project / standard-tier)
+// OAuth accounts, ordered by recency. Verified end-to-end on device:
+//   - 3.1 preview pair is the newest tier of preview the Code Assist endpoint
+//     currently hands out; soft default.
+//   - 3 preview pair confirmed working on the same account state.
+//   - 2.5 family removed: it 429s with MODEL_CAPACITY_EXHAUSTED on accounts that
+//     Google has bound to a ghost cloudaicompanionProject (gemini-cli issues
+//     #22648 / #24937 et al.). Anyone with a fresh project can re-add them by hand
+//     via the editor's "+ add model" — keeping them out of the auto-seed avoids the
+//     "I clicked refresh and got a wall of 404/429 models" first-run experience.
 private val GEMINI_OAUTH_FALLBACK_MODEL_IDS = listOf(
+    "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
 )
 
-/** Model IDs we've previously shipped as defaults that cloudcode-pa actually rejects with
- *  404. Used by the editor's re-login path: if the user's current model list is
- *  entirely composed of these dead IDs (i.e. it's the result of an earlier wrong seed,
- *  not a deliberate user curation), it's safe to overwrite. Anything else — user-added
- *  models, or even a single "good" model in the list — is preserved.  */
+/** Model IDs we've previously shipped as defaults that the current cloudcode-pa fallback
+ *  list considers stale — either because the endpoint outright rejects them (404 for the
+ *  GA-named 3.x family, 404 for the legacy 2.0 family) or because the practical user base
+ *  for OAuth chat is dominated by ghost-project accounts where they 429 every time (2.5
+ *  family). Used by the editor's re-login path: if the user's current model list is
+ *  entirely composed of these IDs (i.e. it's the leftover from an earlier APK's seed,
+ *  not a deliberate user curation), it's safe to overwrite with the current default set.
+ *  A single user-added model that isn't on this list is enough to opt-out of migration. */
 val OBSOLETE_GEMINI_OAUTH_MODEL_IDS: Set<String> = setOf(
+    // 3.x GA names not exposed via cloudcode-pa
     "gemini-3.1-pro",
     "gemini-3.1-flash",
     "gemini-3-pro",
     "gemini-3-flash",
+    // 3.1-flash-preview was briefly auto-seeded but real-device dogfooding shows
+    // cloudcode-pa returns 404 for it. Only the pro variant of the 3.1 preview
+    // is live so far.
+    "gemini-3.1-flash-preview",
+    // 2.0 family — long since retired upstream
     "gemini-2.0-flash",
     "gemini-2.0-flash-exp",
+    // 2.5 family — exists on cloudcode-pa but 429s on ghost-project accounts which
+    // covers ~all OAuth users we've seen so far. Fresh Pro / FREE tier accounts can
+    // still add them manually via "+ add model" in the editor.
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
 )
