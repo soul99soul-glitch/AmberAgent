@@ -31,6 +31,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -66,7 +67,7 @@ class SyncArchiveManager(
         return try {
             buildPayload(settings, request.mode, payloadFile)
             val params = crypto.newEncryptionParams()
-            crypto.encrypt(payloadFile, encryptedPayloadFile, request.passphrase, params)
+            val encryptResult = crypto.encrypt(payloadFile, encryptedPayloadFile, request.passphrase, params)
             val manifest = SyncManifest(
                 appVersionName = BuildConfig.VERSION_NAME,
                 appVersionCode = BuildConfig.VERSION_CODE.toLong(),
@@ -76,9 +77,9 @@ class SyncArchiveManager(
                 remoteRevision = settings.syncSettings.lastRemoteRevision,
                 kdf = params.kdf,
                 cipher = params.cipher,
-                payloadSha256 = crypto.sha256(encryptedPayloadFile),
+                payloadSha256 = encryptResult.sha256,
             )
-            zipArchive(manifest, encryptedPayloadFile, archiveFile)
+            zipArchive(manifest, encryptedPayloadFile, encryptResult, archiveFile)
             archiveFile
         } catch (error: Throwable) {
             archiveFile.delete()
@@ -348,12 +349,29 @@ class SyncArchiveManager(
                 .filter { it.isFile }
                 .forEach { file ->
                     val relativePath = file.relativeTo(context.filesDir).invariantSeparatorsPath
-                    writeFileEntry(zip, "files/$relativePath", file)
+                    writeFileTreeEntry(zip, "files/$relativePath", file)
                     count += 1
                     bytes += file.length()
                 }
         }
         return SyncDatasetSummary("files", recordCount = count, byteCount = bytes)
+    }
+
+    private fun writeFileTreeEntry(zip: ZipOutputStream, name: String, file: File) {
+        // Images, audio, video, and pre-compressed archives carry incompressible
+        // payloads — DEFLATE just spends CPU for no gain. STORE them straight; the
+        // extra CRC32 pass is still cheaper than a wasted DEFLATE pass.
+        if (shouldStoreUncompressed(name)) {
+            writeStoredFileEntry(
+                zip = zip,
+                name = name,
+                file = file,
+                sizeBytes = file.length(),
+                crc32 = computeCrc32(file),
+            )
+        } else {
+            writeFileEntry(zip, name, file)
+        }
     }
 
     private fun replaceFileTreesFromStage(stageRoot: File) {
@@ -404,12 +422,25 @@ class SyncArchiveManager(
         snapshot.openAICodexOAuth?.let { openAICodexAuthStore.restoreRawJsonFromSync(it) }
     }
 
-    private fun zipArchive(manifest: SyncManifest, encryptedPayloadFile: File, archiveFile: File) {
+    private fun zipArchive(
+        manifest: SyncManifest,
+        encryptedPayloadFile: File,
+        encryptResult: EncryptResult,
+        archiveFile: File,
+    ) {
         archiveFile.parentFile?.mkdirs()
         ZipOutputStream(FileOutputStream(archiveFile).buffered()).use { zip ->
             // Put the small manifest first so preview can read metadata without inflating the payload entry first.
             writeTextEntry(zip, SYNC_MANIFEST_ENTRY, json.encodeToString(manifest))
-            writeFileEntry(zip, SYNC_PAYLOAD_ENTRY, encryptedPayloadFile)
+            // payload.enc is AES-GCM ciphertext; DEFLATE would burn CPU for zero gain.
+            // We already have size + CRC32 from the encrypt pass, so STORE it straight.
+            writeStoredFileEntry(
+                zip = zip,
+                name = SYNC_PAYLOAD_ENTRY,
+                file = encryptedPayloadFile,
+                sizeBytes = encryptResult.sizeBytes,
+                crc32 = encryptResult.crc32,
+            )
         }
     }
 
@@ -487,6 +518,42 @@ class SyncArchiveManager(
         zip.closeEntry()
     }
 
+    private fun writeStoredFileEntry(
+        zip: ZipOutputStream,
+        name: String,
+        file: File,
+        sizeBytes: Long,
+        crc32: Long,
+    ) {
+        val entry = ZipEntry(name).apply {
+            method = ZipEntry.STORED
+            size = sizeBytes
+            compressedSize = sizeBytes
+            crc = crc32
+        }
+        zip.putNextEntry(entry)
+        file.inputStream().buffered().use { input -> input.copyTo(zip) }
+        zip.closeEntry()
+    }
+
+    private fun computeCrc32(file: File): Long {
+        val crc = CRC32()
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) crc.update(buffer, 0, read)
+            }
+        }
+        return crc.value
+    }
+
+    private fun shouldStoreUncompressed(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return ext in STORE_UNCOMPRESSED_EXTENSIONS
+    }
+
     private fun writeBytesEntry(zip: ZipOutputStream, name: String, bytes: ByteArray) {
         zip.putNextEntry(ZipEntry(name))
         zip.write(bytes)
@@ -502,6 +569,16 @@ class SyncArchiveManager(
         private const val SETTINGS_ENTRY = "settings.json"
         private const val SECRETS_ENTRY = "secrets.json"
         private const val AMBER_FILE_PREFIX = "amber-file://"
+
+        // Pre-compressed/lossy formats: DEFLATE has no headroom and just burns CPU.
+        // Listed by extension so the check stays cheap and stable across content
+        // types we cannot otherwise detect from a File handle.
+        private val STORE_UNCOMPRESSED_EXTENSIONS = setOf(
+            "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif",
+            "mp3", "m4a", "aac", "ogg", "opus", "flac",
+            "mp4", "m4v", "mov", "webm", "mkv",
+            "pdf", "zip", "gz", "tgz", "7z", "rar", "xz", "br", "zst",
+        )
 
         val SYNC_TABLES = listOf(
             "conversationentity",

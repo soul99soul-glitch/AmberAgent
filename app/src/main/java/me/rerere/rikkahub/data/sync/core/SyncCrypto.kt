@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.zip.CRC32
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
@@ -43,16 +44,38 @@ class SyncCrypto {
         }
     }
 
-    fun encrypt(inputFile: File, outputFile: File, passphrase: String, params: SyncEncryptionParams) {
+    fun encrypt(
+        inputFile: File,
+        outputFile: File,
+        passphrase: String,
+        params: SyncEncryptionParams,
+    ): EncryptResult {
         val cipher = cipher(Cipher.ENCRYPT_MODE, passphrase, params.kdf, params.cipher)
         outputFile.parentFile?.mkdirs()
-        inputFile.inputStream().buffered().use { input ->
-            outputFile.outputStream().buffered().use { output ->
-                CipherOutputStream(output, cipher).use { cipherOut ->
-                    input.copyTo(cipherOut)
+        val digest = MessageDigest.getInstance("SHA-256")
+        val crc = CRC32()
+        var size = 0L
+        inputFile.inputStream().buffered().use { rawIn ->
+            CipherInputStream(rawIn, cipher).use { cipherIn ->
+                outputFile.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = cipherIn.read(buffer)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        output.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
+                        crc.update(buffer, 0, read)
+                        size += read
+                    }
                 }
             }
         }
+        return EncryptResult(
+            sha256 = digest.digest().joinToString("") { "%02x".format(it) },
+            crc32 = crc.value,
+            sizeBytes = size,
+        )
     }
 
     fun decrypt(bytes: ByteArray, passphrase: String, manifest: SyncManifest): ByteArray {
@@ -133,6 +156,12 @@ class SyncCrypto {
 data class SyncEncryptionParams(
     val kdf: SyncKdfInfo,
     val cipher: SyncCipherInfo,
+)
+
+data class EncryptResult(
+    val sha256: String,
+    val crc32: Long,
+    val sizeBytes: Long,
 )
 
 internal fun ByteArray.toBase64(): String =
