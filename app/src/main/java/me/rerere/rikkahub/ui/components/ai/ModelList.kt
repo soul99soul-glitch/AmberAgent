@@ -69,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.GoogleAuthMode
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -863,4 +864,40 @@ private fun ProviderSetting.isCodexOAuthProvider(): Boolean {
 
 private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
     return isCodexOAuthProvider() && model.isCodexOAuthReviewModel()
+}
+
+/**
+ * True when the provider has enough credentials to actually serve a request.
+ *
+ * Used by the image-generation model picker so that auto-seeded entries
+ * (gpt-image-2 in the default OpenAI provider, gemini-3.1-flash-image-preview
+ * in the default Gemini provider) stay hidden until the user has filled in
+ * an API key — without this, a fresh install shows "Nano Banana 2" as a
+ * pickable option even though selecting it would 401 on every call.
+ *
+ * Chat / OCR / translation pickers deliberately don't apply this filter
+ * (those have always shown models from key-less providers, presumably for
+ * exploratory configuration).
+ */
+internal fun ProviderSetting.hasUsableAuth(): Boolean {
+    if (!enabled) return false
+    return when (this) {
+        is ProviderSetting.OpenAI -> when (authMode) {
+            // OAuth modes use a separately-managed token; the user-typed key
+            // field is irrelevant for these.
+            OpenAIAuthMode.CODEX_OAUTH -> true
+            else -> apiKey.isNotBlank()
+        }
+        is ProviderSetting.Google -> when (authMode) {
+            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> true
+            GoogleAuthMode.API_KEY -> when {
+                apiKey.isNotBlank() -> true
+                // Vertex AI + service-account path uses a private-key blob
+                // instead of an API key. Treat that as configured too.
+                vertexAI && useServiceAccount && privateKey.isNotBlank() -> true
+                else -> false
+            }
+        }
+        is ProviderSetting.Claude -> apiKey.isNotBlank()
+    }
 }

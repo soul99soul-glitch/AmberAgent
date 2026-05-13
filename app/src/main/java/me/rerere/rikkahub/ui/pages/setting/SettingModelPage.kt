@@ -76,6 +76,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import me.rerere.rikkahub.ui.components.ai.hasUsableAuth
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
@@ -209,7 +210,12 @@ private fun DefaultImageGenerationModelSetting(
         ModelPickerRow(
             description = null,
             modelId = settings.imageGenerationModelId,
-            providers = settings.providers,
+            // Hide auto-seeded image models from providers the user hasn't
+            // actually configured yet — without this filter, fresh installs
+            // see "Nano Banana 2" / "gpt-image-2" as pickable options even
+            // when the corresponding Gemini / OpenAI provider has no API
+            // key wired up, which would 401 on every generation.
+            providers = settings.providers.filter { it.hasUsableAuth() },
             // Filter by IMAGE so the picker only shows gpt-image-2 / Nano
             // Banana / Codex Image — not chat models. Keep allowClear so the
             // user can opt out globally (assistants still resolve via their
