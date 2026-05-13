@@ -31,6 +31,14 @@ enum class VisualRoute {
     IMAGE_GEN,
 
     /**
+     * Strong "this is a multi-slide presentation" signal — emit show-widget
+     * renderer/spec. Different prompt from DIAGRAM_WIDGET because the
+     * renderer path explicitly DOES want a renderer/spec block, not an
+     * inline SVG.
+     */
+    SLIDES,
+
+    /**
      * Visual intent detected but neither side has a clean signal ("画一只猫",
      * "make me a picture of X"). Give the model the routing criteria and let
      * it decide — including asking the user a clarifying question when truly
@@ -52,7 +60,7 @@ object GenerativeUiPlanner {
         val latestUserText = latestUserText(messages)
         if (latestUserText.isBlank()) return ""
 
-        val route = classifyRoute(latestUserText, hasImageGenTool)
+        val route = classifyRoute(latestUserText)
         val toolMediated = isToolMediatedRequest(latestUserText)
         return buildString {
             appendLine()
@@ -66,7 +74,7 @@ object GenerativeUiPlanner {
                     } else {
                         appendLine("The user asked for a structural diagram / chart / schematic. Emit a concise show-widget SVG block to answer.")
                         appendLine("Start with one short sentence, then output the show-widget block immediately.")
-                        appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart or slides.")
+                        appendLine("Prefer widget_code SVG for streaming; avoid renderer/spec unless the answer truly needs an interactive chart.")
                         appendLine("Keep the SVG inside its viewBox with 24px padding; do not draw outside the card.")
                     }
                 }
@@ -82,6 +90,12 @@ object GenerativeUiPlanner {
                         appendLine("The user asked for a photographic / painted image but no image-generation model is configured.")
                         appendLine("Briefly tell them to set one in Settings → 模型 → 生图模型 (or per-assistant), then offer a quick SVG sketch as a temporary alternative if it would still be useful.")
                     }
+                }
+
+                VisualRoute.SLIDES -> {
+                    appendLine("The user asked for a multi-slide presentation / deck. Emit a show-widget RENDERER (slides spec) — NOT an inline SVG.")
+                    appendLine("Pick a sensible deck length (4-8 slides) unless the user specified a count. Use the slide spec format the renderer expects.")
+                    appendLine("Keep slide content concise; each slide is one idea.")
                 }
 
                 VisualRoute.AMBIGUOUS_VISUAL -> {
@@ -127,7 +141,11 @@ object GenerativeUiPlanner {
     fun shouldGenerateDirectWidgetWithoutTools(setting: GenerativeUiSetting, messages: List<UIMessage>): Boolean {
         if (!setting.enabled) return false
         val text = latestUserText(messages)
-        if (classifyRoute(text, hasImageGenTool = false) != VisualRoute.DIAGRAM_WIDGET) return false
+        // Tool catalog is suppressed only for confident diagram / slides
+        // intent — image-gen and ambiguous-visual paths need the tool list
+        // intact so the model can call generate_image when appropriate.
+        val route = classifyRoute(text)
+        if (route != VisualRoute.DIAGRAM_WIDGET && route != VisualRoute.SLIDES) return false
         if (isToolMediatedRequest(text)) return false
         val lower = text.lowercase()
         val needsExternalContext = listOf(
@@ -150,18 +168,18 @@ object GenerativeUiPlanner {
      *  1. Layer 0 — explicit slash-command escape hatch (the QuickMessage
      *     templates prefix `[ROUTE:image]` / `[ROUTE:diagram]` / `[ROUTE:slides]`).
      *  2. Layer 1 — strong-signal keyword match on either side.
-     *  3. Layer 2 — style-modifier regex ("X 风格", "in the style of X").
+     *  3. Layer 2 — style-modifier regex ("油画风格", "in the style of X").
      *  4. Layer 3 — visual verb detected but no clear medium → AMBIGUOUS_VISUAL.
      *  5. Layer 4 — no visual signal at all → PROSE.
      */
-    internal fun classifyRoute(text: String, hasImageGenTool: Boolean): VisualRoute {
+    internal fun classifyRoute(text: String): VisualRoute {
         val lower = text.lowercase()
 
         // Layer 0: explicit slash-command route tags. Trumps everything.
         when {
             "[route:image]" in lower -> return VisualRoute.IMAGE_GEN
             "[route:diagram]" in lower -> return VisualRoute.DIAGRAM_WIDGET
-            "[route:slides]" in lower -> return VisualRoute.DIAGRAM_WIDGET  // slides go through widget renderer path
+            "[route:slides]" in lower -> return VisualRoute.SLIDES
         }
 
         val imageGenStrong = IMAGE_GEN_STRONG_KEYWORDS.any { it in lower } ||
@@ -171,16 +189,25 @@ object GenerativeUiPlanner {
             STYLE_MODIFIER_REGEX.containsMatchIn(lower)
         val diagramStrong = DIAGRAM_STRONG_KEYWORDS.any { it in lower } ||
             DIAGRAM_STRONG_REGEX.containsMatchIn(lower)
+        val slidesStrong = SLIDES_STRONG_KEYWORDS.any { it in lower } ||
+            SLIDES_STRONG_REGEX.containsMatchIn(lower)
+
+        // Slides win over diagram/image when explicitly named — "5 张幻灯片"
+        // means a deck, not an SVG diagram, even if a diagram word slipped
+        // in. Image-gen still wins over slides if a paint-style word is
+        // present ("油画风格的演示稿" reads as a single art piece).
+        if (slidesStrong && !imageGenStrong) return VisualRoute.SLIDES
 
         return when {
-            // Both fired → trust the more specific signal. Diagram words are
-            // usually surface terms ("流程图"); image-gen words are stylistic
-            // ("油画风格"). When both, prefer image-gen ONLY if a style modifier
-            // is present (someone wrote "请画一张油画风格的流程图" — they want
-            // an art-style depiction, not a clean diagram).
-            imageGenStrong && diagramStrong ->
-                if (STYLE_MODIFIER_REGEX.containsMatchIn(lower)) VisualRoute.IMAGE_GEN
-                else VisualRoute.DIAGRAM_WIDGET
+            // Both diagram + image hit → diagram word almost always names
+            // the artifact ("流程图"), and image words are usually style
+            // modifiers ("油画风格"). User probably wants a structurally
+            // correct diagram WITH that style. Keep DIAGRAM_WIDGET unless
+            // there's no diagrammatic surface noun left when the style word
+            // is removed — too expensive to compute, so we default to the
+            // "structure first" interpretation. Reviewer flagged this as
+            // a defensible choice either way; ship the conservative default.
+            imageGenStrong && diagramStrong -> VisualRoute.DIAGRAM_WIDGET
 
             diagramStrong -> VisualRoute.DIAGRAM_WIDGET
             imageGenStrong -> VisualRoute.IMAGE_GEN
@@ -194,13 +221,6 @@ object GenerativeUiPlanner {
 
             else -> VisualRoute.PROSE
         }
-    }
-
-    /** Compatibility shim — old `classify()` reduces 4 states to 2. Kept for
-     *  any external callers that might still poke at it. */
-    internal fun classify(text: String): WidgetUse = when (classifyRoute(text, hasImageGenTool = false)) {
-        VisualRoute.DIAGRAM_WIDGET -> WidgetUse.ENCOURAGE
-        VisualRoute.IMAGE_GEN, VisualRoute.AMBIGUOUS_VISUAL, VisualRoute.PROSE -> WidgetUse.DISCOURAGE
     }
 
     internal fun isToolMediatedRequest(text: String): Boolean {
@@ -242,12 +262,15 @@ object GenerativeUiPlanner {
         "类图", "状态图", "ER 图", "er图", "用例图", "活动图", "部署图",
         "树状图", "网络拓扑图", "拓扑图", "依赖图", "调用图", "数据流图",
         "甘特图", "燃尽图", "象限图",
+        // Folk-equivalents the reviewer flagged as missing
+        "家族树", "家谱图", "时间线", "时间轴", "鱼骨图", "韦恩图",
         // English — structural visualization terms
         "flowchart", "flow chart", "sequence diagram", "class diagram",
         "state diagram", "state machine", "mind map", "mindmap",
         "er diagram", "uml", "wireframe", "schematic", "swimlane",
         "org chart", "tree diagram", "dependency graph", "call graph",
-        "gantt", "burndown", "topology",
+        "gantt", "burndown", "topology", "family tree", "timeline",
+        "fishbone", "venn diagram",
     )
     private val DIAGRAM_STRONG_REGEX = Regex(
         """\b(diagram|flowchart|schematic|wireframe|mindmap)\b""",
@@ -262,28 +285,33 @@ object GenerativeUiPlanner {
      *   3. Aesthetic-style words
      *   4. Use-case nouns (poster / wallpaper / cover)
      *   5. Subject + visual-form compounds (风景图 / 风景画 / landscape)
+     *
+     * The "soft" terms `插图 / 封面 / 速写` were dropped after review — too
+     * many FPs (`代码示例插图`, `PPT 封面`, `速记速写`). Users wanting an art
+     * illustration still hit one of the more specific terms (`插画`, `cover art`)
+     * or fall through to AMBIGUOUS where the model can decide.
      */
     private val IMAGE_GEN_STRONG_KEYWORDS = listOf(
         // 1. Medium / technique
-        "照片", "摄影", "油画", "水彩", "水墨", "丙烯", "素描", "速写",
+        "照片", "摄影", "油画", "水彩", "水墨", "丙烯",
         "工笔", "国画", "壁画", "版画", "蜡笔",
         "photograph", "photo of", "oil painting", "watercolor", "watercolour",
         "ink painting", "acrylic", "sketch of", "render of", "3d render",
         // 2. Realism / fidelity
-        "写实", "写实风", "超写实", "高清照片", "真实感",
+        "写实风", "超写实", "高清照片", "真实感",
         "photorealistic", "photoreal", "hyperrealistic", "lifelike",
-        // 3. Aesthetic style
-        "动漫风", "动漫风格", "二次元", "二次元风格", "卡通", "卡通风格",
-        "赛博朋克", "蒸汽朋克", "国风", "古风", "未来主义",
+        // 3. Aesthetic style (always paired with style noun, not bare)
+        "动漫风", "动漫风格", "二次元", "二次元风格", "卡通风格",
+        "赛博朋克", "蒸汽朋克",
         "anime style", "manga style", "ghibli", "cyberpunk", "steampunk",
         "pixar", "disney style", "fantasy art",
         // 4. Use-case nouns
-        "海报", "封面", "壁纸", "桌面", "概念图", "概念稿", "原画", "插画",
-        "插图", "插图配图", "配图", "宣传图", "宣传画",
+        "海报", "壁纸", "桌面壁纸", "概念图", "概念稿", "原画", "插画",
+        "宣传画",
         "poster", "cover art", "wallpaper", "concept art", "concept design",
         "illustration", "key visual", "splash art",
         // 5. Subject + visual-form compounds
-        "风景图", "风景画", "肖像", "肖像画", "写真", "人像", "人物图",
+        "风景图", "风景画", "肖像画", "写真照", "人物画像",
         "landscape painting", "scenery", "portrait", "still life",
     )
     private val IMAGE_GEN_STRONG_REGEX = Regex(
@@ -292,23 +320,40 @@ object GenerativeUiPlanner {
     )
 
     /**
-     * Style modifier pattern — "X 风格 / X style / in the style of X / X-style".
-     * Matching this is a strong tell that the user wants a stylised image,
-     * even if the subject word is otherwise diagrammatic. Anchored loosely so
-     * "in the style of Studio Ghibli" matches without requiring the literal
-     * word "image".
+     * Style modifier pattern — only matches X where X is a known art-style
+     * word. Old regex `\S{1,16}风格` had real false-positive damage:
+     * `"学习风格"`, `"管理风格"`, `"他风格的笔记"` all got classified as image
+     * requests. Anchor strictly to a curated list of style nouns instead.
+     * `\bX-style\b` was a placeholder leak (literal X) — replaced with the
+     * English "in the style of X" form which is unambiguous.
      */
     private val STYLE_MODIFIER_REGEX = Regex(
-        """(?:\S{1,16}风格|in the style of\s+\S+|\bX-style\b|风格的)""",
+        """(?:(?:油画|水彩|水墨|工笔|国画|素描|动漫|二次元|卡通|赛博朋克|蒸汽朋克|国风|古风|未来主义|超写实|写实|概念|抽象|印象派|超现实|波普|涂鸦|蒸汽波|低多边形|3d|cg|c4d|blender|photorealistic|cartoon|anime|cyberpunk|steampunk|impressionist|surreal)风格|in the style of\s+\S+)""",
         RegexOption.IGNORE_CASE,
     )
 
-    /** Generic visual verbs that don't pin down medium. Match these last. */
+    /** Slide / deck / presentation terms — explicit multi-slide signal. */
+    private val SLIDES_STRONG_KEYWORDS = listOf(
+        "幻灯片", "ppt", "slide deck", "presentation deck", "演示文稿", "演示稿",
+    )
+    private val SLIDES_STRONG_REGEX = Regex(
+        """\b(slide\s*deck|presentation\s+deck|powerpoint)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
+     * Generic visual verbs that don't pin down medium. Match these last —
+     * everything here routes to AMBIGUOUS_VISUAL so the model can decide
+     * based on full context.
+     *
+     * `演示 / 汇报` were left in despite FP risk ("向领导汇报") because the
+     * downstream prompt asks the model to clarify before committing to a
+     * visual artifact — low harm.
+     */
     private val GENERIC_VISUAL_KEYWORDS = listOf(
         "画一下", "画一个", "画个", "画出", "画一张", "画一幅",
         "可视化", "做一张图", "做张图", "生成一张图", "生成张图",
-        "幻灯片", "ppt", "presentation", "slides", "slide deck", "slide",
-        "简报", "汇报", "演示",
+        "简报", "演示",
     )
     private val GENERIC_VISUAL_REGEX = Regex(
         """\b(draw|sketch|chart|graph|visualize|visualise|plot)\b""",
@@ -316,11 +361,3 @@ object GenerativeUiPlanner {
     )
 }
 
-/**
- * Legacy 2-state enum, kept for the internal compatibility shim only. New
- * code should use [VisualRoute].
- */
-enum class WidgetUse {
-    ENCOURAGE,
-    DISCOURAGE,
-}
