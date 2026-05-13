@@ -141,6 +141,7 @@ import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
@@ -1547,35 +1548,13 @@ private fun ChatListPreview(
             .padding(top = innerPadding.calculateTopPadding())
             .fillMaxSize(),
     ) {
-        // 搜索框
-        OutlinedTextField(
+        WorkspaceSearchField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = { Text(stringResource(R.string.history_page_search)) },
-            leadingIcon = {
-                Icon(
-                    imageVector = HugeIcons.Search01,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-            },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = "Clear",
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            },
-            singleLine = true,
-            shape = CircleShape,
-            maxLines = 1,
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            placeholder = stringResource(R.string.history_page_search),
         )
 
         // 消息预览
@@ -1592,47 +1571,61 @@ private fun ChatListPreview(
             ) { _, (originalIndex, node) ->
                 val message = node.currentMessage
                 val isUser = message.role == me.rerere.ai.core.MessageRole.USER
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (!isUser) Modifier.padding(end = 24.dp) else Modifier
-                        ),
-                    horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+                val workspace = workspaceColors()
+                // Notion-style flat preview row — no bubble, just a thin
+                // left-edge accent (blue for the user, green for assistant)
+                // plus subtle paper background with hairline border. The
+                // role-color block is 3dp wide so it reads as metadata, not
+                // as a heavy speech-bubble fill.
+                Surface(
+                    onClick = { onJumpToMessage(originalIndex) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    color = workspace.paper,
+                    contentColor = workspace.ink,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, workspace.hairline),
                 ) {
-                    Surface(
-                        shape = MaterialTheme.shapes.medium,
-                        color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
+                        androidx.compose.foundation.Canvas(
                             modifier = Modifier
-                                .clickable {
-                                    onJumpToMessage(originalIndex)
-                                }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .height(20.dp)
+                                .width(3.dp),
                         ) {
-                            val highlightColor = MaterialTheme.colorScheme.tertiaryContainer
-                            val highlightedText = remember(searchQuery, message) {
-                                val fullText = message.toText().trim().ifBlank { "[...]" }
-                                val messageText = extractMatchingSnippet(
-                                    text = fullText,
-                                    query = searchQuery
-                                )
-                                buildHighlightedText(
-                                    text = messageText,
-                                    query = searchQuery,
-                                    highlightColor = highlightColor
-                                )
-                            }
-                            Text(
-                                text = highlightedText,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                            drawRect(
+                                color = if (isUser) workspace.blue else workspace.green,
                             )
                         }
+                        Text(
+                            text = if (isUser) "你" else "AI",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = workspace.muted,
+                        )
+                        val highlightColor = workspace.amberContainer
+                        val highlightedText = remember(searchQuery, message) {
+                            val fullText = message.toText().trim().ifBlank { "[...]" }
+                            val messageText = extractMatchingSnippet(
+                                text = fullText,
+                                query = searchQuery
+                            )
+                            buildHighlightedText(
+                                text = messageText,
+                                query = searchQuery,
+                                highlightColor = highlightColor
+                            )
+                        }
+                        Text(
+                            text = highlightedText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
             }

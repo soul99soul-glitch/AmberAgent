@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -65,9 +66,9 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
-import me.rerere.rikkahub.ui.components.ui.Tag
-import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -138,42 +139,34 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Search bar
-            OutlinedTextField(
+            WorkspaceSearchField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text(stringResource(R.string.setting_provider_page_search_providers)) },
-                leadingIcon = {
-                    Icon(HugeIcons.Search01, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = CircleShape,
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                placeholder = stringResource(R.string.setting_provider_page_search_providers),
             )
-
 
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .imePadding(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
                 state = lazyListState,
             ) {
+                // Notion grouped-row pattern: every item shares one outer
+                // rounded hairline, internal 1dp gaps act as dividers.
+                val total = filteredProviders.size
                 lazyItems(filteredProviders, key = { it.id }) { provider ->
+                    val index = filteredProviders.indexOfFirst { it.id == provider.id }
                     ProviderItem(
                         modifier = Modifier.fillMaxWidth(),
                         provider = provider,
+                        isFirst = index == 0,
+                        isLast = index == total - 1,
                         onEdit = {
                             navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
                         },
@@ -507,72 +500,108 @@ private fun AddButton(
 @Composable
 private fun ProviderItem(
     provider: ProviderSetting,
+    isFirst: Boolean,
+    isLast: Boolean,
     modifier: Modifier = Modifier,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Card(
+    val workspace = workspaceColors()
+    // Outer-corner rounding: only the first and last items get the big group
+    // corners; middle items stay nearly square so the stack visually reads as
+    // one card. Matches the CardGroup pattern used elsewhere on the page.
+    val cornerOuter = 12.dp
+    val cornerInner = 2.dp
+    val topCorner = if (isFirst) cornerOuter else cornerInner
+    val bottomCorner = if (isLast) cornerOuter else cornerInner
+
+    androidx.compose.material3.Surface(
+        onClick = onEdit,
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = if (provider.enabled) {
-                CustomColors.listItemColors.containerColor
-            } else MaterialTheme.colorScheme.errorContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+            topStart = topCorner,
+            topEnd = topCorner,
+            bottomStart = bottomCorner,
+            bottomEnd = bottomCorner,
         ),
-        onClick = {
-            onEdit()
-        }
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        border = androidx.compose.foundation.BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AutoAIIcon(
                 name = provider.name,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .then(
+                        if (!provider.enabled) Modifier.alpha(0.45f) else Modifier
+                    ),
             )
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
                     text = provider.name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (provider.enabled) workspace.ink else workspace.muted,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
                 )
-                ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                    CompositionLocalProvider(LocalContentColor provides LocalContentColor.current.copy(alpha = 0.7f)) {
-                        provider.shortDescription()
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Tag(type = if (provider.enabled) TagType.SUCCESS else TagType.WARNING) {
-                        Text(stringResource(if (provider.enabled) R.string.setting_provider_page_enabled else R.string.setting_provider_page_disabled))
-                    }
-                    Tag(type = TagType.INFO) {
-                        Text(
-                            stringResource(
-                                R.string.setting_provider_page_model_count,
-                                provider.models.size
-                            )
+                    // Status dot — 6dp circle, green when enabled, amber when
+                    // disabled. Replaces the heavy colored Tag with a tiny
+                    // sub-text indicator (Notion's "Connected" pattern).
+                    androidx.compose.foundation.Canvas(
+                        modifier = Modifier.size(6.dp),
+                    ) {
+                        drawCircle(
+                            color = if (provider.enabled) workspace.green else workspace.amber,
                         )
                     }
+                    Text(
+                        text = stringResource(
+                            if (provider.enabled) R.string.setting_provider_page_enabled
+                            else R.string.setting_provider_page_disabled
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                    )
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.faint,
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.setting_provider_page_model_count,
+                            provider.models.size,
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                    )
                 }
             }
-            // Card tap already enters edit (onClick = onEdit at the Card root), so the
-            // Edit IconButton was redundant noise next to the brand logo and Tags. Only
-            // the destructive-and-not-otherwise-reachable Delete stays visible.
-            IconButton(onClick = onDelete) {
+            // Card tap enters edit, so only the destructive delete stays as
+            // a tappable icon — small, muted, no surrounding box.
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(32.dp),
+            ) {
                 Icon(
                     imageVector = HugeIcons.Delete01,
                     contentDescription = stringResource(R.string.delete),
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(16.dp),
+                    tint = workspace.muted,
                 )
             }
         }
