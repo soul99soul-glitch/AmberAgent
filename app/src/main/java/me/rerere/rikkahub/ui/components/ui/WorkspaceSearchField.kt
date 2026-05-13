@@ -69,6 +69,10 @@ fun WorkspaceSearchField(
             .background(workspace.row)
             .border(BorderStroke(1.dp, workspace.hairline), RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp),
+        // contentAlignment vertically centers the Row inside the 40dp Box —
+        // without this the Row hugs the top edge and the magnifier icon /
+        // text input visibly float above the vertical midline.
+        contentAlignment = Alignment.CenterStart,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

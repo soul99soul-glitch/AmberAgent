@@ -1572,34 +1572,32 @@ private fun ChatListPreview(
                 val message = node.currentMessage
                 val isUser = message.role == me.rerere.ai.core.MessageRole.USER
                 val workspace = workspaceColors()
-                // Notion-style flat preview row — no bubble, just a thin
-                // left-edge accent (blue for the user, green for assistant)
-                // plus subtle paper background with hairline border. The
-                // role-color block is 3dp wide so it reads as metadata, not
-                // as a heavy speech-bubble fill.
+                // Per-role light fill — user messages get the very-light blue
+                // (blueContainer #EAF4FF), AI gets the very-light green
+                // (greenContainer #EDF9EF). Border picks up the same hue at
+                // ~22% alpha. Replaces the previous 3dp left-edge accent +
+                // paper fill: a 3dp stripe was too subtle to read the role
+                // at a glance.
+                val previewContainer = if (isUser) workspace.blueContainer else workspace.greenContainer
+                val previewBorder = if (isUser) {
+                    workspace.blue.copy(alpha = 0.22f)
+                } else {
+                    workspace.green.copy(alpha = 0.22f)
+                }
                 Surface(
                     onClick = { onJumpToMessage(originalIndex) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                    color = workspace.paper,
+                    color = previewContainer,
                     contentColor = workspace.ink,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, workspace.hairline),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, previewBorder),
                 ) {
                     Row(
                         modifier = Modifier
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        androidx.compose.foundation.Canvas(
-                            modifier = Modifier
-                                .height(20.dp)
-                                .width(3.dp),
-                        ) {
-                            drawRect(
-                                color = if (isUser) workspace.blue else workspace.green,
-                            )
-                        }
                         Text(
                             text = if (isUser) "你" else "AI",
                             style = MaterialTheme.typography.labelSmall,

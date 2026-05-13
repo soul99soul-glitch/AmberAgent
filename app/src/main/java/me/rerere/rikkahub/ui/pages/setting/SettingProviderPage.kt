@@ -515,6 +515,16 @@ private fun ProviderItem(
     val topCorner = if (isFirst) cornerOuter else cornerInner
     val bottomCorner = if (isLast) cornerOuter else cornerInner
 
+    // Enabled providers get a very light blue fill + a slightly bluer border;
+    // disabled providers get a very light red fill + slightly redder border.
+    // Picks the existing palette colors (blueContainer #EAF4FF / redContainer
+    // #FFEFED) so the page no longer reads as "all white, all the same".
+    val containerColor = if (provider.enabled) workspace.blueContainer else workspace.redContainer
+    val borderColor = if (provider.enabled) {
+        workspace.blue.copy(alpha = 0.22f)
+    } else {
+        workspace.red.copy(alpha = 0.22f)
+    }
     androidx.compose.material3.Surface(
         onClick = onEdit,
         modifier = modifier,
@@ -524,9 +534,9 @@ private fun ProviderItem(
             bottomStart = bottomCorner,
             bottomEnd = bottomCorner,
         ),
-        color = workspace.paper,
+        color = containerColor,
         contentColor = workspace.ink,
-        border = androidx.compose.foundation.BorderStroke(1.dp, workspace.hairline),
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
     ) {
         Row(
             modifier = Modifier
@@ -558,14 +568,15 @@ private fun ProviderItem(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    // Status dot — 6dp circle, green when enabled, amber when
-                    // disabled. Replaces the heavy colored Tag with a tiny
-                    // sub-text indicator (Notion's "Connected" pattern).
+                    // Status dot — 6dp circle anchored on the same color as
+                    // the card border for visual coherence (blue on enabled
+                    // cards, red on disabled cards). Replaces the heavy
+                    // colored Tag with a small inline indicator.
                     androidx.compose.foundation.Canvas(
                         modifier = Modifier.size(6.dp),
                     ) {
                         drawCircle(
-                            color = if (provider.enabled) workspace.green else workspace.amber,
+                            color = if (provider.enabled) workspace.blue else workspace.red,
                         )
                     }
                     Text(
