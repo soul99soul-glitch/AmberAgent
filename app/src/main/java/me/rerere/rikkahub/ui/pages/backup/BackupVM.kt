@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.backup
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,10 @@ class BackupVM(
     private val googleDriveSyncRepository: GoogleDriveSyncRepository,
     googleOAuthConfigGate: GoogleOAuthConfigGate,
 ) : ViewModel() {
+    companion object {
+        private const val TAG = "BackupVM"
+    }
+
     val settings = settingsStore.settingsFlow.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
@@ -102,7 +107,9 @@ class BackupVM(
                     recordError(error)
                 }
             } finally {
-                googleAuthorizationInFlight = false
+                if (pendingGoogleAuthorization.value == null) {
+                    googleAuthorizationInFlight = false
+                }
             }
         }
     }
@@ -114,21 +121,39 @@ class BackupVM(
     fun completeGoogleAuthorization(intent: Intent?) {
         viewModelScope.launch {
             operationState.value = UiState.Loading
-            runCatching {
-                googleDriveSyncRepository.completeAuthorization(intent)
-            }.onSuccess { session ->
-                applyGoogleSession(session)
-                operationState.value = UiState.Idle
-            }.onFailure { error ->
-                operationState.value = UiState.Error(error)
-                googleMessage.value = "Google 授权失败：${error.message.orEmpty()}"
-                recordError(error)
+            try {
+                runCatching {
+                    googleDriveSyncRepository.completeAuthorization(intent)
+                }.onSuccess { session ->
+                    applyGoogleSession(session)
+                    operationState.value = UiState.Idle
+                }.onFailure { error ->
+                    operationState.value = UiState.Error(error)
+                    googleMessage.value = "Google 授权失败：${error.message.orEmpty()}"
+                    recordError(error)
+                }
+            } finally {
+                googleAuthorizationInFlight = false
             }
         }
     }
 
-    fun cancelGoogleAuthorization() {
-        googleMessage.value = "Google 授权已取消"
+    fun handleGoogleAuthorizationResult(resultCode: Int, intent: Intent?) {
+        Log.i(TAG, "Google authorization result: resultCode=$resultCode hasData=${intent != null}")
+        if (intent != null) {
+            completeGoogleAuthorization(intent)
+        } else {
+            cancelGoogleAuthorization(resultCode)
+        }
+    }
+
+    fun cancelGoogleAuthorization(resultCode: Int? = null) {
+        googleAuthorizationInFlight = false
+        googleMessage.value = if (resultCode == 0) {
+            "Google 授权未完成或被系统取消"
+        } else {
+            "Google 授权已取消"
+        }
         operationState.value = UiState.Idle
     }
 
