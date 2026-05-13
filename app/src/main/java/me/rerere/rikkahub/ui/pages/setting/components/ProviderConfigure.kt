@@ -37,6 +37,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.providers.google.GoogleGeminiAuthStore
 import me.rerere.ai.provider.providers.google.GoogleGeminiAuthTokens
 import me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient
+import me.rerere.ai.provider.providers.google.defaultGeminiOAuthModelList
 import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.availableAuthModes
@@ -150,6 +151,7 @@ fun ProviderConfigure(
                 ProviderConfigureGoogle(
                     provider = provider,
                     onEdit = onEdit,
+                    onCommit = { effectiveCommit(it) },
                     autoStartOAuth = autoStartOAuth,
                     onAutoStartConsumed = onAutoStartConsumed,
                 )
@@ -894,6 +896,8 @@ private fun ColumnScope.ProviderConfigureClaude(
 private fun ColumnScope.ProviderConfigureGoogle(
     provider: ProviderSetting.Google,
     onEdit: (provider: ProviderSetting.Google) -> Unit,
+    /** Top-level commit, used by OAuth login to seed initial models — see [ProviderConfigure] docs. */
+    onCommit: (provider: ProviderSetting.Google) -> Unit = onEdit,
     /** Picker's "Sign in with Google" row sets this true; see [ProviderConfigure] docs. */
     autoStartOAuth: Boolean = false,
     /** One-shot reset callback paired with [autoStartOAuth]; see [ProviderConfigure] docs. */
@@ -1180,6 +1184,22 @@ private fun ColumnScope.ProviderConfigureGoogle(
             try {
                 val tokens = geminiOAuthClient.authorize(context, provider.id)
                 geminiTokens = tokens
+                // Seed the model list right after first login so the editor's "Models"
+                // tab is non-empty. Mirrors what the codex side does via
+                // defaultCodexOAuthModelList. cloudcode-pa's real listAvailableModels
+                // lands in commit #4; for now hardcode the gemini-cli family. Subsequent
+                // re-logins leave provider.models alone (user may have curated it).
+                val newSelection = if (provider.models.isEmpty()) {
+                    defaultGeminiOAuthModelList()
+                } else {
+                    provider.models
+                }
+                onCommit(
+                    provider.copy(
+                        models = newSelection,
+                        name = if (provider.name == "Google") "Gemini OAuth" else provider.name,
+                    )
+                )
                 toaster.show(
                     context.getString(
                         R.string.setting_provider_page_gemini_oauth_login_success,

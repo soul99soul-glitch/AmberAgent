@@ -323,3 +323,26 @@ class GoogleGeminiOAuthClient(
         return Base64.encodeToString(sha, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     }
 }
+
+/**
+ * Seed model IDs to put into [me.rerere.ai.provider.ProviderSetting.Google.models] right
+ * after a successful Gemini OAuth login, so the user lands on a usable provider without
+ * having to type model names. Mirrors what [defaultCodexOAuthModelList] does on the codex
+ * side. Commit #4 will replace this with a real `cloudcode-pa:listAvailableModels` call;
+ * for now we hardcode the public-facing Gemini family the gemini-cli ships with.
+ */
+fun defaultGeminiOAuthModelList(): List<me.rerere.ai.provider.Model> {
+    return GEMINI_OAUTH_FALLBACK_MODEL_IDS.map { id ->
+        me.rerere.ai.provider.Model(
+            modelId = id,
+            displayName = id,
+        )
+    }
+}
+
+private val GEMINI_OAUTH_FALLBACK_MODEL_IDS = listOf(
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+)
