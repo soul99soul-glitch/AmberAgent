@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,9 +23,12 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -61,6 +65,11 @@ fun WorkspaceSearchField(
     onSubmit: ((String) -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
+    val focusRequester = remember { FocusRequester() }
+    // No-ripple interactionSource so tapping the outer search box doesn't
+    // splash on the whole 40dp area — only the BasicTextField shows its
+    // own cursor blink on focus.
+    val outerTapSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -68,6 +77,11 @@ fun WorkspaceSearchField(
             .clip(RoundedCornerShape(10.dp))
             .background(workspace.row)
             .border(BorderStroke(1.dp, workspace.hairline), RoundedCornerShape(10.dp))
+            .clickable(
+                interactionSource = outerTapSource,
+                indication = null,
+                onClick = { focusRequester.requestFocus() },
+            )
             .padding(horizontal = 12.dp),
         // contentAlignment vertically centers the Row inside the 40dp Box —
         // without this the Row hugs the top edge and the magnifier icon /
@@ -93,7 +107,9 @@ fun WorkspaceSearchField(
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
                     singleLine = true,
                     textStyle = TextStyle(
                         color = workspace.ink,

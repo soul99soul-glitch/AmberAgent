@@ -508,10 +508,10 @@ private fun ProviderItem(
 ) {
     val workspace = workspaceColors()
     // Outer-corner rounding: only the first and last items get the big group
-    // corners; middle items stay nearly square so the stack visually reads as
-    // one card. Matches the CardGroup pattern used elsewhere on the page.
+    // corners; middle items go fully square so the 1dp gap between rows
+    // reads as a clean divider rather than a "stair-step" hairline.
     val cornerOuter = 12.dp
-    val cornerInner = 2.dp
+    val cornerInner = 0.dp
     val topCorner = if (isFirst) cornerOuter else cornerInner
     val bottomCorner = if (isLast) cornerOuter else cornerInner
 

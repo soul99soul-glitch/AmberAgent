@@ -371,6 +371,8 @@
   <string name="history_page_pin">고정</string>
   <string name="history_page_search">검색</string>
   <string name="history_page_search_messages">메시지 검색</string>
+  <string name="history_page_search_role_user">나</string>
+  <string name="history_page_search_role_assistant">AI</string>
   <string name="history_page_title">채팅 기록</string>
   <string name="history_page_undo">실행 취소</string>
   <string name="history_page_unpin">고정 해제</string>

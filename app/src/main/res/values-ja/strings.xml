@@ -371,6 +371,8 @@
   <string name="history_page_pin">ピン留め</string>
   <string name="history_page_search">検索</string>
   <string name="history_page_search_messages">メッセージを検索</string>
+  <string name="history_page_search_role_user">あなた</string>
+  <string name="history_page_search_role_assistant">AI</string>
   <string name="history_page_title">チャット履歴</string>
   <string name="history_page_undo">元に戻す</string>
   <string name="history_page_unpin">ピン留め解除</string>

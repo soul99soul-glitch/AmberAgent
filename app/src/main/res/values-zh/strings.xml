@@ -390,6 +390,8 @@
   <string name="history_page_pin">置顶</string>
   <string name="history_page_search">搜索</string>
   <string name="history_page_search_messages">搜索消息</string>
+  <string name="history_page_search_role_user">你</string>
+  <string name="history_page_search_role_assistant">AI</string>
   <string name="history_page_title">聊天历史</string>
   <string name="history_page_undo">撤销</string>
   <string name="history_page_unpin">取消置顶</string>

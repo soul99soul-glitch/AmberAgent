@@ -371,6 +371,8 @@
   <string name="history_page_pin">Закрепить</string>
   <string name="history_page_search">Поиск</string>
   <string name="history_page_search_messages">Поиск сообщений</string>
+  <string name="history_page_search_role_user">Вы</string>
+  <string name="history_page_search_role_assistant">AI</string>
   <string name="history_page_title">История чатов</string>
   <string name="history_page_undo">Отменить</string>
   <string name="history_page_unpin">Открепить</string>

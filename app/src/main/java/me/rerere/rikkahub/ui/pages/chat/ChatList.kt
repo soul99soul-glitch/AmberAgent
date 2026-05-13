@@ -1599,7 +1599,10 @@ private fun ChatListPreview(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (isUser) "你" else "AI",
+                            text = stringResource(
+                                if (isUser) R.string.history_page_search_role_user
+                                else R.string.history_page_search_role_assistant
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = workspace.muted,
                         )

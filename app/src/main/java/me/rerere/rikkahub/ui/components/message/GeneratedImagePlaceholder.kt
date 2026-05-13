@@ -68,16 +68,20 @@ fun GeneratedImagePlaceholder(
         ) {
             val spacing = 14.dp.toPx()
             val dotRadius = 1.6.dp.toPx()
+            // Count cells (not gridlines): `0 until cols` then center the
+            // packed grid inside the canvas so dots are equidistant from
+            // all edges regardless of aspect ratio. Using `0..cols` plus
+            // the centering math would push the last column off the right
+            // edge by half a spacing — visually negligible but mathematically
+            // wrong; switch to half-spacing offset for a clean fit.
             val cols = (size.width / spacing).toInt().coerceAtLeast(1)
             val rows = (size.height / spacing).toInt().coerceAtLeast(1)
-            // Center the grid inside the available canvas so dots are
-            // equidistant from all edges regardless of aspect ratio.
-            val xOffset = (size.width - cols * spacing) / 2f
-            val yOffset = (size.height - rows * spacing) / 2f
+            val xOffset = (size.width - (cols - 1) * spacing) / 2f
+            val yOffset = (size.height - (rows - 1) * spacing) / 2f
             val diagonalRange = (cols + rows).toFloat().coerceAtLeast(1f)
 
-            for (col in 0..cols) {
-                for (row in 0..rows) {
+            for (col in 0 until cols) {
+                for (row in 0 until rows) {
                     val x = xOffset + col * spacing
                     val y = yOffset + row * spacing
                     // Diagonal-traveling wave: dots near the upper-left peak

@@ -371,6 +371,8 @@
   <string name="history_page_pin">置頂</string>
   <string name="history_page_search">搜尋</string>
   <string name="history_page_search_messages">搜尋訊息</string>
+  <string name="history_page_search_role_user">你</string>
+  <string name="history_page_search_role_assistant">AI</string>
   <string name="history_page_title">聊天歷史</string>
   <string name="history_page_undo">撤銷</string>
   <string name="history_page_unpin">取消置頂</string>

@@ -390,6 +390,8 @@
   <string name="history_page_pin">Pin</string>
   <string name="history_page_search">Search</string>
   <string name="history_page_search_messages">Search Messages</string>
+  <string name="history_page_search_role_user">You</string>
+  <string name="history_page_search_role_assistant">AI</string>
   <string name="history_page_title">Chat History</string>
   <string name="history_page_undo">Undo</string>
   <string name="history_page_unpin">Unpin</string>

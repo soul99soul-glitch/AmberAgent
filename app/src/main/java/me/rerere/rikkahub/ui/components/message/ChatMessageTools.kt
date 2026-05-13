@@ -656,6 +656,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     arguments.jsonObject["aspect_ratio"]?.jsonPrimitive?.contentOrNull
                 )
             }
+            val requestedCount = remember(arguments) {
+                arguments.jsonObject["count"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 4) ?: 1
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -672,14 +675,16 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     if (hasImages) {
                         GeneratedImageCarousel(images = images)
                     } else {
-                        // Render at ~85% of the available width so the single
-                        // placeholder visually previews the size of one image
-                        // card (matches the multi-image carousel's per-card
-                        // width). aspectRatio modifier inside the placeholder
-                        // pre-allocates the right height.
+                        // Match the post-load carousel width so the
+                        // crossfade doesn't visibly resize:
+                        //   - count == 1 → carousel renders single full-width
+                        //     card, so placeholder also full-width.
+                        //   - count >  1 → carousel uses 0.85f per card in a
+                        //     horizontal scroller, so placeholder matches.
+                        val widthFraction = if (requestedCount > 1) 0.85f else 1f
                         GeneratedImagePlaceholder(
                             aspectRatio = aspectRatioFloat,
-                            modifier = Modifier.fillMaxWidth(0.85f),
+                            modifier = Modifier.fillMaxWidth(widthFraction),
                         )
                     }
                 }
