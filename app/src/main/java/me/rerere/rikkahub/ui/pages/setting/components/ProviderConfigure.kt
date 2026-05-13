@@ -37,6 +37,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.providers.google.GoogleGeminiAuthStore
 import me.rerere.ai.provider.providers.google.GoogleGeminiAuthTokens
 import me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient
+import me.rerere.ai.provider.providers.google.OBSOLETE_GEMINI_OAUTH_MODEL_IDS
 import me.rerere.ai.provider.providers.google.defaultGeminiOAuthModelList
 import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.OpenAIBrand
@@ -1186,10 +1187,15 @@ private fun ColumnScope.ProviderConfigureGoogle(
                 geminiTokens = tokens
                 // Seed the model list right after first login so the editor's "Models"
                 // tab is non-empty. Mirrors what the codex side does via
-                // defaultCodexOAuthModelList. cloudcode-pa's real listAvailableModels
-                // lands in commit #4; for now hardcode the gemini-cli family. Subsequent
-                // re-logins leave provider.models alone (user may have curated it).
-                val newSelection = if (provider.models.isEmpty()) {
+                // defaultCodexOAuthModelList. Subsequent re-logins normally leave the
+                // user's curated list alone — except if the existing list is entirely
+                // composed of model IDs we've since marked obsolete (e.g. we shipped a
+                // wrong seed in an earlier APK, like the 3.1 family that cloudcode-pa
+                // 404s on). In that case the list isn't user-curated, it's our bug,
+                // and re-login is the natural moment to fix it transparently.
+                val isAllObsolete = provider.models.isNotEmpty() &&
+                    provider.models.all { it.modelId in OBSOLETE_GEMINI_OAUTH_MODEL_IDS }
+                val newSelection = if (provider.models.isEmpty() || isAllObsolete) {
                     defaultGeminiOAuthModelList()
                 } else {
                     provider.models

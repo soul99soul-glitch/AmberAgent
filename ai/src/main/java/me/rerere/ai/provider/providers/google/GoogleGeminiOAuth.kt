@@ -56,6 +56,13 @@ private const val PREF_NAME = "google_gemini_oauth"
 private const val REFRESH_SKEW_MS = 2 * 60 * 1000L
 private const val AUTH_TIMEOUT_MS = 5 * 60 * 1000L
 private const val FALLBACK_TOKEN_LIFETIME_MS = 60 * 60 * 1000L
+// gemini-cli's User-Agent template (contentGenerator.ts:243-258). The server uses this
+// to gate Pro / Free tier identification — a generic OkHttp UA gets classified as
+// unknown-client and silently dropped into standard-tier even for Pro subscribers.
+// We pose as gemini-cli; the trade-off is staying in the same "third-party reusing
+// public client_id" ToS bucket already disclosed in the editor warning.
+private const val CLOUDCODE_PA_USER_AGENT =
+    "GeminiCLI/0.40.0/gemini-2.5-pro (android; arm64; amberagent)"
 private const val LRO_POLL_INTERVAL_MS = 5_000L
 private const val MAX_LRO_POLL_ITERATIONS = 12
 private const val TAG = "GoogleGeminiOAuth"
@@ -265,14 +272,19 @@ class GoogleGeminiOAuthClient(
         val accessToken = getValidAccessToken(providerId)
             ?: error("无法刷新 Google OAuth token，请重新登录。")
 
-        // 1) loadCodeAssist — if the user already has a cloudaicompanionProject
-        // (because they previously used gemini-cli or Code Assist on another device),
-        // we get it back here without needing an onboardUser call.
+        // 1) loadCodeAssist — CRITICAL: gemini-cli setup.ts:177-183 OMITS the
+        // `cloudaicompanionProject` field entirely when the user has no
+        // GOOGLE_CLOUD_PROJECT env var (JSON.stringify drops undefined keys). If we
+        // send `""` instead, the server reads that as "user supplied an explicit
+        // (empty) project" and irreversibly classifies the account as
+        // userDefinedCloudaicompanionProject=true → standard-tier, masking the
+        // Pro / Free subscription. Pro users then get 429 MODEL_CAPACITY_EXHAUSTED
+        // forever. We mirror gemini-cli's body shape exactly — no project field at
+        // all when we don't have one, and we don't slip a duetProject in either.
         val loadResp = postCloudCodeAssistJson(
             accessToken,
             ":loadCodeAssist",
             buildJsonObject {
-                put("cloudaicompanionProject", "") // empty asks server to pick
                 putJsonObject("metadata") {
                     put("ideType", "IDE_UNSPECIFIED")
                     put("platform", "PLATFORM_UNSPECIFIED")
@@ -408,6 +420,12 @@ class GoogleGeminiOAuthClient(
             .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL$path")
             .header("Authorization", "Bearer $accessToken")
             .header("Content-Type", "application/json")
+            .header("User-Agent", CLOUDCODE_PA_USER_AGENT)
+            .header(
+                "Client-Metadata",
+                "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+            )
+            .header("x-activity-request-id", Uuid.random().toString())
             .post(wrapper.toString().toRequestBody("application/json".toMediaType()))
             .build()
     }
@@ -418,14 +436,29 @@ class GoogleGeminiOAuthClient(
         body: JsonObject,
     ): JsonObject {
         val url = "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal$method"
+        // Two cosmetic headers a couple of mature wrappers ship that the canonical
+        // gemini-cli also sends: Client-Metadata (echoes the JSON metadata block as a
+        // single comma-joined header value — KashifKhn/gemini-proxy constants.ts:22-23)
+        // and x-activity-request-id (per-call UUID, both opencode-gemini-auth and
+        // KashifKhn ship it). Neither flips a ghost-project user out of standard-tier
+        // (issue #22648 et al. confirm this is server-side), but at least keeps us
+        // wire-format indistinguishable from those projects.
         val request = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $accessToken")
             .header("Content-Type", "application/json")
+            .header("User-Agent", CLOUDCODE_PA_USER_AGENT)
+            .header(
+                "Client-Metadata",
+                "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
+            )
+            .header("x-activity-request-id", Uuid.random().toString())
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
+        Log.i(TAG, "cloudcode-pa $method request: $body")
         val response = httpClient.newCall(request).await()
         val text = response.body?.string().orEmpty()
+        Log.i(TAG, "cloudcode-pa $method response (${response.code}): ${text.take(2000)}")
         if (!response.isSuccessful) {
             error("cloudcode-pa $method 失败：HTTP ${response.code} ${text.take(300)}")
         }
@@ -445,6 +478,7 @@ class GoogleGeminiOAuthClient(
         val request = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $accessToken")
+            .header("User-Agent", CLOUDCODE_PA_USER_AGENT)
             .get()
             .build()
         val response = httpClient.newCall(request).await()
@@ -588,9 +622,39 @@ fun defaultGeminiOAuthModelList(): List<me.rerere.ai.provider.Model> {
     }
 }
 
+// Model IDs cloudcode-pa actually recognizes, ordered by likelihood of working under
+// a typical user's account. Verified against gemini-cli's `packages/core/src/config/
+// models.ts` on main + real-device dogfooding:
+//   - 3.x preview family is the only thing that reliably serves on accounts
+//     stuck in the "ghost project / standard-tier" state (gemini-cli issues
+//     #22648 / #24937 et al.). Putting these first means the editor's auto-pick
+//     gives the user something that actually works on first login.
+//   - 2.5 family is kept as fallback because non-ghost-project accounts
+//     (fresh Pro / fresh FREE tier) do see capacity for them.
+//   - 3.1 family the user explicitly asked for earlier was removed:
+//     cloudcode-pa returns HTTP 404 "Requested entity was not found" for it
+//     because Code Assist hasn't released those IDs through this endpoint.
+//     They're in OBSOLETE_GEMINI_OAUTH_MODEL_IDS so re-login auto-replaces them.
+// Order matters: first entry is the "soft default" the editor uses when
+// provider.models was empty before login.
 private val GEMINI_OAUTH_FALLBACK_MODEL_IDS = listOf(
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+)
+
+/** Model IDs we've previously shipped as defaults that cloudcode-pa actually rejects with
+ *  404. Used by the editor's re-login path: if the user's current model list is
+ *  entirely composed of these dead IDs (i.e. it's the result of an earlier wrong seed,
+ *  not a deliberate user curation), it's safe to overwrite. Anything else — user-added
+ *  models, or even a single "good" model in the list — is preserved.  */
+val OBSOLETE_GEMINI_OAUTH_MODEL_IDS: Set<String> = setOf(
     "gemini-3.1-pro",
     "gemini-3.1-flash",
     "gemini-3-pro",
     "gemini-3-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
 )
