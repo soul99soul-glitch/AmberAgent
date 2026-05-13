@@ -55,6 +55,10 @@
   <string name="assistant_page_chat_background_desc">アシスタントチャットページの背景画像を設定</string>
   <string name="assistant_page_chat_model">チャットモデル</string>
   <string name="assistant_page_chat_model_desc">アシスタントのデフォルトチャットモデルを設定します。設定しない場合は、グローバルデフォルトチャットモデルが使用されます</string>
+  <string name="assistant_page_image_model">画像生成モデル</string>
+  <string name="assistant_page_image_model_desc">設定すると、メインのチャットモデルが組み込みツールを呼び出してこのモデルで画像を生成できます。空のままにするとこのアシスタントの画像生成は無効になります（グローバル設定にモデルがあればそれが使われます）。</string>
+  <string name="assistant_page_image_model_empty">未設定</string>
+  <string name="assistant_page_image_model_clear">画像生成モデルをクリア</string>
   <string name="assistant_page_clone">複製</string>
   <string name="assistant_page_confirm">確認</string>
   <string name="assistant_page_context_message_count">コンテキストメッセージサイズ: %d</string>

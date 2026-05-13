@@ -16,6 +16,7 @@ import kotlin.uuid.Uuid
 data class Assistant(
     val id: Uuid = Uuid.random(),
     val chatModelId: Uuid? = null, // 如果为null, 使用全局默认模型
+    val imageGenerationModelId: Uuid? = null, // 如果为null, 回退到全局 Settings.imageGenerationModelId; 仍为 null 时不启用 generate_image 工具
     val name: String = "",
     val avatar: Avatar = Avatar.Dummy,
     val useAssistantAvatar: Boolean = false, // 使用助手头像替代模型头像

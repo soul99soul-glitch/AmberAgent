@@ -1954,7 +1954,7 @@ class ChatService(
                 addAll(createSearchTools(settings))
             }
             val assistant = settings.getCurrentAssistant()
-            addAll(localTools.getTools(assistant.localTools))
+            addAll(localTools.getTools(assistant.localTools, conversationId))
             addAll(
                 createSkillTools(
                     enabledSkills = assistant.enabledSkills,

@@ -277,6 +277,28 @@ class FilesManager(
         return dir
     }
 
+    /**
+     * Per-conversation storage for chat-inline generated images. Separate from
+     * the global gallery `getImagesDir()` because chat-generated images live
+     * and die with the conversation (user must explicitly export to MediaStore
+     * via the long-press menu to keep them around).
+     */
+    fun getChatImagesDir(conversationId: Uuid): File {
+        val dir = context.filesDir.resolve("chat_images").resolve(conversationId.toString())
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
+    /** Recursively delete all chat-inline generated images for a conversation. */
+    fun deleteChatImagesDir(conversationId: Uuid) {
+        val dir = context.filesDir.resolve("chat_images").resolve(conversationId.toString())
+        if (dir.exists()) {
+            dir.deleteRecursively()
+        }
+    }
+
     @OptIn(ExperimentalEncodingApi::class)
     fun createImageFileFromBase64(base64Data: String, filePath: String): File {
         val data = if (base64Data.startsWith("data:image")) {

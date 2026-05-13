@@ -34,6 +34,9 @@ import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
+import me.rerere.rikkahub.data.repository.ImageGenerationRepository
+import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
@@ -44,6 +47,7 @@ import java.net.URLEncoder
 import java.time.ZonedDateTime
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.uuid.Uuid
 
 @Serializable
 sealed class LocalToolOption {
@@ -130,6 +134,7 @@ class LocalTools(
     private val webMountManager: WebMountManager,
     private val userSiteRegistry: me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry,
     private val settingsStore: SettingsStore,
+    private val imageGenerationRepository: ImageGenerationRepository,
 ) {
     val javascriptTool by lazy {
         Tool(
@@ -1125,7 +1130,108 @@ class LocalTools(
         )
     }
 
-    fun getTools(options: List<LocalToolOption>): List<Tool> {
+    /**
+     * Build a fresh `generate_image` tool bound to [conversationId]. Each
+     * conversation gets its own tool instance because the execute lambda needs
+     * to know where on disk to write the resulting images (per-conversation
+     * subdir). The tool is only included when the current assistant — or the
+     * global Settings — has an image-generation model configured.
+     */
+    private fun buildImageGenTool(conversationId: Uuid): Tool = Tool(
+        name = "generate_image",
+        description = """
+            Generate one or more images from a text prompt using the user's
+            configured image-generation model. Use this whenever the user asks
+            you to draw, paint, illustrate, sketch, create a picture, visualize,
+            or produce any visual content. The user sees the images inline in
+            this conversation and can save / share / regenerate them.
+            Prefer English prompts with specific subject, style, composition,
+            lighting cues — image models follow them more reliably. Generated
+            images are bound to this conversation; deleting the conversation
+            removes them.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("prompt", buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "description",
+                            "Detailed description of the desired image. Include subject, style, composition, lighting, mood."
+                        )
+                    })
+                    put("aspect_ratio", buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "enum",
+                            buildJsonArray { add("1:1"); add("16:9"); add("9:16") }
+                        )
+                        put("description", "Image aspect ratio. Default 1:1 (square).")
+                    })
+                    put("count", buildJsonObject {
+                        put("type", "integer")
+                        put("minimum", 1)
+                        put("maximum", 4)
+                        put("description", "Number of variants to generate, 1-4. Default 1. Only request multiple variants when the user explicitly asks for choices.")
+                    })
+                },
+                required = listOf("prompt")
+            )
+        },
+        execute = { args ->
+            val obj = args.jsonObject
+            val prompt = obj["prompt"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            require(prompt.isNotEmpty()) { "prompt is required and must not be blank" }
+            val aspectRatio = when (obj["aspect_ratio"]?.jsonPrimitive?.contentOrNull) {
+                "16:9" -> ImageAspectRatio.LANDSCAPE
+                "9:16" -> ImageAspectRatio.PORTRAIT
+                "1:1", null -> ImageAspectRatio.SQUARE
+                else -> ImageAspectRatio.SQUARE
+            }
+            val count = (obj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1).coerceIn(1, 4)
+
+            val settings = settingsStore.settingsFlow.value
+            val model = settings.getCurrentImageGenerationModel()
+                ?: error("No image generation model configured. Please ask the user to set one in the Assistant settings page.")
+
+            val files = imageGenerationRepository.generateForConversation(
+                modelId = model.id,
+                prompt = prompt,
+                aspectRatio = aspectRatio,
+                numOfImages = count,
+                conversationId = conversationId,
+            ).getOrThrow()
+
+            // Build output: Image parts first (so the timeline renders cards
+            // up top) followed by a single Text summary so the main chat model
+            // has a structured handle on the result for its follow-up reply.
+            val parts = mutableListOf<UIMessagePart>()
+            files.forEach { saved ->
+                parts.add(
+                    UIMessagePart.Image(
+                        url = "file://${saved.file.absolutePath}",
+                        metadata = buildJsonObject {
+                            put("source", "generate_image")
+                            put("prompt", prompt)
+                            put("aspect_ratio", aspectRatio.name)
+                            put("model", saved.modelDisplayName)
+                        }
+                    )
+                )
+            }
+            val summary = buildJsonObject {
+                put("status", "ok")
+                put("count", files.size)
+                put("model", model.displayName)
+                put("prompt", prompt)
+                put("aspect_ratio", aspectRatio.name)
+            }
+            parts.add(UIMessagePart.Text(summary.toString()))
+            parts
+        }
+    )
+
+    fun getTools(options: List<LocalToolOption>, conversationId: Uuid? = null): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
             tools.add(javascriptTool)
@@ -1203,6 +1309,15 @@ class LocalTools(
         tools.add(permissionsStatusTool)
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
+
+        // generate_image auto-appears whenever the current assistant — or the
+        // global setting — resolves to a real image-gen model. The tool needs
+        // a concrete conversationId to scope its file output, so we skip it
+        // for the debug catalog path (conversationId == null).
+        if (conversationId != null && settingsStore.settingsFlow.value.getCurrentImageGenerationModel() != null) {
+            tools.add(buildImageGenTool(conversationId))
+        }
+
         return tools
     }
 

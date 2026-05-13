@@ -223,6 +223,36 @@ internal fun AssistantBasicContent(
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
+                    Text(stringResource(R.string.assistant_page_image_model))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_image_model_desc))
+                },
+                content = {
+                    ModelSelector(
+                        modelId = assistant.imageGenerationModelId,
+                        providers = providers,
+                        type = ModelType.IMAGE,
+                        allowClear = true,
+                        emptyLabel = stringResource(R.string.assistant_page_image_model_empty),
+                        clearContentDescription = stringResource(R.string.assistant_page_image_model_clear),
+                        onClear = {
+                            onUpdate(assistant.copy(imageGenerationModelId = null))
+                        },
+                        onSelect = {
+                            onUpdate(
+                                assistant.copy(
+                                    imageGenerationModelId = it.id
+                                )
+                            )
+                        },
+                    )
+                }
+            )
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
                     Text(stringResource(R.string.assistant_page_temperature))
                 },
                 tail = {

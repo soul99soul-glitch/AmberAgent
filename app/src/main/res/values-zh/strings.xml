@@ -55,6 +55,10 @@
   <string name="assistant_page_chat_background_desc">设置助手聊天页面的背景图片</string>
   <string name="assistant_page_chat_model">聊天模型</string>
   <string name="assistant_page_chat_model_desc">设置助手的默认聊天模型，如果不设置，则使用全局默认聊天模型</string>
+  <string name="assistant_page_image_model">生图模型</string>
+  <string name="assistant_page_image_model_desc">设置后，主对话模型可调用内置工具用此模型生成图片。留空则当前助手禁用生图（如全局设置中已配置生图模型则回退使用）。</string>
+  <string name="assistant_page_image_model_empty">未配置</string>
+  <string name="assistant_page_image_model_clear">清除生图模型</string>
   <string name="assistant_page_clone">复制</string>
   <string name="assistant_page_confirm">确定</string>
   <string name="assistant_page_context_message_count">上下文消息数量: %d</string>

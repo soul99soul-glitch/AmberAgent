@@ -874,6 +874,15 @@ fun Settings.getCurrentChatModel(): Model? {
     return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
 }
 
+/**
+ * Resolve the image-generation model for the current assistant: per-assistant
+ * override first, then global setting. Returns null when neither is set, in
+ * which case the generate_image tool is not exposed to the main chat model.
+ */
+fun Settings.getCurrentImageGenerationModel(): Model? {
+    return findModelById(this.getCurrentAssistant().imageGenerationModelId ?: this.imageGenerationModelId)
+}
+
 fun Settings.resolveTaskChatModel(modelId: Uuid): Model? {
     return findModelById(modelId) ?: getCurrentChatModel()
 }

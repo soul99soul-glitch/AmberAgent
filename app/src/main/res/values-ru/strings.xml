@@ -55,6 +55,10 @@
   <string name="assistant_page_chat_background_desc">Установить фоновое изображение для страницы чата с ассистентом</string>
   <string name="assistant_page_chat_model">Модель чата</string>
   <string name="assistant_page_chat_model_desc">Установить модель чата по умолчанию для ассистента. Если не задано, будет использована глобальная модель чата по умолчанию</string>
+  <string name="assistant_page_image_model">Модель генерации изображений</string>
+  <string name="assistant_page_image_model_desc">Если задано, главная модель чата может вызывать встроенный инструмент для генерации изображений этой моделью. Оставьте пустым, чтобы отключить генерацию изображений для этого ассистента (если в глобальных настройках задана модель, будет использована она).</string>
+  <string name="assistant_page_image_model_empty">Не настроено</string>
+  <string name="assistant_page_image_model_clear">Очистить модель генерации изображений</string>
   <string name="assistant_page_clone">Клонировать</string>
   <string name="assistant_page_confirm">Подтвердить</string>
   <string name="assistant_page_context_message_count">Размер контекстных сообщений: %d</string>

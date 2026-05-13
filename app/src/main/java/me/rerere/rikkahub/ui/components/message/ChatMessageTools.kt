@@ -586,7 +586,12 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             ?: arguments.getStringContent("path")
         candidate?.takeIf { it.isNotBlank() && !it.startsWith("/") }
     }
-    val hasExtraContent = isDenied || images.isNotEmpty()
+    // generate_image renders its result as a dedicated full-width carousel
+    // below the capsule, NOT as 64dp thumbnails inside the small extra-content
+    // surface. Skip the regular extra-content path so we don't double-render
+    // (capsule + tiny thumb + big carousel).
+    val isGenerateImage = tool.toolName == "generate_image"
+    val hasExtraContent = isDenied || (images.isNotEmpty() && !isGenerateImage)
 
     Column(
         modifier = Modifier
@@ -634,6 +639,19 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 null
             },
         )
+
+        // generate_image tool: render images directly under the capsule as
+        // big carousel cards. The capsule itself stays so users can tap into
+        // the result sheet to inspect prompt / aspect_ratio metadata.
+        if (isGenerateImage && images.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 32.dp, top = 4.dp),
+            ) {
+                GeneratedImageCarousel(images = images)
+            }
+        }
 
         if (workspaceFilePath != null && onOpenWorkspaceFile != null) {
             Surface(

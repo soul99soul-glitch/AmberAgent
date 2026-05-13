@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
+import me.rerere.rikkahub.data.repository.ImageGenerationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.memory.recall.MemoryRecallStore
 import org.koin.dsl.module
@@ -30,6 +31,14 @@ val repositoryModule = module {
 
     single {
         GenMediaRepository(get())
+    }
+
+    single {
+        ImageGenerationRepository(
+            settingsStore = get(),
+            providerManager = get(),
+            filesManager = get(),
+        )
     }
 
     single {

@@ -279,6 +279,10 @@ class ConversationRepository(
             )
         }
         filesManager.deleteChatFiles(fullConversation.files)
+        // Drop any generate_image tool output bound to this conversation.
+        // The dir is `filesDir/chat_images/{conversationId}/` and is created
+        // lazily on first generation — deleteRecursively no-ops when missing.
+        filesManager.deleteChatImagesDir(conversation.id)
     }
 
     suspend fun searchMessages(keyword: String) = messageFtsManager.search(keyword)

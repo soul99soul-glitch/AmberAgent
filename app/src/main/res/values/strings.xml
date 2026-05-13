@@ -55,6 +55,10 @@
   <string name="assistant_page_chat_background_desc">Set background image for assistant chat page</string>
   <string name="assistant_page_chat_model">Chat Model</string>
   <string name="assistant_page_chat_model_desc">Set the default chat model for the assistant. If not set, the global default chat model will be used</string>
+  <string name="assistant_page_image_model">Image Generation Model</string>
+  <string name="assistant_page_image_model_desc">When set, the chat model can call a built-in tool to generate images using this model. Leave empty to disable image generation for this assistant (falls back to the global setting if any).</string>
+  <string name="assistant_page_image_model_empty">Not configured</string>
+  <string name="assistant_page_image_model_clear">Clear image generation model</string>
   <string name="assistant_page_clone">Clone</string>
   <string name="assistant_page_confirm">Confirm</string>
   <string name="assistant_page_context_message_count">Context Message Size: %d</string>
