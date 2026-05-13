@@ -201,7 +201,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             geminiOAuthClient!!
                 .generateContent(accessToken, params.model.modelId, projectId, requestBody)
                 .newBuilder()
-                .headers(params.customHeaders.toHeaders())
+                .apply {
+                    params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
+                }
                 .build()
         } else {
             val url = buildUrl(
@@ -277,7 +279,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             geminiOAuthClient!!
                 .streamGenerateContent(accessToken, params.model.modelId, projectId, requestBody)
                 .newBuilder()
-                .headers(params.customHeaders.toHeaders())
+                .apply {
+                    // CRITICAL: use addHeader, not headers(). The latter REPLACES the
+                    // entire header set including the Authorization Bearer we just put
+                    // in streamGenerateContent — server then returns
+                    // "Request is missing required authentication credential".
+                    params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
+                }
                 .build()
         } else {
             val url = buildUrl(

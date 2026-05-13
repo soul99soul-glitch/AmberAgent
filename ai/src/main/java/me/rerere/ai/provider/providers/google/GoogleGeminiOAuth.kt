@@ -56,7 +56,8 @@ private const val PREF_NAME = "google_gemini_oauth"
 private const val REFRESH_SKEW_MS = 2 * 60 * 1000L
 private const val AUTH_TIMEOUT_MS = 5 * 60 * 1000L
 private const val FALLBACK_TOKEN_LIFETIME_MS = 60 * 60 * 1000L
-private const val LRO_POLL_INTERVAL_MS = 1500L
+private const val LRO_POLL_INTERVAL_MS = 5_000L
+private const val MAX_LRO_POLL_ITERATIONS = 12
 private const val TAG = "GoogleGeminiOAuth"
 
 /**
@@ -170,7 +171,16 @@ class GoogleGeminiOAuthClient(
             val code = callback.code ?: error("Google 授权回调缺少 code 参数。")
             val tokens = exchangeAuthorizationCode(code, verifier, redirectUri)
             authStore.save(providerId, tokens)
-            tokens
+            Log.i(TAG, "OAuth tokens stored for provider=$providerId, kicking off cloudcode-pa onboard…")
+            // Run loadCodeAssist+onboardUser inside the login flow so the user pays the
+            // ~5-15s onboarding cost upfront (with the "登录中" busy indicator) instead
+            // of waiting 30s on the first chat. If onboarding fails, we still keep the
+            // token — user can retry by sending a chat (ensureOnboarded is idempotent).
+            val onboarded = runCatching { ensureOnboarded(providerId) }
+                .onFailure { Log.w(TAG, "Onboard during login failed; will retry on first chat", it) }
+                .getOrNull() ?: tokens
+            Log.i(TAG, "Onboard done: projectId=${onboarded.projectId?.take(20)}… tier=${onboarded.onboardedTier}")
+            onboarded
         }
     }
 
@@ -288,6 +298,9 @@ class GoogleGeminiOAuthClient(
         val chosenTier = allowedTiers.firstOrNull { it == "FREE" }
             ?: allowedTiers.firstOrNull()
             ?: "FREE"
+        // gemini-cli setup.ts L167-182: FREE tier passes cloudaicompanionProject =
+        // undefined so the server assigns one; only paid/enterprise tiers send back
+        // a pre-existing project id. Mirror that.
         val onboardResp = postCloudCodeAssistJson(
             accessToken,
             ":onboardUser",
@@ -298,7 +311,9 @@ class GoogleGeminiOAuthClient(
                     put("platform", "PLATFORM_UNSPECIFIED")
                     put("pluginType", "GEMINI")
                 }
-                currentProject?.let { put("cloudaicompanionProject", it) }
+                if (chosenTier != "FREE" && !currentProject.isNullOrBlank()) {
+                    put("cloudaicompanionProject", currentProject)
+                }
             },
         )
 
@@ -313,37 +328,30 @@ class GoogleGeminiOAuthClient(
         accessToken: String,
         initialResponse: JsonObject,
     ): String? {
-        // Operation may either be done immediately or be a LRO whose `name` we poll
-        // against `:operations.get` (relative path of the resource).
+        // gemini-cli setup.ts L187-193 + server.ts L139-164: poll uses GET (not POST)
+        // and URL is just /v1internal/{name} where `name` already contains
+        // `operations/...`. `done` is a boolean, not a string. 5s interval.
         var current = initialResponse
-        repeat(20) { iteration ->
-            val done = current["done"]?.jsonPrimitive?.contentOrNull == "true"
-                || current["done"]?.jsonPrimitive?.booleanOrNull == true
+        repeat(MAX_LRO_POLL_ITERATIONS) { iteration ->
+            val done = current["done"]?.jsonPrimitive?.booleanOrNull == true
             if (done) {
                 val response = current["response"]?.jsonObject
                 val errorObj = current["error"]?.jsonObject
                 if (errorObj != null) {
                     error("onboardUser LRO 报错：${errorObj.toString().take(300)}")
                 }
+                // gemini-cli's OnboardUserResponse keeps the project under
+                // `cloudaicompanionProject.id`, so peel that nested object.
                 return response
                     ?.get("cloudaicompanionProject")?.jsonObject
                     ?.get("id")?.jsonPrimitive?.contentOrNull
-                    ?: response?.get("name")?.jsonPrimitive?.contentOrNull
             }
             val opName = current["name"]?.jsonPrimitive?.contentOrNull ?: return null
             delay(LRO_POLL_INTERVAL_MS)
-            // The "name" field is the full resource path "operations/xxxxx"; we POST
-            // to :get to refresh state (Google's Code Assist private API uses POST
-            // for LRO reads, mirroring `setup.ts` in gemini-cli).
-            current = postCloudCodeAssistJson(
-                accessToken,
-                "/$opName",
-                buildJsonObject {},
-                useV1InternalPrefix = false,
-            )
+            current = getCloudCodeAssistJson(accessToken, opName)
             Log.d(TAG, "Onboard LRO poll iter=$iteration done=${current["done"]}")
         }
-        error("onboardUser LRO 轮询 ${LRO_POLL_INTERVAL_MS * 20 / 1000}s 仍未完成")
+        error("onboardUser LRO 轮询 ${LRO_POLL_INTERVAL_MS * MAX_LRO_POLL_ITERATIONS / 1000}s 仍未完成")
     }
 
     /**
@@ -357,19 +365,13 @@ class GoogleGeminiOAuthClient(
         modelId: String,
         projectId: String,
         innerRequest: JsonObject,
-    ): Request {
-        val wrapper = buildJsonObject {
-            put("model", modelId)
-            put("project", projectId)
-            put("request", innerRequest)
-        }
-        return Request.Builder()
-            .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal:streamGenerateContent?alt=sse")
-            .header("Authorization", "Bearer $accessToken")
-            .header("Content-Type", "application/json")
-            .post(wrapper.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-    }
+    ): Request = buildCloudCodeAssistRequest(
+        accessToken = accessToken,
+        path = "/v1internal:streamGenerateContent?alt=sse",
+        modelId = modelId,
+        projectId = projectId,
+        innerRequest = innerRequest,
+    )
 
     /** Same as [streamGenerateContent] but for the non-streaming generateContent path. */
     suspend fun generateContent(
@@ -377,14 +379,33 @@ class GoogleGeminiOAuthClient(
         modelId: String,
         projectId: String,
         innerRequest: JsonObject,
+    ): Request = buildCloudCodeAssistRequest(
+        accessToken = accessToken,
+        path = "/v1internal:generateContent",
+        modelId = modelId,
+        projectId = projectId,
+        innerRequest = innerRequest,
+    )
+
+    private fun buildCloudCodeAssistRequest(
+        accessToken: String,
+        path: String,
+        modelId: String,
+        projectId: String,
+        innerRequest: JsonObject,
     ): Request {
+        // gemini-cli's converter.ts L89-98 sends model / project / request +
+        // user_prompt_id (snake_case, used for server-side tracing). Sending it
+        // matches what the official CLI emits — keeps us indistinguishable from
+        // gemini-cli at the protocol level.
         val wrapper = buildJsonObject {
             put("model", modelId)
             put("project", projectId)
+            put("user_prompt_id", Uuid.random().toString())
             put("request", innerRequest)
         }
         return Request.Builder()
-            .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal:generateContent")
+            .url("$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL$path")
             .header("Authorization", "Bearer $accessToken")
             .header("Content-Type", "application/json")
             .post(wrapper.toString().toRequestBody("application/json".toMediaType()))
@@ -395,13 +416,8 @@ class GoogleGeminiOAuthClient(
         accessToken: String,
         method: String,
         body: JsonObject,
-        useV1InternalPrefix: Boolean = true,
     ): JsonObject {
-        val url = if (useV1InternalPrefix) {
-            "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal$method"
-        } else {
-            "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL$method"
-        }
+        val url = "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal$method"
         val request = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $accessToken")
@@ -415,6 +431,29 @@ class GoogleGeminiOAuthClient(
         }
         return runCatching { json.parseToJsonElement(text).jsonObject }
             .getOrElse { error("cloudcode-pa $method 响应不是 JSON：${text.take(300)}") }
+    }
+
+    /** GET against `https://cloudcode-pa.googleapis.com/v1internal/{operationName}`. Used
+     *  for LRO polling — operationName already contains the `operations/...` prefix the
+     *  server sent back, so we just append it after `/v1internal/`. Reference:
+     *  gemini-cli `server.ts` `getOperationUrl` + `requestGetOperation`. */
+    private suspend fun getCloudCodeAssistJson(
+        accessToken: String,
+        operationName: String,
+    ): JsonObject {
+        val url = "$GOOGLE_GEMINI_CODE_ASSIST_BASE_URL/v1internal/$operationName"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+        val response = httpClient.newCall(request).await()
+        val text = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            error("cloudcode-pa LRO poll 失败：HTTP ${response.code} ${text.take(300)}")
+        }
+        return runCatching { json.parseToJsonElement(text).jsonObject }
+            .getOrElse { error("cloudcode-pa LRO poll 响应不是 JSON：${text.take(300)}") }
     }
 
     // ----------------------------------------------------------------------
