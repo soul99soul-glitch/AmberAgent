@@ -2755,14 +2755,24 @@ private fun QuickMessageButton(
             expanded = !expanded
         }) {
         SlashCommandLeadingMark()
+        // Notion-like dropdown: each entry is a Row of [leading "/" chip + Column(title,
+        // optional content preview)] instead of the old plain Column of two unspaced
+        // Text lines. Hairline dividers between entries; min width bumped to 260dp so
+        // the title doesn't get clipped to a noun fragment.
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             modifier = Modifier
-                .widthIn(min = 200.dp)
-                .width(IntrinsicSize.Min)
+                .widthIn(min = 260.dp, max = 360.dp)
         ) {
-            quickMessages.forEach { quickMessage ->
+            quickMessages.forEachIndexed { index, quickMessage ->
+                if (index > 0) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
                 Surface(
                     onClick = {
                         state.appendText(quickMessage.content)
@@ -2771,21 +2781,34 @@ private fun QuickMessageButton(
                     color = Color.Transparent,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Column(
-                        modifier = Modifier.padding(8.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = quickMessage.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = quickMessage.content,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        SlashCommandLeadingMark()
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = quickMessage.title.ifBlank {
+                                    stringResource(R.string.extension_content_unnamed)
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (quickMessage.content.isNotBlank()) {
+                                Text(
+                                    text = quickMessage.content,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 }
             }
