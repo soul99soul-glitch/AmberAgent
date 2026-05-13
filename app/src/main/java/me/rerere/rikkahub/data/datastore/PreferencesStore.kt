@@ -299,7 +299,7 @@ class SettingsStore(
                             description = defaultProvider.description,
                             shortDescription = defaultProvider.shortDescription,
                         )
-                        if (
+                        val withBrand = if (
                             withMeta is me.rerere.ai.provider.ProviderSetting.OpenAI &&
                             defaultProvider is me.rerere.ai.provider.ProviderSetting.OpenAI &&
                             withMeta.brand == me.rerere.ai.provider.OpenAIBrand.GENERIC &&
@@ -308,6 +308,26 @@ class SettingsStore(
                             withMeta.copy(brand = defaultProvider.brand)
                         } else {
                             withMeta
+                        }
+                        // One-time backfill: ensure the built-in OpenAI provider exposes
+                        // SeedOpenAIImageModel (gpt-image-2) and built-in Gemini exposes
+                        // SeedGeminiImageModel (Nano Banana 2). New installs ship these in
+                        // DEFAULT_PROVIDERS.models, but existing users won't have them
+                        // because their providers were persisted before this commit.
+                        // Stable seed UUIDs let us detect "already added" robustly; if the
+                        // user removed it on purpose they can clear it again.
+                        when {
+                            withBrand is me.rerere.ai.provider.ProviderSetting.OpenAI &&
+                                withBrand.id == OpenAIProviderIdRef &&
+                                withBrand.models.none { it.id == SeedOpenAIImageModelId } -> {
+                                withBrand.copy(models = withBrand.models + SeedOpenAIImageModel)
+                            }
+                            withBrand is me.rerere.ai.provider.ProviderSetting.Google &&
+                                withBrand.id == GeminiProviderIdRef &&
+                                withBrand.models.none { it.id == SeedGeminiImageModelId } -> {
+                                withBrand.copy(models = withBrand.models + SeedGeminiImageModel)
+                            }
+                            else -> withBrand
                         }
                     } else provider
                 }

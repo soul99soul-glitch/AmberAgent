@@ -233,10 +233,22 @@ class OpenAIProvider(
         require(providerSetting is ProviderSetting.OpenAI) {
             "Expected OpenAI provider setting"
         }
-        require(providerSetting.authMode == OpenAIAuthMode.API_KEY) {
-            unsupportedAuthModeMessage(providerSetting.authMode, capability = "image generation")
+        when (providerSetting.authMode) {
+            OpenAIAuthMode.API_KEY -> generateImageViaImagesEndpoint(providerSetting, params)
+            // Codex OAuth tokens cannot hit /v1/images/generations directly, but the
+            // Codex backend exposes image generation as a built-in tool on its
+            // Responses API. Route the call there so ChatGPT Plus / Pro subscribers
+            // can produce images through their existing OAuth login without
+            // separately paying for an API key. Mirrors openai-oauth / ima2-gen.
+            OpenAIAuthMode.CODEX_OAUTH -> generateImageViaCodexResponses(providerSetting, params)
+            else -> error(unsupportedAuthModeMessage(providerSetting.authMode, capability = "image generation"))
         }
+    }
 
+    private suspend fun generateImageViaImagesEndpoint(
+        providerSetting: ProviderSetting.OpenAI,
+        params: ImageGenerationParams,
+    ): ImageGenerationResult {
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
 
         val requestBody = json.encodeToString(
@@ -282,7 +294,142 @@ class OpenAIProvider(
             )
         }
 
-        ImageGenerationResult(items = items)
+        return ImageGenerationResult(items = items)
+    }
+
+    /**
+     * Codex Responses-API image generation. The backend does not accept `n`>1
+     * inside the `image_generation` tool — one image per request — so we call
+     * the endpoint sequentially when the caller asks for multiple variants.
+     *
+     * The `model` field in the request body is a Codex *routing* hint, not the
+     * actual image model. We pin it to a known-accepted Codex chat model
+     * ([CODEX_IMAGE_ROUTING_MODEL]); the backend then dispatches to its
+     * underlying image model via the `image_generation` tool. The
+     * `params.model.modelId` the caller passes (e.g. our synthesized
+     * "codex-oauth-image" placeholder) is ignored on the wire.
+     */
+    private suspend fun generateImageViaCodexResponses(
+        providerSetting: ProviderSetting.OpenAI,
+        params: ImageGenerationParams,
+    ): ImageGenerationResult {
+        val count = params.numOfImages.coerceIn(1, 4)
+        val items = mutableListOf<ImageGenerationItem>()
+        repeat(count) {
+            val item = generateOneCodexImage(providerSetting, params) ?: return@repeat
+            items.add(item)
+        }
+        if (items.isEmpty()) {
+            error("Codex image generation returned no images")
+        }
+        return ImageGenerationResult(items = items)
+    }
+
+    private suspend fun generateOneCodexImage(
+        providerSetting: ProviderSetting.OpenAI,
+        params: ImageGenerationParams,
+    ): ImageGenerationItem? {
+        val sizeStr = when (params.aspectRatio) {
+            ImageAspectRatio.SQUARE -> "1024x1024"
+            ImageAspectRatio.LANDSCAPE -> "1536x1024"
+            ImageAspectRatio.PORTRAIT -> "1024x1536"
+        }
+        val requestBody = buildJsonObject {
+            put("model", CODEX_IMAGE_ROUTING_MODEL)
+            // Proxies (and the Codex backend) reject Responses requests without
+            // these fields, so set them explicitly even though they are empty
+            // / boolean defaults — see openai-oauth/core/transport.ts.
+            put("instructions", "")
+            put("store", false)
+            put("stream", true)
+            put("tool_choice", "required")
+            putJsonArray("tools") {
+                add(buildJsonObject {
+                    put("type", "image_generation")
+                    put("size", sizeStr)
+                    put("quality", "high")
+                    put("moderation", "low")
+                })
+            }
+            putJsonArray("input") {
+                add(buildJsonObject {
+                    put("role", "user")
+                    putJsonArray("content") {
+                        add(buildJsonObject {
+                            put("type", "input_text")
+                            put("text", params.prompt)
+                        })
+                    }
+                })
+            }
+        }.mergeCustomBody(params.customBody)
+
+        val tokens = oauthClient?.getCached(providerSetting.id)
+        val request = Request.Builder()
+            .url("$OPENAI_CODEX_BACKEND_BASE_URL/responses")
+            .headers(params.customHeaders.toHeaders())
+            .addHeader("Authorization", "Bearer ${resolveBearerToken(providerSetting, false)}")
+            .addOpenAICodexBackendHeaders(tokens)
+            .addHeader("OpenAI-Beta", "responses=experimental")
+            .addHeader("Accept", "text/event-stream")
+            .addHeader("Content-Type", "application/json")
+            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .build()
+
+        var response = client.newCall(request).await()
+        if (response.code == 401) {
+            response.close()
+            val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
+            response = request.newBuilder()
+                .header("Authorization", "Bearer $retryToken")
+                .build()
+                .let { client.newCall(it).await() }
+        }
+        if (!response.isSuccessful) {
+            error("Codex image generation failed: ${response.code} ${response.body?.string()}")
+        }
+
+        response.use { activeResponse ->
+            val source = activeResponse.body.source()
+            var eventType: String? = null
+            val dataLines = mutableListOf<String>()
+            var captured: ImageGenerationItem? = null
+
+            fun drainEvent() {
+                if (dataLines.isEmpty()) return
+                val data = dataLines.joinToString("\n").also { dataLines.clear() }
+                if (data == "[DONE]") return
+                val eventJson = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return
+                if (eventType == "response.output_item.done") {
+                    val item = eventJson["item"]?.jsonObject ?: return
+                    if (item["type"]?.jsonPrimitive?.contentOrNull == "image_generation_call") {
+                        val result = item["result"]?.jsonPrimitive?.contentOrNull
+                        if (!result.isNullOrBlank() && captured == null) {
+                            captured = ImageGenerationItem(data = result, mimeType = "image/png")
+                        }
+                    }
+                }
+            }
+
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                when {
+                    line.isEmpty() -> {
+                        drainEvent()
+                        if (eventType == "response.completed") break
+                        eventType = null
+                    }
+                    line.startsWith("event:") -> {
+                        eventType = line.removePrefix("event:").trim()
+                    }
+                    line.startsWith("data:") -> {
+                        dataLines += line.removePrefix("data:").trimStart()
+                    }
+                }
+            }
+            drainEvent()
+            return captured
+        }
     }
 
     private suspend fun resolveBearerToken(
@@ -389,13 +536,37 @@ class OpenAIProvider(
 }
 
 /**
+ * Routing model name we send in the `model` field of the Codex Responses-API
+ * image generation request. The Codex backend uses this as a router hint; the
+ * actual image is produced by the `image_generation` tool's underlying model
+ * (gpt-image-2 family today). We pin a known-accepted Codex chat model so the
+ * request validates server-side regardless of what placeholder modelId the
+ * caller picked. Pinned to `gpt-5.4` (the newest non-codex-suffix entry in
+ * the chat fallback list above).
+ */
+internal const val CODEX_IMAGE_ROUTING_MODEL = "gpt-5.4"
+
+/**
+ * Synthetic model ID exposed in the Codex OAuth provider's model list with
+ * `type = IMAGE`. Users see this as a pickable "image model" in the assistant
+ * settings; under the hood [OpenAIProvider.generateImage] detects CODEX_OAUTH
+ * auth mode and routes to the Responses API, ignoring this id on the wire.
+ */
+internal const val CODEX_OAUTH_IMAGE_MODEL_ID = "codex-oauth-image"
+
+/**
  * Bundled fallback model list for OpenAI Codex OAuth. Public so the provider settings UI can
  * write it into `provider.models` whenever a live `listModels` call returns nothing or throws —
  * without this, an early failure in the OAuth login path leaves `provider.models` empty and the
  * "available models" sheet shows blank with no obvious recovery.
+ *
+ * Includes one synthetic [CODEX_OAUTH_IMAGE_MODEL_ID] entry with `type = IMAGE`
+ * so users can pick "Codex Image" in the new assistant `生图模型` field. Generation
+ * goes through the Responses API + `image_generation` tool — no API key needed,
+ * the call bills against the user's ChatGPT subscription.
  */
 fun defaultCodexOAuthModelList(): List<Model> {
-    return OPENAI_CODEX_OAUTH_FALLBACK_MODEL_IDS.map { id ->
+    val chatModels = OPENAI_CODEX_OAUTH_FALLBACK_MODEL_IDS.map { id ->
         Model(
             modelId = id,
             displayName = id,
@@ -405,6 +576,14 @@ fun defaultCodexOAuthModelList(): List<Model> {
             contextWindowTokens = ModelRegistry.MODEL_CONTEXT_WINDOW.getData(id),
         )
     }
+    val imageModel = Model(
+        modelId = CODEX_OAUTH_IMAGE_MODEL_ID,
+        displayName = "Codex Image (ChatGPT Plus/Pro)",
+        type = me.rerere.ai.provider.ModelType.IMAGE,
+        inputModalities = listOf(me.rerere.ai.provider.Modality.TEXT),
+        outputModalities = listOf(me.rerere.ai.provider.Modality.IMAGE),
+    )
+    return chatModels + imageModel
 }
 
 private val OPENAI_CODEX_OAUTH_FALLBACK_MODEL_IDS = listOf(

@@ -1,14 +1,60 @@
 package me.rerere.rikkahub.data.datastore
 
 import me.rerere.ai.provider.BalanceOption
+import me.rerere.ai.provider.Modality
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
 import kotlin.uuid.Uuid
 
+// Stable UUIDs for the two image-generation models we seed into the built-in
+// OpenAI and Gemini providers. Stable so the per-load migration that adds the
+// model to existing user providers can detect "already added by us" without
+// matching on modelId (users could later rename it).
+internal val SeedOpenAIImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5d")
+internal val SeedGeminiImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5e")
+
+/**
+ * gpt-image-2 entry seeded into the built-in OpenAI provider. Set as
+ * ModelType.IMAGE so it appears in the new assistant "生图模型" picker
+ * (ModelType.IMAGE filter) and does NOT pollute the chat-model dropdown.
+ * Output modality is IMAGE only — input is the user's text prompt.
+ */
+internal val SeedOpenAIImageModel = Model(
+    id = SeedOpenAIImageModelId,
+    modelId = "gpt-image-2",
+    displayName = "gpt-image-2",
+    type = ModelType.IMAGE,
+    inputModalities = listOf(Modality.TEXT),
+    outputModalities = listOf(Modality.IMAGE),
+)
+
+/**
+ * gemini-3.1-flash-image-preview (Nano Banana 2) seeded into the built-in
+ * Gemini API-Key provider. Same rationale as SeedOpenAIImageModel. NOT added
+ * to the Gemini OAuth fallback list — cloudcode-pa is a chat-only endpoint
+ * and image generation requires the standard generativelanguage.googleapis.com
+ * route, which only the API-Key auth mode hits.
+ */
+internal val SeedGeminiImageModel = Model(
+    id = SeedGeminiImageModelId,
+    modelId = "gemini-3.1-flash-image-preview",
+    displayName = "Gemini 3.1 Flash Image (Nano Banana 2)",
+    type = ModelType.IMAGE,
+    inputModalities = listOf(Modality.TEXT),
+    outputModalities = listOf(Modality.IMAGE),
+)
+
 val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 
-private val OpenAIProviderId = Uuid.parse("1eeea727-9ee5-4cae-93e6-6fb01a4d051e")
-private val GeminiProviderId = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa6d")
+// Exposed so the per-load migration in PreferencesStore can target these two
+// specific providers when backfilling the seeded image models. The other
+// brand-IDs below remain private — they have no migration tied to them.
+internal val OpenAIProviderIdRef = Uuid.parse("1eeea727-9ee5-4cae-93e6-6fb01a4d051e")
+internal val GeminiProviderIdRef = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa6d")
+private val OpenAIProviderId = OpenAIProviderIdRef
+private val GeminiProviderId = GeminiProviderIdRef
 private val DeepSeekProviderId = Uuid.parse("f099ad5b-ef03-446d-8e78-7e36787f780b")
 private val OpenRouterProviderId = Uuid.parse("d5734028-d39b-4d41-9841-fd648d65440e")
 private val MoonshotProviderId = Uuid.parse("d6c4d8c6-3f62-4ca9-a6f3-7ade6b15ecc3")
@@ -42,12 +88,21 @@ val DEFAULT_PROVIDERS = listOf(
         baseUrl = "https://api.openai.com/v1",
         apiKey = "",
         brand = OpenAIBrand.OPENAI,
+        // Seed gpt-image-2 so first-launch users can pick it in the new
+        // assistant "生图模型" field without hunting for the model ID. The
+        // migration in PreferencesStore re-adds this for existing users
+        // whose OpenAI provider was created before this commit.
+        models = listOf(SeedOpenAIImageModel),
     ),
     ProviderSetting.Google(
         id = GeminiProviderId,
         name = "Gemini",
         apiKey = "",
         enabled = true,
+        // Seed Nano Banana 2 (gemini-3.1-flash-image-preview) for the same
+        // reason. Image generation only works via the API-Key route, not the
+        // separate Gemini OAuth provider — see GoogleGeminiOAuth comments.
+        models = listOf(SeedGeminiImageModel),
     ),
     ProviderSetting.OpenAI(
         id = DeepSeekProviderId,
