@@ -66,7 +66,31 @@ import java.util.Locale
 import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
-private const val STREAM_UI_FLUSH_INTERVAL_MS = 200L
+// 2026-05-15 — flush cadence rationale.
+//
+// Was 200ms historically. User feedback after that: "一坨一坨蹦出来", not
+// "一个字一个字蹦出来 like Claude Code CLI". Tried 16ms in 1.8.12 — fixed
+// the chunk-reveal feel but user reported "往上滚动的帧数好像变低了". Root
+// cause of the regression: 16ms means up to 60 Compose recompose +
+// Markdown parse schedule + LazyColumn item re-layout + animateScrollBy
+// cancel-and-restart cycles per second. Even with Markdown parse off the
+// main thread (mapLatest on Dispatchers.Default), the recompose+layout
+// chain itself eats enough budget on a mid-range device to choke user
+// gesture scroll and the streaming auto-scroll animation.
+//
+// 33ms (~30Hz) is the sweet spot:
+//   - SSE chunks from real providers arrive every 50-200ms (5-20 tokens
+//     each on the fast end). 33ms is below that floor, so a chunk-arrival
+//     reaches the UI on the very next 33ms tick — practically immediate.
+//     The only case where 33ms differs from 16ms is when two chunks land
+//     <33ms apart, which is rare and not perceptually distinguishable
+//     anyway (one tick visually = one font row).
+//   - Halves the per-second recompose budget vs 16ms, freeing CPU for
+//     scroll animation interpolation and gesture handling.
+//
+// If a future profile shows this is still too aggressive, the next stop
+// is 50ms; below 16ms is pointless (sub-frame).
+private const val STREAM_UI_FLUSH_INTERVAL_MS = 33L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS = 5_000L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS = 800
 // "Did the model produce real prose?" threshold for skipping the local fallback widget

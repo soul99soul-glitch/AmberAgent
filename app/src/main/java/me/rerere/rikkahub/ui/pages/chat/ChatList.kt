@@ -910,10 +910,13 @@ private fun ChatListNormal(
             // ChatListNormal recomposes, latestRenderToken usually differs → key
             // changes → LaunchedEffect restarts → if we're following + idle, scroll.
             //
-            // What this gives up: no 60ms coalesce, so streaming chunks that arrive
-            // very close together (<80ms) queue at LazyListState.scroll{}'s mutex.
-            // In practice MessageStreamAccumulator flushes every ~200ms and each
-            // scroll is tween(80ms), so there's never overlap.
+            // What this gives up: no 60ms coalesce, so streaming chunks queue at
+            // LazyListState.scroll{}'s mutex on tight bursts. Each scroll is
+            // tween(80ms); MessageStreamAccumulator now flushes at 16ms (one Compose
+            // frame) so a burst is real — but a new LaunchedEffect launch cancels
+            // the in-flight scroll cleanly, and LinearEasing has no velocity to
+            // preserve so the cancel doesn't show as a hitch. Net effect: the scroll
+            // continuously chases the latest tail with no perceptible discrete steps.
             //
             // What this gains: deterministic — one chunk in, one scroll out. No
             // SnapshotState indirection, no FlowPreview API surface, no
