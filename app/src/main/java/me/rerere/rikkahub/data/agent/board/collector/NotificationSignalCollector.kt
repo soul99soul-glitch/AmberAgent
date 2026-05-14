@@ -81,12 +81,20 @@ class NotificationSignalCollector(
 
         val sourceRef = sbn.key
         val isHighValue = isHighValuePackage(pkg)
+        val isWorkContext = pkg in WORK_CONTEXT_PACKAGES
         val hasAtMention = combined.contains("@") || title.contains("@")
             || combined.contains("回复了你") || combined.contains("提到了你")
             || combined.contains("replied") || combined.contains("mentioned")
+        val hasWorkSignal = isWorkContext && (
+            combined.contains("审批") || combined.contains("日程") || combined.contains("会议")
+            || combined.contains("待办") || combined.contains("任务") || combined.contains("OKR")
+            || combined.contains("approval") || combined.contains("meeting")
+            || combined.contains("schedule") || combined.contains("todo")
+        )
 
         // Encode priority hints in metadata so the aggregator scoring can use them
         val priorityHint = when {
+            hasWorkSignal -> "high"
             isHighValue && hasAtMention -> "high"
             isHighValue -> "medium"
             else -> "low"
@@ -155,7 +163,30 @@ class NotificationSignalCollector(
         val pkg = sbn.packageName.replace("\"", "\\\"")
         val channel = sbn.notification?.channelId.orEmpty().replace("\"", "\\\"")
         val tag = sbn.tag.orEmpty().replace("\"", "\\\"")
-        return """{"package":"$pkg","channel":"$channel","tag":"$tag","priority":"$priorityHint"}"""
+        // For work-context apps, include the channel ID which often encodes the notification
+        // type (e.g. "message", "calendar_remind", "approval", "todo" on Lark/Feishu).
+        val workType = if (sbn.packageName in WORK_CONTEXT_PACKAGES) {
+            classifyLarkChannel(channel)
+        } else ""
+        val workTypePart = if (workType.isNotBlank()) ""","work_type":"$workType"""" else ""
+        return """{"package":"$pkg","channel":"$channel","tag":"$tag","priority":"$priorityHint"$workTypePart}"""
+    }
+
+    /**
+     * Classify Lark/Feishu notification channels into work categories.
+     * Channel IDs vary across Lark versions but follow stable patterns.
+     */
+    private fun classifyLarkChannel(channel: String): String {
+        val ch = channel.lowercase()
+        return when {
+            ch.contains("message") || ch.contains("im") || ch.contains("chat") -> "message"
+            ch.contains("calendar") || ch.contains("schedule") || ch.contains("meeting") -> "calendar"
+            ch.contains("approval") || ch.contains("审批") -> "approval"
+            ch.contains("todo") || ch.contains("task") || ch.contains("待办") -> "task"
+            ch.contains("doc") || ch.contains("wiki") || ch.contains("sheet") -> "document"
+            ch.contains("bot") || ch.contains("webhook") -> "bot"
+            else -> "other"
+        }
     }
 
     companion object {
@@ -168,17 +199,26 @@ class NotificationSignalCollector(
 
         /** Communication apps — high signal-to-noise, treated as important. */
         private val HIGH_VALUE_PACKAGES = setOf(
-            "com.tencent.mm",              // WeChat
-            "com.tencent.wework",          // 企业微信
-            "com.alibaba.android.rimet",   // DingTalk
-            "com.ss.android.lark",         // Feishu / Lark
-            "com.google.android.gm",       // Gmail
-            "com.microsoft.office.outlook",// Outlook
-            "com.slack",                   // Slack
-            "org.telegram.messenger",      // Telegram
-            "com.whatsapp",                // WhatsApp
-            "com.github.android",          // GitHub
-            "com.microsoft.teams",         // Teams
+            "com.tencent.mm",                    // WeChat
+            "com.tencent.wework",                // 企业微信
+            "com.alibaba.android.rimet",         // DingTalk
+            "com.ss.android.lark",               // Feishu / Lark
+            "com.ss.android.lark.saxmsa667",     // 小米办公 Pro (Feishu-based)
+            "com.google.android.gm",             // Gmail
+            "com.microsoft.office.outlook",      // Outlook
+            "com.slack",                         // Slack
+            "org.telegram.messenger",            // Telegram
+            "com.whatsapp",                      // WhatsApp
+            "com.github.android",                // GitHub
+            "com.microsoft.teams",               // Teams
+        )
+
+        /** Packages whose notifications carry extra-rich work context (meetings, approvals, tasks). */
+        private val WORK_CONTEXT_PACKAGES = setOf(
+            "com.ss.android.lark",
+            "com.ss.android.lark.saxmsa667",
+            "com.alibaba.android.rimet",
+            "com.tencent.wework",
         )
 
         /** Known low-signal packages — shopping, delivery, system bloatware, ads. */

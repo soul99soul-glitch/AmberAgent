@@ -43,6 +43,9 @@ interface BoardItemDAO {
     @Query("SELECT * FROM board_item WHERE board_date = :boardDate AND status = 'active'")
     suspend fun getActiveByDate(boardDate: String): List<BoardItemEntity>
 
+    @Query("SELECT * FROM board_item WHERE board_date = :boardDate AND status = 'completed'")
+    suspend fun getCompletedByDate(boardDate: String): List<BoardItemEntity>
+
     @Query("UPDATE board_item SET status = 'completed', completed_at = :completedAt WHERE id = :id")
     suspend fun markCompleted(id: String, completedAt: Long)
 

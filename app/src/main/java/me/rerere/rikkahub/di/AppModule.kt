@@ -591,6 +591,20 @@ val appModule = module {
         )
     }
 
+    single {
+        me.rerere.rikkahub.data.agent.board.collector.AppUsageCollector(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.agent.board.agent.DailyReviewAgent(
+            settingsStore = get(),
+            providerManager = get(),
+            boardRepository = get(),
+            conversationRepository = get(),
+            appUsageCollector = get(),
+        )
+    }
+
     factory {
         BoardViewModel(
             boardRepository = get(),

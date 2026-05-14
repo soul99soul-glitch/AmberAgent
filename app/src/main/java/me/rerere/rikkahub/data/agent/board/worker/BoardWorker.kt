@@ -6,12 +6,15 @@ import androidx.work.WorkerParameters
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.agent.BoardAgent
 import me.rerere.rikkahub.data.agent.board.agent.BoardRunResult
+import me.rerere.rikkahub.data.agent.board.agent.DailyReviewAgent
 import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 
 /**
  * Worker that executes one full board update cycle:
@@ -70,12 +73,14 @@ class BoardWorker(
                     summary = result.summary,
                 )
                 pruneOldItems(repository, boardDate)
+                maybeRunDailyReview(boardDate)
                 return Result.success()
             }
 
             BoardRunResult.Empty -> {
                 repository.markSignalsProcessed(scored.map { it.signal.id })
                 pruneOldItems(repository, boardDate)
+                maybeRunDailyReview(boardDate)
                 return Result.success()
             }
 
@@ -91,6 +96,27 @@ class BoardWorker(
         }
     }
 
+    /**
+     * Run the daily review agent if the current time falls within a review window.
+     * - 12:00–14:59 → noon phase (first generation)
+     * - 18:00–23:59 → evening phase (append to noon)
+     */
+    private suspend fun maybeRunDailyReview(boardDate: String) {
+        val now = ZonedDateTime.now()
+        val hour = now.hour
+        val phase = when (hour) {
+            in 13..14 -> DailyReviewAgent.PHASE_NOON
+            in 19..23 -> DailyReviewAgent.PHASE_EVENING
+            else -> return // outside review windows
+        }
+        runCatching {
+            val agent = get<DailyReviewAgent>()
+            agent.run(boardDate, phase)
+        }.onFailure {
+            android.util.Log.w("BoardWorker", "daily review failed", it)
+        }
+    }
+
     private suspend fun pruneOldItems(repository: BoardRepository, currentBoardDate: String) {
         runCatching {
             // Keep only today's board - earlier dates are archived at 04:00 cutoff.
@@ -99,6 +125,9 @@ class BoardWorker(
             // Also prune old processed signals (> 7 days) to bound signal table growth.
             val weekAgoMs = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
             repository.pruneProcessedSignalsBefore(weekAgoMs)
+            // Prune daily reviews older than 30 days.
+            val cutoffDate = today.minusDays(30).toString()
+            repository.pruneDailyReviews(cutoffDate)
         }
     }
 }

@@ -5,10 +5,12 @@ import me.rerere.rikkahub.data.db.dao.BoardFocusRuleDAO
 import me.rerere.rikkahub.data.db.dao.BoardItemDAO
 import me.rerere.rikkahub.data.db.dao.BoardSignalDAO
 import me.rerere.rikkahub.data.db.dao.BoardWeightDAO
+import me.rerere.rikkahub.data.db.dao.DailyReviewDAO
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
+import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
 import java.time.ZoneId
 
 /**
@@ -24,6 +26,7 @@ class BoardRepository(
     private val itemDao: BoardItemDAO,
     private val focusRuleDao: BoardFocusRuleDAO,
     private val weightDao: BoardWeightDAO,
+    private val dailyReviewDao: DailyReviewDAO,
 ) {
     // ---- Signals --------------------------------------------------------------------
 
@@ -127,4 +130,19 @@ class BoardRepository(
 
     /** Convenience: today's board date from the system clock + default zone. */
     fun todayBoardDate(): String = resolveBoardDate()
+
+    // ---- Daily Review ---------------------------------------------------------------
+
+    fun observeDailyReview(boardDate: String): Flow<DailyReviewEntity?> =
+        dailyReviewDao.observeByDate(boardDate)
+
+    suspend fun getDailyReview(boardDate: String): DailyReviewEntity? =
+        dailyReviewDao.getByDate(boardDate)
+
+    suspend fun saveDailyReview(entity: DailyReviewEntity) = dailyReviewDao.upsert(entity)
+
+    suspend fun pruneDailyReviews(keepFromDate: String) = dailyReviewDao.deleteOlderThan(keepFromDate)
+
+    suspend fun getCompletedItems(boardDate: String): List<BoardItemEntity> =
+        itemDao.getCompletedByDate(boardDate)
 }

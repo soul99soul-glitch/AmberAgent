@@ -58,6 +58,6 @@ val repositoryModule = module {
     }
 
     single {
-        BoardRepository(get(), get(), get(), get())
+        BoardRepository(get(), get(), get(), get(), get())
     }
 }

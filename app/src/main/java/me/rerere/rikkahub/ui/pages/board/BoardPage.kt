@@ -1,8 +1,12 @@
 package me.rerere.rikkahub.ui.pages.board
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +49,7 @@ import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
+import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.NotionListRow
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -97,37 +102,41 @@ fun TodayBoardPage() {
                     Text("暂无内容\n稍后会有信号汇入", style = MaterialTheme.typography.bodyMedium)
                 }
             } else {
+                val dailyReview by vm.dailyReview.collectAsStateWithLifecycle(initialValue = null)
+
                 TabRow(selectedTabIndex = selectedTab) {
                     Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("分区") })
-                    Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("紧急度") })
+                    Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("今日回顾") })
                 }
 
-                if (selectedTab == 0) {
-                BoardSectionTab(
-                    items = activeItems,
-                    expandedItemId = expandedItemId,
-                    onToggleExpand = { id -> expandedItemId = if (expandedItemId == id) null else id },
-                    onComplete = { vm.markCompleted(it) },
-                    onDismiss = { vm.markDismissed(it) },
-                    onChat = { itemId ->
-                        vm.startChat(itemId)
-                        activeItems.find { it.id == itemId }?.let { item ->
-                            navigateToChatPage(navController, initText = chatContext(item))
-                        }
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(200)) + slideInVertically(
+                            initialOffsetY = { it / 20 },
+                            animationSpec = tween(200),
+                        )).togetherWith(fadeOut(animationSpec = tween(150)))
                     },
-                )
-            } else {
-                BoardUrgencyTab(
-                    items = activeItems,
-                    onComplete = { vm.markCompleted(it) },
-                    onChat = { itemId ->
-                        vm.startChat(itemId)
-                        activeItems.find { it.id == itemId }?.let { item ->
-                            navigateToChatPage(navController, initText = chatContext(item))
-                        }
-                    },
-                )
-            }
+                    label = "boardTabs",
+                ) { tab ->
+                    if (tab == 0) {
+                        BoardSectionTab(
+                            items = activeItems,
+                            expandedItemId = expandedItemId,
+                            onToggleExpand = { id -> expandedItemId = if (expandedItemId == id) null else id },
+                            onComplete = { vm.markCompleted(it) },
+                            onDismiss = { vm.markDismissed(it) },
+                            onChat = { itemId ->
+                                vm.startChat(itemId)
+                                activeItems.find { it.id == itemId }?.let { item ->
+                                    navigateToChatPage(navController, initText = chatContext(item))
+                                }
+                            },
+                        )
+                    } else {
+                        DailyReviewTab(review = dailyReview)
+                    }
+                }
         }
     }
 }
@@ -176,29 +185,58 @@ fun BoardSectionTab(
 }
 
 @Composable
-fun BoardUrgencyTab(
-    items: List<BoardItemEntity>,
-    onComplete: (String) -> Unit,
-    onChat: (String) -> Unit,
-) {
-    val sorted = items.sortedWith(
-        compareBy<BoardItemEntity> { if (it.urgency == "high") 0 else if (it.urgency == "medium") 1 else 2 }
-            .thenByDescending { it.signalTime }
-    )
-    val top3 = sorted.take(3).filter { it.urgency == "high" }
-    val timeline = sorted.filter { it !in top3 }
-
-    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (top3.isNotEmpty()) {
-            item { SectionHeader("📌 最紧急", top3.size) }
-            items(top3, key = { it.id }) { item ->
-                PinnedItemCard(item, onComplete, onChat)
+fun DailyReviewTab(review: DailyReviewEntity?) {
+    val workspace = workspaceColors()
+    if (review == null) {
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📝", style = MaterialTheme.typography.displaySmall)
+                Text("今日回顾尚未生成", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "将在 13:00 生成上午回顾，19:00 补充下午内容",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
             }
         }
-        if (timeline.isNotEmpty()) {
-            item { SectionHeader("时间轴", timeline.size) }
-            items(timeline, key = { it.id }) { item ->
-                TimelineItemRow(item, onComplete)
+    } else {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                val phase = if (review.phase == "evening") "下午已更新" else "上午版"
+                val updatedTime = java.time.Instant.ofEpochMilli(review.updatedAt)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "今日回顾",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "$phase · $updatedTime",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                    )
+                }
+            }
+            item(key = "review_${review.id}") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                ) {
+                    // Render Markdown content
+                    me.rerere.rikkahub.ui.components.richtext.MarkdownBlock(
+                        content = review.content,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
             }
         }
     }

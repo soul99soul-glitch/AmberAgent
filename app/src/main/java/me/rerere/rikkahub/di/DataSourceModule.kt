@@ -215,6 +215,10 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().dailyReviewDao()
+    }
+
+    single {
         MessageFtsManager(get())
     }
 

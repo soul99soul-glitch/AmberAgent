@@ -32,6 +32,8 @@ import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
+import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
+import me.rerere.rikkahub.data.db.dao.DailyReviewDAO
 import me.rerere.rikkahub.data.db.entity.FeishuDocChangeEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocDependencyEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocSnapshotEntity
@@ -69,8 +71,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         BoardItemEntity::class,
         BoardFocusRuleEntity::class,
         BoardWeightEntity::class,
+        DailyReviewEntity::class,
     ],
-    version = 23,
+    version = 24,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -84,6 +87,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 12, to = 13),
         AutoMigration(from = 16, to = 17, spec = Migration_16_17::class),
         AutoMigration(from = 17, to = 18),
+        AutoMigration(from = 23, to = 24),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -125,6 +129,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun boardFocusRuleDao(): BoardFocusRuleDAO
 
     abstract fun boardWeightDao(): BoardWeightDAO
+
+    abstract fun dailyReviewDao(): DailyReviewDAO
 }
 
 object TokenUsageConverter {

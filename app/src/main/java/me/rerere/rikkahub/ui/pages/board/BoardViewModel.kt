@@ -13,6 +13,7 @@ import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
+import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
 import kotlinx.coroutines.launch
 
 class BoardViewModel(
@@ -28,6 +29,11 @@ class BoardViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     val items: Flow<List<BoardItemEntity>> = boardDateTick.flatMapLatest {
         boardRepository.observeItems(boardRepository.todayBoardDate())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dailyReview: Flow<DailyReviewEntity?> = boardDateTick.flatMapLatest {
+        boardRepository.observeDailyReview(boardRepository.todayBoardDate())
     }
 
     val settings = settingsStore.settingsFlow
