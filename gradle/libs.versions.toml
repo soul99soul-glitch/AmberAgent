@@ -22,7 +22,6 @@ lifecycleViewmodelNav3 = "2.10.0"
 nav3Material = "1.0.0-SNAPSHOT"
 markdown = "66a56dffca"
 okhttp = "5.3.2"
-retrofit = "3.0.0"
 coil = "3.4.0"
 quickjs = "3.2.3"
 room = "2.8.4"
@@ -47,7 +46,6 @@ leakcanary = "2.14"
 workmanager = "2.11.2"
 reorderable = "3.1.0"
 mcp = "0.8.4"
-pebble = "4.1.1"
 browser = "1.10.0"
 security-crypto = "1.1.0-alpha07"
 credentials = "1.6.0"
@@ -113,8 +111,6 @@ metadata-extractor = { module = "com.drewnoakes:metadata-extractor", version.ref
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
-retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
-retrofit-serialization-json = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-gif = { group = "io.coil-kt.coil3", name = "coil-gif", version.ref = "coil" }
 coil-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
@@ -143,7 +139,6 @@ leakcanary-android = { module = "com.squareup.leakcanary:leakcanary-android", ve
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 commons-text = { module = "org.apache.commons:commons-text", version.ref = "commons-text" }
 modelcontextprotocol-kotlin-sdk = { module = "io.modelcontextprotocol:kotlin-sdk", version.ref = "mcp" }
-pebble = { module = "io.pebbletemplates:pebble", version.ref = "pebble" }
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }

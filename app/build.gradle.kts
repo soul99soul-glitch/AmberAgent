@@ -341,8 +341,6 @@ dependencies {
     // okhttp
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.serialization.json)
 
     // ktor client
     implementation(libs.ktor.client.core)
@@ -352,9 +350,6 @@ dependencies {
 
     // ucrop
     implementation(libs.ucrop)
-
-    // pebble (template engine)
-    implementation(libs.pebble)
 
     // coil
     implementation(libs.coil.compose)
