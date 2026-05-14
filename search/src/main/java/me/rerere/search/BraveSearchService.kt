@@ -75,6 +75,7 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                     // original is full-resolution and may be too large for mobile.
                     val imgUrl = (result.thumbnail?.src ?: result.thumbnail?.original)
                         ?.takeIf { it.startsWith("http") }
+                    android.util.Log.i("BraveSearchService", "result: ${result.title}, thumbnail: ${result.thumbnail?.src}, original: ${result.thumbnail?.original}, imgUrl: $imgUrl")
                     SearchResultItem(
                         title = result.title,
                         url = result.url,
@@ -82,6 +83,7 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                         images = listOfNotNull(imgUrl),
                     )
                 } ?: emptyList()
+                android.util.Log.i("BraveSearchService", "total items: ${items.size}, with images: ${items.count { it.images.isNotEmpty() }}")
 
                 return@withContext Result.success(
                     SearchResult(

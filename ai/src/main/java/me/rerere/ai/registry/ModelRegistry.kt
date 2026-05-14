@@ -96,7 +96,7 @@ object ModelRegistry {
         tokens("gpt", "5", "5")
         visionInput()
         toolReasoningAbility()
-        contextWindow(1_000_000)
+        contextWindow(400_000)
     }
 
     private val GEMINI_20_FLASH = defineModel {

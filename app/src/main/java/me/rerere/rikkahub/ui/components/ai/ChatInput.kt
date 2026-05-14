@@ -759,7 +759,10 @@ private fun ContextUsageIndicator(
     }
     val usedTokens = estimatedTokens
     val contextWindow = remember(model?.modelId, model?.contextWindowTokens) {
-        model?.contextWindowTokens ?: model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
+        // Prefer registry (kept up-to-date) over persisted model value (may be stale
+        // from an old fetch). Fall back to persisted value for unknown/custom models.
+        model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_WINDOW.getData(it) }
+            ?: model?.contextWindowTokens
     }
     val ratio = if (contextWindow != null && contextWindow > 0) {
         (usedTokens.toFloat() / contextWindow.toFloat()).coerceIn(0f, 1f)

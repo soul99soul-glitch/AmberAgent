@@ -69,7 +69,9 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
             val body = buildJsonObject {
                 put("query", JsonPrimitive(query))
                 put("max_results", JsonPrimitive(commonOptions.resultSize))
-                put("return_images", JsonPrimitive(true))
+                // NOTE: return_images is a Sonar /chat/completions feature, not
+                // supported by the /search endpoint. Kept commented for reference.
+                // put("return_images", JsonPrimitive(true))
                 serviceOptions.maxTokens?.let {
                     if (it > 0) {
                         put("max_tokens", JsonPrimitive(it))
@@ -100,10 +102,12 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
                 // Collect all image URLs from the response-level images array.
                 // Perplexity returns images at the response level, not per-result,
                 // so we distribute them across the top results (round-robin, max 5 total).
+                Log.i(TAG, "response images count: ${responseBody.images.size}, results: ${responseBody.results.size}")
                 val allImages = responseBody.images
                     .mapNotNull { it.imageUrl }
                     .distinct()
                     .take(5)
+                Log.i(TAG, "allImages (${allImages.size}): ${allImages.take(2)}")
 
                 val rawItems = responseBody.results
                     .filter { !it.title.isNullOrBlank() && !it.url.isNullOrBlank() }
