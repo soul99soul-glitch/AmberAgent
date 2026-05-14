@@ -2160,10 +2160,20 @@ private fun ModelCouncilRunSheet(
                             content = displayText,
                             modifier = Modifier.fillMaxWidth(),
                             style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
-                            // Same rationale as SubAgentRunSheet above — per-seat
-                            // council output streams via manager.liveTextFlow, and
-                            // should pick up the character-level tail fade-in.
-                            streaming = isRunning,
+                            // 2026-05-14 review fix: was `streaming = isRunning`,
+                            // but isRunning is the COUNCIL-wide RUNNING flag — a
+                            // 4-seat council where 3 seats finished early would
+                            // leave those 3 seat tabs with permanent grey-tail
+                            // characters (same shape as the 1.8.8 main-chat fix,
+                            // applied to the wrong granularity). Per-seat signal:
+                            // finalText is non-blank exactly when the council
+                            // manager has finalized THIS seat's output via the
+                            // tool call. Once finalText surfaces, this seat has
+                            // sealed off — even if the council overall is still
+                            // running other seats — so streaming should flip to
+                            // false and let Paragraph.settleAnim lift the tail
+                            // back to alpha=1.
+                            streaming = isRunning && finalText.isBlank(),
                         )
                     }
                 }

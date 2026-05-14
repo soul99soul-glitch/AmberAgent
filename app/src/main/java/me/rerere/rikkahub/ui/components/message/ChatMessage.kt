@@ -4,8 +4,8 @@ import android.content.Intent
 import android.os.Trace
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -292,25 +292,32 @@ private fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
 
 /**
  * Height-change animation specifically for the streaming-tail assistant container
- * (and ONLY there — single layer, never stacked). Returns a fast tween that
- * completes inside the accumulator's 200ms flush interval so consecutive flushes
- * never collide. Spec is intentionally `tween(140ms, FastOutSlowInEasing)`
- * rather than the default spring:
- *   - 140ms < 200ms flush interval → each height transition settles before the
- *     next chunk arrives, so we never have two competing animations targeting
- *     different heights (which is what made the previous nested-spring setup
- *     look janky).
- *   - FastOutSlowInEasing eases out smoothly at the end — bubble height "lands"
- *     gently into the new size, which reads as smooth content scroll-up rather
- *     than a hard snap.
+ * (and ONLY there — single layer, never stacked).
  *
- * Apply this AT MOST ONCE per assistant message (on the outermost container
- * that wraps the streaming markdown content). Stacking it on inner layers
- * resurrects the original problem.
+ * Spec evolution:
+ *   v1.8.3: `tween(140ms, FastOutSlowInEasing)` — got us "smooth on each chunk",
+ *           but tween restarts from velocity=0 every flush. User reported the
+ *           result as 顿挫感 — each chunk was a discrete "start → decelerate →
+ *           stop" unit, four to five of them per second stacking up.
+ *   v1.8.9: `spring(NoBouncy, StiffnessMediumLow)`. When the next chunk arrives
+ *           mid-animation, spring PRESERVES the current velocity and smoothly
+ *           redirects the height toward the new target. Five consecutive chunks
+ *           feel like one continuous follow rather than five discrete jumps.
+ *           NoBouncy damping kills the Material default overshoot wobble.
+ *           StiffnessMediumLow is loose enough that the bubble visibly "trails"
+ *           the latest content — the user reads this as natural scroll-up
+ *           rather than as a snap.
+ *
+ * Why single-layer matters: nested spring animations stack their velocity
+ * contributions and produce the "floating" jank we hit in 1.8.0 (the original
+ * 4-5 layer bug). One spring per assistant message is the correct dosage.
  */
 private fun Modifier.streamingContentSize(enabled: Boolean): Modifier =
     if (enabled) animateContentSize(
-        animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
     ) else this
 
 @Composable
