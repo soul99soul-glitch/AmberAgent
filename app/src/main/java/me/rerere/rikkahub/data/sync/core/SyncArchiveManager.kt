@@ -73,6 +73,7 @@ class SyncArchiveManager(
                 appVersionCode = BuildConfig.VERSION_CODE.toLong(),
                 createdAt = System.currentTimeMillis(),
                 deviceId = settings.syncSettings.deviceId.ifBlank { "local" },
+                deviceLabel = formatDeviceLabel(),
                 mode = request.mode,
                 remoteRevision = settings.syncSettings.lastRemoteRevision,
                 kdf = params.kdf,
@@ -115,7 +116,7 @@ class SyncArchiveManager(
                 "备份文件校验失败"
             }
             crypto.decrypt(encryptedPayloadFile, payloadFile, request.passphrase, parsed.manifest)
-            restorePayload(payloadFile, parsed.manifest, request.scope)
+            restorePayload(payloadFile, parsed.manifest, request)
             SyncPreview(
                 manifest = parsed.manifest,
                 fileName = file.name,
@@ -200,6 +201,23 @@ class SyncArchiveManager(
         return count
     }
 
+    /**
+     * Build "OPPO PMA110" / "vivo V2509A" style label. We dedupe when MODEL
+     * already starts with MANUFACTURER (some OEMs prepend their brand) so
+     * we don't end up with "Samsung Samsung SM-X910".
+     */
+    private fun formatDeviceLabel(): String {
+        val manufacturer = android.os.Build.MANUFACTURER.orEmpty()
+        val model = android.os.Build.MODEL.orEmpty()
+        return when {
+            manufacturer.isBlank() && model.isBlank() -> ""
+            manufacturer.isBlank() -> model
+            model.isBlank() -> manufacturer
+            model.startsWith(manufacturer, ignoreCase = true) -> model
+            else -> "$manufacturer $model"
+        }
+    }
+
     private fun tempSyncFile(prefix: String, suffix: String): File {
         val dir = File(context.cacheDir, "sync").apply { mkdirs() }
         return File.createTempFile("amber-$prefix-", suffix, dir)
@@ -208,8 +226,9 @@ class SyncArchiveManager(
     private suspend fun restorePayload(
         payloadFile: File,
         manifest: SyncManifest,
-        scope: RestoreScope,
+        request: SyncRestoreRequest,
     ) {
+        val scope = request.scope
         var settingsJson: String? = null
         var secretsJson: String? = null
         val tableRows = linkedMapOf<String, MutableList<JsonObject>>()
@@ -222,6 +241,16 @@ class SyncArchiveManager(
         // entries unconditionally would burn I/O on archives that contain
         // multi-GB chat_images / upload dirs we're not going to use.
         val skipBulkPayload = scope == RestoreScope.CONFIG_ONLY
+        // Same I/O optimization for the preserve toggles: when the user opted
+        // to keep their local chat_images / images, don't even bother staging
+        // the bytes from the archive — they'd be wiped by the outer finally
+        // block anyway.
+        val skipChatImages = scope == RestoreScope.EVERYTHING && request.preserveGenMedia
+        val skipImages = scope == RestoreScope.EVERYTHING && request.preserveGenMedia
+        val preserveConversationTables =
+            scope == RestoreScope.EVERYTHING && request.preserveConversations
+        val preserveGenMediaTables =
+            scope == RestoreScope.EVERYTHING && request.preserveGenMedia
         ZipInputStream(FileInputStream(payloadFile).buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
@@ -254,13 +283,24 @@ class SyncArchiveManager(
                         !skipBulkPayload && entry.name.startsWith("files/") -> {
                             val relativePath = entry.name.removePrefix("files/")
                             requireSafeRelativePath(relativePath)
-                            val target = File(stagedFilesRoot, relativePath).canonicalFile
-                            require(target.path.startsWith(stagedFilesRoot.path + File.separator)) {
-                                "Invalid file path in sync archive: $relativePath"
-                            }
-                            target.parentFile?.mkdirs()
-                            FileOutputStream(target).buffered().use { output ->
-                                zip.copyTo(output)
+                            // Per-root skip for the preserve toggles. We don't
+                            // need to drain the entry bytes — ZipInputStream's
+                            // closeEntry() (at the bottom of the outer loop)
+                            // skips past any unread payload of the current
+                            // entry before advancing.
+                            val isChatImages = relativePath.startsWith(FileFolders.CHAT_IMAGES + "/")
+                            val isImages = relativePath.startsWith(FileFolders.IMAGES + "/")
+                            if ((skipChatImages && isChatImages) || (skipImages && isImages)) {
+                                // intentionally drop — local files of this root stay.
+                            } else {
+                                val target = File(stagedFilesRoot, relativePath).canonicalFile
+                                require(target.path.startsWith(stagedFilesRoot.path + File.separator)) {
+                                    "Invalid file path in sync archive: $relativePath"
+                                }
+                                target.parentFile?.mkdirs()
+                                FileOutputStream(target).buffered().use { output ->
+                                    zip.copyTo(output)
+                                }
                             }
                         }
                     }
@@ -296,11 +336,25 @@ class SyncArchiveManager(
         try {
             when (scope) {
                 RestoreScope.EVERYTHING -> {
-                    // Historical full-replace: wipe + rebuild all tables in
-                    // a single transaction, then swap in the restored file
-                    // trees on success.
-                    restoreTables(tableRows) {
-                        replaceFileTreesFromStage(stagedFilesRoot)
+                    // Apply the preserve toggles: filter out tables the user
+                    // chose to keep, and tell replaceFileTreesFromStage which
+                    // file roots to leave alone. Default behavior (both flags
+                    // false) is the historical full-replace.
+                    val skippedTables = buildSet {
+                        if (preserveConversationTables) addAll(CONVERSATION_TABLES)
+                        if (preserveGenMediaTables) addAll(GEN_MEDIA_TABLES)
+                    }
+                    val filteredTableRows = if (skippedTables.isEmpty()) {
+                        tableRows
+                    } else {
+                        tableRows.filterKeys { it !in skippedTables }
+                    }
+                    val skippedFileRoots = buildSet {
+                        if (skipChatImages) add(FileFolders.CHAT_IMAGES)
+                        if (skipImages) add(FileFolders.IMAGES)
+                    }
+                    restoreTables(filteredTableRows, skippedTables) {
+                        replaceFileTreesFromStage(stagedFilesRoot, skippedFileRoots)
                     }
                 }
                 RestoreScope.CONFIG_ONLY -> {
@@ -350,24 +404,33 @@ class SyncArchiveManager(
 
     private fun restoreTables(
         rowsByTable: Map<String, List<JsonObject>>,
+        preservedTables: Set<String> = emptySet(),
         afterTablesRestored: () -> Unit,
     ) {
         val db = database.openHelper.writableDatabase
         db.execSQL("PRAGMA foreign_keys=OFF")
         db.beginTransaction()
         try {
+            // Wipe only tables we plan to refill from the archive — leave
+            // preserved tables intact so the user's local conversations /
+            // gen-media survive an EVERYTHING-scope restore.
             SYNC_TABLES.asReversed().forEach { table ->
+                if (table in preservedTables) return@forEach
                 db.execSQL("DELETE FROM ${table.sqlName()}")
             }
             SYNC_TABLES.forEach { table ->
+                if (table in preservedTables) return@forEach
                 rowsByTable[table].orEmpty().forEach { row ->
                     db.insert(table, SQLiteDatabase.CONFLICT_REPLACE, row.toContentValues(table))
                 }
             }
             afterTablesRestored()
             runCatching {
-                val names = SYNC_TABLES.joinToString(",") { "'$it'" }
-                db.execSQL("DELETE FROM sqlite_sequence WHERE name IN ($names)")
+                val resetTables = SYNC_TABLES.filterNot { it in preservedTables }
+                if (resetTables.isNotEmpty()) {
+                    val names = resetTables.joinToString(",") { "'$it'" }
+                    db.execSQL("DELETE FROM sqlite_sequence WHERE name IN ($names)")
+                }
             }
             db.setTransactionSuccessful()
         } finally {
@@ -431,13 +494,17 @@ class SyncArchiveManager(
         }
     }
 
-    private fun replaceFileTreesFromStage(stageRoot: File) {
+    private fun replaceFileTreesFromStage(
+        stageRoot: File,
+        preservedRoots: Set<String> = emptySet(),
+    ) {
         val filesDir = context.filesDir.canonicalFile
         val backupRoot = File(context.cacheDir, "sync-restore-backup").canonicalFile
         backupRoot.deleteRecursively()
         backupRoot.mkdirs()
         try {
             SYNC_FILE_ROOTS.forEach { relativeRoot ->
+                if (relativeRoot in preservedRoots) return@forEach
                 val target = File(filesDir, relativeRoot).canonicalFile
                 require(target.path.startsWith(filesDir.path + File.separator)) {
                     "Invalid sync file root: $relativeRoot"
@@ -456,14 +523,17 @@ class SyncArchiveManager(
                 require(relativeRoot in SYNC_FILE_ROOTS) {
                     "Invalid staged sync root: $relativeRoot"
                 }
+                if (relativeRoot in preservedRoots) return@forEach
                 staged.copyRecursively(File(filesDir, relativeRoot), overwrite = true)
             }
             backupRoot.deleteRecursively()
         } catch (error: Throwable) {
             SYNC_FILE_ROOTS.forEach { relativeRoot ->
+                if (relativeRoot in preservedRoots) return@forEach
                 File(filesDir, relativeRoot).deleteRecursively()
             }
             backupRoot.listFiles().orEmpty().forEach { backup ->
+                if (backup.name in preservedRoots) return@forEach
                 backup.copyRecursively(File(filesDir, backup.name), overwrite = true)
             }
             throw error
@@ -636,6 +706,24 @@ class SyncArchiveManager(
             "mp4", "m4v", "mov", "webm", "mkv",
             "pdf", "zip", "gz", "tgz", "7z", "rar", "xz", "br", "zst",
         )
+
+        // Subset of SYNC_TABLES whose rows describe local chat history.
+        // Restore preserves these when SyncRestoreRequest.preserveConversations
+        // is true (default for the simplified UI). Drains from the archive's
+        // ZIP entries are still read (so the ZipInputStream stays in sync),
+        // they just don't write to the DB.
+        val CONVERSATION_TABLES = setOf(
+            "conversationentity",
+            "message_node",
+            "conversation_compact",
+            "conversation_context_event",
+        )
+
+        // Subset of SYNC_TABLES tied to image-generation gallery state.
+        // Restore preserves these when SyncRestoreRequest.preserveGenMedia
+        // is true. The companion file-side preservation is the IMAGES +
+        // CHAT_IMAGES roots inside replaceFileTreesFromStage.
+        val GEN_MEDIA_TABLES = setOf("genmediaentity")
 
         val SYNC_TABLES = listOf(
             "conversationentity",

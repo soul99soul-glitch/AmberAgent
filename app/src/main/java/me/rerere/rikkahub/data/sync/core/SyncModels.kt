@@ -22,6 +22,22 @@ data class SyncSettings(
     val lastDownloadAt: Long = 0L,
     val lastRemoteRevision: String = "",
     val lastError: String = "",
+    /**
+     * Human-readable summary of the most recent backup activity (upload OR
+     * download). Stamped by BackupVM right after success so the UI can show
+     * a one-line "上次备份 yyyy-MM-dd HH:mm (1.8.16, OPPO PMA110)" hint
+     * without re-fetching the cloud archive.
+     *
+     * On upload: filled from local BuildConfig + Build.MANUFACTURER/MODEL
+     * (these describe the device that produced the archive that's now in
+     * the cloud — i.e. the same as the local one).
+     * On download/restore: filled from the archive's SyncManifest fields.
+     * Blank when the user hasn't uploaded or downloaded anything yet — UI
+     * surfaces that as "暂无备份".
+     */
+    val lastBackupVersionName: String = "",
+    val lastBackupVersionCode: Long = 0L,
+    val lastBackupDeviceLabel: String = "",
 )
 
 @Serializable
@@ -31,6 +47,13 @@ data class SyncManifest(
     val appVersionCode: Long,
     val createdAt: Long,
     val deviceId: String,
+    /**
+     * Human-readable model string of the device that produced this archive,
+     * e.g. "OPPO PMA110", "vivo V2509A". Stamped from Build.MANUFACTURER +
+     * Build.MODEL at archive-creation time. Defaults to blank for archives
+     * created before this field existed; UI shows "未知设备" in that case.
+     */
+    val deviceLabel: String = "",
     val mode: SyncMode,
     val remoteRevision: String = "",
     val encrypted: Boolean = true,
@@ -132,6 +155,27 @@ enum class RestoreScope {
 data class SyncRestoreRequest(
     val passphrase: String,
     val scope: RestoreScope = RestoreScope.EVERYTHING,
+    /**
+     * Only consulted when `scope == EVERYTHING`. When true, the restore
+     * leaves the local conversation tables alone (conversation rows,
+     * message_node rows, conversation_compact, conversation_context_event)
+     * — every OTHER table is wiped + replaced. The CONFIG_ONLY scope
+     * implicitly preserves conversations and ignores this flag.
+     *
+     * User intent: "对话整个覆盖掉了也不太好" — a restore is usually about
+     * picking up provider configs / assistants / files from another device,
+     * not wiping the locally-typed chat history.
+     */
+    val preserveConversations: Boolean = true,
+    /**
+     * Only consulted when `scope == EVERYTHING`. When true, leaves the
+     * genmediaentity table (ImgGenPage gallery) and both image file
+     * folders (chat_images, images) untouched. CONFIG_ONLY ignores.
+     *
+     * User said "绘画是一个单独可以选的" — image-generation output is a
+     * separate axis from conversations, surfaced as its own toggle.
+     */
+    val preserveGenMedia: Boolean = true,
 )
 
 const val CURRENT_ARCHIVE_VERSION = 1

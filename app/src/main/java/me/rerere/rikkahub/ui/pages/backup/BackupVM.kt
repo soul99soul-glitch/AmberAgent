@@ -204,6 +204,7 @@ class BackupVM(
                     expectedRemoteRevision = remote?.revisionKey,
                 )
             }.onSuccess { result ->
+                val manifest = result.preview.manifest
                 settingsStore.update { current ->
                     current.copy(
                         syncSettings = current.syncSettings.copy(
@@ -215,6 +216,9 @@ class BackupVM(
                             lastUploadAt = System.currentTimeMillis(),
                             lastRemoteRevision = result.file.revisionKey,
                             lastError = "",
+                            lastBackupVersionName = manifest.appVersionName,
+                            lastBackupVersionCode = manifest.appVersionCode,
+                            lastBackupDeviceLabel = manifest.deviceLabel,
                         )
                     )
                 }
@@ -268,24 +272,35 @@ class BackupVM(
         }
     }
 
-    fun restoreGoogle(passphrase: String, scope: RestoreScope = RestoreScope.EVERYTHING) {
+    fun restoreGoogle(
+        passphrase: String,
+        scope: RestoreScope = RestoreScope.EVERYTHING,
+        preserveConversations: Boolean = true,
+        preserveGenMedia: Boolean = true,
+    ) {
         val archiveFile = pendingCloudRestoreFile
         if (archiveFile == null) {
             operationState.value = UiState.Error(IllegalStateException("没有待恢复的云端快照"))
             return
         }
-        // Blank means "the archive was created without a passphrase" — UI
-        // skips the password dialog in that case and calls us with "". Sub
-        // the fallback so the engine's non-blank invariant still holds.
+        // Blank means the simplified UI skipped passphrase entry, or the
+        // archive was uploaded without one — either way, sub in the
+        // documented fallback so the engine's non-blank require() holds.
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
                 googleDriveSyncRepository.restore(
                     archiveFile = archiveFile,
-                    request = SyncRestoreRequest(passphrase = resolvedPassphrase, scope = scope),
+                    request = SyncRestoreRequest(
+                        passphrase = resolvedPassphrase,
+                        scope = scope,
+                        preserveConversations = preserveConversations,
+                        preserveGenMedia = preserveGenMedia,
+                    ),
                 )
             }.onSuccess { preview ->
+                val manifest = preview.manifest
                 pendingCloudRestoreFile?.delete()
                 pendingCloudRestoreFile = null
                 pendingCloudRestore.value = false
@@ -297,11 +312,14 @@ class BackupVM(
                             lastDownloadAt = System.currentTimeMillis(),
                             lastRemoteRevision = pendingCloudRestoreRevision,
                             lastError = "",
+                            lastBackupVersionName = manifest.appVersionName,
+                            lastBackupVersionCode = manifest.appVersionCode,
+                            lastBackupDeviceLabel = manifest.deviceLabel,
                         )
                     )
                 }
                 pendingCloudRestoreRevision = ""
-                googleMessage.value = "已从 Google Drive 恢复快照。"
+                googleMessage.value = "已恢复云端备份，建议重启应用以确保所有数据生效。"
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
@@ -325,12 +343,16 @@ class BackupVM(
                     request = SyncExportRequest(mode = mode, passphrase = resolvedPassphrase)
                 )
             }.onSuccess { preview ->
+                val manifest = preview.manifest
                 settingsStore.update { current ->
                     current.copy(
                         syncSettings = current.syncSettings.copy(
                             mode = mode,
                             lastLocalExportAt = System.currentTimeMillis(),
                             lastError = "",
+                            lastBackupVersionName = manifest.appVersionName,
+                            lastBackupVersionCode = manifest.appVersionCode,
+                            lastBackupDeviceLabel = manifest.deviceLabel,
                         )
                     )
                 }
@@ -361,26 +383,41 @@ class BackupVM(
         }
     }
 
-    fun restoreLocal(uri: Uri, passphrase: String, scope: RestoreScope = RestoreScope.EVERYTHING) {
+    fun restoreLocal(
+        uri: Uri,
+        passphrase: String,
+        scope: RestoreScope = RestoreScope.EVERYTHING,
+        preserveConversations: Boolean = true,
+        preserveGenMedia: Boolean = true,
+    ) {
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
                 localBackupRepository.restoreFromUri(
                     uri = uri,
-                    request = SyncRestoreRequest(passphrase = resolvedPassphrase, scope = scope)
+                    request = SyncRestoreRequest(
+                        passphrase = resolvedPassphrase,
+                        scope = scope,
+                        preserveConversations = preserveConversations,
+                        preserveGenMedia = preserveGenMedia,
+                    )
                 )
             }.onSuccess { preview ->
+                val manifest = preview.manifest
                 pendingImportPreview.value = null
                 settingsStore.update { current ->
                     current.copy(
                         syncSettings = current.syncSettings.copy(
                             lastDownloadAt = System.currentTimeMillis(),
                             lastError = "",
+                            lastBackupVersionName = manifest.appVersionName,
+                            lastBackupVersionCode = manifest.appVersionCode,
+                            lastBackupDeviceLabel = manifest.deviceLabel,
                         )
                     )
                 }
-                localMessage.value = "已恢复本地备份。"
+                localMessage.value = "已恢复本地备份，建议重启应用以确保所有数据生效。"
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
