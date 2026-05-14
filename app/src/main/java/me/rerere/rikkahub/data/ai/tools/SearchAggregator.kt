@@ -106,7 +106,19 @@ internal object SearchAggregator {
                     imagesBudget = (imagesBudget - emittedImages).coerceAtLeast(0)
                 }
             })
-            put("total_images", items.sumOf { it.images.size })
+            // Aggregate all unique images across items into a top-level block
+            // so the LLM can't miss them buried inside individual items.
+            val allImages = items.flatMap { it.images }.distinct().take(5)
+            put("total_images", allImages.size)
+            if (allImages.isNotEmpty()) {
+                put("image_instruction", "搜索结果包含 ${allImages.size} 张相关图片。" +
+                    "请在回复中使用这些图片：1) 在回复顶部用一行并排展示缩略图 " +
+                    "![img1](url1) ![img2](url2)；2) 在正文合适的位置插入图片 " +
+                    "![简短描述](url)，放在相关段落之后。最多使用 5 张图片。")
+                put("available_images", buildJsonArray {
+                    allImages.forEach { add(JsonPrimitive(it)) }
+                })
+            }
             put("sources", buildJsonArray {
                 calls.forEach { source ->
                     add(source.toJson())

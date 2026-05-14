@@ -58,13 +58,13 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     - Multiple citations are allowed.
                     - If no results are cited, omit citations.
 
-                    Images:
-                    - Some items contain an `images` array with relevant image URLs.
-                    - In your response, first show a row of small thumbnail previews at the top using: `![thumbnail1](url1) ![thumbnail2](url2) ...` on a single line.
-                    - Then in the body text, embed images at semantically appropriate positions using `![brief description](url)`.
-                    - Place each image AFTER the paragraph it illustrates, not grouped together.
-                    - Maximum 5 images per response. If more are available, pick the most relevant ones.
-                    - If no images are available or relevant, skip the thumbnail row and do not add images.
+                    IMPORTANT — Images:
+                    When the search result JSON contains `available_images` and `image_instruction`, you MUST embed those images in your response using Markdown image syntax.
+                    Follow the `image_instruction` field exactly. The typical format is:
+                    1. A thumbnail row at the top: ![](url1) ![](url2) on one line
+                    2. Full images inline after relevant paragraphs: ![brief description](url)
+                    Do NOT ignore available images. Do NOT describe images in text instead of embedding them.
+                    Maximum 5 images. If no `available_images` field exists, skip images entirely.
 
                     Example:
                     The capital of France is Paris. [citation,example.com](abc123)

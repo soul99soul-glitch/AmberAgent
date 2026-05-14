@@ -786,6 +786,29 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 )
                             }
                         }
+                        // Show search result thumbnails inline on the collapsed card
+                        val searchImages = content?.jsonObject?.get("available_images")
+                            ?.jsonArray
+                            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                            ?.take(3)
+                            .orEmpty()
+                        if (searchImages.isNotEmpty()) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(top = 4.dp),
+                            ) {
+                                searchImages.forEach { imgUrl ->
+                                    ZoomableAsyncImage(
+                                        model = imgUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .height(48.dp)
+                                            .widthIn(max = 72.dp)
+                                            .clip(RoundedCornerShape(6.dp)),
+                                    )
+                                }
+                            }
+                        }
                     }
                     if (tool.toolName == ToolNames.SCRAPE_WEB) {
                         val url = arguments.getStringContent("url") ?: ""
@@ -962,11 +985,46 @@ private fun SearchWebPreview(
             }
         }
 
+        // Top-level image thumbnails (from available_images)
+        val topImages = content.jsonObject["available_images"]
+            ?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+            ?.take(5)
+            .orEmpty()
+        if (topImages.isNotEmpty()) {
+            item {
+                Text(
+                    text = "相关图片 (${topImages.size})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                )
+            }
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    topImages.forEach { imgUrl ->
+                        ZoomableAsyncImage(
+                            model = imgUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .height(64.dp)
+                                .widthIn(max = 100.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                        )
+                    }
+                }
+            }
+        }
+
         if (items.isNotEmpty()) {
             items(items) { item ->
                 val url = item.getStringContent("url") ?: return@items
                 val title = item.getStringContent("title") ?: return@items
                 val text = item.getStringContent("text") ?: return@items
+                val itemImages = runCatching {
+                    item.jsonObject["images"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                }.getOrNull().orEmpty()
 
                 Card(
                     onClick = { context.openUrl(url) },
@@ -974,31 +1032,52 @@ private fun SearchWebPreview(
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     )
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 8.dp, horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Favicon(
-                            url = url,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column {
-                            Text(text = title, maxLines = 1)
-                            Text(
-                                text = text,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodySmall
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Favicon(
+                                url = url,
+                                modifier = Modifier.size(24.dp)
                             )
-                            Text(
-                                text = url,
-                                maxLines = 1,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = title, maxLines = 1)
+                                Text(
+                                    text = text,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = url,
+                                    maxLines = 1,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                        // Per-item images
+                        if (itemImages.isNotEmpty()) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(top = 6.dp),
+                            ) {
+                                itemImages.take(2).forEach { imgUrl ->
+                                    ZoomableAsyncImage(
+                                        model = imgUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .height(56.dp)
+                                            .widthIn(max = 80.dp)
+                                            .clip(RoundedCornerShape(6.dp)),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
