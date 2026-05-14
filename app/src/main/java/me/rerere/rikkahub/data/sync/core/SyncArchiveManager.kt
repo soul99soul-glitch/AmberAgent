@@ -217,6 +217,11 @@ class SyncArchiveManager(
         stagedFilesRoot.deleteRecursively()
         stagedFilesRoot.mkdirs()
 
+        // CONFIG_ONLY skips both DB-table extraction and file-tree
+        // extraction — we only care about the settings entry. Reading the
+        // entries unconditionally would burn I/O on archives that contain
+        // multi-GB chat_images / upload dirs we're not going to use.
+        val skipBulkPayload = scope == RestoreScope.CONFIG_ONLY
         ZipInputStream(FileInputStream(payloadFile).buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
@@ -228,10 +233,15 @@ class SyncArchiveManager(
                         }
 
                         entry.name == SECRETS_ENTRY -> {
+                            // Read even when CONFIG_ONLY skips applying — we
+                            // ignore the bytes later but reading keeps the
+                            // ZipInputStream's position consistent.
                             secretsJson = zip.readBytes().decodeToString()
                         }
 
-                        entry.name.startsWith("tables/") && entry.name.endsWith(".jsonl") -> {
+                        !skipBulkPayload &&
+                            entry.name.startsWith("tables/") &&
+                            entry.name.endsWith(".jsonl") -> {
                             val table = entry.name.removePrefix("tables/").removeSuffix(".jsonl")
                             val rows = tableRows.getOrPut(table) { mutableListOf() }
                             zip.readBytes()
@@ -241,7 +251,7 @@ class SyncArchiveManager(
                                 .forEach { rows += json.parseToJsonElement(it).jsonObject }
                         }
 
-                        entry.name.startsWith("files/") -> {
+                        !skipBulkPayload && entry.name.startsWith("files/") -> {
                             val relativePath = entry.name.removePrefix("files/")
                             requireSafeRelativePath(relativePath)
                             val target = File(stagedFilesRoot, relativePath).canonicalFile
@@ -262,11 +272,27 @@ class SyncArchiveManager(
         val restoredSettingsJson = settingsJson ?: error("同步备份缺少 settings.json")
 
         val currentSettings = settingsStore.settingsFlow.value
-        val restoredSettings = redactor.decodeSettingsForRestore(
+        val decodedSettings = redactor.decodeSettingsForRestore(
             settingsJson = restoredSettingsJson,
             mode = manifest.mode,
             localSettings = currentSettings,
-        ).copy(syncSettings = currentSettings.syncSettings)
+        )
+
+        // [Review #1 fix] CONFIG_ONLY only adopts the providers list from
+        // the backup. Replacing the whole Settings object would orphan
+        // local conversations whose `assistantId` points at assistants that
+        // exist only in the backup's `assistants` list, leaving "assistant
+        // not found" / silent misroute behaviour. With this contract, the
+        // user's pain ("don't make me re-input provider configs") is fully
+        // solved while keeping their custom assistants, quick messages,
+        // lorebooks, and conversation references intact.
+        val finalSettings = when (scope) {
+            RestoreScope.EVERYTHING ->
+                decodedSettings.copy(syncSettings = currentSettings.syncSettings)
+            RestoreScope.CONFIG_ONLY ->
+                currentSettings.copy(providers = decodedSettings.providers)
+        }
+
         try {
             when (scope) {
                 RestoreScope.EVERYTHING -> {
@@ -278,25 +304,27 @@ class SyncArchiveManager(
                     }
                 }
                 RestoreScope.CONFIG_ONLY -> {
-                    // Settings + secrets only — leave local conversations,
-                    // memories, generated images, file uploads, skills,
-                    // board / feishu state untouched. The staged file tree
-                    // and tableRows we just unpacked are discarded by the
-                    // outer `finally` deleteRecursively().
+                    // No table or file work — the staged file tree we
+                    // didn't even fill (due to the skipBulkPayload guard
+                    // earlier) is wiped by the outer `finally` regardless.
                 }
             }
         } finally {
             stagedFilesRoot.deleteRecursively()
         }
-        restoreSecrets(secretsJson)
         if (scope == RestoreScope.EVERYTHING) {
-            // Only meaningful after a full table replace — the FTS index
-            // must mirror the new conversations table, and any new file
-            // attachments need to be registered with FilesManager.
+            // Secrets (WebMount + Codex OAuth tokens) are session-bound.
+            // Restoring them on CONFIG_ONLY would clobber a freshly-paired
+            // OAuth session with an old token from the backup. Only do it
+            // when the user explicitly chose the full migrate-everything
+            // path. See Review Risk #4.
+            restoreSecrets(secretsJson)
+            // FTS index + file dir sync only need to run after a full
+            // table / file replace.
             filesManager.syncFolder(FileFolders.UPLOAD)
             messageFtsManager.rebuildAllFromDatabase()
         }
-        settingsStore.update(restoredSettings)
+        settingsStore.update(finalSettings)
     }
 
     private fun cursorRowToJson(table: String, cursor: Cursor): JsonObject = buildJsonObject {

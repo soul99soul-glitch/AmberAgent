@@ -169,6 +169,14 @@ class BackupVM(
             googleMessage.value = "请先完成 Google Drive 授权，再上传云端快照。"
             return
         }
+        // [Review #6 fix] Reject the literal NO_PASSPHRASE_FALLBACK string —
+        // letting it through would silently stamp passphraseProtected=false
+        // on restore and skip the password prompt, which contradicts the
+        // user's intent of "I set a password".
+        if (passphrase == NO_PASSPHRASE_FALLBACK) {
+            operationState.value = UiState.Error(IllegalArgumentException("这个口令是内部保留值，请换一个口令"))
+            return
+        }
         // Blank passphrase from the upload sheet means "no password" — sub in
         // the documented fallback string. The engine stamps the manifest's
         // passphraseProtected flag based on this substitution.
@@ -304,6 +312,10 @@ class BackupVM(
     }
 
     fun exportLocal(uri: Uri, mode: SyncMode, passphrase: String) {
+        if (passphrase == NO_PASSPHRASE_FALLBACK) {
+            operationState.value = UiState.Error(IllegalArgumentException("这个口令是内部保留值，请换一个口令"))
+            return
+        }
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading

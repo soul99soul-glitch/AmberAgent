@@ -315,7 +315,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     if (showRestorePassphrase) {
         val message = when (restoreScope) {
             RestoreScope.CONFIG_ONLY ->
-                "仅恢复配置（Provider / API Key / 助手 / 模型设置）。本机的对话、记忆、生成图都保留。"
+                "仅恢复 Provider 配置（含 API Key / Base URL / 添加的模型）。本机的助手、对话、记忆、生成图都保留。"
             RestoreScope.EVERYTHING ->
                 "恢复会替换本机的对话、记忆、文件和所有配置。恢复前请确认这是你想导入的快照。"
         }
@@ -323,7 +323,16 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             title = "输入同步口令",
             confirmText = "恢复",
             message = message,
-            onDismiss = { showRestorePassphrase = false },
+            // Restoring an archive that requires a passphrase — the user
+            // MUST type the same passphrase used at upload. No "不使用口令"
+            // option to confuse them.
+            allowNoPassphrase = false,
+            onDismiss = {
+                showRestorePassphrase = false
+                // [Review #5 fix] reset the scope so a subsequent restore
+                // attempt doesn't silently inherit the last picked scope.
+                restoreScope = RestoreScope.EVERYTHING
+            },
             onConfirm = { passphrase ->
                 val localUri = pendingImportUri
                 if (pendingCloudRestore) {
@@ -332,6 +341,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     vm.restoreLocal(localUri, passphrase, restoreScope)
                 }
                 showRestorePassphrase = false
+                restoreScope = RestoreScope.EVERYTHING
             }
         )
     }
@@ -387,8 +397,8 @@ private fun ImportPreviewDialog(
                 )
                 RestoreScopeOption(
                     selected = scope == RestoreScope.CONFIG_ONLY,
-                    title = "仅恢复配置",
-                    description = "只覆盖 Provider / API Key / 助手 / 模型默认设置；对话和生成图都保留。",
+                    title = "仅恢复 Provider 配置",
+                    description = "只覆盖 Provider 列表（含 API Key / Base URL / 添加的模型）；本机的助手、对话、记忆都保留。",
                     onClick = { onScopeChange(RestoreScope.CONFIG_ONLY) },
                 )
             }
