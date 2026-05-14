@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.sync.core.NO_PASSPHRASE_FALLBACK
+import me.rerere.rikkahub.data.sync.core.RestoreScope
 import me.rerere.rikkahub.data.sync.core.SyncExportRequest
 import me.rerere.rikkahub.data.sync.core.SyncMode
 import me.rerere.rikkahub.data.sync.core.SyncPreview
@@ -167,7 +169,11 @@ class BackupVM(
             googleMessage.value = "请先完成 Google Drive 授权，再上传云端快照。"
             return
         }
-        val request = SyncExportRequest(mode = mode, passphrase = passphrase)
+        // Blank passphrase from the upload sheet means "no password" — sub in
+        // the documented fallback string. The engine stamps the manifest's
+        // passphraseProtected flag based on this substitution.
+        val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
+        val request = SyncExportRequest(mode = mode, passphrase = resolvedPassphrase)
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
@@ -254,18 +260,22 @@ class BackupVM(
         }
     }
 
-    fun restoreGoogle(passphrase: String) {
+    fun restoreGoogle(passphrase: String, scope: RestoreScope = RestoreScope.EVERYTHING) {
         val archiveFile = pendingCloudRestoreFile
         if (archiveFile == null) {
             operationState.value = UiState.Error(IllegalStateException("没有待恢复的云端快照"))
             return
         }
+        // Blank means "the archive was created without a passphrase" — UI
+        // skips the password dialog in that case and calls us with "". Sub
+        // the fallback so the engine's non-blank invariant still holds.
+        val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
                 googleDriveSyncRepository.restore(
                     archiveFile = archiveFile,
-                    request = SyncRestoreRequest(passphrase = passphrase),
+                    request = SyncRestoreRequest(passphrase = resolvedPassphrase, scope = scope),
                 )
             }.onSuccess { preview ->
                 pendingCloudRestoreFile?.delete()
@@ -294,12 +304,13 @@ class BackupVM(
     }
 
     fun exportLocal(uri: Uri, mode: SyncMode, passphrase: String) {
+        val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
                 localBackupRepository.exportToUri(
                     uri = uri,
-                    request = SyncExportRequest(mode = mode, passphrase = passphrase)
+                    request = SyncExportRequest(mode = mode, passphrase = resolvedPassphrase)
                 )
             }.onSuccess { preview ->
                 settingsStore.update { current ->
@@ -338,13 +349,14 @@ class BackupVM(
         }
     }
 
-    fun restoreLocal(uri: Uri, passphrase: String) {
+    fun restoreLocal(uri: Uri, passphrase: String, scope: RestoreScope = RestoreScope.EVERYTHING) {
+        val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         viewModelScope.launch {
             operationState.value = UiState.Loading
             runCatching {
                 localBackupRepository.restoreFromUri(
                     uri = uri,
-                    request = SyncRestoreRequest(passphrase = passphrase)
+                    request = SyncRestoreRequest(passphrase = resolvedPassphrase, scope = scope)
                 )
             }.onSuccess { preview ->
                 pendingImportPreview.value = null

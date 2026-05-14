@@ -5,6 +5,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +40,12 @@ import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Upload02
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.Alignment
+import me.rerere.rikkahub.data.sync.core.RestoreScope
 import me.rerere.rikkahub.data.sync.core.SYNC_ARCHIVE_MIME
 import me.rerere.rikkahub.data.sync.core.SyncMode
 import me.rerere.rikkahub.data.sync.core.SyncPreview
@@ -73,6 +80,10 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var localExportPassphrase by remember { mutableStateOf("") }
     var showRestorePassphrase by remember { mutableStateOf(false) }
+    // Restore scope picked in the preview dialog, threaded into the
+    // restoreLocal / restoreGoogle calls below. Default keeps the historical
+    // "wipe + replace everything" so existing users aren't surprised.
+    var restoreScope by remember { mutableStateOf(RestoreScope.EVERYTHING) }
     val hasGoogleConnection = googleSession != null ||
         (settings.syncSettings.googleEnabled && settings.syncSettings.googleAccountEmail.isNotBlank())
 
@@ -273,26 +284,52 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     importPreview?.let { preview ->
         ImportPreviewDialog(
             preview = preview,
+            scope = restoreScope,
+            onScopeChange = { restoreScope = it },
             onDismiss = {
                 vm.clearPendingImport()
                 pendingImportUri = null
+                // Reset scope so the NEXT restore doesn't inherit a previous
+                // session's "config only" choice silently.
+                restoreScope = RestoreScope.EVERYTHING
             },
-            onRestore = { showRestorePassphrase = true },
+            onRestore = {
+                // If the archive was created without a passphrase, BackupVM
+                // already knows how to substitute the fallback — skip the
+                // password dialog entirely instead of prompting the user
+                // for something they never set.
+                if (!preview.manifest.passphraseProtected) {
+                    val localUri = pendingImportUri
+                    if (pendingCloudRestore) {
+                        vm.restoreGoogle("", restoreScope)
+                    } else if (localUri != null) {
+                        vm.restoreLocal(localUri, "", restoreScope)
+                    }
+                } else {
+                    showRestorePassphrase = true
+                }
+            },
         )
     }
 
     if (showRestorePassphrase) {
+        val message = when (restoreScope) {
+            RestoreScope.CONFIG_ONLY ->
+                "仅恢复配置（Provider / API Key / 助手 / 模型设置）。本机的对话、记忆、生成图都保留。"
+            RestoreScope.EVERYTHING ->
+                "恢复会替换本机的对话、记忆、文件和所有配置。恢复前请确认这是你想导入的快照。"
+        }
         PassphraseDialog(
             title = "输入同步口令",
             confirmText = "恢复",
-            message = "恢复会替换本机应用数据。恢复前请确认这是你想导入的快照。",
+            message = message,
             onDismiss = { showRestorePassphrase = false },
             onConfirm = { passphrase ->
                 val localUri = pendingImportUri
                 if (pendingCloudRestore) {
-                    vm.restoreGoogle(passphrase)
+                    vm.restoreGoogle(passphrase, restoreScope)
                 } else if (localUri != null) {
-                    vm.restoreLocal(localUri, passphrase)
+                    vm.restoreLocal(localUri, passphrase, restoreScope)
                 }
                 showRestorePassphrase = false
             }
@@ -328,6 +365,8 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
 @Composable
 private fun ImportPreviewDialog(
     preview: SyncPreview,
+    scope: RestoreScope,
+    onScopeChange: (RestoreScope) -> Unit,
     onDismiss: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -335,12 +374,23 @@ private fun ImportPreviewDialog(
         onDismissRequest = onDismiss,
         title = { Text("确认恢复备份") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("模式：${preview.mode}")
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("创建时间：${preview.createdAt}")
                 Text("版本：${preview.manifest.appVersionName} / ${preview.manifest.appVersionCode}")
-                Text("数据清单：已放入加密 payload")
-                Text("恢复会替换本机应用数据，并在完成后刷新文件索引和聊天搜索索引。")
+                HorizontalDivider()
+                Text("恢复范围", style = MaterialTheme.typography.titleSmall)
+                RestoreScopeOption(
+                    selected = scope == RestoreScope.EVERYTHING,
+                    title = "全量恢复",
+                    description = "覆盖配置、对话、记忆、生成图等全部数据。换新设备用这个。",
+                    onClick = { onScopeChange(RestoreScope.EVERYTHING) },
+                )
+                RestoreScopeOption(
+                    selected = scope == RestoreScope.CONFIG_ONLY,
+                    title = "仅恢复配置",
+                    description = "只覆盖 Provider / API Key / 助手 / 模型默认设置；对话和生成图都保留。",
+                    onClick = { onScopeChange(RestoreScope.CONFIG_ONLY) },
+                )
             }
         },
         confirmButton = {
@@ -357,14 +407,53 @@ private fun ImportPreviewDialog(
 }
 
 @Composable
+private fun RestoreScopeOption(
+    selected: Boolean,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = selected,
+                role = androidx.compose.ui.semantics.Role.RadioButton,
+                onClick = onClick,
+            ),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = null,  // handled by selectable() on the row
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun PassphraseDialog(
     title: String,
     message: String,
     confirmText: String,
+    // When true (export sheets), the dialog offers a "no passphrase" toggle.
+    // When false (restore for a passphrase-protected archive), no toggle —
+    // the user must enter the password used at upload time. Default true
+    // matches the old behaviour for callers that haven't been updated.
+    allowNoPassphrase: Boolean = true,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
     var passphrase by remember { mutableStateOf("") }
+    var noPassphrase by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -378,13 +467,38 @@ private fun PassphraseDialog(
                     label = { Text("同步口令") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    enabled = !noPassphrase,
                 )
+                if (allowNoPassphrase) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Checkbox(
+                            checked = noPassphrase,
+                            onCheckedChange = {
+                                noPassphrase = it
+                                if (it) passphrase = ""
+                            },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("不使用口令", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "依赖 Google 账号 / 本地文件权限保护备份。任何能读到这份备份文件的人都能解密。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
-                enabled = passphrase.isNotBlank(),
-                onClick = { onConfirm(passphrase) },
+                enabled = noPassphrase || passphrase.isNotBlank(),
+                // Blank input + noPassphrase=true is the explicit no-password
+                // path; BackupVM substitutes the fallback string internally.
+                onClick = { onConfirm(if (noPassphrase) "" else passphrase) },
             ) {
                 Text(confirmText)
             }

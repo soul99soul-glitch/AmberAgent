@@ -78,6 +78,12 @@ class SyncArchiveManager(
                 kdf = params.kdf,
                 cipher = params.cipher,
                 payloadSha256 = encryptResult.sha256,
+                // If the BackupVM substituted the fixed NO_PASSPHRASE_FALLBACK
+                // string, the user picked the no-password path — stamp the
+                // manifest so the restore UI can skip the passphrase dialog
+                // and auto-inject the same fallback. Real passphrases stay
+                // marked as protected (the default).
+                passphraseProtected = request.passphrase != NO_PASSPHRASE_FALLBACK,
             )
             zipArchive(manifest, encryptedPayloadFile, encryptResult, archiveFile)
             archiveFile
@@ -109,7 +115,7 @@ class SyncArchiveManager(
                 "备份文件校验失败"
             }
             crypto.decrypt(encryptedPayloadFile, payloadFile, request.passphrase, parsed.manifest)
-            restorePayload(payloadFile, parsed.manifest)
+            restorePayload(payloadFile, parsed.manifest, request.scope)
             SyncPreview(
                 manifest = parsed.manifest,
                 fileName = file.name,
@@ -199,7 +205,11 @@ class SyncArchiveManager(
         return File.createTempFile("amber-$prefix-", suffix, dir)
     }
 
-    private suspend fun restorePayload(payloadFile: File, manifest: SyncManifest) {
+    private suspend fun restorePayload(
+        payloadFile: File,
+        manifest: SyncManifest,
+        scope: RestoreScope,
+    ) {
         var settingsJson: String? = null
         var secretsJson: String? = null
         val tableRows = linkedMapOf<String, MutableList<JsonObject>>()
@@ -258,15 +268,34 @@ class SyncArchiveManager(
             localSettings = currentSettings,
         ).copy(syncSettings = currentSettings.syncSettings)
         try {
-            restoreTables(tableRows) {
-                replaceFileTreesFromStage(stagedFilesRoot)
+            when (scope) {
+                RestoreScope.EVERYTHING -> {
+                    // Historical full-replace: wipe + rebuild all tables in
+                    // a single transaction, then swap in the restored file
+                    // trees on success.
+                    restoreTables(tableRows) {
+                        replaceFileTreesFromStage(stagedFilesRoot)
+                    }
+                }
+                RestoreScope.CONFIG_ONLY -> {
+                    // Settings + secrets only — leave local conversations,
+                    // memories, generated images, file uploads, skills,
+                    // board / feishu state untouched. The staged file tree
+                    // and tableRows we just unpacked are discarded by the
+                    // outer `finally` deleteRecursively().
+                }
             }
         } finally {
             stagedFilesRoot.deleteRecursively()
         }
         restoreSecrets(secretsJson)
-        filesManager.syncFolder(FileFolders.UPLOAD)
-        messageFtsManager.rebuildAllFromDatabase()
+        if (scope == RestoreScope.EVERYTHING) {
+            // Only meaningful after a full table replace — the FTS index
+            // must mirror the new conversations table, and any new file
+            // attachments need to be registered with FilesManager.
+            filesManager.syncFolder(FileFolders.UPLOAD)
+            messageFtsManager.rebuildAllFromDatabase()
+        }
         settingsStore.update(restoredSettings)
     }
 
@@ -605,7 +634,12 @@ class SyncArchiveManager(
         private val SYNC_FILE_ROOTS = listOf(
             FileFolders.UPLOAD,
             FileFolders.SKILLS,
-            "images",
+            FileFolders.IMAGES,
+            // generate_image tool output. Conversations carry file:// URIs
+            // pointing into this directory; without it in the archive,
+            // cross-device restores leave all chat-inline images as broken
+            // links. Added in the v1.6.x image-gen feature follow-up.
+            FileFolders.CHAT_IMAGES,
         )
     }
 }

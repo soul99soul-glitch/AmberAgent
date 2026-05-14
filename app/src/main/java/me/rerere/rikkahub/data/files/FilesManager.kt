@@ -591,4 +591,8 @@ class FilesManager(
 object FileFolders {
     const val UPLOAD = "upload"
     const val SKILLS = "skills"
+    /** Per-conversation generate_image output — `filesDir/chat_images/{convId}/…` */
+    const val CHAT_IMAGES = "chat_images"
+    /** Standalone ImgGenPage gallery — `filesDir/images/…` */
+    const val IMAGES = "images"
 }
