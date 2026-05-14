@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>MessageJumper 视觉对比 — 2026-05-13</title>
+<style>
+  :root {
+    --surface: #FFFFFF;
+    --surface-dim: #F5F5F4;
+    --surface-tint: #EFEFEE;
+    --outline: #DCDCDA;
+    --outline-soft: #E8E8E6;
+    --on-surface: #1F1F1E;
+    --on-surface-variant: #6A6A66;
+    --primary: #B36D2F;
+    --legacy-bg: #E8EEFD;
+    /* Notion-style 强调蓝：文档里 link/mention 用色，比 Material primary 偏冷淡 */
+    --notion-blue: #337EA9;
+    --notion-blue-soft: #DCEBF5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
+    background: #FAFAF9;
+    color: var(--on-surface);
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .subtitle {
+    color: var(--on-surface-variant);
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .col-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--on-surface-variant);
+  }
+  .col-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .col-desc {
+    font-size: 12px;
+    color: var(--on-surface-variant);
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+  .phone {
+    position: relative;
+    background: var(--surface-dim);
+    border: 1px solid var(--outline-soft);
+    border-radius: 22px;
+    height: 460px;
+    padding: 18px 14px;
+    overflow: hidden;
+  }
+  /* fake chat message blocks for context */
+  .msg {
+    background: var(--surface);
+    border: 1px solid var(--outline-soft);
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    font-size: 11px;
+    color: var(--on-surface-variant);
+    line-height: 1.5;
+  }
+  .msg.user { background: var(--surface-tint); border-color: transparent; }
+  .msg .line { display: block; height: 8px; background: var(--outline-soft); border-radius: 4px; margin: 4px 0; }
+  .msg .line.w50 { width: 50%; }
+  .msg .line.w80 { width: 80%; }
+  .msg .line.w65 { width: 65%; }
+  .msg .line.w95 { width: 95%; }
+
+  /* jumper container, floats on the right edge, vertically centered */
+  .jumper {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* === Variant A: legacy 4 independent circles === */
+  .legacy .btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: rgba(216, 226, 250, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--on-surface);
+    margin-bottom: 8px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+  .legacy .btn:last-child { margin-bottom: 0; }
+
+  /* === Variant B: segmented Notion card (already implemented) === */
+  .notion-segmented {
+    background: var(--surface);
+    border: 1px solid rgba(220, 220, 218, 0.6);
+    border-radius: 12px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.03);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .notion-segmented .btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+  }
+  .notion-segmented .btn:hover { background: var(--surface-tint); }
+  .notion-segmented .divider {
+    height: 1px;
+    background: rgba(220, 220, 218, 0.4);
+    margin: 0 6px;
+  }
+
+  /* === Variant D: segmented card with Notion-blue icons === */
+  .notion-blue-icon {
+    background: var(--surface);
+    border: 1px solid rgba(220, 220, 218, 0.6);
+    border-radius: 12px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.03);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .notion-blue-icon .btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--notion-blue);
+    cursor: pointer;
+  }
+  .notion-blue-icon .btn:hover { background: var(--notion-blue-soft); }
+  .notion-blue-icon .divider {
+    height: 1px;
+    background: rgba(220, 220, 218, 0.4);
+    margin: 0 6px;
+  }
+
+  /* === Variant E: grey idle, blue on hover (Notion-true) === */
+  .notion-hover-blue {
+    background: var(--surface);
+    border: 1px solid rgba(220, 220, 218, 0.6);
+    border-radius: 12px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.03);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .notion-hover-blue .btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+    transition: background 120ms, color 120ms;
+  }
+  .notion-hover-blue .btn:hover {
+    background: var(--notion-blue-soft);
+    color: var(--notion-blue);
+  }
+  .notion-hover-blue .divider {
+    height: 1px;
+    background: rgba(220, 220, 218, 0.4);
+    margin: 0 6px;
+  }
+
+  /* === Variant C: 4 independent small rounded cards === */
+  .standalone .btn {
+    width: 36px;
+    height: 36px;
+    background: var(--surface);
+    border: 1px solid rgba(220, 220, 218, 0.65);
+    border-radius: 8px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--on-surface-variant);
+    margin-bottom: 6px;
+  }
+  .standalone .btn:last-child { margin-bottom: 0; }
+  .standalone .btn:hover { background: var(--surface-tint); }
+
+  /* icon size */
+  .icn { width: 18px; height: 18px; }
+
+  .footnote {
+    margin-top: 36px;
+    font-size: 12px;
+    color: var(--on-surface-variant);
+    max-width: 980px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.7;
+  }
+  code {
+    background: var(--surface-tint);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<h1>MessageJumper 视觉对比</h1>
+<p class="subtitle">ChatList.kt 右侧浮动跳转器 · 三种风格并排 · 2026-05-13</p>
+
+<div class="grid">
+
+  <!-- ============ Variant A: legacy ============ -->
+  <div class="col">
+    <span class="col-label">A · 当前线上 (改前)</span>
+    <span class="col-title">4 个独立圆形</span>
+    <p class="col-desc">
+      <code>CircleShape</code>，<code>surfaceColorAtElevation(4dp) × 0.65 alpha</code>，
+      半透明淡蓝蒙层。和 Notion-like 灰白卡片体系不太协调。
+    </p>
+    <div class="phone">
+      <div class="msg user"><span class="line w80"></span><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w80"></span><span class="line w65"></span></div>
+      <div class="msg user"><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w65"></span></div>
+      <div class="jumper legacy">
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Variant B: segmented (already implemented) ============ -->
+  <div class="col">
+    <span class="col-label">B · 已实现 (现在的 commit 还没建)</span>
+    <span class="col-title">Segmented 卡片 (4 合 1)</span>
+    <p class="col-desc">
+      <code>RoundedCornerShape(12.dp)</code> + 1dp <code>outlineVariant</code> hairline
+      边框，内部用细 divider 分组。整体像 Notion 的 inline toolbar 段。
+    </p>
+    <div class="phone">
+      <div class="msg user"><span class="line w80"></span><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w80"></span><span class="line w65"></span></div>
+      <div class="msg user"><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w65"></span></div>
+      <div class="jumper">
+        <div class="notion-segmented">
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Variant C: standalone tiles ============ -->
+  <div class="col">
+    <span class="col-label">C · 备选</span>
+    <span class="col-title">4 个独立小圆角方块</span>
+    <p class="col-desc">
+      跟 B 同样的 hairline / 灰阶基调，但保留 4 个独立按钮，每个是 8dp 圆角的小卡片。
+      节奏更轻，但视觉上仍是 4 块。
+    </p>
+    <div class="phone">
+      <div class="msg user"><span class="line w80"></span><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w80"></span><span class="line w65"></span></div>
+      <div class="msg user"><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w65"></span></div>
+      <div class="jumper standalone">
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Variant D: segmented + Notion blue icons (always on) ============ -->
+  <div class="col">
+    <span class="col-label">D · 备选 · 蓝箭头</span>
+    <span class="col-title">Segmented + Notion 蓝箭头</span>
+    <p class="col-desc">
+      跟 B 同样的卡片骨架，但箭头 tint 改成 Notion 文档的链接蓝 <code>#337EA9</code>，
+      hover 时浅蓝背景。箭头一直亮，比 idle 灰更显眼。
+    </p>
+    <div class="phone">
+      <div class="msg user"><span class="line w80"></span><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w80"></span><span class="line w65"></span></div>
+      <div class="msg user"><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w65"></span></div>
+      <div class="jumper">
+        <div class="notion-blue-icon">
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Variant E: hover-only blue (closest to real Notion) ============ -->
+  <div class="col">
+    <span class="col-label">E · 备选 · hover 才变蓝</span>
+    <span class="col-title">Segmented + idle 灰 / hover 蓝</span>
+    <p class="col-desc">
+      最接近 Notion 真实做法：idle 是中性灰 <code>onSurfaceVariant</code>，鼠标 / 触控
+      hover 时图标变蓝、背景泛淡蓝。<strong>把鼠标移到下面的按钮上看看。</strong>
+    </p>
+    <div class="phone">
+      <div class="msg user"><span class="line w80"></span><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w80"></span><span class="line w65"></span></div>
+      <div class="msg user"><span class="line w50"></span></div>
+      <div class="msg"><span class="line w95"></span><span class="line w65"></span></div>
+      <div class="jumper">
+        <div class="notion-hover-blue">
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+          <div class="divider"></div>
+          <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<h2 style="font-size: 16px; font-weight: 600; margin: 56px 0 6px;">图标变体对比</h2>
+<p class="subtitle" style="margin-bottom: 16px;">骨架都用 B 的 segmented 卡片，只换内部 4 个图标本身</p>
+
+<div class="grid icon-grid" style="max-width: 1100px;">
+
+  <div class="col">
+    <span class="col-label">I · 现状</span>
+    <span class="col-title">HugeIcons arrow-with-stem</span>
+    <p class="col-desc">
+      <code>ArrowUp01 / ArrowDown01 / ArrowUpDouble / ArrowDownDouble</code>。
+      箭头带竖线 (stem)，体积感最重。和 app 内所有其他箭头位 (Select / JsonTree /
+      ChainOfThought / ChatMessageBranch) 一致。
+    </p>
+    <div class="icon-frame">
+      <div class="notion-segmented">
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v6"/><path d="m8 8 4-4 4 4"/><path d="M12 13v6"/><path d="m8 16 4-4 4 4"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v6"/><path d="m8 8 4 4 4-4"/><path d="M12 13v6"/><path d="m8 16 4 4 4-4"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <span class="col-label">II · 纯 chevron</span>
+    <span class="col-title">Lucide ChevronsUp/Down + ChevronUp/Down</span>
+    <p class="col-desc">
+      去掉 stem，只保留 V 字尖。最 Notion，体积感最轻。跟
+      SkillDetailPage 已用的 <code>Lucide.ChevronDown</code> 同库同风格。
+    </p>
+    <div class="icon-frame">
+      <div class="notion-segmented">
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <span class="col-label">III · 语义混合</span>
+    <span class="col-title">ArrowUpToLine + Chevron</span>
+    <p class="col-desc">
+      跳顶/跳底用 <code>ArrowUpToLine / ArrowDownToLine</code>（带横线表达
+      "到端点"），上下一条用 chevron。语义最清楚，但混了两种字形。
+    </p>
+    <div class="icon-frame">
+      <div class="notion-segmented">
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 20V7"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 11 6 6 6-6"/><path d="M12 17V4"/><path d="M5 21h14"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <span class="col-label">IV · 极简 V</span>
+    <span class="col-title">细 chevron + 更松排版</span>
+    <p class="col-desc">
+      还是 chevron，但 stroke-width 从 2 降到 1.5，视觉更安静；按钮间距/divider
+      也轻微放松。如果觉得 II 还是"太机械"，可以试。
+    </p>
+    <div class="icon-frame">
+      <div class="notion-segmented">
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+        <div class="divider"></div>
+        <div class="btn"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .icon-frame {
+    height: 180px;
+    background: var(--surface-dim);
+    border: 1px solid var(--outline-soft);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon-frame .notion-segmented { color: var(--on-surface-variant); }
+</style>
+
+<p class="footnote">
+  说明：
+  顶部 5 列对比的是「整体卡片样式 + 颜色」；下面 4 列对比的是「图标字形本身」，骨架完全相同。
+  在 Android 端落地时：方案 II/IV 改用 <code>com.composables.icons.lucide.ChevronUp/ChevronDown/ChevronsUp/ChevronsDown</code>；
+  方案 III 上下两端用 <code>Lucide.ArrowUpToLine</code>/<code>ArrowDownToLine</code>，中间两个仍用 <code>ChevronUp/Down</code>。
+  真机上颜色会跟随 Material You 动态主题；这里只演示亮色 + 灰白 outline 基线。
+  数值（36dp 按钮、18dp 图标、12dp 圆角、1dp 边框、6dp 分隔线内缩）跟 ChatList.kt:1684 那段实际代码完全对应。
+</p>
+
+</body>
+</html>

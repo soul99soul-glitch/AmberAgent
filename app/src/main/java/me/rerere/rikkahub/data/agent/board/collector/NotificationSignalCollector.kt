@@ -10,19 +10,19 @@ import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
 import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
 
 /**
- * Captures system notifications. Behaves in two modes:
+ * Captures system notifications with signal-to-noise filtering.
  *
- * 1. **Live mode**: registers as a [AmberNotificationListenerService.Listener] so each
- *    posted notification flows into the [SignalAggregator] as it arrives. This is the
- *    primary path — it captures notifications even when the app is fully backgrounded,
- *    because Android keeps the listener service alive once granted.
+ * Three-layer filter before a notification becomes a signal:
  *
- * 2. **Pull mode** ([collect]): on demand snapshot of currently active notifications.
- *    Invoked by the scheduler on first run or when re-enabled, so users don't show up to
- *    an empty board because the service hadn't been observing yet.
+ * 1. **Hard reject**: foreground-service, empty content, our own app, system UI noise.
+ * 2. **Package classification**: communication apps (WeChat, DingTalk, Feishu, Gmail,
+ *    Outlook, Slack, Telegram, WhatsApp) are high-value; known low-signal packages
+ *    (shopping, delivery, ad SDKs, phone managers) are dropped.
+ * 3. **Same-source merging**: when multiple notifications from the same package+channel
+ *    arrive within a merge window, they're combined into a single signal to avoid
+ *    flooding the Board with 20 WeChat messages as 20 separate items.
  *
- * Both paths funnel through the same [convert] mapping so dedup and hashing work
- * uniformly regardless of how the signal entered the system.
+ * Live mode and pull mode are unchanged from the original design.
  */
 class NotificationSignalCollector(
     private val context: Context,
@@ -47,19 +47,18 @@ class NotificationSignalCollector(
     }
 
     override suspend fun collect(limit: Int): List<RawBoardSignal> {
-        return AmberNotificationListenerService.getActiveNotificationsSnapshot()
-            .asSequence()
-            .mapNotNull { convert(it) }
-            .take(limit)
-            .toList()
+        val snapshots = AmberNotificationListenerService.getActiveNotificationsSnapshot()
+        return mergeNotifications(
+            snapshots.mapNotNull { convert(it) }
+        ).take(limit)
     }
 
     /**
-     * Translate a [StatusBarNotification] into our raw shape. Filters out:
-     *  - Foreground service notifications (mostly persistent, low signal-to-noise).
-     *  - Empty / blank notifications (no useful text).
-     *  - Our own app's notifications (avoid feedback loops with Today Board's own
-     *    notifications, e.g. "Board updated").
+     * Translate a [StatusBarNotification] into our raw shape. Hard-filters:
+     *  - Foreground service notifications (persistent, low signal).
+     *  - Empty / blank notifications.
+     *  - Our own app's notifications (avoid feedback loops).
+     *  - Known low-signal packages (shopping, delivery, system bloatware).
      */
     private fun convert(sbn: StatusBarNotification): RawBoardSignal? {
         val notif = sbn.notification ?: return null
@@ -69,6 +68,10 @@ class NotificationSignalCollector(
         val isForegroundService = notif.flags and Notification.FLAG_FOREGROUND_SERVICE != 0
         if (isForegroundService) return null
 
+        // Package-level filtering
+        val pkg = sbn.packageName
+        if (isLowSignalPackage(pkg)) return null
+
         val extras = notif.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty().trim()
@@ -76,11 +79,18 @@ class NotificationSignalCollector(
         val combined = listOf(text, bigText).filter { it.isNotBlank() }.distinct().joinToString("\n")
         if (title.isBlank() && combined.isBlank()) return null
 
-        // Compose a stable per-notification identifier. sbn.key is package + id + tag and
-        // survives across reposts of the same logical notification, which is what we want
-        // for dedup ("user kept getting reminded about the same thing") rather than the
-        // post-time-based id which would treat each repost as new.
         val sourceRef = sbn.key
+        val isHighValue = isHighValuePackage(pkg)
+        val hasAtMention = combined.contains("@") || title.contains("@")
+            || combined.contains("回复了你") || combined.contains("提到了你")
+            || combined.contains("replied") || combined.contains("mentioned")
+
+        // Encode priority hints in metadata so the aggregator scoring can use them
+        val priorityHint = when {
+            isHighValue && hasAtMention -> "high"
+            isHighValue -> "medium"
+            else -> "low"
+        }
 
         return RawBoardSignal(
             sourceType = BoardSignalSourceType.NOTIFICATION,
@@ -88,18 +98,124 @@ class NotificationSignalCollector(
             title = title.ifBlank { combined.lineSequence().firstOrNull().orEmpty().take(80) },
             content = combined.take(2_000),
             signalTime = sbn.postTime,
-            metadataJson = buildMetadata(sbn),
+            metadataJson = buildMetadata(sbn, priorityHint),
         )
     }
 
-    private fun buildMetadata(sbn: StatusBarNotification): String {
+    /**
+     * Merge notifications from the same package+channel into combined signals.
+     * Keeps the latest notification's timestamp, concatenates content.
+     */
+    private fun mergeNotifications(signals: List<RawBoardSignal>): List<RawBoardSignal> {
+        if (signals.size <= 1) return signals
+
+        data class MergeKey(val pkg: String, val channel: String)
+
+        val grouped = mutableMapOf<MergeKey, MutableList<RawBoardSignal>>()
+        for (signal in signals) {
+            // Extract package and channel from metadata
+            val pkg = extractJsonField(signal.metadataJson, "package")
+            val channel = extractJsonField(signal.metadataJson, "channel")
+            val key = MergeKey(pkg, channel)
+            grouped.getOrPut(key) { mutableListOf() }.add(signal)
+        }
+
+        return grouped.flatMap { (_, group) ->
+            if (group.size <= MERGE_THRESHOLD) {
+                // Few enough to keep individual
+                group
+            } else {
+                // Merge into one combined signal
+                val latest = group.maxBy { it.signalTime }
+                val mergedContent = buildString {
+                    appendLine("[${group.size}条通知合并]")
+                    for (s in group.sortedByDescending { it.signalTime }.take(5)) {
+                        appendLine("• ${s.title}: ${s.content.take(200)}")
+                    }
+                    if (group.size > 5) {
+                        appendLine("…及其他${group.size - 5}条")
+                    }
+                }
+                listOf(
+                    latest.copy(
+                        title = "${latest.title}（等${group.size}条）",
+                        content = mergedContent.take(2_000),
+                    )
+                )
+            }
+        }
+    }
+
+    private fun extractJsonField(json: String, key: String): String {
+        val pattern = "\"$key\":\"([^\"]*)\""
+        return Regex(pattern).find(json)?.groupValues?.getOrNull(1).orEmpty()
+    }
+
+    private fun buildMetadata(sbn: StatusBarNotification, priorityHint: String): String {
         val pkg = sbn.packageName.replace("\"", "\\\"")
         val channel = sbn.notification?.channelId.orEmpty().replace("\"", "\\\"")
         val tag = sbn.tag.orEmpty().replace("\"", "\\\"")
-        return """{"package":"$pkg","channel":"$channel","tag":"$tag"}"""
+        return """{"package":"$pkg","channel":"$channel","tag":"$tag","priority":"$priorityHint"}"""
     }
 
     companion object {
         private const val TAG = "BoardNotifCollector"
+
+        /** Notifications from same source exceeding this count get merged. */
+        private const val MERGE_THRESHOLD = 2
+
+        // ---- Package classification ----
+
+        /** Communication apps — high signal-to-noise, treated as important. */
+        private val HIGH_VALUE_PACKAGES = setOf(
+            "com.tencent.mm",              // WeChat
+            "com.tencent.wework",          // 企业微信
+            "com.alibaba.android.rimet",   // DingTalk
+            "com.ss.android.lark",         // Feishu / Lark
+            "com.google.android.gm",       // Gmail
+            "com.microsoft.office.outlook",// Outlook
+            "com.slack",                   // Slack
+            "org.telegram.messenger",      // Telegram
+            "com.whatsapp",                // WhatsApp
+            "com.github.android",          // GitHub
+            "com.microsoft.teams",         // Teams
+        )
+
+        /** Known low-signal packages — shopping, delivery, system bloatware, ads. */
+        private val LOW_SIGNAL_PACKAGES = setOf(
+            // Shopping & delivery
+            "com.taobao.taobao",
+            "com.jingdong.app.mall",
+            "com.xunmeng.pinduoduo",
+            "com.eg.android.AlipayGphone",  // Alipay (mostly promo)
+            "com.sankuai.meituan",
+            "me.ele",
+            "com.sf.activity",              // SF Express
+            "com.achievo.vipshop",
+            // System / utility noise
+            "com.android.vending",          // Play Store
+            "com.google.android.apps.maps",
+            "com.android.providers.downloads",
+            "com.miui.cleanmaster",
+            "com.miui.securitycenter",
+            "com.huawei.systemmanager",
+            "com.coloros.safecenter",
+            // Weather & media
+            "com.moji.mjweather",
+            "com.autonavi.minimap",         // Amap
+        )
+
+        /** Prefixes for broad package-family filtering. */
+        private val LOW_SIGNAL_PREFIXES = listOf(
+            "com.android.systemui",
+            "com.google.android.googlequicksearchbox",
+        )
+
+        private fun isHighValuePackage(pkg: String): Boolean = pkg in HIGH_VALUE_PACKAGES
+
+        private fun isLowSignalPackage(pkg: String): Boolean {
+            if (pkg in LOW_SIGNAL_PACKAGES) return true
+            return LOW_SIGNAL_PREFIXES.any { pkg.startsWith(it) }
+        }
     }
 }

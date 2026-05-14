@@ -7,6 +7,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.agent.board.BoardRepository
+import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_HARD_MUTE_WEIGHT
 import me.rerere.rikkahub.data.agent.board.collector.BoardSignalCollector
@@ -151,7 +152,10 @@ class SignalAggregator(
     // ---- Scoring --------------------------------------------------------------------
 
     private fun score(signal: BoardSignalEntity, weights: List<BoardWeightEntity>): Int {
-        var total = 0
+        // Start with rule-based scoring by source type and content heuristics.
+        var total = ruleBasedScore(signal)
+
+        // Layer on user-configured keyword weights (BoardWeightEntity table).
         for (weight in weights) {
             if (weight.sourceType != signal.sourceType) continue
             val keyword = weight.keyword
@@ -164,6 +168,68 @@ class SignalAggregator(
             }
         }
         return total
+    }
+
+    /**
+     * Automatic relevance scoring based on signal source type, timing, and content
+     * heuristics. Runs before user keyword weights so it provides a sensible default
+     * even when the weight table is empty (which it almost always is).
+     */
+    private fun ruleBasedScore(signal: BoardSignalEntity): Int {
+        val now = System.currentTimeMillis()
+        var score = 0
+
+        when (signal.sourceType) {
+            // ---- Calendar: the closer the event, the more important ----
+            BoardSignalSourceType.CALENDAR -> {
+                score += 5 // base: calendar events are inherently actionable
+                val minutesUntil = (signal.signalTime - now) / 60_000L
+                when {
+                    minutesUntil in -30..30 -> score += 8  // imminent or just happened
+                    minutesUntil in 31..120 -> score += 4  // coming up within 2h
+                    minutesUntil in 121..360 -> score += 2 // later today
+                }
+            }
+
+            // ---- Notifications: use priority hint from collector metadata ----
+            BoardSignalSourceType.NOTIFICATION -> {
+                val priority = extractMetaField(signal.metadataJson, "priority")
+                when (priority) {
+                    "high" -> score += 6   // communication app with @mention
+                    "medium" -> score += 3 // communication app, no @mention
+                    "low" -> score += 0    // other apps — rely on keyword weights
+                }
+            }
+
+            // ---- Chat history: relevance score embedded by collector ----
+            BoardSignalSourceType.CHAT_HISTORY -> {
+                val relevance = extractMetaField(signal.metadataJson, "relevance")
+                    .toIntOrNull() ?: 0
+                score += relevance.coerceIn(0, 10)
+            }
+
+            // ---- Feishu messages: always somewhat important ----
+            BoardSignalSourceType.FEISHU_MSG -> {
+                score += 4
+            }
+
+            // ---- Feishu docs: document changes are moderately useful ----
+            BoardSignalSourceType.FEISHU_DOC -> {
+                score += 3
+            }
+
+            // ---- Time anchors: near-zero value, only survive as fillers ----
+            BoardSignalSourceType.TIME -> {
+                score -= 3 // effectively suppressed unless nothing else exists
+            }
+        }
+
+        return score
+    }
+
+    private fun extractMetaField(json: String, key: String): String {
+        val pattern = "\"$key\"\\s*:\\s*\"?([^\"\\s,}]+)\"?"
+        return Regex(pattern).find(json)?.groupValues?.getOrNull(1).orEmpty()
     }
 
     // ---- Hashing --------------------------------------------------------------------
