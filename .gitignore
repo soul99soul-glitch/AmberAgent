@@ -12,3 +12,7 @@ local.properties
 .cursor
 .history
 .kotlin
+
+# Perfetto trace binaries (large, regeneratable). Keep .md analysis reports.
+*.pftrace
+*.perfetto-trace
