@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.os.Trace
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,11 +35,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -378,6 +383,19 @@ fun MarkdownBlock(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
+    /**
+     * When true, the most recently appended top-level block (paragraph/header/code-fence/etc.)
+     * fades in on first appearance instead of popping. Used during LLM streaming so newly
+     * arriving content reveals smoothly rather than snapping in at every 200ms accumulator
+     * flush. False (the default) preserves the legacy "instant" behavior for static history
+     * messages — fading every paragraph when scrolling back through old conversations would
+     * be visual noise.
+     *
+     * The fade only applies to the *last* top-level block. Earlier blocks have already
+     * stabilized and don't need to animate again. See `streamingFadeAlpha()` for the actual
+     * animation: 180ms tween, 0.35→1.0, LinearOutSlowIn curve.
+     */
+    streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
     var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
@@ -411,19 +429,79 @@ fun MarkdownBlock(
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-                    data.astTree.children.fastForEach { child ->
-                        MarkdownNode(
-                            node = child,
-                            content = data.preprocessed,
-                            modifier = nodeModifier,
-                            onClickCitation = onClickCitation,
-                        )
+                    val children = data.astTree.children
+                    val lastChildIdx = children.lastIndex
+                    // Index-based loop instead of fastForEach: we need `idx` to identify
+                    // the tail without an O(n) indexOf() per child (which would cost O(n²)
+                    // per recomposition — measurable on long replies with 30+ paragraphs).
+                    for (idx in children.indices) {
+                        val child = children[idx]
+                        // Cheap structural key from the AST node's source range — stable
+                        // across the same logical block being re-parsed on each 200ms
+                        // flush. Without this, every flush would replace ALL children with
+                        // new Compose nodes (since the parsed children list is a fresh
+                        // ArrayList every parse) and we'd lose `remember`'d state per block.
+                        // The structural key keeps remember-state pinned to "this header
+                        // at byte offset N", which is what makes per-block fade Animatable
+                        // survive across re-parses.
+                        val childKey = "${child.type}:${child.startOffset}:${child.endOffset}"
+                        key(childKey) {
+                            val isStreamingTail = streaming && idx == lastChildIdx
+                            val childAlpha = streamingFadeAlpha(
+                                key = childKey,
+                                enabled = isStreamingTail,
+                            )
+                            // graphicsLayer { alpha = ... } is the cheap path — no extra
+                            // layout pass, no compositing of the whole subtree, just a
+                            // post-draw alpha multiply on the layer. For non-streaming
+                            // blocks `enabled = false` short-circuits to alpha=1f and
+                            // graphicsLayer becomes a no-op.
+                            val blockModifier = if (isStreamingTail) {
+                                nodeModifier.graphicsLayer { this.alpha = childAlpha }
+                            } else {
+                                nodeModifier
+                            }
+                            MarkdownNode(
+                                node = child,
+                                content = data.preprocessed,
+                                modifier = blockModifier,
+                                onClickCitation = onClickCitation,
+                            )
+                        }
                     }
                 }
             }
         }
       }
     }
+}
+
+/**
+ * Drives the streaming-fade animation for a single top-level markdown block. The Animatable
+ * is keyed by `key` so a given block (identified by its AST source range) keeps its alpha
+ * state across re-parses — when the same paragraph re-renders 50 times during streaming
+ * because the accumulator flushed, we don't restart the fade.
+ *
+ * When `enabled` flips false (e.g. streaming finishes, or this block stops being the tail),
+ * we jump to alpha=1 immediately instead of running the animation — the user is no longer
+ * watching this specific block come in, so an idle fade would just look like a flicker.
+ *
+ * 0.35 starting alpha (not 0) was chosen empirically: pure 0→1 looks like text is "appearing
+ * from nothing", which reads as a missed paint frame on slower devices. Starting around
+ * one-third visible reads as "softening in" instead — closer to Claude's web UI than to a
+ * typewriter effect.
+ */
+@Composable
+private fun streamingFadeAlpha(key: String, enabled: Boolean): Float {
+    if (!enabled) return 1f
+    val animatable = remember(key) { Animatable(0.35f) }
+    LaunchedEffect(key) {
+        animatable.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+        )
+    }
+    return animatable.value
 }
 
 // for debug

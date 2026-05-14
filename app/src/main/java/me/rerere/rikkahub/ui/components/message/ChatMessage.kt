@@ -276,6 +276,15 @@ fun ChatMessage(
     }
 }
 
+// 2026-05-14 caveat: do NOT add new `animateContentSizeIf(loading)` callsites in the
+// message render path. We had 5 such callsites stacked 4-5 deep during streaming
+// (MessageAnnotations + ChainOfThought card + Surface bubble + Markdown wrapper)
+// and the result was a hard-to-pin "streaming feels janky" regression: every 200ms
+// accumulator flush kicked off a fresh spring at each layer, none of which had
+// time to settle before the next chunk arrived. The remaining callers
+// (`loading && lastMessage` guards on the action-button column) are fine — they
+// wrap a tiny, low-frequency-changing payload (the action buttons row), not the
+// streamed text itself.
 private fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
     if (enabled) animateContentSize() else this
 
@@ -745,6 +754,9 @@ private fun AssistantMarkdownBlockOrWidgets(
         MarkdownBlock(
             content = content,
             modifier = modifier,
+            // Forward streaming so the tail block of the assistant response fades in
+            // smoothly on each 200ms flush instead of popping. See MarkdownBlock kdoc.
+            streaming = streaming,
             onClickCitation = onClickCitation,
         )
         return
@@ -757,11 +769,21 @@ private fun AssistantMarkdownBlockOrWidgets(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        val lastSegmentIdx = segments.lastIndex
         segments.forEachIndexed { index, segment ->
             key(index) {
+                // Only the trailing segment is still receiving new tokens during
+                // streaming — earlier Text segments have already been frozen by the
+                // widget parser (a closed fence ended them). So only forward
+                // streaming=true to the tail; earlier blocks render statically.
+                // Without this guard each accumulator flush would re-fade every
+                // historical Text segment on every recompose, which reads as the
+                // whole reply "blinking" instead of just the tail growing.
+                val segmentStreaming = streaming && index == lastSegmentIdx
                 when (segment) {
                     is GenerativeWidgetSegment.Text -> MarkdownBlock(
                         content = segment.content,
+                        streaming = segmentStreaming,
                         onClickCitation = onClickCitation,
                     )
 
@@ -1107,9 +1129,13 @@ private fun MessageAnnotations(
     if (annotations.isEmpty()) return
 
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-    Column(
-        modifier = Modifier.animateContentSizeIf(loading),
-    ) {
+    // 2026-05-14: dropped `animateContentSizeIf(loading)` here — see
+    // animateContentSizeIf() note in this file. Citations grow during streaming
+    // at the same 200ms flush cadence as the body text; nested spring animations
+    // across MessageAnnotations + ChainOfThought + Surface + Markdown stacked
+    // 4-5 deep and saturated the main thread. Layout still settles correctly
+    // without the per-flush animation; final position is unchanged.
+    Column {
         var expand by remember { mutableStateOf(false) }
         if (expand) {
             ProvideTextStyle(
@@ -1210,8 +1236,13 @@ private fun MessagePartsBlock(
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
+                    // 2026-05-14: removed outer `Modifier.animateContentSizeIf(loading)` — the
+                    // ChainOfThought card was the most visible jank source. Its inner
+                    // `animateContentChanges = loading` still drives the step-list spring
+                    // (less aggressive, single layer), so the user-visible "新思维步骤滑入"
+                    // motion is preserved. Removing the outer Card-level spring is the
+                    // free win — it stacked on top of the inner one with no added value.
                     ChainOfThought(
-                        modifier = Modifier.animateContentSizeIf(loading),
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                         animateContentChanges = loading,
@@ -1278,10 +1309,13 @@ private fun MessagePartsBlock(
                     is UIMessagePart.Text -> {
                         MessageSelectionContainer {
                                 if (role == MessageRole.USER) {
+                                    // 2026-05-14: removed `.animateContentSizeIf(loading)` —
+                                    // user messages don't change after send, so the loading
+                                    // gate here was always inert except during the brief moment
+                                    // before the assistant reply started. Cost > benefit.
                                     Surface(
                                         modifier = Modifier
-                                            .widthIn(max = 560.dp)
-                                            .animateContentSizeIf(loading),
+                                            .widthIn(max = 560.dp),
                                         shape = RoundedCornerShape(6.dp),
                                         color = workspace.note,
                                         contentColor = workspace.ink,
@@ -1317,10 +1351,15 @@ private fun MessagePartsBlock(
                                     }
                                 } else {
                                     if (settings.displaySetting.showAssistantBubble) {
+                                        // 2026-05-14: dropped `.animateContentSizeIf(loading)` —
+                                        // see animateContentSizeIf() note in this file. This was
+                                        // the dominant frame-time consumer on long replies: every
+                                        // 200ms accumulator flush kicked off a new Surface spring,
+                                        // which never finished settling before the next chunk
+                                        // arrived. Final size is identical without it.
                                         Surface(
                                             modifier = Modifier
-                                                .widthIn(max = 640.dp)
-                                                .animateContentSizeIf(loading),
+                                                .widthIn(max = 640.dp),
                                             shape = RoundedCornerShape(8.dp),
                                             color = workspace.paper,
                                             contentColor = workspace.ink,
@@ -1342,6 +1381,10 @@ private fun MessagePartsBlock(
                                             }
                                         }
                                     } else {
+                                        // 2026-05-14: dropped `Modifier.animateContentSizeIf(loading)` —
+                                        // see paired block above (with-bubble variant). Same reason:
+                                        // 200ms flush + nested spring animations was the dominant
+                                        // streaming jank source.
                                         AssistantMarkdownBlockOrWidgets(
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
@@ -1351,8 +1394,6 @@ private fun MessagePartsBlock(
                                             onClickCitation = handleClickCitation,
                                             streaming = loading,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                            modifier = Modifier
-                                                .animateContentSizeIf(loading)
                                         )
                                     }
                                 }
