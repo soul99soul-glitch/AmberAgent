@@ -744,6 +744,21 @@ private fun MarkdownNode(
                 node.findChildOfTypeRecursive(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content) ?: "plaintext"
             val hasEnd = node.findChildOfTypeRecursive(MarkdownTokenTypes.CODE_FENCE_END) != null
 
+            // `search-images` is a virtual code language emitted by
+            // SearchImageInjectorTransformer — each line inside the fence is an image
+            // URL. SearchImageBlock applies uniform sizing rules (multi-image strip
+            // / single full-width / failed image collapses to zero height) so the
+            // entire visual stays consistent regardless of which search service
+            // produced the image. Other fence languages fall through to syntax
+            // highlighting unchanged.
+            if (language == "search-images") {
+                SearchImageBlock(
+                    urls = code.split('\n'),
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                return
+            }
+
             HighlightCodeBlock(
                 code = code,
                 language = language,

@@ -71,9 +71,14 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                 val searchResponse = json.decodeFromString<BraveSearchResponse>(responseBody)
 
                 val items = searchResponse.web?.results?.map { result ->
-                    // Use src (Brave-proxied thumbnail, ~500px) for inline display.
-                    // original is full-resolution and may be too large for mobile.
-                    val imgUrl = (result.thumbnail?.src ?: result.thumbnail?.original)
+                    // Prefer `original` (true source URL like n.sinaimg.cn /
+                    // reuters.com). `src` is the Brave-proxied thumbnail
+                    // (imgs.search.brave.com/<sig>/...) which is hot-link
+                    // protected — Coil's GET without a brave.com Referer header
+                    // gets a 403 and the image renders as blank space inline.
+                    // Source-resized thumbnails are still fine on mobile because
+                    // most news CDNs ship sub-1MB JPEGs.
+                    val imgUrl = (result.thumbnail?.original ?: result.thumbnail?.src)
                         ?.takeIf { it.startsWith("http") }
                     android.util.Log.i("BraveSearchService", "result: ${result.title}, thumbnail: ${result.thumbnail?.src}, original: ${result.thumbnail?.original}, imgUrl: $imgUrl")
                     SearchResultItem(

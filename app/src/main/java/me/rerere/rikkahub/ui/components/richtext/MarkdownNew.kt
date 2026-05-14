@@ -540,6 +540,19 @@ private fun HtmlCodeBlock(element: Element) {
         ?: "plaintext"
     val code = codeElement?.wholeText()?.trimEnd('\n') ?: element.wholeText().trimEnd('\n')
 
+    // `search-images` is a virtual code language — it doesn't represent source code,
+    // it's a marker that SearchImageInjectorTransformer wraps around image URL groups
+    // so the renderer can apply uniform sizing rules (multi-image = horizontal strip,
+    // single-image = full width with don't-upscale fallback). Anything else falls
+    // through to the syntax-highlighted code block.
+    if (language == "search-images") {
+        SearchImageBlock(
+            urls = code.split('\n'),
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        return
+    }
+
     HighlightCodeBlock(
         code = code,
         language = language,
