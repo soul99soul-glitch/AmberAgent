@@ -110,11 +110,8 @@ import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.sample
-import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -495,7 +492,6 @@ fun ChatList(
     }
 }
 
-@OptIn(FlowPreview::class)
 @Composable
 private fun ChatListNormal(
     innerPadding: PaddingValues,
@@ -894,57 +890,49 @@ private fun ChatListNormal(
             .background(workspace.canvas),
     ) {
         if (settings.displaySetting.enableAutoScroll) {
-            // 2026-05-14 v1.8.10: critical fix to 1.8.9 — the snapshotFlow
-            // approach didn't actually subscribe to streaming changes. Why:
+            // 2026-05-15: simplified from 1.8.10's snapshotFlow + rememberUpdatedState
+            // + sample(60ms) trio back to a direct LaunchedEffect keyed on the
+            // freshly-computed render token.
             //
-            // `snapshotFlow` only re-runs its lambda when a SnapshotState read
-            // inside the lambda changes. `conversation`, `processingStatus`,
-            // `pendingUserMessages`, `loading` are all ChatListNormal function
-            // parameters — plain Kotlin values, NOT SnapshotState. When the
-            // outer Composable recomposes with a new `conversation` instance,
-            // the LaunchedEffect's closure still captures the old reference
-            // (key `(activeGenerationState, conversation.id)` doesn't change
-            // during streaming → LaunchedEffect doesn't restart).
+            // 1.8.10 (d1a7ab17) added rememberUpdatedState wrappers around the params
+            // read inside snapshotFlow so the flow would re-emit on each streaming
+            // chunk. Mechanically valid for the standard "snapshotFlow read tracking"
+            // contract, but on-device follow-bottom still didn't catch. Multiple
+            // possible failure modes there — ChatViewModel emit cadence, snapshot
+            // tracking on a value-typed Conversation, sample()-induced skips when
+            // scroll-in-progress eats every alternate sample — and the diagnostic
+            // surface was wide.
             //
-            // Result in 1.8.9: snapshotFlow emitted exactly once (the initial
-            // value) and never again. `scrollToTimelineBottom()` was called
-            // ~zero times during streaming. The "顿挫感" the user reported in
-            // 1.8.9 was actually closer to "no auto-follow at all + occasional
-            // catch-up scroll when LaunchedEffect happened to restart for
-            // unrelated reasons".
+            // Trust Compose recomposition as the trigger instead. `latestRenderToken`
+            // is recomputed at every recompose (params and conversation are read
+            // directly). When ANY of (conversation contents, processingStatus,
+            // pendingUserMessages count, loading) changes such that the outer
+            // ChatListNormal recomposes, latestRenderToken usually differs → key
+            // changes → LaunchedEffect restarts → if we're following + idle, scroll.
             //
-            // Fix: wrap the params in `rememberUpdatedState`. That returns a
-            // `State<T>` (i.e. SnapshotState) whose value is updated on every
-            // recomposition. Reading `.value` inside snapshotFlow registers it
-            // as a tracked snapshot dependency, so the flow re-evaluates when
-            // any of these props change.
-            val conversationState = rememberUpdatedState(conversation)
-            val processingStatusState = rememberUpdatedState(processingStatus)
-            val pendingCountState = rememberUpdatedState(pendingUserMessages.size)
-            val loadingState = rememberUpdatedState(loading)
-            LaunchedEffect(activeGenerationState, conversation.id) {
-                if (!activeGenerationState) return@LaunchedEffect
-                snapshotFlow {
-                    // Read the underlying State.value — these are SnapshotState,
-                    // so snapshotFlow tracks them properly and re-evaluates
-                    // whenever any change.
-                    listOf(
-                        conversationState.value.latestRenderToken(),
-                        processingStatusState.value,
-                        conversationState.value.messageNodes.size,
-                        pendingCountState.value,
-                        loadingState.value,
-                    )
+            // What this gives up: no 60ms coalesce, so streaming chunks that arrive
+            // very close together (<80ms) queue at LazyListState.scroll{}'s mutex.
+            // In practice MessageStreamAccumulator flushes every ~200ms and each
+            // scroll is tween(80ms), so there's never overlap.
+            //
+            // What this gains: deterministic — one chunk in, one scroll out. No
+            // SnapshotState indirection, no FlowPreview API surface, no
+            // rememberUpdatedState chain to reason about.
+            val latestRenderToken = conversation.latestRenderToken()
+            LaunchedEffect(
+                latestRenderToken,
+                conversation.id,
+                processingStatus,
+                pendingUserMessages.size,
+                loading,
+            ) {
+                if (
+                    activeGenerationState &&
+                    followMode == TimelineFollowMode.FollowingBottom &&
+                    !state.isScrollInProgress
+                ) {
+                    scrollToTimelineBottom()
                 }
-                    .sample(60.milliseconds)
-                    .collect {
-                        if (
-                            followMode == TimelineFollowMode.FollowingBottom &&
-                            !state.isScrollInProgress
-                        ) {
-                            scrollToTimelineBottom()
-                        }
-                    }
             }
         }
 

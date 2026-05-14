@@ -5,6 +5,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -1799,8 +1800,18 @@ private fun SubAgentRunSheet(
     }
     // Auto-follow only while the run is active. Once it finishes the user can scroll up freely
     // without being yanked back to the bottom.
+    //
+    // Scroll spec mirrors ChatList.scrollToTimelineBottom (tween 80ms + LinearEasing).
+    // Default spring on ScrollState.animateScrollTo holds isScrollInProgress true for
+    // ~1s after the destination is reached, which gates off the next chunk's scroll
+    // — same shape of bug as 1.8.9's main-chat scroll regression.
     LaunchedEffect(displayText, isRunning, followBottom) {
-        if (isRunning && followBottom) scrollState.animateScrollTo(scrollState.maxValue)
+        if (isRunning && followBottom) {
+            scrollState.animateScrollTo(
+                value = scrollState.maxValue,
+                animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+            )
+        }
     }
 
     ModalBottomSheet(
@@ -1889,14 +1900,6 @@ private fun SubAgentRunSheet(
                         content = displayText,
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
-                        // Forward the run's RUNNING flag as streaming. SubAgentRunSheet
-                        // re-uses MarkdownBlock for the live body text, so we want the
-                        // same character-level tail fade-in (last 40 chars alpha ramp,
-                        // settle to 1f on completion) as the main chat. Without this,
-                        // the sub-agent text just snaps in on each manager.liveTextFlow
-                        // emission — the user reported "subagent 输出的内容能变得更
-                        // 流畅吗" pointing at this sheet.
-                        streaming = isRunning,
                     )
                 }
             }
@@ -2130,8 +2133,17 @@ private fun ModelCouncilRunSheet(
                         }
                     }
             }
+            // Scroll spec aligned with ChatList.scrollToTimelineBottom — tween 80ms,
+            // LinearEasing. Default spring's long settle holds isScrollInProgress and
+            // would gate off subsequent chunks (same regression shape 1.8.10 fixed
+            // on the main chat path).
             LaunchedEffect(displayText, isRunning, activeSeatKey, followBottom) {
-                if (isRunning && followBottom) scrollState.animateScrollTo(scrollState.maxValue)
+                if (isRunning && followBottom) {
+                    scrollState.animateScrollTo(
+                        value = scrollState.maxValue,
+                        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+                    )
+                }
             }
             Column(
                 modifier = Modifier
@@ -2160,20 +2172,6 @@ private fun ModelCouncilRunSheet(
                             content = displayText,
                             modifier = Modifier.fillMaxWidth(),
                             style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
-                            // 2026-05-14 review fix: was `streaming = isRunning`,
-                            // but isRunning is the COUNCIL-wide RUNNING flag — a
-                            // 4-seat council where 3 seats finished early would
-                            // leave those 3 seat tabs with permanent grey-tail
-                            // characters (same shape as the 1.8.8 main-chat fix,
-                            // applied to the wrong granularity). Per-seat signal:
-                            // finalText is non-blank exactly when the council
-                            // manager has finalized THIS seat's output via the
-                            // tool call. Once finalText surfaces, this seat has
-                            // sealed off — even if the council overall is still
-                            // running other seats — so streaming should flip to
-                            // false and let Paragraph.settleAnim lift the tail
-                            // back to alpha=1.
-                            streaming = isRunning && finalText.isBlank(),
                         )
                     }
                 }

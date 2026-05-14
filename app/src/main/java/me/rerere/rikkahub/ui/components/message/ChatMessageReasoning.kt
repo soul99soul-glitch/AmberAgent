@@ -202,17 +202,10 @@ private fun ReasoningContent(
                 contentColor = workspace.muted,
                 border = BorderStroke(1.dp, workspace.hairline),
             ) {
-                // Deliberately NOT forwarding `streaming` to MarkdownBlock here. The
-                // reasoning text already sits inside a ChainOfThought card whose
-                // `animateContentChanges = loading` drives a spring animation on the
-                // step list. Stacking a 180ms tail-paragraph fade on top of that
-                // spring competes visually: the spring is pushing the new step in
-                // from below while the tail paragraph is fading from translucent to
-                // opaque — two animations on the same content, both keyed to the
-                // 200ms flush. Single-source-of-truth for "new reasoning is arriving":
-                // the ChainOfThought spring. If users complain the reasoning text
-                // still pops, revisit by passing `streaming = loading` AND dropping
-                // ChainOfThought.animateContentChanges, not by stacking them.
+                // ChainOfThought.animateContentChanges already drives a spring on the
+                // step list; reasoning text rides on that motion. (Char-level fade was
+                // removed across the app 2026-05-15, so there's no fade to consider
+                // forwarding here anyway.)
                 MarkdownBlock(
                     content = displayText.replaceRegexes(
                         assistant = assistant,

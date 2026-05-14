@@ -1,8 +1,6 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.os.Trace
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,7 +39,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import kotlin.math.pow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -384,18 +381,13 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
     /**
-     * When true, the most recently appended top-level block (paragraph/header/code-fence/etc.)
-     * fades in on first appearance instead of popping. Used during LLM streaming so newly
-     * arriving content reveals smoothly rather than snapping in at every 200ms accumulator
-     * flush. False (the default) preserves the legacy "instant" behavior for static history
-     * messages — fading every paragraph when scrolling back through old conversations would
-     * be visual noise.
-     *
-     * The fade only applies to the *last* top-level block. Earlier blocks have already
-     * stabilized and don't need to animate again. See `streamingFadeAlpha()` for the actual
-     * animation: 180ms tween, 0.35→1.0, LinearOutSlowIn curve.
+     * No-op as of 2026-05-15. Previously gated a character-level tail fade-in
+     * (last ~40 chars with gradient alpha). User feedback: Claude Code's CLI
+     * streams without any alpha gradient and feels more honest; the fade
+     * was perceived as "灰尾". Param kept to avoid churning every callsite;
+     * remove once those are migrated.
      */
-    streaming: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
     var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
@@ -429,90 +421,18 @@ fun MarkdownBlock(
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-                    val children = data.astTree.children
-                    val lastChildIdx = children.lastIndex
-                    // Plain index loop so the streaming-tail signal can be passed by
-                    // position without an O(n) indexOf per child. The actual fade-in
-                    // animation lives inside Paragraph (character-level alpha on the
-                    // last N chars, see applyStreamingTailFade) — this layer just tells
-                    // the tail block "you're the one currently being appended to".
-                    for (idx in children.indices) {
-                        val child = children[idx]
+                    data.astTree.children.fastForEach { child ->
                         MarkdownNode(
                             node = child,
                             content = data.preprocessed,
                             modifier = nodeModifier,
                             onClickCitation = onClickCitation,
-                            streamingTail = streaming && idx == lastChildIdx,
                         )
                     }
                 }
             }
         }
       }
-    }
-}
-
-// =============================================================================
-//  Character-level streaming fade — designed 2026-05-14 after the paragraph-level
-//  variant (0.35→1.0 over 180ms) was rejected by user as "几乎没有什么动画效果".
-//
-//  Design goals:
-//    1. Visual match for Codex / Claude.ai web: the last ~40 characters of the
-//       in-progress paragraph have a graduated alpha ramp; closest-to-tail
-//       chars are nearly invisible, farther back chars are nearly opaque. As
-//       new chars stream in, the whole ramp shifts right one position per char,
-//       which reads as "characters fading into existence".
-//    2. No frame ticker. alpha is purely a function of (length, char index).
-//       It only re-evaluates when the text length actually changes (i.e. when
-//       a new accumulator flush arrives), not every paint frame.
-//    3. Markdown-compatible. The fade is applied as `addStyle` overlay on top
-//       of the existing AnnotatedString — code-span / bold / italic / link
-//       SpanStyles all survive. Each character takes one extra SpanStyle range
-//       (so a max of FADE_TAIL_CHARS extra ranges per paragraph).
-//    4. Graceful stop. When `streamingTail` flips false (LLM finished, or the
-//       widget parser closed this segment), a 320ms tween lifts every faded
-//       char back to alpha=1 in one motion — no more low-alpha leftover.
-//
-//  STREAMING_FADE_TAIL_CHARS — how many trailing chars carry the ramp. 40 is
-//  ~1 line of typical text at default font size; longer reads as "ghost trail",
-//  shorter reads as "popping in". Tested values 20/30/40/60; 40 feels best.
-//
-//  STREAMING_FADE_GAMMA — exponent applied to the linear position so the ramp
-//  is steeper near the tail. 0.55 puts ~60% of the visible fade in the last
-//  10 chars, which matches what Codex's CSS opacity-transition does in practice.
-// =============================================================================
-private const val STREAMING_FADE_TAIL_CHARS = 40
-private const val STREAMING_FADE_GAMMA = 0.55f
-
-internal fun applyStreamingTailFade(
-    input: AnnotatedString,
-    baseColor: Color,
-    settleProgress: Float,
-): AnnotatedString {
-    // Fast path: settle done, nothing to overlay.
-    if (settleProgress >= 1f) return input
-    val len = input.length
-    if (len == 0) return input
-    val fadeStart = (len - STREAMING_FADE_TAIL_CHARS).coerceAtLeast(0)
-    return buildAnnotatedString {
-        append(input)
-        for (i in fadeStart until len) {
-            val distFromTail = len - 1 - i
-            // distFromTail=0 (last char) → 0 → pow(...) → 0
-            // distFromTail=FADE_TAIL_CHARS-1 → ~1 → pow(0.55) → ~1
-            val baseAlpha = (distFromTail.toFloat() / STREAMING_FADE_TAIL_CHARS)
-                .coerceIn(0f, 1f)
-                .pow(STREAMING_FADE_GAMMA)
-            // settleProgress=0 (streaming) → effective = baseAlpha
-            // settleProgress=1 (settled)   → effective = 1
-            val effective = baseAlpha + (1f - baseAlpha) * settleProgress
-            addStyle(
-                style = SpanStyle(color = baseColor.copy(alpha = effective)),
-                start = i,
-                end = i + 1,
-            )
-        }
     }
 }
 
@@ -557,15 +477,6 @@ private fun MarkdownNode(
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
     listLevel: Int = 0,
-    /**
-     * True when this node is the streaming tail of the message — the LLM is actively
-     * appending tokens to it right now. Forwarded only to PARAGRAPH (the only AST
-     * type that hosts the character-level fade-in). Other block types (headers,
-     * code fences, lists, tables, block quotes) don't fade — when they're being
-     * generated the user-visible "currently typing" cue is the trailing paragraph
-     * that follows them anyway.
-     */
-    streamingTail: Boolean = false,
 ) {
     when (node.type) {
         // 文件根节点
@@ -584,7 +495,6 @@ private fun MarkdownNode(
                 content = content,
                 modifier = modifier,
                 onClickCitation = onClickCitation,
-                streamingTail = streamingTail,
             )
         }
 
@@ -1033,14 +943,6 @@ private fun Paragraph(
     trim: Boolean = false,
     onClickCitation: (String) -> Unit = {},
     modifier: Modifier,
-    /**
-     * When true, this paragraph is the in-progress streaming tail. Last
-     * STREAMING_FADE_TAIL_CHARS characters are rendered with a gradient alpha
-     * (closest-to-tail = nearly invisible, farther back = nearly opaque). On
-     * flip-to-false, a 320ms tween settles all alpha back to 1f so the user
-     * doesn't see partially-faded characters left after streaming stops.
-     */
-    streamingTail: Boolean = false,
 ) {
     // dumpAst(node, content)
     if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
@@ -1055,7 +957,6 @@ private fun Paragraph(
     }
 
     val colorScheme = MaterialTheme.colorScheme
-    val baseColor = LocalContentColor.current
     val inlineContents = remember {
         mutableStateMapOf<String, InlineTextContent>()
     }
@@ -1071,24 +972,6 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
-    // settleAnim drives the "streaming stopped → restore full alpha" transition.
-    // - while streamingTail=true: held at 0, character-level fade is fully visible.
-    // - flip to false: tween 0→1 over 320ms, applyStreamingTailFade lerps every
-    //   faded char back up to alpha=1 in lockstep, so the entire ramp lifts at once.
-    // Using a single Animatable rather than animateFloatAsState so we can snapTo(0)
-    // immediately when re-entering streaming mode (e.g. a regenerate kicks off again).
-    val settleAnim = remember { Animatable(if (streamingTail) 0f else 1f) }
-    LaunchedEffect(streamingTail) {
-        if (streamingTail) {
-            settleAnim.snapTo(0f)
-        } else {
-            settleAnim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 320, easing = LinearOutSlowInEasing),
-            )
-        }
-    }
-
     FlowRow(
         modifier = modifier
             .fillWidthIf(LocalMarkdownFillWidth.current)
@@ -1097,7 +980,7 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
-        val rawAnnotatedString = remember(content, enableLatexRendering, onClickUrl) {
+        val annotatedString = remember(content, enableLatexRendering, onClickUrl) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -1114,25 +997,6 @@ private fun Paragraph(
                     )
                 }
             }
-        }
-
-        // Apply the tail fade overlay. While streaming, this rebuilds on every
-        // content flush (raw AnnotatedString changes anyway) and adds up to
-        // STREAMING_FADE_TAIL_CHARS extra SpanStyle ranges. While settling, this
-        // rebuilds ~18 times over 320ms (Animatable triggers per-frame reads of
-        // settleAnim.value) — still cheap, the input AnnotatedString is shared,
-        // only the trailing addStyle ranges differ.
-        val settle = settleAnim.value
-        val annotatedString = if (!streamingTail && settle >= 1f) {
-            // Hot path: settled non-tail blocks (all historical paragraphs,
-            // non-tail children) skip the overlay entirely.
-            rawAnnotatedString
-        } else {
-            applyStreamingTailFade(
-                input = rawAnnotatedString,
-                baseColor = baseColor,
-                settleProgress = settle,
-            )
         }
 
         Text(
