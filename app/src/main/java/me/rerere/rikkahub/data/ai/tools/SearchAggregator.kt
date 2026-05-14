@@ -106,6 +106,7 @@ internal object SearchAggregator {
                     imagesBudget = (imagesBudget - emittedImages).coerceAtLeast(0)
                 }
             })
+            put("total_images", items.sumOf { it.images.size })
             put("sources", buildJsonArray {
                 calls.forEach { source ->
                     add(source.toJson())

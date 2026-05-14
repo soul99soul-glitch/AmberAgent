@@ -75,7 +75,7 @@ object ModelRegistry {
         tokens("gpt", "5", "4")
         visionInput()
         toolReasoningAbility()
-        contextWindow(1_000_000)
+        contextWindow(950_000)
     }
 
     private val GPT_5_4_MINI = defineModel {
