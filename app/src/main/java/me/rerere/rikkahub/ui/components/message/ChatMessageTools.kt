@@ -1889,6 +1889,14 @@ private fun SubAgentRunSheet(
                         content = displayText,
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                        // Forward the run's RUNNING flag as streaming. SubAgentRunSheet
+                        // re-uses MarkdownBlock for the live body text, so we want the
+                        // same character-level tail fade-in (last 40 chars alpha ramp,
+                        // settle to 1f on completion) as the main chat. Without this,
+                        // the sub-agent text just snaps in on each manager.liveTextFlow
+                        // emission — the user reported "subagent 输出的内容能变得更
+                        // 流畅吗" pointing at this sheet.
+                        streaming = isRunning,
                     )
                 }
             }
@@ -2152,6 +2160,10 @@ private fun ModelCouncilRunSheet(
                             content = displayText,
                             modifier = Modifier.fillMaxWidth(),
                             style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                            // Same rationale as SubAgentRunSheet above — per-seat
+                            // council output streams via manager.liveTextFlow, and
+                            // should pick up the character-level tail fade-in.
+                            streaming = isRunning,
                         )
                     }
                 }
