@@ -27,8 +27,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -408,7 +408,6 @@ private fun PendingUserMessageBubble(
     }
 }
 
-@OptIn(FlowPreview::class)
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
@@ -496,6 +495,7 @@ fun ChatList(
     }
 }
 
+@OptIn(FlowPreview::class)
 @Composable
 private fun ChatListNormal(
     innerPadding: PaddingValues,
@@ -592,37 +592,44 @@ private fun ChatListNormal(
     suspend fun scrollToTimelineBottom() {
         val token = beginProgrammaticScroll()
         try {
-            // 2026-05-14 v1.8.9: replaced animateScrollToItem(lastIndex) with
-            // animateScrollBy(viewportPx*2, spring). Three reasons, all from
-            // empirical testing + Google issuetracker #198753885 + JetBrains
-            // CMP-6937 evidence:
-            //   1. animateScrollToItem has no animationSpec parameter — it always
-            //      uses an internal default spring that's known to snap/jerk at
-            //      high update frequency. We can't tame it.
-            //   2. animateScrollBy accepts an explicit AnimationSpec. We use
-            //      spring(NoBouncy, MediumLow): when the next chunk arrives
-            //      mid-animation, spring preserves the current scroll velocity
-            //      and smoothly redirects toward the new target. Consecutive
-            //      chunks blend into one continuous downward motion instead of
-            //      five discrete "tween → settle → restart" jerks (user
-            //      reported 1.8.8 as "顿挫感").
-            //   3. animateScrollBy operates on pixels. We push viewport*2 worth
-            //      of scroll — LazyListState clamps to maxScrollOffset
-            //      automatically. As the tail item keeps growing during the
-            //      animation, the clamp target naturally extends, so the
-            //      animation reaches the actual bottom without a second pass.
-            // No convergence pass needed: animateScrollBy + spring + sample(60ms)
-            // upstream gives a smooth final approach without the corrective second
-            // scroll the previous implementation needed.
+            // 2026-05-14 v1.8.10: reverted spring spec from 1.8.9 to short
+            // LinearEasing tween. Why:
+            //
+            // 1.8.9 assumed spring preserves velocity across cancellations.
+            // That's true for `animateContentSize(spring)` (which uses a
+            // persistent SizeAnimationModifierNode.Animatable internally), but
+            // NOT for `animateScrollBy`. AOSP source confirms `animateScrollBy`
+            // wraps `animate(0f, target, spec)` in `scroll {}` — a fresh
+            // top-level `animate()` is created every call, with no persistent
+            // Animatable across cancellations. So spring's "velocity continuity"
+            // never materialized on the scroll path.
+            //
+            // Worse, spring(StiffnessMediumLow) settles in ~800-1500ms even
+            // after the scroll has clamped at maxOffset — `isScrollInProgress`
+            // stays true the entire time, gating off subsequent
+            // scrollToTimelineBottom triggers in the collect block. Net effect:
+            // one scroll per ~1s instead of per chunk, so content accumulated
+            // for 1s then suddenly caught up — a worse cadence than the
+            // 200ms-tween version this replaced.
+            //
+            // Short LinearEasing tween is the honest choice: fixed duration so
+            // isScrollInProgress flips back deterministically, linear so a
+            // mid-animation cancellation (next chunk arrives 60ms later)
+            // continues from current position toward new target without
+            // velocity discontinuity (linear has no velocity, just constant
+            // delta-per-frame). 80ms is shorter than the sample window so we
+            // never queue up multiple overlapping scrolls.
+            //
+            // viewportPx (not *2) is enough: LazyListState clamps to
+            // maxScrollOffset, and the tail item grows by ≤ a few lines per
+            // flush, never more than viewportPx in one tick. Overscroll
+            // wasn't needed.
             if (state.layoutInfo.totalItemsCount > 0) {
                 val viewportPx = state.layoutInfo.viewportSize.height.toFloat()
                 if (viewportPx > 0f) {
                     state.animateScrollBy(
-                        value = viewportPx * 2f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow,
-                        ),
+                        value = viewportPx,
+                        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
                     )
                 }
             }
@@ -887,32 +894,46 @@ private fun ChatListNormal(
             .background(workspace.canvas),
     ) {
         if (settings.displaySetting.enableAutoScroll) {
-            // 2026-05-14 v1.8.9: was LaunchedEffect(latestRenderToken, …) which
-            // re-keyed on every signal change → independent coroutine per change
-            // → fresh scroll animation per change. With 200ms accumulator flush
-            // plus interleaved reasoning/content/token-counter signals, that
-            // produced 4-6 independent scroll-animation starts per second. Even
-            // with spring (above), each start began from a pristine state, so
-            // the user perceived discrete scroll units stacking up.
+            // 2026-05-14 v1.8.10: critical fix to 1.8.9 — the snapshotFlow
+            // approach didn't actually subscribe to streaming changes. Why:
             //
-            // snapshotFlow + sample(60.ms) coalesces all those changes into at
-            // most ~16 scroll triggers/sec. Combined with the now-spring scroll
-            // (animateScrollBy(viewport*2)), the result is one continuous
-            // velocity-preserving scroll that follows the growing content
-            // smoothly. 60ms is the minimum window that still lets the eye
-            // perceive continuity (less than 4 frames @ 60fps).
+            // `snapshotFlow` only re-runs its lambda when a SnapshotState read
+            // inside the lambda changes. `conversation`, `processingStatus`,
+            // `pendingUserMessages`, `loading` are all ChatListNormal function
+            // parameters — plain Kotlin values, NOT SnapshotState. When the
+            // outer Composable recomposes with a new `conversation` instance,
+            // the LaunchedEffect's closure still captures the old reference
+            // (key `(activeGenerationState, conversation.id)` doesn't change
+            // during streaming → LaunchedEffect doesn't restart).
+            //
+            // Result in 1.8.9: snapshotFlow emitted exactly once (the initial
+            // value) and never again. `scrollToTimelineBottom()` was called
+            // ~zero times during streaming. The "顿挫感" the user reported in
+            // 1.8.9 was actually closer to "no auto-follow at all + occasional
+            // catch-up scroll when LaunchedEffect happened to restart for
+            // unrelated reasons".
+            //
+            // Fix: wrap the params in `rememberUpdatedState`. That returns a
+            // `State<T>` (i.e. SnapshotState) whose value is updated on every
+            // recomposition. Reading `.value` inside snapshotFlow registers it
+            // as a tracked snapshot dependency, so the flow re-evaluates when
+            // any of these props change.
+            val conversationState = rememberUpdatedState(conversation)
+            val processingStatusState = rememberUpdatedState(processingStatus)
+            val pendingCountState = rememberUpdatedState(pendingUserMessages.size)
+            val loadingState = rememberUpdatedState(loading)
             LaunchedEffect(activeGenerationState, conversation.id) {
                 if (!activeGenerationState) return@LaunchedEffect
                 snapshotFlow {
-                    // All signals that previously keyed the LaunchedEffect
-                    // aggregated into one tuple — snapshotFlow emits only when
-                    // the tuple actually changes (structural equality).
+                    // Read the underlying State.value — these are SnapshotState,
+                    // so snapshotFlow tracks them properly and re-evaluates
+                    // whenever any change.
                     listOf(
-                        conversation.latestRenderToken(),
-                        processingStatus,
-                        conversation.messageNodes.size,
-                        pendingUserMessages.size,
-                        loading,
+                        conversationState.value.latestRenderToken(),
+                        processingStatusState.value,
+                        conversationState.value.messageNodes.size,
+                        pendingCountState.value,
+                        loadingState.value,
                     )
                 }
                     .sample(60.milliseconds)
