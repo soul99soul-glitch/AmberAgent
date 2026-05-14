@@ -578,12 +578,23 @@ private fun ChatListNormal(
         try {
             var lastIndex = state.layoutInfo.totalItemsCount - 1
             if (lastIndex >= 0) {
-                state.scrollToItem(lastIndex)
+                // 2026-05-14: replaced scrollToItem (instant snap) with
+                // animateScrollToItem. The LaunchedEffect above re-fires this
+                // function on every accumulator flush during streaming (because
+                // latestRenderToken changes), and instant scrolls produced the
+                // "一行一行跳" jerky effect the user reported — each chunk
+                // arrived, list height grew by one line, snap-to-bottom yanked
+                // the viewport down by exactly that line height. animateScrollToItem
+                // smooths the delta over a few frames so consecutive flushes blend
+                // into one continuous scroll motion. The cheap second pass below
+                // still uses animateScrollToItem to converge if the first attempt
+                // undershot due to mid-flight measure changes.
+                state.animateScrollToItem(lastIndex)
             }
             withFrameNanos { }
             lastIndex = state.layoutInfo.totalItemsCount - 1
             if (lastIndex >= 0 && !state.isAtTimelineBottom(bottomFollowBufferPx)) {
-                state.scrollToItem(lastIndex)
+                state.animateScrollToItem(lastIndex)
             }
         } finally {
             endProgrammaticScroll(token)

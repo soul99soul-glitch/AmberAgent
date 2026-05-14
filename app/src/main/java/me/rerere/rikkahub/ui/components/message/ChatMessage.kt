@@ -1256,7 +1256,20 @@ private fun MessagePartsBlock(
             GenerativeWidgetParser.hasRenderableWidget(part.text)
         }
     }
-    groupedParts.fastForEach { block ->
+    // Identify the LAST Text content block in this message. Only the trailing
+    // Text part is "currently being appended to" during streaming — earlier
+    // Text parts (sandwiched between tool calls in interleaved generation, e.g.
+    // text → tool_call → text → tool_call → text) are already sealed off and
+    // won't grow further. If we forwarded `streaming = loading` to ALL of them
+    // their tail-character fade would never settle (loading stays true across
+    // the whole multi-step generation), leaving the user staring at greyed-out
+    // last-N-chars in every intermediate text block. Reported as a bug 2026-05-14.
+    val lastTextBlockIdx = remember(groupedParts) {
+        groupedParts.indexOfLast { block ->
+            block is MessagePartBlock.ContentBlock && block.part is UIMessagePart.Text
+        }
+    }
+    groupedParts.fastForEachIndexed { blockIdx, block ->
         when (block) {
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
@@ -1375,6 +1388,11 @@ private fun MessagePartsBlock(
                                         }
                                     }
                                 } else {
+                                    // True only for the trailing Text block in a streaming
+                                    // message — see lastTextBlockIdx note above for why
+                                    // forwarding `loading` directly would leave grey-tail
+                                    // characters on intermediate text blocks.
+                                    val isStreamingText = loading && blockIdx == lastTextBlockIdx
                                     if (settings.displaySetting.showAssistantBubble) {
                                         // 2026-05-14: dropped the original Modifier.animateContentSizeIf(loading)
                                         // because it was nested 4-5 layers deep with default spring,
@@ -1387,7 +1405,7 @@ private fun MessagePartsBlock(
                                         Surface(
                                             modifier = Modifier
                                                 .widthIn(max = 640.dp)
-                                                .streamingContentSize(loading),
+                                                .streamingContentSize(isStreamingText),
                                             shape = RoundedCornerShape(8.dp),
                                             color = workspace.paper,
                                             contentColor = workspace.ink,
@@ -1402,7 +1420,7 @@ private fun MessagePartsBlock(
                                                         scope = AssistantAffectScope.ASSISTANT,
                                                         visual = true,
                                                     ),
-                                                    streaming = loading,
+                                                    streaming = isStreamingText,
                                                     onClickCitation = handleClickCitation,
                                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                                                 )
@@ -1422,9 +1440,9 @@ private fun MessagePartsBlock(
                                                 visual = true,
                                             ),
                                             onClickCitation = handleClickCitation,
-                                            streaming = loading,
+                                            streaming = isStreamingText,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                            modifier = Modifier.streamingContentSize(loading),
+                                            modifier = Modifier.streamingContentSize(isStreamingText),
                                         )
                                     }
                                 }
