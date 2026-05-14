@@ -1256,19 +1256,20 @@ private fun MessagePartsBlock(
             GenerativeWidgetParser.hasRenderableWidget(part.text)
         }
     }
-    // Identify the LAST Text content block in this message. Only the trailing
-    // Text part is "currently being appended to" during streaming — earlier
-    // Text parts (sandwiched between tool calls in interleaved generation, e.g.
-    // text → tool_call → text → tool_call → text) are already sealed off and
-    // won't grow further. If we forwarded `streaming = loading` to ALL of them
-    // their tail-character fade would never settle (loading stays true across
-    // the whole multi-step generation), leaving the user staring at greyed-out
-    // last-N-chars in every intermediate text block. Reported as a bug 2026-05-14.
-    val lastTextBlockIdx = remember(groupedParts) {
-        groupedParts.indexOfLast { block ->
-            block is MessagePartBlock.ContentBlock && block.part is UIMessagePart.Text
-        }
-    }
+    // A Text block is "the streaming tail" (still being appended to) if and ONLY
+    // if it sits at the very end of the grouped block sequence. The first
+    // attempt at this fix (indexOfLast { ContentBlock && Text }) was wrong:
+    // it kept declaring intermediate Text blocks as the tail when there was
+    // only one Text in the message, even if a Tool/Thinking block followed it
+    // — e.g. `[Reasoning, Text, Tool(subagent_task)]` would mark idx=1 (Text)
+    // as the only-and-therefore-last Text, but it's already sealed off by the
+    // trailing Tool. Result: 1.8.6 still showed permanent grey-tail mid-message.
+    //
+    // Correct rule: blockIdx == groupedParts.lastIndex is the canonical "this
+    // is the trailing block right now" test. If it happens to be a Text block,
+    // it's streaming; if it's a Tool/Thinking block, the Text branch never
+    // reads isStreamingText anyway (the `when (block)` doesn't enter Text).
+    val lastBlockIdx = groupedParts.lastIndex
     groupedParts.fastForEachIndexed { blockIdx, block ->
         when (block) {
             is MessagePartBlock.ThinkingBlock -> {
@@ -1388,11 +1389,11 @@ private fun MessagePartsBlock(
                                         }
                                     }
                                 } else {
-                                    // True only for the trailing Text block in a streaming
-                                    // message — see lastTextBlockIdx note above for why
-                                    // forwarding `loading` directly would leave grey-tail
-                                    // characters on intermediate text blocks.
-                                    val isStreamingText = loading && blockIdx == lastTextBlockIdx
+                                    // True only when this Text block is the very last block
+                                    // in the message AND generation is ongoing. See lastBlockIdx
+                                    // note above for why this is "is the trailing block" rather
+                                    // than "is the last Text block".
+                                    val isStreamingText = loading && blockIdx == lastBlockIdx
                                     if (settings.displaySetting.showAssistantBubble) {
                                         // 2026-05-14: dropped the original Modifier.animateContentSizeIf(loading)
                                         // because it was nested 4-5 layers deep with default spring,

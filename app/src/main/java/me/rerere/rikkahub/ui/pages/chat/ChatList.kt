@@ -710,7 +710,19 @@ private fun ChatListNormal(
 
     LaunchedEffect(state.isScrollInProgress) {
         if (state.isScrollInProgress) {
-            isRecentScroll = true
+            // 2026-05-14: gate isRecentScroll on `!programmaticScrollInProgress`.
+            // Previously this was unconditional, which meant the streaming-time
+            // animateScrollToItem (in scrollToTimelineBottom, fired by the
+            // latestRenderToken LaunchedEffect on every accumulator flush) kept
+            // re-arming "the user just scrolled" state. MessageJumper's
+            // visibility = `isRecentScroll && !isScrollInProgress` then flipped
+            // true→false→true on every chunk's scroll lifecycle, causing the
+            // jumper card to slide in/out repeatedly — user reported it as
+            // "右边这个四个箭头的导航按钮疯狂的往外弹". Only mark recent-scroll
+            // when the user actually initiated the gesture.
+            if (!programmaticScrollInProgress) {
+                isRecentScroll = true
+            }
             if (activeGenerationState && !programmaticScrollInProgress) {
                 pauseAutoFollowTemporarily(
                     mode = TimelineFollowMode.PausedForUser,
