@@ -65,7 +65,7 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "PreferencesStore"
 
-private val Context.settingsStore by preferencesDataStore(
+internal val Context.settingsStore by preferencesDataStore(
     name = "settings",
     produceMigrations = { context ->
         listOf(

@@ -21,6 +21,7 @@ import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
@@ -51,6 +52,10 @@ import java.util.concurrent.TimeUnit
 val dataSourceModule = module {
     single {
         SettingsStore(context = get(), scope = get())
+    }
+
+    single {
+        UIPrefs(context = get(), scope = get())
     }
 
     single {
