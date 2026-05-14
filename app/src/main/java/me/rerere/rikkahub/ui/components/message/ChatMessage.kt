@@ -4,6 +4,8 @@ import android.content.Intent
 import android.os.Trace
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -287,6 +289,29 @@ fun ChatMessage(
 // streamed text itself.
 private fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
     if (enabled) animateContentSize() else this
+
+/**
+ * Height-change animation specifically for the streaming-tail assistant container
+ * (and ONLY there — single layer, never stacked). Returns a fast tween that
+ * completes inside the accumulator's 200ms flush interval so consecutive flushes
+ * never collide. Spec is intentionally `tween(140ms, FastOutSlowInEasing)`
+ * rather than the default spring:
+ *   - 140ms < 200ms flush interval → each height transition settles before the
+ *     next chunk arrives, so we never have two competing animations targeting
+ *     different heights (which is what made the previous nested-spring setup
+ *     look janky).
+ *   - FastOutSlowInEasing eases out smoothly at the end — bubble height "lands"
+ *     gently into the new size, which reads as smooth content scroll-up rather
+ *     than a hard snap.
+ *
+ * Apply this AT MOST ONCE per assistant message (on the outermost container
+ * that wraps the streaming markdown content). Stacking it on inner layers
+ * resurrects the original problem.
+ */
+private fun Modifier.streamingContentSize(enabled: Boolean): Modifier =
+    if (enabled) animateContentSize(
+        animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
+    ) else this
 
 @Composable
 private fun rememberChatMessageTextStyle(): androidx.compose.ui.text.TextStyle {
@@ -1351,15 +1376,18 @@ private fun MessagePartsBlock(
                                     }
                                 } else {
                                     if (settings.displaySetting.showAssistantBubble) {
-                                        // 2026-05-14: dropped `.animateContentSizeIf(loading)` —
-                                        // see animateContentSizeIf() note in this file. This was
-                                        // the dominant frame-time consumer on long replies: every
-                                        // 200ms accumulator flush kicked off a new Surface spring,
-                                        // which never finished settling before the next chunk
-                                        // arrived. Final size is identical without it.
+                                        // 2026-05-14: dropped the original Modifier.animateContentSizeIf(loading)
+                                        // because it was nested 4-5 layers deep with default spring,
+                                        // and each 200ms accumulator flush kicked off a new spring that
+                                        // never had time to settle. Re-introduced as a SINGLE layer with
+                                        // a fast tween (140ms < 200ms flush interval) so the bubble
+                                        // grows smoothly when new tokens arrive. Without this, the
+                                        // bubble snaps to its new height on every flush — which user
+                                        // perceives as "上抬时没有丝滑的动画".
                                         Surface(
                                             modifier = Modifier
-                                                .widthIn(max = 640.dp),
+                                                .widthIn(max = 640.dp)
+                                                .streamingContentSize(loading),
                                             shape = RoundedCornerShape(8.dp),
                                             color = workspace.paper,
                                             contentColor = workspace.ink,
@@ -1381,10 +1409,12 @@ private fun MessagePartsBlock(
                                             }
                                         }
                                     } else {
-                                        // 2026-05-14: dropped `Modifier.animateContentSizeIf(loading)` —
-                                        // see paired block above (with-bubble variant). Same reason:
-                                        // 200ms flush + nested spring animations was the dominant
-                                        // streaming jank source.
+                                        // 2026-05-14: paired with the with-bubble branch above.
+                                        // Single-layer streamingContentSize on the outermost wrapper
+                                        // gives smooth height transitions on each 200ms flush without
+                                        // the nested-spring jank of the original code. Without this
+                                        // the markdown column snaps to its new height when new
+                                        // paragraphs arrive.
                                         AssistantMarkdownBlockOrWidgets(
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
@@ -1394,6 +1424,7 @@ private fun MessagePartsBlock(
                                             onClickCitation = handleClickCitation,
                                             streaming = loading,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                            modifier = Modifier.streamingContentSize(loading),
                                         )
                                     }
                                 }
