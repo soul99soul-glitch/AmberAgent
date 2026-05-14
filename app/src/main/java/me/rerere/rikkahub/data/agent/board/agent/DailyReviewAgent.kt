@@ -67,9 +67,11 @@ class DailyReviewAgent(
             rawMarkdown
         }
 
-        // 5. Persist
+        // 5. Persist — use boardDate as deterministic id so noon and evening
+        // always upsert the same row. This avoids PK vs unique-index conflicts
+        // when noon fails and evening creates a new entity.
         val entity = DailyReviewEntity(
-            id = existing?.id ?: Uuid.random().toString(),
+            id = "review:$boardDate",
             boardDate = boardDate,
             content = finalContent,
             phase = phase,
@@ -173,21 +175,21 @@ class DailyReviewAgent(
     private suspend fun callModel(settings: Settings, prompt: String): String? {
         val model = resolveModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
-        return runCatching {
-            withTimeout(90_000L) {
-            val response = providerManager.getProviderByType(provider).generateText(
-                providerSetting = provider,
-                messages = listOf(UIMessage.user(prompt)),
-                params = TextGenerationParams(
-                    model = model,
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies,
-                ),
-            )
-            response.choices.firstOrNull()?.message?.toText()
-            }
-        }.onFailure { Log.e(TAG, "daily review model call failed", it) }
-            .getOrNull()
+        return withTimeout(90_000L) {
+            runCatching {
+                val response = providerManager.getProviderByType(provider).generateText(
+                    providerSetting = provider,
+                    messages = listOf(UIMessage.user(prompt)),
+                    params = TextGenerationParams(
+                        model = model,
+                        customHeaders = model.customHeaders,
+                        customBody = model.customBodies,
+                    ),
+                )
+                response.choices.firstOrNull()?.message?.toText()
+            }.onFailure { Log.e(TAG, "daily review model call failed", it) }
+                .getOrNull()
+        }
     }
 
     private fun resolveModel(settings: Settings): me.rerere.ai.provider.Model? {

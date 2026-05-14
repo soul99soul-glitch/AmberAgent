@@ -3,8 +3,12 @@ package me.rerere.rikkahub.data.agent.board
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** Default trigger anchors in 24h local time. Users can toggle these on/off individually. */
-val DEFAULT_TODAY_BOARD_TRIGGER_HOURS = listOf("08:00", "12:00", "18:00")
+/**
+ * Default trigger anchors in 24h local time. Users can toggle these on/off individually.
+ * 08:00 / 12:00 / 18:00 drive the board signal pipeline.
+ * 13:00 / 19:00 additionally trigger the daily review generation windows.
+ */
+val DEFAULT_TODAY_BOARD_TRIGGER_HOURS = listOf("08:00", "12:00", "13:00", "18:00", "19:00")
 
 /**
  * Cutoff hour for nightly cleanup. Items from previous days' boards are archived at this

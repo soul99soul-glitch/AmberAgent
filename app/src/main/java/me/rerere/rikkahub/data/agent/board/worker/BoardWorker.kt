@@ -56,7 +56,11 @@ class BoardWorker(
         }
 
         val scored = aggregator.getFilteredSignals(limit = 200)
-        if (scored.isEmpty()) return Result.success()
+        if (scored.isEmpty()) {
+            // No board signals, but daily review can still run (app usage, completed items)
+            maybeRunDailyReview(boardDate)
+            return Result.success()
+        }
 
         val rules = repository.getActiveFocusRules()
         val result = agent.run(

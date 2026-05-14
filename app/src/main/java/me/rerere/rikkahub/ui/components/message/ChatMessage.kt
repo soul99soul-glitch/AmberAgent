@@ -1441,9 +1441,8 @@ private fun MessagePartsBlock(
                         if (isImageLoading) {
                             Box(
                                 modifier = Modifier
-                                    .heightIn(max = 216.dp)
-                                    .widthIn(max = 360.dp)
-                                    .size(216.dp)
+                                    .heightIn(min = 120.dp, max = 216.dp)
+                                    .widthIn(min = 120.dp, max = 360.dp)
                                     .clip(MaterialTheme.shapes.medium)
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .shimmer(isLoading = true)
