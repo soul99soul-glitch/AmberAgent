@@ -106,6 +106,8 @@ data class SearchResult(
         val url: String,
         val text: String,
         val publishedAt: String? = null,
+        /** Image URLs associated with this result. Max 5 per item. */
+        val images: List<String> = emptyList(),
     )
 }
 

@@ -97,9 +97,13 @@ internal object SearchAggregator {
             put("time_range", timeRange)
             recencyDays?.let { put("recency_days", it) }
             put("service_count", candidates.size)
+            // Global image budget: max 5 images across all items in one response.
+            var imagesBudget = 5
             put("items", buildJsonArray {
                 items.forEachIndexed { index, item ->
-                    add(item.toJson(index + 1))
+                    val emittedImages = item.images.distinct().take(imagesBudget.coerceIn(0, 5)).size
+                    add(item.toJson(index + 1, maxImages = imagesBudget))
+                    imagesBudget = (imagesBudget - emittedImages).coerceAtLeast(0)
                 }
             })
             put("sources", buildJsonArray {
@@ -219,6 +223,7 @@ internal object SearchAggregator {
                         sourceRank = index + 1,
                         duplicateCount = 1,
                         score = sourceBoost + hitBoost + freshnessBoost - index,
+                        images = item.images.take(5),
                     )
                 } else {
                     existing.sourceServices.add(source.serviceName)
@@ -226,6 +231,11 @@ internal object SearchAggregator {
                     existing.score += 8
                     if (item.text.length > existing.text.length) {
                         existing.text = item.text
+                    }
+                    // Merge images from duplicate sources, rebuild list to stay immutable-safe
+                    if (item.images.isNotEmpty() && existing.images.size < 5) {
+                        val merged = (existing.images + item.images).distinct().take(5)
+                        existing.images = merged
                     }
                 }
             }
@@ -336,8 +346,9 @@ private data class AggregatedSearchItem(
     val sourceRank: Int,
     var duplicateCount: Int,
     var score: Int,
+    var images: List<String> = emptyList(),
 ) {
-    fun toJson(index: Int): JsonElement = buildJsonObject {
+    fun toJson(index: Int, maxImages: Int = 5): JsonElement = buildJsonObject {
         put("id", Uuid.random().toString().take(6))
         put("index", index)
         put("title", title)
@@ -351,5 +362,11 @@ private data class AggregatedSearchItem(
         put("duplicate_count", duplicateCount)
         put("rank_score", score)
         put("published_at", JsonNull)
+        val cappedImages = images.distinct().take(maxImages.coerceIn(0, 5))
+        if (cappedImages.isNotEmpty()) {
+            put("images", buildJsonArray {
+                cappedImages.forEach { add(JsonPrimitive(it)) }
+            })
+        }
     }
 }

@@ -69,6 +69,7 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
             val body = buildJsonObject {
                 put("query", JsonPrimitive(query))
                 put("max_results", JsonPrimitive(commonOptions.resultSize))
+                put("return_images", JsonPrimitive(true))
                 serviceOptions.maxTokens?.let {
                     if (it > 0) {
                         put("max_tokens", JsonPrimitive(it))
@@ -96,16 +97,33 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
                     json.decodeFromString<PerplexityResponse>(it)
                 }
 
-                val items = responseBody.results
+                // Collect all image URLs from the response-level images array.
+                // Perplexity returns images at the response level, not per-result,
+                // so we distribute them across the top results (round-robin, max 5 total).
+                val allImages = responseBody.images
+                    .mapNotNull { it.imageUrl }
+                    .distinct()
+                    .take(5)
+
+                val rawItems = responseBody.results
                     .filter { !it.title.isNullOrBlank() && !it.url.isNullOrBlank() }
                     .take(commonOptions.resultSize)
-                    .map {
-                        SearchResultItem(
-                            title = it.title!!,
-                            url = it.url!!,
-                            text = it.snippet ?: it.text ?: ""
-                        )
-                    }
+
+                // Attach all response-level images to the first valid result.
+                // The aggregator handles cross-result distribution and dedup.
+                var imagesAttached = false
+                val items = rawItems.map {
+                    val imgs = if (!imagesAttached && allImages.isNotEmpty()) {
+                        imagesAttached = true
+                        allImages
+                    } else emptyList()
+                    SearchResultItem(
+                        title = it.title!!,
+                        url = it.url!!,
+                        text = it.snippet ?: it.text ?: "",
+                        images = imgs,
+                    )
+                }
 
                 return@withContext Result.success(
                     SearchResult(
@@ -130,7 +148,8 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
     @Serializable
     private data class PerplexityResponse(
         val answer: String? = null,
-        val results: List<ResultItem> = emptyList()
+        val results: List<ResultItem> = emptyList(),
+        val images: List<ImageItem> = emptyList(),
     ) {
         @Serializable
         data class ResultItem(
@@ -138,6 +157,15 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
             val url: String? = null,
             val snippet: String? = null,
             @SerialName("text") val text: String? = null,
+        )
+
+        @Serializable
+        data class ImageItem(
+            @SerialName("image_url") val imageUrl: String? = null,
+            @SerialName("origin_url") val originUrl: String? = null,
+            val title: String? = null,
+            val width: Int? = null,
+            val height: Int? = null,
         )
     }
 }

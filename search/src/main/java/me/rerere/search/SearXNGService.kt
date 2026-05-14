@@ -99,13 +99,26 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 }.getOrThrow()
 
                 // 转换为标准格式，取前 N 个结果
+                val resolveBase = java.net.URI(baseUrl)
                 val items = searchResponse.results
                     .take(commonOptions.resultSize)
                     .map { result ->
+                        val imgs = listOfNotNull(result.thumbnail, result.imgSrc)
+                            .filter { it.isNotBlank() }
+                            .map { raw ->
+                                when {
+                                    raw.startsWith("http") -> raw
+                                    raw.startsWith("//") -> "https:$raw"
+                                    else -> runCatching { resolveBase.resolve(raw).toString() }.getOrDefault(raw)
+                                }
+                            }
+                            .filter { it.startsWith("http") }
+                            .distinct()
                         SearchResultItem(
                             title = result.title,
                             url = result.url,
-                            text = result.content
+                            text = result.content,
+                            images = imgs.take(2),
                         )
                     }
 

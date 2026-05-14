@@ -50,12 +50,21 @@ fun createSearchTools(settings: Settings): Set<Tool> {
 
                     Response format:
                     - items[].id (short id), title, url, text, source_service, source_services, duplicate_count
+                    - items[].images[] (optional): relevant image URLs from the search results
                     - sources[].service, status, result_count, error
 
                     Citations:
                     - After using results, add `[citation,domain](id)` after the sentence.
                     - Multiple citations are allowed.
                     - If no results are cited, omit citations.
+
+                    Images:
+                    - Some items contain an `images` array with relevant image URLs.
+                    - In your response, first show a row of small thumbnail previews at the top using: `![thumbnail1](url1) ![thumbnail2](url2) ...` on a single line.
+                    - Then in the body text, embed images at semantically appropriate positions using `![brief description](url)`.
+                    - Place each image AFTER the paragraph it illustrates, not grouped together.
+                    - Maximum 5 images per response. If more are available, pick the most relevant ones.
+                    - If no images are available or relevant, skip the thumbnail row and do not add images.
 
                     Example:
                     The capital of France is Paris. [citation,example.com](abc123)

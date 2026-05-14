@@ -71,10 +71,15 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                 val searchResponse = json.decodeFromString<BraveSearchResponse>(responseBody)
 
                 val items = searchResponse.web?.results?.map { result ->
+                    // Use src (Brave-proxied thumbnail, ~500px) for inline display.
+                    // original is full-resolution and may be too large for mobile.
+                    val imgUrl = (result.thumbnail?.src ?: result.thumbnail?.original)
+                        ?.takeIf { it.startsWith("http") }
                     SearchResultItem(
                         title = result.title,
                         url = result.url,
-                        text = result.description ?: ""
+                        text = result.description ?: "",
+                        images = listOfNotNull(imgUrl),
                     )
                 } ?: emptyList()
 
@@ -116,5 +121,14 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
         val title: String,
         val url: String,
         val description: String? = null,
+        val thumbnail: Thumbnail? = null,
+    )
+
+    @Serializable
+    data class Thumbnail(
+        val src: String? = null,
+        val height: Int? = null,
+        val width: Int? = null,
+        val original: String? = null,
     )
 }

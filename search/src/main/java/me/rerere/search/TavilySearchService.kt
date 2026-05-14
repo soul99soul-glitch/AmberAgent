@@ -107,14 +107,21 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                     json.decodeFromString<SearchResponse>(it)
                 }
 
+                val tavilyImages = response.images.distinct().take(5)
+                var imagesAttached = false
                 return@withContext Result.success(
                     SearchResult(
                         answer = response.answer,
                         items = response.results.map {
+                            val imgs = if (!imagesAttached && tavilyImages.isNotEmpty()) {
+                                imagesAttached = true
+                                tavilyImages
+                            } else emptyList()
                             SearchResultItem(
                                 title = it.title,
                                 url = it.url,
-                                text = it.content
+                                text = it.content,
+                                images = imgs,
                             )
                         }
                     ))
