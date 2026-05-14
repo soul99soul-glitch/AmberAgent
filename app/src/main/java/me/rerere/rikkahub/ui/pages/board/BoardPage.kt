@@ -3,10 +3,14 @@ package me.rerere.rikkahub.ui.pages.board
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +19,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,12 +34,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -42,16 +49,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Notebook01
 import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.NotionListRow
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
+import me.rerere.rikkahub.ui.components.ui.workspaceBorder
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.navigateToChatPage
@@ -73,7 +90,12 @@ fun TodayBoardPage() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("今日看板") },
+                title = {
+                    Text(
+                        "今日看板",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { vm.refresh() }) {
@@ -90,8 +112,16 @@ fun TodayBoardPage() {
         }
     ) { innerPadding ->
         if (!boardEnabled) {
-            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Text("今日看板未启用\n请在实验性功能设置中开启", style = MaterialTheme.typography.bodyLarge)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "今日看板未启用\n请在实验性功能设置中开启",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
             }
             return@Scaffold
         }
@@ -103,19 +133,46 @@ fun TodayBoardPage() {
                 }
             } else {
                 val dailyReview by vm.dailyReview.collectAsStateWithLifecycle(initialValue = null)
+                val workspace = workspaceColors()
 
-                TabRow(selectedTabIndex = selectedTab) {
-                    Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("分区") })
-                    Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("今日回顾") })
+                SecondaryTabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = {
+                            Text(
+                                "分区",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Normal,
+                                ),
+                            )
+                        },
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = {
+                            Text(
+                                "今日回顾",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Normal,
+                                ),
+                            )
+                        },
+                    )
                 }
 
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        (fadeIn(animationSpec = tween(200)) + slideInVertically(
+                        (fadeIn(animationSpec = tween(150)) + slideInVertically(
                             initialOffsetY = { it / 20 },
-                            animationSpec = tween(200),
-                        )).togetherWith(fadeOut(animationSpec = tween(150)))
+                            animationSpec = tween(150),
+                        )).togetherWith(fadeOut(animationSpec = tween(100)))
                     },
                     label = "boardTabs",
                 ) { tab ->
@@ -123,7 +180,9 @@ fun TodayBoardPage() {
                         BoardSectionTab(
                             items = activeItems,
                             expandedItemId = expandedItemId,
-                            onToggleExpand = { id -> expandedItemId = if (expandedItemId == id) null else id },
+                            onToggleExpand = { id ->
+                                expandedItemId = if (expandedItemId == id) null else id
+                            },
                             onComplete = { vm.markCompleted(it) },
                             onDismiss = { vm.markDismissed(it) },
                             onChat = { itemId ->
@@ -134,17 +193,21 @@ fun TodayBoardPage() {
                             },
                         )
                     } else {
-                        DailyReviewTab(review = dailyReview)
+                        DailyReviewTab(
+                            review = dailyReview,
+                            onRefresh = { vm.refresh() },
+                        )
                     }
                 }
+            }
         }
     }
 }
 
-}
-
 private fun chatContext(item: BoardItemEntity): String =
     "看板条目: ${item.title}\n\n原因: ${item.reason}\n建议: ${item.suggestion}\n\n来源内容: ${item.sourceContent.take(1000)}"
+
+// ── Tab 0: Board sections ────────────────────────────────────────────────────
 
 @Composable
 fun BoardSectionTab(
@@ -156,27 +219,32 @@ fun BoardSectionTab(
     onChat: (String) -> Unit,
 ) {
     LazyColumn(
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         val actions = items.filter { it.category == "action" }
         val attentions = items.filter { it.category == "attention" }
         val infos = items.filter { it.category == "info" }
 
         if (actions.isNotEmpty()) {
-            item { SectionHeader("📋 要做的事", actions.size) }
+            item { BoardSectionHeader("要做的事", actions.size, "📋") }
+            item { Spacer(Modifier.height(4.dp)) }
             items(actions, key = { it.id }) { item ->
                 BoardItemRow(item, expandedItemId, onToggleExpand, onComplete, onDismiss, onChat)
             }
+            item { Spacer(Modifier.height(8.dp)) }
         }
         if (attentions.isNotEmpty()) {
-            item { SectionHeader("👀 值得关注", attentions.size) }
+            item { BoardSectionHeader("值得关注", attentions.size, "👀") }
+            item { Spacer(Modifier.height(4.dp)) }
             items(attentions, key = { it.id }) { item ->
                 BoardItemRow(item, expandedItemId, onToggleExpand, onComplete, onDismiss, onChat)
             }
+            item { Spacer(Modifier.height(8.dp)) }
         }
         if (infos.isNotEmpty()) {
-            item { SectionHeader("📰 今日动态", infos.size) }
+            item { BoardSectionHeader("今日动态", infos.size, "📰") }
+            item { Spacer(Modifier.height(4.dp)) }
             items(infos, key = { it.id }) { item ->
                 BoardItemRow(item, expandedItemId, onToggleExpand, onComplete, onDismiss, onChat)
             }
@@ -185,69 +253,30 @@ fun BoardSectionTab(
 }
 
 @Composable
-fun DailyReviewTab(review: DailyReviewEntity?) {
+private fun BoardSectionHeader(title: String, count: Int, emoji: String) {
     val workspace = workspaceColors()
-    if (review == null) {
-        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("📝", style = MaterialTheme.typography.displaySmall)
-                Text("今日回顾尚未生成", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "将在 13:00 生成上午回顾，19:00 补充下午内容",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
-                )
-            }
-        }
-    } else {
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(emoji, style = MaterialTheme.typography.titleSmall)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.secondary,
+            ),
+        )
+        Spacer(Modifier.width(4.dp))
+        Badge(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ) {
-            item {
-                val phase = if (review.phase == "evening") "下午已更新" else "上午版"
-                val updatedTime = java.time.Instant.ofEpochMilli(review.updatedAt)
-                    .atZone(java.time.ZoneId.systemDefault())
-                    .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                Row(
-                    Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "今日回顾",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        "$phase · $updatedTime",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = workspace.muted,
-                    )
-                }
-            }
-            item(key = "review_${review.id}") {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                ) {
-                    // Render Markdown content
-                    me.rerere.rikkahub.ui.components.richtext.MarkdownBlock(
-                        content = review.content,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-            }
+            Text("$count", style = MaterialTheme.typography.labelSmall)
         }
-    }
-}
-
-@Composable
-private fun SectionHeader(title: String, count: Int) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.width(8.dp))
-        Badge { Text("$count") }
     }
 }
 
@@ -260,31 +289,144 @@ private fun BoardItemRow(
     onDismiss: (String) -> Unit,
     onChat: (String) -> Unit,
 ) {
+    val workspace = workspaceColors()
     val isExpanded = item.id == expandedItemId
-    Column {
-        NotionListRow(
-            title = item.title,
-            subtitle = item.reason.take(80),
-            leading = { UrgencyDot(urgencyColor(item.urgency)) },
-            trailing = {
-                TextButton(onClick = { onComplete(item.id) }) { Text("✓") }
-            },
-            onClick = { onToggleExpand(item.id) },
-        )
-        AnimatedVisibility(visible = isExpanded, enter = fadeIn(), exit = fadeOut()) {
-            Surface(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (item.suggestion.isNotBlank()) {
-                        Text("💡 ${item.suggestion}", style = MaterialTheme.typography.bodyMedium)
+    val (accentColor, accentTone) = urgencyAccent(item.urgency)
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .border(workspaceBorder(), MaterialTheme.shapes.medium),
+    ) {
+        // Left-accent stripe + row
+        Row(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(56.dp)
+                    .background(accentColor),
+            )
+            NotionListRow(
+                title = item.title,
+                subtitle = item.reason.take(80),
+                modifier = Modifier.weight(1f),
+                trailing = {
+                    // Checkbox affordance: circle with Tick icon
+                    Surface(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape),
+                        shape = CircleShape,
+                        color = workspace.paper,
+                        border = workspaceBorder(),
+                        onClick = { onComplete(item.id) },
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = HugeIcons.Tick01,
+                                contentDescription = "完成",
+                                modifier = Modifier.size(15.dp),
+                                tint = workspace.muted,
+                            )
+                        }
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { onDismiss(item.id) }) { Text("忽略") }
-                        Spacer(Modifier.width(4.dp))
-                        TextButton(onClick = { onChat(item.id) }) { Text("💬 聊一下") }
+                },
+                onClick = { onToggleExpand(item.id) },
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            )
+        }
+
+        // Expandable detail card
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically(tween(150)) + fadeIn(tween(150)),
+            exit = shrinkVertically(tween(120)) + fadeOut(tween(120)),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(workspace.paper)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (item.suggestion.isNotBlank()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text("💡", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            item.suggestion,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = workspace.ink,
+                        )
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    WorkspaceTextButton(
+                        text = "忽略",
+                        onClick = { onDismiss(item.id) },
+                        tone = WorkspaceTone.Neutral,
+                    )
+                    WorkspaceTextButton(
+                        text = "聊一下",
+                        onClick = { onChat(item.id) },
+                        tone = WorkspaceTone.Accent,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Tab 1: Daily Review ──────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DailyReviewTab(
+    review: DailyReviewEntity?,
+    onRefresh: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val pullState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            isRefreshing = false
+            onRefresh()
+        },
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        if (review == null) {
+            ReviewEmptyState()
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    ReviewHeader(review)
+                }
+                item(key = "review_${review.id}") {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(workspaceBorder(), RoundedCornerShape(16.dp)),
+                        shape = RoundedCornerShape(16.dp),
+                        color = workspace.paper,
+                    ) {
+                        MarkdownBlock(
+                            content = review.content,
+                            modifier = Modifier.padding(16.dp),
+                        )
                     }
                 }
             }
@@ -293,47 +435,96 @@ private fun BoardItemRow(
 }
 
 @Composable
-private fun PinnedItemCard(item: BoardItemEntity, onComplete: (String) -> Unit, onChat: (String) -> Unit) {
-    val workspace = workspaceColors()
-    val c = urgencyColor(item.urgency)
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = c.copy(alpha = 0.08f)) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                UrgencyDot(c)
-                Spacer(Modifier.width(8.dp))
-                Text(item.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = { onComplete(item.id) }) { Text("✓") }
-            }
-            if (item.reason.isNotBlank()) {
-                Text(item.reason.take(120), style = MaterialTheme.typography.bodySmall, color = workspace.muted)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { onChat(item.id) }) { Text("💬 聊一下") }
-            }
+private fun ReviewHeader(review: DailyReviewEntity) {
+    val isEvening = review.phase == "evening"
+    val updatedTime = java.time.Instant.ofEpochMilli(review.updatedAt)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "今日回顾",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WorkspaceStatusPill(
+                text = if (isEvening) "下午已更新" else "上午版",
+                tone = if (isEvening) WorkspaceTone.Success else WorkspaceTone.Warning,
+            )
+            WorkspaceStatusPill(
+                text = updatedTime,
+                tone = WorkspaceTone.Neutral,
+            )
         }
     }
 }
 
 @Composable
-private fun TimelineItemRow(item: BoardItemEntity, onComplete: (String) -> Unit) {
-    val timeText = java.time.Instant.ofEpochMilli(item.signalTime)
-        .atZone(java.time.ZoneId.systemDefault())
-        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-    NotionListRow(
-        title = item.title,
-        subtitle = item.reason.take(60),
-        leading = { Text(timeText, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted) },
-        trailing = { TextButton(onClick = { onComplete(item.id) }) { Text("✓") } },
-    )
+private fun ReviewEmptyState() {
+    val workspace = workspaceColors()
+    Box(
+        Modifier
+            .fillMaxSize()
+            .padding(40.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // Illustration-like icon cluster
+            Box(contentAlignment = Alignment.Center) {
+                Surface(
+                    modifier = Modifier.size(72.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                    border = workspaceBorder(),
+                ) {}
+                Icon(
+                    imageVector = HugeIcons.Notebook01,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.secondary,
+                )
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    "今日回顾尚未生成",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = workspace.ink,
+                )
+                Text(
+                    "将在 13:00 生成上午回顾\n19:00 补充下午内容",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
+            }
+        }
+    }
 }
 
+// ── Urgency helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Maps urgency level to a workspace semantic color + its tone enum.
+ * Uses [workspaceColors] tokens instead of hardcoded hex values.
+ */
 @Composable
-private fun UrgencyDot(color: androidx.compose.ui.graphics.Color) {
-    Surface(Modifier.size(10.dp), shape = RoundedCornerShape(50), color = color, content = {})
-}
-
-private fun urgencyColor(urgency: String): androidx.compose.ui.graphics.Color = when (urgency) {
-    "high" -> androidx.compose.ui.graphics.Color(0xFFE53935)
-    "medium" -> androidx.compose.ui.graphics.Color(0xFFFB8C00)
-    else -> androidx.compose.ui.graphics.Color(0xFF43A047)
+private fun urgencyAccent(urgency: String): Pair<Color, WorkspaceTone> {
+    val workspace = workspaceColors()
+    return when (urgency) {
+        "high" -> workspace.red to WorkspaceTone.Danger
+        "medium" -> workspace.amber to WorkspaceTone.Warning
+        else -> workspace.green to WorkspaceTone.Success
+    }
 }
