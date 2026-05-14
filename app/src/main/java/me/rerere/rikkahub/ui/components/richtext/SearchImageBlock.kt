@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.components.richtext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -10,7 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,17 +46,19 @@ import me.rerere.rikkahub.ui.components.ui.LocalExportContext
  * Entry format per line: `<url>` or `<url>|<caption>` (caption optional).
  *
  * Visual rules (mockup `docs/search-image-layout-mockup.html`, refined 2026-05-14):
- *   * **Multiple URLs** → horizontal Row, every cell `weight(1f)` + 4:3 cropped
- *     thumbnail (height follows width via aspectRatio, with heightIn(min=72dp)
- *     as a tail-end safety for the 4-5 image case where the per-cell width
- *     would otherwise yield a sub-50dp strip). 8dp gap. Captions ignored for
- *     the strip — mockup's thumbnail row is photo-only and any "title · domain"
- *     would just clip.
  *   * **Single URL** → tries to span the full width, but uses
  *     [ContentScale.Inside]+[Alignment.Center] so small images (e.g. logos) are
  *     never upscaled — they sit centred at their intrinsic size. Captions render
  *     below the image as a small grey "title · domain" line (the mockup
  *     `.img-caption` rule).
+ *   * **2–3 URLs** → horizontal Row, every cell `weight(1f)` + 4:3 cropped
+ *     thumbnail (height follows width via aspectRatio). All cells fit on screen
+ *     without scrolling.
+ *   * **4+ URLs** → horizontally scrollable LazyRow. Per-cell width sized so the
+ *     viewport shows 2 full thumbs + ~15% of the third — a visual hint that the
+ *     strip can be scrolled, same affordance as the markdown table fallback.
+ *     User swipes left to reveal more; right-edge thumbs slide in, left-edge
+ *     thumbs slide out of view.
  *   * **Load failure** → cell collapses to height 0 instead of leaving a
  *     placeholder rectangle. Avoids the "wall of grey blocks" effect when half
  *     the search results 404 or hot-link-block their images.
@@ -79,15 +85,15 @@ fun SearchImageBlock(
     }
     if (entries.isEmpty()) return
 
-    when (entries.size) {
-        1 -> SingleImage(
+    when {
+        entries.size == 1 -> SingleImage(
             entry = entries[0],
             modifier = modifier
                 .fillMaxWidth()
                 .padding(vertical = 6.dp),
         )
 
-        else -> Row(
+        entries.size <= 3 -> Row(
             modifier = modifier
                 .fillMaxWidth()
                 .padding(vertical = 6.dp),
@@ -98,6 +104,37 @@ fun SearchImageBlock(
                     url = entry.url,
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+
+        // 4+ thumbs: switch to horizontally scrollable strip. The viewport
+        // shows 2 thumbs in full + ~15% of the third one as a scroll affordance.
+        // BoxWithConstraints gives us the parent's maxWidth so per-cell width
+        // can be computed exactly — without it we'd have to hard-code a dp
+        // value that would look right on one screen size and wrong on another.
+        else -> BoxWithConstraints(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+        ) {
+            val gap = 8.dp
+            // Solve for cell width w such that: 2 * w + gap + 0.15 * w == maxWidth
+            // i.e. fit 2.15 cells (2 full + 15% peek) inside the visible width,
+            // with one inter-cell gap separating the two fully-visible cells.
+            // The third cell's leading 15% sits flush against the second cell's
+            // trailing gap, so we only count one gap in the equation. Result on
+            // a typical 320dp message bubble: w ≈ (320 - 8) / 2.15 ≈ 145dp wide,
+            // ~109dp tall (4:3) — comfortably above the legibility threshold.
+            val cellWidth = (maxWidth - gap) / 2.15f
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                items(entries) { entry ->
+                    ThumbnailImage(
+                        url = entry.url,
+                        modifier = Modifier.width(cellWidth),
+                    )
+                }
             }
         }
     }
@@ -197,19 +234,17 @@ private fun ThumbnailImage(
         model = request,
         contentDescription = null,
         modifier = modifier
-            // 2026-05-14: bumped from hardcoded `height(56.dp)` to `aspectRatio(4:3)
-            // + heightIn(min=72dp)`. The original 56dp was set against a thumbnail-
-            // strip mockup that assumed all images were photos (which crop cleanly
-            // at any aspect). In reality search results mix in spec tables, banner
-            // composites, etc. where 56dp is too short to read anything — the user
-            // reported "高度太矮了，比例接近 4:3 就行". Now height follows the per-
-            // cell width via aspectRatio, which gives:
-            //   - 2 cells (most common): ~100-130dp tall, comfortably readable
-            //   - 3 cells: ~70-90dp tall
-            //   - 4-5 cells: aspectRatio would compute <72dp, heightIn floor kicks
-            //     in and keeps the row at 72dp (a touch wider than 4:3 per cell,
-            //     but still legible — preferred over a 40dp sliver)
-            // Crop still normalises mixed-aspect sources into a clean strip.
+            // Height follows width via aspectRatio(4:3). The width itself comes
+            // from the caller's modifier (Modifier.weight(1f) inside a Row for
+            // 2-3 thumbs; Modifier.width(cellWidth) inside a LazyRow for 4+
+            // thumbs). With the 2.15-cells-per-viewport sizing in the LazyRow
+            // path, cellWidth on a typical 320dp bubble is ~145dp → ~109dp tall,
+            // so the aspectRatio gives a comfortably readable cell.
+            // heightIn(min=72dp) is a legacy safety floor from the pre-LazyRow
+            // implementation when 4-5 thumbs squeezed into a Row could end up
+            // <50dp tall. With the LazyRow path replacing that case, it's now
+            // only ever hit if the parent bubble is very narrow (<170dp wide)
+            // — preferred over a sub-50dp sliver in that edge.
             .aspectRatio(4f / 3f)
             .heightIn(min = 72.dp)
             .clip(RoundedCornerShape(8.dp))
