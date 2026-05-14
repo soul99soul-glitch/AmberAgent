@@ -16,7 +16,18 @@ private val supportedTypes = setOf(
     "image/png",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/avif",
 )
+
+/** ISO BMFF ftyp brands for HEIC/HEIF containers (HEVC codec, Android 9+ / API 28). */
+private val HEIF_BRANDS = setOf(
+    "heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs",
+    "mif1", "msf1",
+)
+
+/** ISO BMFF ftyp brands for AVIF containers (AV1 codec, Android 12+ / API 31). */
+private val AVIF_BRANDS = setOf("avif", "avis")
 
 data class EncodedImage(
     val base64: String,
@@ -139,13 +150,25 @@ private fun File.compressAndEncode(
         inJustDecodeBounds = true
     }
     BitmapFactory.decodeFile(absolutePath, options)
+    if (options.outWidth <= 0 || options.outHeight <= 0) {
+        throw IllegalArgumentException("Failed to decode image dimensions: $absolutePath")
+    }
 
     // 强制压缩处理
     options.inSampleSize = calculateInSampleSize(options, maxDimension, maxDimension)
     options.inJustDecodeBounds = false
 
     val bitmap = BitmapFactory.decodeFile(absolutePath, options)
-        ?: throw IllegalArgumentException("Failed to decode image: $absolutePath")
+        ?: throw IllegalArgumentException(
+            when {
+                mimeType == "image/heic" && android.os.Build.VERSION.SDK_INT < 28 ->
+                    "Failed to decode image: HEIC format requires Android 9 or above"
+                mimeType == "image/avif" && android.os.Build.VERSION.SDK_INT < 31 ->
+                    "Failed to decode image: AVIF format requires Android 12 or above"
+                else ->
+                    "Failed to decode image: $absolutePath"
+            }
+        )
     val normalizedBitmap = normalizeByExif(bitmap)
 
     return try {
@@ -217,6 +240,12 @@ private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int,
     while ((height / inSampleSize) > reqHeight || (width / inSampleSize) > reqWidth) {
         inSampleSize *= 2
     }
+    // Safety net: cap decoded pixel count at ~16 MP to prevent OOM on
+    // ultra-high-res sensors (50 MP+) and panoramas.
+    val maxPixels = 16_000_000L
+    while ((width.toLong() / inSampleSize) * (height.toLong() / inSampleSize) > maxPixels) {
+        inSampleSize *= 2
+    }
     return inSampleSize
 }
 
@@ -226,9 +255,15 @@ private fun File.guessMimeType(): Result<String> = runCatching {
         val read = input.read(bytes)
         if (read < 12) error("File too short to determine MIME type")
 
-        // 判断 HEIC 格式：包含 "ftypheic"
-        if (bytes.copyOfRange(4, 12).toString(Charsets.US_ASCII) == "ftypheic") {
-            return@runCatching "image/heic"
+        // 判断 HEIC/HEIF 格式：ISO BMFF ftyp box at offset 4.
+        // Common brands: heic, heix, hevc, hevx, heim, heis, hevm, hevs,
+        // mif1, msf1, avif, avis — all are HEIF-family containers that
+        // Android 9+ (API 28) can decode via BitmapFactory.
+        val ftypTag = bytes.copyOfRange(4, 8).toString(Charsets.US_ASCII)
+        if (ftypTag == "ftyp") {
+            val brand = bytes.copyOfRange(8, 12).toString(Charsets.US_ASCII)
+            if (brand in HEIF_BRANDS) return@runCatching "image/heic"
+            if (brand in AVIF_BRANDS) return@runCatching "image/avif"
         }
 
         // 判断 JPEG 格式：开头为 0xFF 0xD8

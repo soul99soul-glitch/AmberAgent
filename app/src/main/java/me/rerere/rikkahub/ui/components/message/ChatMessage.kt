@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -1440,7 +1441,9 @@ private fun MessagePartsBlock(
                         if (isImageLoading) {
                             Box(
                                 modifier = Modifier
-                                    .size(72.dp)
+                                    .heightIn(max = 216.dp)
+                                    .widthIn(max = 360.dp)
+                                    .size(216.dp)
                                     .clip(MaterialTheme.shapes.medium)
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .shimmer(isLoading = true)
@@ -1451,7 +1454,8 @@ private fun MessagePartsBlock(
                                 contentDescription = null,
                                 modifier = Modifier
                                     .clip(MaterialTheme.shapes.medium)
-                                    .height(72.dp)
+                                    .heightIn(max = 216.dp)
+                                    .widthIn(max = 360.dp)
                             )
                         }
                     }

@@ -105,8 +105,9 @@ object ImageAttachmentValidator {
         return when {
             "File does not exist" in message -> "图片文件不存在或已被删除"
             "Unsupported URL format" in message -> "图片来源暂不支持"
-            "Failed to decode image" in message -> "图片格式无法解码"
-            "Failed to guess MIME type" in message -> "图片格式暂不支持"
+            "HEIC format requires Android 9" in message -> "HEIC 格式需要 Android 9 或更高版本"
+            "Failed to decode image" in message -> "图片格式无法解码（可能是不支持的格式或文件损坏）"
+            "Failed to guess MIME type" in message -> "图片格式暂不支持（支持 JPEG/PNG/WebP/GIF/HEIC）"
             else -> "图片不可读取：${message.ifBlank { cause::class.simpleName ?: "未知错误" }}"
         }
     }
