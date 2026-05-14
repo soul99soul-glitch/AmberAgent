@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -41,9 +42,12 @@ import me.rerere.rikkahub.ui.components.ui.LocalExportContext
  * Entry format per line: `<url>` or `<url>|<caption>` (caption optional).
  *
  * Visual rules (mockup `docs/search-image-layout-mockup.html`, refined 2026-05-14):
- *   * **Multiple URLs** → horizontal Row, every cell `weight(1f)` + 16:9 cropped
- *     thumbnail, 56dp tall, 8dp gap. Captions ignored for the strip — mockup's
- *     thumbnail row is photo-only and any "title · domain" would just clip.
+ *   * **Multiple URLs** → horizontal Row, every cell `weight(1f)` + 4:3 cropped
+ *     thumbnail (height follows width via aspectRatio, with heightIn(min=72dp)
+ *     as a tail-end safety for the 4-5 image case where the per-cell width
+ *     would otherwise yield a sub-50dp strip). 8dp gap. Captions ignored for
+ *     the strip — mockup's thumbnail row is photo-only and any "title · domain"
+ *     would just clip.
  *   * **Single URL** → tries to span the full width, but uses
  *     [ContentScale.Inside]+[Alignment.Center] so small images (e.g. logos) are
  *     never upscaled — they sit centred at their intrinsic size. Captions render
@@ -193,10 +197,21 @@ private fun ThumbnailImage(
         model = request,
         contentDescription = null,
         modifier = modifier
-            // 56dp matches the mockup `.thumbnail-strip img` height; weight(1f)
-            // on the Row distributes width so 2/3/4/5 thumbnails always fit on
-            // one line. Crop normalises mixed-aspect sources into a clean strip.
-            .height(56.dp)
+            // 2026-05-14: bumped from hardcoded `height(56.dp)` to `aspectRatio(4:3)
+            // + heightIn(min=72dp)`. The original 56dp was set against a thumbnail-
+            // strip mockup that assumed all images were photos (which crop cleanly
+            // at any aspect). In reality search results mix in spec tables, banner
+            // composites, etc. where 56dp is too short to read anything — the user
+            // reported "高度太矮了，比例接近 4:3 就行". Now height follows the per-
+            // cell width via aspectRatio, which gives:
+            //   - 2 cells (most common): ~100-130dp tall, comfortably readable
+            //   - 3 cells: ~70-90dp tall
+            //   - 4-5 cells: aspectRatio would compute <72dp, heightIn floor kicks
+            //     in and keeps the row at 72dp (a touch wider than 4:3 per cell,
+            //     but still legible — preferred over a 40dp sliver)
+            // Crop still normalises mixed-aspect sources into a clean strip.
+            .aspectRatio(4f / 3f)
+            .heightIn(min = 72.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable { showViewer = true },
         contentScale = ContentScale.Crop,
