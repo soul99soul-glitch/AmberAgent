@@ -279,6 +279,7 @@
   <string name="chat_page_compressing">正在压缩...</string>
   <string name="chat_context_auto_compacted">上下文已自动压缩</string>
   <string name="chat_context_auto_compacting">正在自动压缩</string>
+  <string name="chat_context_auto_compacting_subtitle">正在生成上下文摘要…</string>
   <string name="chat_page_delete">删除</string>
   <string name="chat_page_dismiss_error">关闭错误</string>
   <string name="chat_page_edit_nickname">编辑昵称</string>

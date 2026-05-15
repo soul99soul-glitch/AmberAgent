@@ -90,6 +90,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.DisposableEffect
@@ -345,35 +346,53 @@ private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
             1f to baseColor,
         ),
     )
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = workspace.hairline,
-        )
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                imageVector = HugeIcons.Package01,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = workspace.muted,
+            HorizontalDivider(
+                modifier = Modifier.weight(1f),
+                color = workspace.hairline,
             )
-            Text(
-                text = stringResource(R.string.chat_context_auto_compacting),
-                style = MaterialTheme.typography.labelLarge.copy(brush = brush),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Package01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = workspace.muted,
+                )
+                Text(
+                    text = stringResource(R.string.chat_context_auto_compacting),
+                    style = MaterialTheme.typography.labelLarge.copy(brush = brush),
+                )
+            }
+            HorizontalDivider(
+                modifier = Modifier.weight(1f),
+                color = workspace.hairline,
             )
         }
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = workspace.hairline,
+        // Sub-line under the divider: explains what's actually happening so
+        // users don't conflate the shimmer with generic "waiting for AI".
+        // Stream-rendering the LLM-generated summary text here is a much
+        // bigger change (streamText vs generateText in compactConversation,
+        // plus a per-conversation streaming flow); for now use a static
+        // placeholder. The transient "已自动压缩" marker (8s post-compact)
+        // takes over once the summary lands.
+        Text(
+            text = stringResource(R.string.chat_context_auto_compacting_subtitle),
+            style = MaterialTheme.typography.labelSmall,
+            color = workspace.muted,
         )
     }
 }
@@ -760,6 +779,54 @@ private fun ChatListNormal(
             }
             .groupBy(keySelector = { it.first }, valueTransform = { it.second })
     }
+
+    // Set of message-node indices (visible-list space) whose source message is
+    // covered by an already-completed compact. ChatMessage container alpha is
+    // dimmed for these so the user can VISUALLY tell that "above the
+    // '———已自动压缩———' divider is no longer in active context, only the
+    // summary is sent to the model." Without this dimming the user can't
+    // distinguish "still in context" from "compacted out".
+    val coveredMessageIndices = remember(contextCompacts, conversation.messageNodes) {
+        val coveredIds = contextCompacts
+            .filter { it.status == "completed" }
+            .flatMap { it.sourceMessageIds }
+            .toSet()
+        if (coveredIds.isEmpty()) emptySet() else conversation.messageNodes
+            .mapIndexedNotNull { idx, node ->
+                idx.takeIf { node.currentMessage.id.toString() in coveredIds }
+            }
+            .toSet()
+    }
+
+    // Transient "compact just finished" flag — flips true the moment a new
+    // completed ConversationCompact appears in the list, stays for 8s, then
+    // flips false. Drives the swap from ContextCompactInProgressMarker (shimmer)
+    // to a brief ContextCompactMarker (final state) at the SAME bottom-of-list
+    // position, so the user gets the Codex-style "—— 正在自动压缩 ——" →
+    // "—— 已自动压缩 ——" transition right where they're already looking.
+    // The "real" historical-position ContextCompactMarker (in compactMarkersByEndIndex)
+    // also lives in its proper place in the timeline; this transient one is
+    // an additional confirmation at the bottom.
+    val latestCompletedCompactId = remember(contextCompacts) {
+        contextCompacts.filter { it.status == "completed" }
+            .maxByOrNull { it.createdAt }?.id
+    }
+    var recentlyFinishedCompactId by remember(conversation.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(latestCompletedCompactId) {
+        // Only flip "recently finished" when there's an actual newest completed
+        // compact and it's different from whatever we last announced. Avoids
+        // re-showing on conversation switch when the list reloads from disk.
+        if (latestCompletedCompactId != null && latestCompletedCompactId != recentlyFinishedCompactId) {
+            recentlyFinishedCompactId = latestCompletedCompactId
+            kotlinx.coroutines.delay(8_000)
+            // Only clear if we're still announcing the same id (no newer
+            // compact landed in the meantime).
+            if (recentlyFinishedCompactId == latestCompletedCompactId) {
+                recentlyFinishedCompactId = null
+            }
+        }
+    }
+    val showRecentlyFinishedMarker = recentlyFinishedCompactId != null && !isCompacting
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
@@ -1084,6 +1151,7 @@ private fun ChatListNormal(
             conversation.messageNodes.forEachIndexed { index, node ->
                 val isLastMessage = index == conversation.messageNodes.lastIndex
                 val isLoadingMessage = loading && isLastMessage
+                val isPreCompacted = index in coveredMessageIndices
                 val virtualItems = buildChatMessageVirtualItems(
                     node = node,
                     assistant = chatAssistant,
@@ -1103,6 +1171,13 @@ private fun ChatListNormal(
                                     modifier = Modifier.padding(bottom = TimelineItemSpacing)
                                 )
                             }
+                            // 2026-05-15: dim already-compacted messages (their source ids
+                            // appear in some completed ConversationCompact.sourceMessageIds).
+                            // Visual contract: above '———已自动压缩———' divider is no longer
+                            // in active context — model only sees the summary now. Alpha
+                            // applied at the ListSelectableItem level so the divider above
+                            // is NOT dimmed (it remains legible as the boundary marker).
+                            Box(modifier = Modifier.alpha(if (isPreCompacted) 0.4f else 1f)) {
                             ListSelectableItem(
                                 key = node.id,
                                 onSelectChange = {
@@ -1157,6 +1232,7 @@ private fun ChatListNormal(
                                     lastMessage = isLastMessage,
                                 )
                             }
+                            } // close alpha Box
                         }
                     }
                 } else {
@@ -1174,7 +1250,7 @@ private fun ChatListNormal(
                             contentType = "message-${node.currentMessage.role}-virtual-${virtualItem.keySuffix.substringBefore('-')}",
                         ) {
                             Column(
-                                modifier = Modifier.padding(bottom = bottomPadding)
+                                modifier = Modifier.padding(bottom = bottomPadding),
                             ) {
                                 if (isFirstVirtualItem) {
                                     val markers = compactMarkersByEndIndex[index - 1].orEmpty()
@@ -1184,6 +1260,12 @@ private fun ChatListNormal(
                                         )
                                     }
                                 }
+                                // Pre-compacted node → dim content. The marker that delimits
+                                // "above is compacted" is NOT dimmed — only the message body —
+                                // so the divider text remains legible while the messages above
+                                // fade out. Box scope here keeps the alpha modifier from
+                                // bleeding into the marker(s) above and the bottom padding.
+                                Box(modifier = Modifier.alpha(if (isPreCompacted) 0.4f else 1f)) {
                                 TimelineSelectableMessageItem(
                                     key = node.id,
                                     onSelectChange = {
@@ -1240,6 +1322,7 @@ private fun ChatListNormal(
                                         lastMessage = isLastMessage,
                                     )
                                 }
+                                } // close alpha Box
                             }
                         }
                     }
@@ -1261,19 +1344,35 @@ private fun ChatListNormal(
                 }
             }
 
-            // Codex-style "auto-compacting now" divider. Lives between the
+            // Codex-style "auto-compacting" divider. Lives between
             // pending-user-messages and the loading indicator so users see the
-            // sequence: [my message] → [shimmer compacting] → [AI thinking] →
-            // [final compacted divider stays in history]. Only rendered while
-            // ConversationContextEngine.compactingConversations contains this
-            // conversation — flips back to false the moment compactConversation
-            // returns (success or failure).
+            // sequence:
+            //   [my message]
+            //   → [shimmer "正在自动压缩"]
+            //   → (compact done) [solid "已自动压缩"] (8s)
+            //   → [AI thinking]
+            //
+            // The transient finished marker at this position is in ADDITION to
+            // the permanent ContextCompactMarker that gets inserted at the
+            // historical sourceEndIndex (compactMarkersByEndIndex above) — that
+            // one stays in the timeline as the boundary between compacted and
+            // active context; this transient one is feedback at the user's
+            // current viewport position.
             if (isCompacting) {
                 item(
                     key = "compact-in-progress",
                     contentType = "compact-in-progress",
                 ) {
                     ContextCompactInProgressMarker(
+                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                    )
+                }
+            } else if (showRecentlyFinishedMarker) {
+                item(
+                    key = "compact-recently-finished",
+                    contentType = "compact-recently-finished",
+                ) {
+                    ContextCompactMarker(
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
                     )
                 }
