@@ -398,15 +398,23 @@ private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ContextCompactMarker(modifier: Modifier = Modifier) {
+private fun ContextCompactMarker(
+    modifier: Modifier = Modifier,
+    summaryPreview: String? = null,
+) {
     val workspace = workspaceColors()
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
         HorizontalDivider(
             modifier = Modifier.weight(1f),
             color = workspace.hairline,
@@ -431,6 +439,23 @@ private fun ContextCompactMarker(modifier: Modifier = Modifier) {
             modifier = Modifier.weight(1f),
             color = workspace.hairline,
         )
+        }
+        // 2026-05-15 (1.9.5): when shown as the transient post-compact marker
+        // (bottom of LazyColumn, 8s window), show a short preview of the freshly
+        // generated summary so the user can actually SEE what was compacted —
+        // not just "something happened". Lightweight alternative to a full
+        // streaming view (would have required 200+ lines + new flows). 80 chars
+        // is enough for a sentence + ellipsis on most phone widths.
+        if (summaryPreview != null) {
+            Text(
+                text = summaryPreview,
+                style = MaterialTheme.typography.labelSmall,
+                color = workspace.muted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 24.dp),
+            )
+        }
     }
 }
 
@@ -780,21 +805,18 @@ private fun ChatListNormal(
             .groupBy(keySelector = { it.first }, valueTransform = { it.second })
     }
 
-    // Set of message-node indices (visible-list space) whose source message is
-    // covered by an already-completed compact. ChatMessage container alpha is
-    // dimmed for these so the user can VISUALLY tell that "above the
-    // '———已自动压缩———' divider is no longer in active context, only the
-    // summary is sent to the model." Without this dimming the user can't
-    // distinguish "still in context" from "compacted out".
-    val coveredMessageIndices = remember(contextCompacts, conversation.messageNodes) {
-        val coveredIds = contextCompacts
+    // Set of message ids covered by an already-completed compact. ChatMessage
+    // container alpha is dimmed for these so the user can VISUALLY tell that
+    // "above the '———已自动压缩———' divider is no longer in active context,
+    // only the summary is sent to the model." Keyed on contextCompacts ONLY —
+    // NOT on conversation.messageNodes — so the streaming-time
+    // updateConversation() that re-emits a new messageNodes List reference per
+    // 33ms chunk does NOT cause this Set to be rebuilt. Per-node containment
+    // is checked inline at render time (O(1) HashSet lookup).
+    val coveredMessageIds = remember(contextCompacts) {
+        contextCompacts
             .filter { it.status == "completed" }
             .flatMap { it.sourceMessageIds }
-            .toSet()
-        if (coveredIds.isEmpty()) emptySet() else conversation.messageNodes
-            .mapIndexedNotNull { idx, node ->
-                idx.takeIf { node.currentMessage.id.toString() in coveredIds }
-            }
             .toSet()
     }
 
@@ -807,26 +829,51 @@ private fun ChatListNormal(
     // The "real" historical-position ContextCompactMarker (in compactMarkersByEndIndex)
     // also lives in its proper place in the timeline; this transient one is
     // an additional confirmation at the bottom.
-    val latestCompletedCompactId = remember(contextCompacts) {
+    val latestCompletedCompact = remember(contextCompacts) {
         contextCompacts.filter { it.status == "completed" }
-            .maxByOrNull { it.createdAt }?.id
+            .maxByOrNull { it.createdAt }
     }
-    var recentlyFinishedCompactId by remember(conversation.id) { mutableStateOf<String?>(null) }
+    val latestCompletedCompactId = latestCompletedCompact?.id
+    // 2026-05-15 (1.9.5): the previous version of this had a real bug — the
+    // remember initializer was `mutableStateOf<String?>(null)`, so on conversation
+    // switch the state reset to null, then LaunchedEffect saw
+    // latestCompletedCompactId go null → realId and triggered the transient
+    // marker for 8s — even though the user did NOT just run a compaction, they
+    // just opened an old conversation that happened to already have a compact
+    // record. Per reviewer, anchor the initial state to the current latest id
+    // so the LaunchedEffect only fires on genuine "a new compact just landed"
+    // events. The `initialized` sentinel covers the first composition pass
+    // separately from later identity changes.
+    var recentlyFinishedCompactId by remember(conversation.id) {
+        mutableStateOf<String?>(latestCompletedCompactId)
+    }
+    var initialized by remember(conversation.id) { mutableStateOf(false) }
     LaunchedEffect(latestCompletedCompactId) {
-        // Only flip "recently finished" when there's an actual newest completed
-        // compact and it's different from whatever we last announced. Avoids
-        // re-showing on conversation switch when the list reloads from disk.
+        if (!initialized) {
+            // First emission after conversation switch — just record the
+            // baseline, no transient marker. recentlyFinishedCompactId is
+            // already pre-seeded to this value above.
+            initialized = true
+            return@LaunchedEffect
+        }
         if (latestCompletedCompactId != null && latestCompletedCompactId != recentlyFinishedCompactId) {
             recentlyFinishedCompactId = latestCompletedCompactId
             kotlinx.coroutines.delay(8_000)
-            // Only clear if we're still announcing the same id (no newer
-            // compact landed in the meantime).
             if (recentlyFinishedCompactId == latestCompletedCompactId) {
                 recentlyFinishedCompactId = null
             }
         }
     }
-    val showRecentlyFinishedMarker = recentlyFinishedCompactId != null && !isCompacting
+    // Only show the transient marker when (a) compaction is no longer running,
+    // and (b) the displayed id matches a NEW one we received this session.
+    // We use `latestCompletedCompactId` not `recentlyFinishedCompactId` as the
+    // "current id to show" since the only time they diverge is during the 8s
+    // window — outside it both should match, and inside it `recentlyFinishedCompactId`
+    // is the authoritative announcement that the marker is the freshly-completed
+    // compact (vs. an old one from session restore).
+    val showRecentlyFinishedMarker = recentlyFinishedCompactId != null &&
+        recentlyFinishedCompactId == latestCompletedCompactId &&
+        !isCompacting
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
@@ -1151,7 +1198,8 @@ private fun ChatListNormal(
             conversation.messageNodes.forEachIndexed { index, node ->
                 val isLastMessage = index == conversation.messageNodes.lastIndex
                 val isLoadingMessage = loading && isLastMessage
-                val isPreCompacted = index in coveredMessageIndices
+                val isPreCompacted = coveredMessageIds.isNotEmpty() &&
+                    node.currentMessage.id.toString() in coveredMessageIds
                 val virtualItems = buildChatMessageVirtualItems(
                     node = node,
                     assistant = chatAssistant,
@@ -1171,14 +1219,17 @@ private fun ChatListNormal(
                                     modifier = Modifier.padding(bottom = TimelineItemSpacing)
                                 )
                             }
-                            // 2026-05-15: dim already-compacted messages (their source ids
-                            // appear in some completed ConversationCompact.sourceMessageIds).
-                            // Visual contract: above '———已自动压缩———' divider is no longer
-                            // in active context — model only sees the summary now. Alpha
-                            // applied at the ListSelectableItem level so the divider above
-                            // is NOT dimmed (it remains legible as the boundary marker).
-                            Box(modifier = Modifier.alpha(if (isPreCompacted) 0.4f else 1f)) {
+                            // 2026-05-15 (1.9.5): pass alpha modifier directly to
+                            // ListSelectableItem instead of wrapping in a Box. Compose's
+                            // Modifier.alpha(1f) is a no-op (returns Modifier as-is, no
+                            // graphics layer allocated), so this skips the wrapper Box
+                            // for active messages and avoids the 100+ unnecessary
+                            // Composable nodes a long covered-history conversation
+                            // would otherwise produce. Divider above is rendered
+                            // separately (outside this modifier chain), so it remains
+                            // fully opaque as the boundary marker.
                             ListSelectableItem(
+                                modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
                                 key = node.id,
                                 onSelectChange = {
                                     if (!selectedItems.contains(node.id)) {
@@ -1232,7 +1283,6 @@ private fun ChatListNormal(
                                     lastMessage = isLastMessage,
                                 )
                             }
-                            } // close alpha Box
                         }
                     }
                 } else {
@@ -1260,13 +1310,11 @@ private fun ChatListNormal(
                                         )
                                     }
                                 }
-                                // Pre-compacted node → dim content. The marker that delimits
-                                // "above is compacted" is NOT dimmed — only the message body —
-                                // so the divider text remains legible while the messages above
-                                // fade out. Box scope here keeps the alpha modifier from
-                                // bleeding into the marker(s) above and the bottom padding.
-                                Box(modifier = Modifier.alpha(if (isPreCompacted) 0.4f else 1f)) {
+                                // See non-virtual branch comment above — alpha is passed to
+                                // TimelineSelectableMessageItem.modifier so the active-message
+                                // path doesn't pay for an extra Box wrapper.
                                 TimelineSelectableMessageItem(
+                                    modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
                                     key = node.id,
                                     onSelectChange = {
                                         if (!selectedItems.contains(node.id)) {
@@ -1322,7 +1370,6 @@ private fun ChatListNormal(
                                         lastMessage = isLastMessage,
                                     )
                                 }
-                                } // close alpha Box
                             }
                         }
                     }
@@ -1372,8 +1419,20 @@ private fun ChatListNormal(
                     key = "compact-recently-finished",
                     contentType = "compact-recently-finished",
                 ) {
+                    // Take a leading slice of the just-generated summary as a
+                    // preview under the marker. The summary is stored verbatim
+                    // on ConversationCompact.summary; we trim aggressive
+                    // whitespace and slice 80 chars so the typical Notion-width
+                    // bubble fits 1-2 lines comfortably.
+                    val summaryPreview = latestCompletedCompact
+                        ?.summary
+                        ?.replace(Regex("\\s+"), " ")
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { if (it.length > 80) it.take(80) + "…" else it }
                     ContextCompactMarker(
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                        summaryPreview = summaryPreview,
                     )
                 }
             }
