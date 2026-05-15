@@ -10,7 +10,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Assistant
 import org.koin.core.component.KoinComponent
@@ -26,7 +26,7 @@ import java.util.TimeZone
 
 data class PlaceholderCtx(
     val context: Context,
-    val settingsStore: SettingsStore,
+    val settingsStore: SettingsAggregator,
     val model: Model,
     val assistant: Assistant,
 )
@@ -141,7 +141,7 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val settingsStore = get<SettingsStore>()
+        val settingsStore = get<SettingsAggregator>()
         return messages.map {
             it.copy(
                 parts = it.parts.map { part ->
@@ -160,7 +160,7 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
     private fun replacePlaceholders(
         text: String,
         ctx: TransformerContext,
-        settingsStore: SettingsStore
+        settingsStore: SettingsAggregator
     ): String {
         var result = text
 

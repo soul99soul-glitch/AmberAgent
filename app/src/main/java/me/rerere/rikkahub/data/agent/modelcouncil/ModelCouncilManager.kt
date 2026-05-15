@@ -39,7 +39,7 @@ import me.rerere.rikkahub.data.agent.task.toQueueState
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import java.io.File
@@ -223,7 +223,7 @@ class ExternalCliModelCouncilRunner(
 class ModelCouncilManager(
     context: Context,
     private val appScope: AppScope,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val json: Json,
     private val modelRunner: ModelCouncilTextRunner,
     private val externalCliRunner: ExternalCliModelCouncilRunner,

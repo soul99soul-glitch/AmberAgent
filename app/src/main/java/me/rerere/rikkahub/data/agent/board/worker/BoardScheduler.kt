@@ -9,7 +9,7 @@ import androidx.work.WorkManager
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
  */
 class BoardScheduler(
     context: Context,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
 ) {
     private val workManager = WorkManager.getInstance(context)
 

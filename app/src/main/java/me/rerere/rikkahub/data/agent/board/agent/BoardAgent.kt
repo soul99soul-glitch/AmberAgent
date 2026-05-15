@@ -7,7 +7,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.aggregator.ScoredSignal
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
@@ -19,7 +19,7 @@ import kotlin.uuid.Uuid
  * can keep the previous board visible when generation fails.
  */
 class BoardAgent(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val boardRepository: BoardRepository,
 ) {

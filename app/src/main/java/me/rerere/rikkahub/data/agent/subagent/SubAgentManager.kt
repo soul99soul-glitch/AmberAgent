@@ -24,7 +24,7 @@ import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
 import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
 import me.rerere.rikkahub.data.agent.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.task.toQueueState
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -33,7 +33,7 @@ import kotlin.uuid.Uuid
 class SubAgentManager(
     context: Context,
     private val appScope: AppScope,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val json: Json,
     private val runner: SubAgentRunner,
     private val agentTaskStore: AgentTaskStore,

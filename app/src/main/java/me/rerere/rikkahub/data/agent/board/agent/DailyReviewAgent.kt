@@ -9,7 +9,7 @@ import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.collector.AppUsageCollector
 import me.rerere.rikkahub.data.agent.board.collector.AppUsageEntry
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
@@ -31,7 +31,7 @@ import kotlin.uuid.Uuid
  * directly in the "今日回顾" tab.
  */
 class DailyReviewAgent(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val boardRepository: BoardRepository,
     private val conversationRepository: ConversationRepository,

@@ -62,7 +62,7 @@ import com.dokar.sonner.rememberToasterState
 import kotlinx.serialization.Serializable
 import me.rerere.highlight.Highlighter
 import me.rerere.highlight.LocalHighlighter
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
 import me.rerere.rikkahub.data.event.AppEvent
@@ -155,7 +155,7 @@ private const val TAG = "RouteActivity"
 class RouteActivity : ComponentActivity() {
     private val highlighter by inject<Highlighter>()
     private val okHttpClient by inject<OkHttpClient>()
-    private val settingsStore by inject<SettingsStore>()
+    private val settingsStore by inject<SettingsAggregator>()
     private val oauthCallbackDispatcher by inject<me.rerere.rikkahub.data.agent.webmount.oauth.OAuthCallbackDispatcher>()
     private var navStack: MutableList<NavKey>? = null
     private var newIntentHandler: ((Intent) -> Unit)? = null

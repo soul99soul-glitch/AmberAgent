@@ -33,7 +33,7 @@ import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
 import me.rerere.ai.ui.ImageAspectRatio
@@ -133,7 +133,7 @@ class LocalTools(
     private val webMountPrimitiveTools: WebMountPrimitiveTools,
     private val webMountManager: WebMountManager,
     private val userSiteRegistry: me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val imageGenerationRepository: ImageGenerationRepository,
 ) {
     val javascriptTool by lazy {
