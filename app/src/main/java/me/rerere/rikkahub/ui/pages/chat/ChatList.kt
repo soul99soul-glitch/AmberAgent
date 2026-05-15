@@ -11,6 +11,7 @@ import com.composables.icons.lucide.Lucide
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -157,6 +158,10 @@ import me.rerere.rikkahub.utils.plus
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
+// M0.1 diagnostic: trace timeline follow / scroll state machine to find why
+// auto-scroll occasionally misses the tail of streaming responses. Remove
+// after root cause identified.
+private const val SCROLL_TAG = "ChatScroll"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 private val TimelineHorizontalPadding = 16.dp
@@ -721,10 +726,26 @@ private fun ChatListNormal(
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     val workspace = workspaceColors()
 
+    // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
+    // transition point so we can correlate "哗哗出字最后没贴底" timeline
+    // events from logcat. Remove with the rest of M0.1 logging after the
+    // root cause is fixed.
+    fun logScroll(event: String, extra: String = "") {
+        Log.d(
+            SCROLL_TAG,
+            "[$event] follow=$followMode prog=$programmaticScrollInProgress " +
+                "token=$programmaticScrollToken activeGen=$activeGenerationState " +
+                "scrollInProgress=${state.isScrollInProgress} " +
+                "canScrollFwd=${state.canScrollForward} resumeToken=$autoFollowResumeToken" +
+                if (extra.isNotEmpty()) " | $extra" else ""
+        )
+    }
+
     fun beginProgrammaticScroll(): Int {
         val token = programmaticScrollToken + 1
         programmaticScrollToken = token
         programmaticScrollInProgress = true
+        logScroll("beginProgrammaticScroll", "newToken=$token")
         return token
     }
 
@@ -741,20 +762,24 @@ private fun ChatListNormal(
             // MessageJumper wouldn't surface. Snapping the flag back after one
             // frame closes that window.
             withFrameNanos { }
-            if (programmaticScrollToken == token) {
+            val matched = programmaticScrollToken == token
+            if (matched) {
                 programmaticScrollInProgress = false
             }
+            logScroll("endProgrammaticScroll", "token=$token matched=$matched")
         }
     }
 
     fun enterIdleFollowMode() {
         followMode = TimelineFollowMode.Idle
         autoFollowResumeToken += 1
+        logScroll("enterIdleFollowMode")
     }
 
     fun resumeBottomFollow() {
         followMode = TimelineFollowMode.FollowingBottom
         autoFollowResumeToken += 1
+        logScroll("resumeBottomFollow")
     }
 
     fun pauseAutoFollowTemporarily(
@@ -765,10 +790,12 @@ private fun ChatListNormal(
         if (scheduleIdleReturn) {
             autoFollowResumeToken += 1
         }
+        logScroll("pauseAutoFollowTemporarily", "mode=$mode scheduleIdle=$scheduleIdleReturn")
     }
 
     suspend fun scrollToTimelineBottom() {
         val token = beginProgrammaticScroll()
+        logScroll("scrollToTimelineBottom.enter", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
         try {
             // 2026-05-14 v1.8.10: reverted spring spec from 1.8.9 to short
             // LinearEasing tween. Why:
@@ -809,9 +836,11 @@ private fun ChatListNormal(
                         value = viewportPx,
                         animationSpec = tween(durationMillis = 80, easing = LinearEasing),
                     )
+                    logScroll("scrollToTimelineBottom.afterAnimate", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
                 }
             }
         } finally {
+            logScroll("scrollToTimelineBottom.exit", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
             endProgrammaticScroll(token)
         }
     }
@@ -930,7 +959,12 @@ private fun ChatListNormal(
         activeGeneration,
         conversation.id,
     ) {
+        logScroll(
+            "LE_init",
+            "enableAutoScroll=${settings.displaySetting.enableAutoScroll} convId=${conversation.id}"
+        )
         if (!settings.displaySetting.enableAutoScroll || !activeGeneration) {
+            logScroll("LE_init.branch", "→ enterIdleFollowMode (autoScrollOff or generationOff)")
             enterIdleFollowMode()
         } else if (
             followMode == TimelineFollowMode.Idle &&
@@ -939,22 +973,37 @@ private fun ChatListNormal(
                     state.isNearListEnd(bufferItems = 4)
                 )
         ) {
+            logScroll(
+                "LE_init.branch",
+                "→ resumeBottomFollow (isAtBottom=${state.isAtTimelineBottom(bottomFollowBufferPx)} nearEnd=${state.isNearListEnd(bufferItems = 4)})"
+            )
             resumeBottomFollow()
+        } else {
+            logScroll(
+                "LE_init.branch",
+                "→ noop (currentFollow=$followMode isAtBottom=${state.isAtTimelineBottom(bottomFollowBufferPx)})"
+            )
         }
     }
 
     val latestMessage = conversation.currentMessages.lastOrNull()
     LaunchedEffect(conversation.id, latestMessage?.id, activeGeneration) {
+        logScroll(
+            "LE_userMsg",
+            "latestRole=${latestMessage?.role} latestId=${latestMessage?.id} enableAS=${settings.displaySetting.enableAutoScroll}"
+        )
         if (
             activeGeneration &&
             settings.displaySetting.enableAutoScroll &&
             latestMessage?.role == MessageRole.USER
         ) {
+            logScroll("LE_userMsg.branch", "→ resumeBottomFollow")
             resumeBottomFollow()
         }
     }
 
     LaunchedEffect(state.isScrollInProgress) {
+        logScroll("LE_scrollProgress", "isScrollInProgress=${state.isScrollInProgress}")
         if (state.isScrollInProgress) {
             // 2026-05-14: gate isRecentScroll on `!programmaticScrollInProgress`.
             // Previously this was unconditional, which meant the streaming-time
@@ -982,8 +1031,10 @@ private fun ChatListNormal(
                 // isAtTimelineBottom(bottomFollowBufferPx); avoids the old "tiny scroll ends
                 // within bufferPx → re-arm follow → next chunk yanks the user away" bug.
                 if (!state.canScrollForward) {
+                    logScroll("LE_scrollProgress.stop", "→ resumeBottomFollow (canScrollForward=false)")
                     resumeBottomFollow()
                 } else {
+                    logScroll("LE_scrollProgress.stop", "→ pauseAutoFollowTemporarily (canScrollForward=true)")
                     pauseAutoFollowTemporarily(
                         mode = TimelineFollowMode.PausedForUser,
                         scheduleIdleReturn = true,
@@ -1000,6 +1051,7 @@ private fun ChatListNormal(
         activeGeneration,
         settings.displaySetting.enableAutoScroll,
     ) {
+        logScroll("LE_30sResume", "enter")
         if (
             activeGeneration &&
             settings.displaySetting.enableAutoScroll &&
@@ -1011,6 +1063,7 @@ private fun ChatListNormal(
             // it yanks back to bottom. Give them 30s of breathing room before auto-resuming;
             // they can still re-arm follow manually by scrolling to the bottom.
             delay(30_000)
+            logScroll("LE_30sResume.afterDelay", "tokenStillValid=${token == autoFollowResumeToken}")
             if (
                 token == autoFollowResumeToken &&
                 activeGenerationState &&
@@ -1142,11 +1195,15 @@ private fun ChatListNormal(
                 pendingUserMessages.size,
                 loading,
             ) {
-                if (
-                    activeGenerationState &&
+                val willScroll = activeGenerationState &&
                     followMode == TimelineFollowMode.FollowingBottom &&
                     !state.isScrollInProgress
-                ) {
+                logScroll(
+                    "LE_chunk",
+                    "loading=$loading pendingUserMsgs=${pendingUserMessages.size} " +
+                        "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willScroll) "SCROLL" else "SKIP"}"
+                )
+                if (willScroll) {
                     scrollToTimelineBottom()
                 }
             }
@@ -1175,6 +1232,7 @@ private fun ChatListNormal(
                         // intent enough. The 30s resume timer below gives streaming a chance
                         // to catch up if the user just tapped and walked away.
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        logScroll("pointerDown", "enableAS=${settings.displaySetting.enableAutoScroll}")
                         if (activeGenerationState && settings.displaySetting.enableAutoScroll) {
                             pauseAutoFollowTemporarily(
                                 mode = TimelineFollowMode.PausedForUser,
