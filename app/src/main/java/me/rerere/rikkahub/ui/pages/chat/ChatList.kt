@@ -166,6 +166,23 @@ private val TimelineHorizontalPadding = 16.dp
 // can update at ~30Hz; per-tick Regex compile is a measurable frame-rate hit
 // on mid-tier devices.
 private val COMPACT_SUMMARY_WHITESPACE_RE = Regex("\\s+")
+
+/**
+ * Slice a ConversationCompact.summary to a ≤80-char one-line preview suitable
+ * for the under-divider label on [ContextCompactMarker]. Strips the structured
+ * JSON body (everything from the first `{`), collapses whitespace, ellipsises
+ * when too long. Returns null when there's no usable prose preamble — caller
+ * should hide the preview line entirely in that case (don't render an empty
+ * subtitle).
+ */
+private fun summaryPreviewOf(compact: ConversationCompact): String? {
+    val raw = compact.summary.ifBlank { return null }
+    val cutIndex = raw.indexOf('{')
+    val prose = if (cutIndex >= 0) raw.substring(0, cutIndex) else raw
+    val collapsed = COMPACT_SUMMARY_WHITESPACE_RE.replace(prose, " ").trim()
+    if (collapsed.isEmpty()) return null
+    return if (collapsed.length > 80) collapsed.take(80) + "…" else collapsed
+}
 private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
@@ -882,21 +899,18 @@ private fun ChatListNormal(
             initialized = true
             return@LaunchedEffect
         }
+        // 2026-05-15 (1.9.8): when a new compact lands, announce it. NO timeout —
+        // user said "总结的内容 8s 后会消失吗？没必要吧，留着给用户看摘要不挺好的".
+        // The transient marker now lives until either (a) the next compact
+        // replaces it (this LaunchedEffect re-runs with a new id), or (b) the
+        // user switches conversation (remember(conversation.id) resets state).
+        // Permanent ContextCompactMarker (at sourceEndIndex in compactMarkersByEndIndex)
+        // also carries the summary preview now, so the user has a long-term
+        // record once they scroll back.
         if (latestCompletedCompactId != null && latestCompletedCompactId != recentlyFinishedCompactId) {
             recentlyFinishedCompactId = latestCompletedCompactId
-            kotlinx.coroutines.delay(8_000)
-            if (recentlyFinishedCompactId == latestCompletedCompactId) {
-                recentlyFinishedCompactId = null
-            }
         }
     }
-    // Only show the transient marker when (a) compaction is no longer running,
-    // and (b) the displayed id matches a NEW one we received this session.
-    // We use `latestCompletedCompactId` not `recentlyFinishedCompactId` as the
-    // "current id to show" since the only time they diverge is during the 8s
-    // window — outside it both should match, and inside it `recentlyFinishedCompactId`
-    // is the authoritative announcement that the marker is the freshly-completed
-    // compact (vs. an old one from session restore).
     val showRecentlyFinishedMarker = recentlyFinishedCompactId != null &&
         recentlyFinishedCompactId == latestCompletedCompactId &&
         !isCompacting
@@ -1240,9 +1254,16 @@ private fun ChatListNormal(
                     ) {
                         Column(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
                             val markers = compactMarkersByEndIndex[index - 1].orEmpty()
-                            markers.forEach {
+                            markers.forEach { compact ->
+                                // 2026-05-15 (1.9.8): historical marker also carries
+                                // the summary preview (was display-divider-only before).
+                                // Users scrolling back through the timeline can see what
+                                // each compaction summarised — same content the transient
+                                // bottom marker shows when compact just finished, but
+                                // permanent at the proper sourceEndIndex position.
                                 ContextCompactMarker(
-                                    modifier = Modifier.padding(bottom = TimelineItemSpacing)
+                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                    summaryPreview = summaryPreviewOf(compact),
                                 )
                             }
                             // 2026-05-15 (1.9.5): pass alpha modifier directly to
@@ -1446,20 +1467,9 @@ private fun ChatListNormal(
                     key = "compact-recently-finished",
                     contentType = "compact-recently-finished",
                 ) {
-                    // Take a leading slice of the just-generated summary as a
-                    // preview under the marker. The summary is stored verbatim
-                    // on ConversationCompact.summary; we trim aggressive
-                    // whitespace and slice 80 chars so the typical Notion-width
-                    // bubble fits 1-2 lines comfortably.
-                    val summaryPreview = latestCompletedCompact
-                        ?.summary
-                        ?.replace(Regex("\\s+"), " ")
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
-                        ?.let { if (it.length > 80) it.take(80) + "…" else it }
                     ContextCompactMarker(
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        summaryPreview = summaryPreview,
+                        summaryPreview = latestCompletedCompact?.let { summaryPreviewOf(it) },
                     )
                 }
             }
