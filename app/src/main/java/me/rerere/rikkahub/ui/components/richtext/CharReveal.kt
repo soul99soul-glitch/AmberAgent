@@ -12,51 +12,74 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 
-// Phase B / B1 — character-level reveal controller for streaming text.
+// Phase B / B1 + B2 — word-level reveal controller for streaming text.
 //
-// Goal: each newly-arrived character fades in over a short window
-// (default ~200ms) instead of popping with the 33ms accumulator flush.
-// Equivalent to the smooth-streaming-rendering-guide §8 "word reveal
-// queue" pattern adapted to Compose.
+// Architecture (mirrors smooth-streaming-rendering-guide §8 + §15):
 //
-// Mechanics:
-//  - We don't track every char individually — that's O(content.length)
-//    state for a streaming response that can be tens of thousands of
-//    chars. Instead we keep a single moving boundary `revealedHead`
-//    and an ArrayDeque of (offset, appearNanos) for chars currently
-//    inside the fade window only.
-//  - Every frame, withFrameNanos updates `nowNanos` (a mutableLongState
-//    so reads in build*AnnotatedString keys force a rebuild) and
-//    promotes any char whose age has exceeded `revealDurationNanos`
-//    out of the active queue into `revealedHead`.
-//  - alphaAt(offset) is the only public read API. Below revealedHead →
-//    1f (fast path, no map lookup). Above current content length → 0f.
-//    In between → linear progress through the fade window.
+//   chunk → onContentChanged(newContent)
+//          ↓ slice newly-arrived suffix into RevealEntries:
+//          • whitespace  → its own entry (so spaces never "fade in")
+//          • CJK / Han   → 1 entry per codepoint  (CJK has no word breaks)
+//          • Latin run   → 1 entry per word       (whitespace-bounded)
+//          ↓
+//   onFrame(frameNanos)
+//          • EWMA the inter-frame delta to track current FPS
+//          • if FPS < 45 OR backlog > BACKLOG_DEGRADE → degraded mode:
+//            promote every queued entry to revealedHead immediately
+//            (alpha jumps to 1f without fade) — guide §15 step 1-2
+//          • else: promote any entry whose age crossed the fade window
+//          • idle short-circuit: if the queue is empty, freeze nowNanos
+//            so Paragraph's remember-key stops invalidating
+//   alphaAt(absoluteOffset)
+//          • below revealedHead → 1f  (fast path, ~99% of finalized text)
+//          • above contentLength → 0f (not yet emitted)
+//          • inside an entry    → entry-shared alpha based on age
+//          (every codepoint inside a word entry shares the same alpha so
+//           a word fades as a unit, per guide §8)
 //
-// Caller integration is via LocalCharRevealController. MarkdownBlock
-// installs one when `streaming=true`, MarkdownNode's leaf path looks
-// it up and wraps each codepoint in withStyle(SpanStyle(alpha=...)).
-// finalized blocks see null and skip the per-codepoint split entirely.
+// Caller integration: LocalCharRevealController. MarkdownBlock installs
+// one when streaming=true; MarkdownNode's leaf path queries alphaAt per
+// codepoint when building AnnotatedString. Within a word, every codepoint
+// returns the same alpha — Compose Text deduplicates adjacent spans
+// with identical SpanStyle so this is cheap.
 
-/** Default fade-in window for newly-arrived chars. ~12 frames @60Hz. */
+/** Default fade-in window for newly-arrived words. ~12 frames @60Hz. */
 private const val DEFAULT_REVEAL_DURATION_MS = 200L
+
+/**
+ * If the unfinished-reveal queue exceeds this many entries the model is
+ * outpacing our render — switch to instant mode (no fade) until we
+ * catch up. Tuned for 33ms accumulator flush × ~10 words/flush worst
+ * case ≈ 50 entries within one fade window.
+ */
+private const val BACKLOG_DEGRADE = 80
+
+/**
+ * EWMA-smoothed FPS below which we drop the fade animation entirely.
+ * Aligns with guide §15: "fps < 45 → revealMode = 'batch'".
+ */
+private const val DEGRADE_FPS = 45f
+
+/** EWMA alpha for the FPS smoother. 1/8 ≈ ~125ms half-life. */
+private const val FPS_EWMA_NUMERATOR = 7
+private const val FPS_EWMA_DENOMINATOR = 8
 
 @Stable
 class CharRevealController internal constructor(
     private val revealDurationNanos: Long,
 ) {
-    // Highest offset whose char is fully revealed (alpha == 1f). Below
-    // this is the fast path — no per-char alpha computation.
+    // Highest offset whose codepoint is fully revealed (alpha == 1f).
+    // Below this is the fast path — no per-codepoint alpha computation.
     private var revealedHead: Int = 0
 
     // Total chars seen so far. Anything >= this hasn't been emitted yet
     // and renders alpha=0 (effectively invisible).
     private var contentLength: Int = 0
 
-    // Chars currently inside the fade window: offset → appearNanos.
-    // We use an ArrayDeque so promotion-out-of-window is O(k) for the
-    // small k = chars-emitted-in-the-last-revealDuration window —
-    // typically <100 even on a fast model.
+    // Word/grapheme entries currently inside the fade window.
+    // Each entry covers a [startOffset, endOffset) range that shares one
+    // alpha — so an English word or a single CJK codepoint fades as a
+    // unit, not as individual letters.
     private val revealing: ArrayDeque<RevealEntry> = ArrayDeque()
 
     // Frame clock. Reads of this in a Composable's remember-key force
@@ -65,21 +88,61 @@ class CharRevealController internal constructor(
     internal var nowNanos: Long by mutableLongStateOf(0L)
         private set
 
+    // FPS smoother — used to detect "we're falling behind, drop the
+    // animation" per guide §15.
+    private var prevFrameNanos: Long = 0L
+    private var avgFrameDeltaNanos: Long = 16_666_666L  // 60Hz default
+
+    /** Smoothed FPS. Used by [shouldDegrade] and exposed for profiler use. */
+    val currentFps: Float
+        get() = if (avgFrameDeltaNanos <= 0L) 60f
+        else 1_000_000_000f / avgFrameDeltaNanos.toFloat()
+
+    private fun shouldDegrade(): Boolean =
+        currentFps < DEGRADE_FPS || revealing.size > BACKLOG_DEGRADE
+
     internal fun onFrame(frameNanos: Long) {
+        // Always update the FPS EWMA, even when idle — gives us a fresh
+        // signal for the next reveal burst.
+        if (prevFrameNanos > 0L) {
+            val delta = frameNanos - prevFrameNanos
+            // Guard against pathological deltas (process pause, debugger,
+            // background return) corrupting the EWMA.
+            if (delta in 1_000_000L..200_000_000L) {
+                avgFrameDeltaNanos = (
+                    avgFrameDeltaNanos * FPS_EWMA_NUMERATOR + delta
+                    ) / FPS_EWMA_DENOMINATOR
+            }
+        }
+        prevFrameNanos = frameNanos
+
         // Idle short-circuit: nothing in the fade window means there's
         // no alpha to advance. Holding nowNanos at its previous value
-        // keeps Paragraph's `remember` key stable so finalized
+        // keeps Paragraph's remember-key stable so finalized
         // paragraphs in a still-streaming message stop rebuilding
         // their AnnotatedString every frame. onContentChanged will
         // bump nowNanos when fresh chars arrive; until then we let
         // the frame go.
         if (revealing.isEmpty()) return
+
+        // Degrade: catch-up mode. Fast-promote everything queued; the
+        // next paint will see all chars at alpha=1 with no fade. Cleaner
+        // than dropping frames or tearing.
+        if (shouldDegrade()) {
+            val tail = revealing.last()
+            revealedHead = maxOf(revealedHead, tail.endOffset)
+            revealing.clear()
+            // Bump nowNanos so the next paint sees the change.
+            nowNanos = frameNanos
+            return
+        }
+
         nowNanos = frameNanos
-        // Promote chars whose age has crossed the reveal window.
+        // Promote entries whose age has crossed the reveal window.
         while (revealing.isNotEmpty()) {
             val head = revealing.first()
             if (frameNanos - head.appearNanos >= revealDurationNanos) {
-                revealedHead = maxOf(revealedHead, head.offset + 1)
+                revealedHead = maxOf(revealedHead, head.endOffset)
                 revealing.removeFirst()
             } else {
                 break
@@ -89,13 +152,10 @@ class CharRevealController internal constructor(
 
     /**
      * Called when the upstream content string changes. Walks the new
-     * tail (chars beyond what we've seen before) and stamps them with
-     * the current nowNanos so they begin their fade window from this
-     * frame.
-     *
-     * No attempt to handle content shrinking (truncation) — current
-     * streaming pipeline only ever appends. If we ever truncate we
-     * just reset.
+     * tail (chars beyond what we've seen before), splits it into
+     * word/CJK/whitespace entries, and stamps each entry with the
+     * current wall clock so reveal starts from "now" — even if onFrame
+     * had been quiescent.
      */
     internal fun onContentChanged(newContent: String) {
         val newLength = newContent.length
@@ -106,36 +166,36 @@ class CharRevealController internal constructor(
             contentLength = 0
         }
         if (newLength <= contentLength) return
-        // Always use the wall clock so freshly-appearing chars start
-        // their fade from "now", even if onFrame had been quiescent
-        // (idle-short-circuit above held nowNanos at a stale value).
-        // Also bump nowNanos to this stamp so the next frame's alphaAt
-        // sees a sane (≈0) delta — prevents the "first chunk after a
-        // pause renders fully revealed" glitch.
         val stamp = System.nanoTime()
-        for (offset in contentLength until newLength) {
-            revealing.addLast(RevealEntry(offset, stamp))
-        }
+        sliceTailIntoEntries(
+            content = newContent,
+            startInclusive = contentLength,
+            endExclusive = newLength,
+            stamp = stamp,
+            into = revealing,
+        )
         contentLength = newLength
+        // Bump nowNanos so the next frame's alphaAt sees a sane (≈0)
+        // delta — prevents the "first chunk after a pause renders fully
+        // revealed" glitch when the idle-short-circuit had paused us.
         nowNanos = stamp
     }
 
     /**
      * Returns the alpha [0f..1f] for the codepoint starting at
-     * [absoluteOffset] in the original content string.
+     * [absoluteOffset]. All codepoints inside the same word/CJK
+     * entry share one alpha so a word fades as a unit.
      *
      * Reads `nowNanos` so that any Composable invoking this from
-     * within a `remember(...)` key (or directly from buildAnnotatedString
-     * inside a Composable) participates in the per-frame invalidation.
+     * within a `remember(...)` key participates in per-frame invalidation.
      */
     fun alphaAt(absoluteOffset: Int): Float {
         if (absoluteOffset < revealedHead) return 1f
         if (absoluteOffset >= contentLength) return 0f
-        // Linear search within the active queue. k is small (see above).
-        // The list is ordered by offset/time so we could binary search,
-        // but linear is faster for k<32.
+        // Linear search within the active queue. k is small (one fade
+        // window's worth of words ≈ tens) so the linear cost is fine.
         revealing.fastForEach { entry ->
-            if (entry.offset == absoluteOffset) {
+            if (absoluteOffset in entry.startOffset until entry.endOffset) {
                 val age = nowNanos - entry.appearNanos
                 if (age <= 0L) return 0f
                 if (age >= revealDurationNanos) return 1f
@@ -148,7 +208,77 @@ class CharRevealController internal constructor(
         return 1f
     }
 
-    private data class RevealEntry(val offset: Int, val appearNanos: Long)
+    /** Public for profilers / instrumentation. Cheap. */
+    fun hasActiveReveals(): Boolean = revealing.isNotEmpty()
+
+    /** Public for profilers. */
+    fun queueDepth(): Int = revealing.size
+
+    private data class RevealEntry(
+        val startOffset: Int,  // inclusive
+        val endOffset: Int,    // exclusive
+        val appearNanos: Long,
+    )
+
+    private companion object {
+        /**
+         * Walks `content[startInclusive..endExclusive)` and slices it
+         * into reveal entries by these rules:
+         *  - whitespace codepoints become their own single-codepoint
+         *    entry (a space "fading in" looks weird but it has to be
+         *    in the queue or alphaAt would treat it as fully-revealed
+         *    after the next promotion).
+         *  - CJK / Hangul / kana codepoints become 1 entry each (no
+         *    word breaks in those scripts).
+         *  - runs of other codepoints (Latin, digits, punctuation
+         *    attached to words) coalesce into one entry per word run,
+         *    bounded by the next whitespace/CJK or end-of-tail.
+         */
+        fun sliceTailIntoEntries(
+            content: String,
+            startInclusive: Int,
+            endExclusive: Int,
+            stamp: Long,
+            into: ArrayDeque<RevealEntry>,
+        ) {
+            // wordRunStart tracks the start of an in-progress Latin/digit
+            // word. -1 means we're not currently inside one.
+            var wordRunStart = -1
+            var i = startInclusive
+            while (i < endExclusive) {
+                val cp = content.codePointAt(i)
+                val cpLen = Character.charCount(cp)
+                val isWordBreaker = isWhitespaceCodepoint(cp) || isCjkCodepoint(cp)
+                if (isWordBreaker) {
+                    // Flush any in-progress word run first.
+                    if (wordRunStart >= 0) {
+                        into.addLast(RevealEntry(wordRunStart, i, stamp))
+                        wordRunStart = -1
+                    }
+                    into.addLast(RevealEntry(i, i + cpLen, stamp))
+                } else {
+                    if (wordRunStart < 0) wordRunStart = i
+                }
+                i += cpLen
+            }
+            if (wordRunStart >= 0) {
+                into.addLast(RevealEntry(wordRunStart, endExclusive, stamp))
+            }
+        }
+
+        private fun isWhitespaceCodepoint(cp: Int): Boolean =
+            Character.isWhitespace(cp) || cp == ' '.code
+
+        private fun isCjkCodepoint(cp: Int): Boolean =
+            cp in 0x4E00..0x9FFF        // CJK Unified Ideographs
+                || cp in 0x3400..0x4DBF // CJK Extension A
+                || cp in 0x20000..0x2A6DF // CJK Extension B
+                || cp in 0x2A700..0x2B73F // CJK Extension C
+                || cp in 0x3040..0x309F // Hiragana
+                || cp in 0x30A0..0x30FF // Katakana
+                || cp in 0xAC00..0xD7AF // Hangul syllables
+                || cp in 0xFF00..0xFFEF // Halfwidth/Fullwidth forms
+    }
 }
 
 /**
@@ -179,9 +309,8 @@ fun rememberCharRevealController(
     }
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(controller) {
-        // 1) Kick the clock every frame so alphaAt() updates.
-        // 2) Whenever content grows, stamp the new tail with the current
-        //    frame's nanos so reveal starts from "now" for those chars.
+        // Whenever content grows, slice the new tail into word/grapheme
+        // entries and stamp them with wall-clock so reveal starts now.
         snapshotFlow { updatedContent }
             .collect { latest ->
                 controller.onContentChanged(latest)
@@ -199,10 +328,6 @@ fun rememberCharRevealController(
 
 // Local clone of androidx.compose.ui.util.fastForEach to avoid the
 // import cost from this small file. Same semantics, no allocation.
-private inline fun <T> List<T>.fastForEach(action: (T) -> Unit) {
-    for (i in indices) action(this[i])
-}
-
 private inline fun <T> ArrayDeque<T>.fastForEach(action: (T) -> Unit) {
     val it = iterator()
     while (it.hasNext()) action(it.next())
