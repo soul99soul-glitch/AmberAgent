@@ -863,57 +863,21 @@ private fun ChatListNormal(
             .toSet()
     }
 
-    // Transient "compact just finished" flag — flips true the moment a new
-    // completed ConversationCompact appears in the list, stays for 8s, then
-    // flips false. Drives the swap from ContextCompactInProgressMarker (shimmer)
-    // to a brief ContextCompactMarker (final state) at the SAME bottom-of-list
-    // position, so the user gets the Codex-style "—— 正在自动压缩 ——" →
-    // "—— 已自动压缩 ——" transition right where they're already looking.
-    // The "real" historical-position ContextCompactMarker (in compactMarkersByEndIndex)
-    // also lives in its proper place in the timeline; this transient one is
-    // an additional confirmation at the bottom.
-    val latestCompletedCompact = remember(contextCompacts) {
-        contextCompacts.filter { it.status == "completed" }
-            .maxByOrNull { it.createdAt }
-    }
-    val latestCompletedCompactId = latestCompletedCompact?.id
-    // 2026-05-15 (1.9.5): the previous version of this had a real bug — the
-    // remember initializer was `mutableStateOf<String?>(null)`, so on conversation
-    // switch the state reset to null, then LaunchedEffect saw
-    // latestCompletedCompactId go null → realId and triggered the transient
-    // marker for 8s — even though the user did NOT just run a compaction, they
-    // just opened an old conversation that happened to already have a compact
-    // record. Per reviewer, anchor the initial state to the current latest id
-    // so the LaunchedEffect only fires on genuine "a new compact just landed"
-    // events. The `initialized` sentinel covers the first composition pass
-    // separately from later identity changes.
-    var recentlyFinishedCompactId by remember(conversation.id) {
-        mutableStateOf<String?>(latestCompletedCompactId)
-    }
-    var initialized by remember(conversation.id) { mutableStateOf(false) }
-    LaunchedEffect(latestCompletedCompactId) {
-        if (!initialized) {
-            // First emission after conversation switch — just record the
-            // baseline, no transient marker. recentlyFinishedCompactId is
-            // already pre-seeded to this value above.
-            initialized = true
-            return@LaunchedEffect
-        }
-        // 2026-05-15 (1.9.8): when a new compact lands, announce it. NO timeout —
-        // user said "总结的内容 8s 后会消失吗？没必要吧，留着给用户看摘要不挺好的".
-        // The transient marker now lives until either (a) the next compact
-        // replaces it (this LaunchedEffect re-runs with a new id), or (b) the
-        // user switches conversation (remember(conversation.id) resets state).
-        // Permanent ContextCompactMarker (at sourceEndIndex in compactMarkersByEndIndex)
-        // also carries the summary preview now, so the user has a long-term
-        // record once they scroll back.
-        if (latestCompletedCompactId != null && latestCompletedCompactId != recentlyFinishedCompactId) {
-            recentlyFinishedCompactId = latestCompletedCompactId
-        }
-    }
-    val showRecentlyFinishedMarker = recentlyFinishedCompactId != null &&
-        recentlyFinishedCompactId == latestCompletedCompactId &&
-        !isCompacting
+    // 2026-05-15 (1.9.9): user clarified the expected UX — "应该只有一段
+    // '———已自动压缩———' 作为分割线，上面是灰色的历史内容，下面是历史内容的摘要".
+    // Single source of truth = the permanent ContextCompactMarker injected at
+    // each compact's sourceEndIndex via compactMarkersByEndIndex below. That
+    // marker now carries the summary preview (1.9.8 change), so users see
+    // exactly one "———已自动压缩———" line, divider above is pre-compacted
+    // (dimmed via coveredMessageIds), divider below is the summary + active
+    // context.
+    //
+    // The shimmer-while-compacting marker is still rendered at the LazyColumn
+    // bottom while `isCompacting` is true (visual feedback that work is in
+    // progress), but it vanishes the moment compactConversation returns and
+    // the permanent marker takes over at the correct historical position.
+    // The previous transient-bottom-marker-with-8s-timeout was an extra
+    // moving piece I added trying to cover both reading positions — removed.
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
@@ -1462,17 +1426,17 @@ private fun ChatListNormal(
                         streamingText = streamingSummary,
                     )
                 }
-            } else if (showRecentlyFinishedMarker) {
-                item(
-                    key = "compact-recently-finished",
-                    contentType = "compact-recently-finished",
-                ) {
-                    ContextCompactMarker(
-                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        summaryPreview = latestCompletedCompact?.let { summaryPreviewOf(it) },
-                    )
-                }
             }
+            // 1.9.9: removed the post-compact transient bottom marker. The
+            // permanent marker at sourceEndIndex (rendered in
+            // compactMarkersByEndIndex above) is the single visible boundary;
+            // its built-in summaryPreview displays the prose summary right
+            // below the divider, exactly matching the user's mental model:
+            //   [pre-compacted msg]   (dimmed)
+            //   [pre-compacted msg]   (dimmed)
+            //   ─── 已自动压缩 ───
+            //   "summary preview ..."
+            //   [active msg]
 
             if (loading) {
                 item(
