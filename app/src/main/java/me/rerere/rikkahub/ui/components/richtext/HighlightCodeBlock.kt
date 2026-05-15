@@ -172,6 +172,7 @@ fun HighlightCodeBlock(
                                 language = language,
                                 textStyle = textStyle,
                                 colorPalette = colorPalette,
+                                completeCodeBlock = completeCodeBlock,
                             )
                         }
                         else -> {
@@ -184,6 +185,7 @@ fun HighlightCodeBlock(
                                 autoWrap = autoWrap,
                                 showLineNumbers = showLineNumbers,
                                 scrollState = scrollState,
+                                completeCodeBlock = completeCodeBlock,
                             )
                         }
                     }
@@ -235,6 +237,7 @@ private fun CodeBlockWithLineNumbersWrapped(
     language: String,
     textStyle: TextStyle,
     colorPalette: HighlightTextColorPalette,
+    completeCodeBlock: Boolean = true,
 ) {
     val lineNumberWidth = remember(displayLines.size) {
         displayLines.size.toString().length
@@ -254,17 +257,34 @@ private fun CodeBlockWithLineNumbersWrapped(
                         softWrap = false,
                         modifier = Modifier.padding(end = 8.dp)
                     )
-                    HighlightText(
-                        code = line,
-                        language = language,
-                        fontSize = textStyle.fontSize,
-                        lineHeight = textStyle.lineHeight,
-                        colors = colorPalette,
-                        overflow = TextOverflow.Visible,
-                        softWrap = true,
-                        fontFamily = JetbrainsMono,
-                        modifier = Modifier.weight(1f)
-                    )
+                    if (completeCodeBlock) {
+                        HighlightText(
+                            code = line,
+                            language = language,
+                            fontSize = textStyle.fontSize,
+                            lineHeight = textStyle.lineHeight,
+                            colors = colorPalette,
+                            overflow = TextOverflow.Visible,
+                            softWrap = true,
+                            fontFamily = JetbrainsMono,
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        // M1.3: streaming 阶段跳过 prism 高亮（QuickJS expensive
+                        // per-line, fires on every 33ms chunk flush). Render plain
+                        // monospace text; the closing ``` will trigger a recompose
+                        // with completeCodeBlock=true that switches back to
+                        // HighlightText for the final colored render.
+                        Text(
+                            text = line,
+                            fontSize = textStyle.fontSize,
+                            lineHeight = textStyle.lineHeight,
+                            fontFamily = JetbrainsMono,
+                            overflow = TextOverflow.Visible,
+                            softWrap = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -281,6 +301,7 @@ private fun CodeBlockDefault(
     autoWrap: Boolean,
     showLineNumbers: Boolean,
     scrollState: ScrollState,
+    completeCodeBlock: Boolean = true,
 ) {
     Row(
         modifier = if (autoWrap) {
@@ -315,17 +336,33 @@ private fun CodeBlockDefault(
         SelectionContainer(
             modifier = if (autoWrap) Modifier.weight(1f) else Modifier
         ) {
-            HighlightText(
-                code = displayCode,
-                language = language,
-                modifier = Modifier.animateContentSize(),
-                fontSize = textStyle.fontSize,
-                lineHeight = textStyle.lineHeight,
-                colors = colorPalette,
-                overflow = TextOverflow.Visible,
-                softWrap = autoWrap,
-                fontFamily = JetbrainsMono
-            )
+            if (completeCodeBlock) {
+                HighlightText(
+                    code = displayCode,
+                    language = language,
+                    modifier = Modifier.animateContentSize(),
+                    fontSize = textStyle.fontSize,
+                    lineHeight = textStyle.lineHeight,
+                    colors = colorPalette,
+                    overflow = TextOverflow.Visible,
+                    softWrap = autoWrap,
+                    fontFamily = JetbrainsMono
+                )
+            } else {
+                // M1.3: streaming 阶段跳过 prism 高亮（QuickJS, fires on every
+                // 33ms chunk flush). 看到 ``` closing fence 之后 recompose 会
+                // 把 completeCodeBlock 翻 true，那一帧才付一次完整高亮的成本。
+                // 视觉上等同纯 monospace text；finalize 时会 fade 进高亮颜色。
+                Text(
+                    text = displayCode,
+                    modifier = Modifier.animateContentSize(),
+                    fontSize = textStyle.fontSize,
+                    lineHeight = textStyle.lineHeight,
+                    overflow = TextOverflow.Visible,
+                    softWrap = autoWrap,
+                    fontFamily = JetbrainsMono,
+                )
+            }
         }
     }
 }
