@@ -85,10 +85,7 @@ import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
-import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeAnalyzer
 import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
-import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentFetcher
-import me.rerere.rikkahub.data.agent.office.radar.FeishuDocumentMonitor
 import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
 import me.rerere.rikkahub.data.agent.board.agent.BoardAgent
 import me.rerere.rikkahub.ui.pages.board.BoardViewModel
@@ -504,21 +501,20 @@ val appModule = module {
         MemoryDreamScheduler(get(), get())
     }
 
-    // Feishu Document Radar
-    single {
-        FeishuDocumentFetcher(get(), get(), get(), get())
-    }
-
-    single {
-        FeishuChangeAnalyzer(get(), get(), get())
-    }
-
+    // Feishu Document Radar (refactored)
     single {
         FeishuChangeNotifier(get())
     }
 
     single {
-        FeishuDocumentMonitor(get(), get())
+        me.rerere.rikkahub.data.agent.office.radar.DocRadar(
+            context = get(),
+            subscriptionDao = get(),
+            changeLogDao = get(),
+            mcpManager = get(),
+            settingsStore = get(),
+            notifier = get(),
+        )
     }
 
     // Today Board
@@ -531,7 +527,10 @@ val appModule = module {
     }
 
     single {
-        FeishuDocSignalCollector(get(), get())
+        FeishuDocSignalCollector(
+            subscriptionDao = get<me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO>(),
+            changeLogDao = get<me.rerere.rikkahub.data.db.dao.DocChangeLogDAO>(),
+        )
     }
 
     single {

@@ -199,6 +199,14 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().docSubscriptionDao()
+    }
+
+    single {
+        get<AppDatabase>().docChangeLogDao()
+    }
+
+    single {
         MessageFtsManager(get())
     }
 
