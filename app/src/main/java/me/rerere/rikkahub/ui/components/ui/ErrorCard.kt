@@ -19,7 +19,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,7 +27,6 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
@@ -102,11 +100,12 @@ fun ErrorCard(
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
 
-    // 5 秒后自动消失
-    LaunchedEffect(error.id) {
-        delay(5000)
-        onDismiss()
-    }
+    // 2026-05-15: removed the 5s auto-dismiss. Generation errors are often the only
+    // signal a user gets that something went wrong (e.g. context compaction failure,
+    // network drop mid-stream), and a 5-second window is far too short — users
+    // notice 30+ seconds later that "AI 没回复" and have no idea why. The card now
+    // stays put until explicitly dismissed via the close button, matching how
+    // every other in-app status (tool failure, queue exhaustion) behaves.
 
     Surface(
         modifier = modifier.fillMaxWidth(),

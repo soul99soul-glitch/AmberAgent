@@ -337,6 +337,7 @@
   <string name="emoji_picker_search_placeholder">Search emojis...</string>
   <string name="emoji_picker_select_skin_tone">Select Skin Tone</string>
   <string name="error_title_compress_conversation">Conversation compression failed</string>
+  <string name="error_auto_compact_failed_hint">Context is full and auto-compaction failed.\n\nConfigure a fast lightweight model under Settings → Models → Compression Model, or switch to a model with a larger context window to continue.\n\nFailed phase: %1$s\nReason: %2$s</string>
   <string name="error_title_generate_title">Auto title generation failed</string>
   <string name="error_title_generation">Message generation failed</string>
   <string name="error_title_operation">Operation failed</string>

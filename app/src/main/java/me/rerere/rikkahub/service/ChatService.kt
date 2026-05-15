@@ -1202,7 +1202,25 @@ class ChatService(
             }
 
             it.printStackTrace()
-            addError(it, conversationId, title = context.getString(R.string.error_title_generation))
+            // Surface compaction failures with a targeted title + actionable hint instead
+            // of the generic "message generation failed" toast. Previously this was the
+            // root cause of the silent-stall bug: GLM 5.1 at near-context-limit triggered
+            // forceRatio compact → fell back to the same slow model → compact timed out →
+            // exception got wrapped as a generic generation error → 5-second ErrorCard →
+            // user never saw it. Now it points users at the 压缩模型 setting where the
+            // real fix lives.
+            val (errorTitle, surfacedError) = when (it) {
+                is me.rerere.rikkahub.data.context.ContextCompactionFailedException -> {
+                    val hint = context.getString(
+                        R.string.error_auto_compact_failed_hint,
+                        it.phase,
+                        it.compactionReason,
+                    )
+                    context.getString(R.string.error_title_compress_conversation) to RuntimeException(hint, it)
+                }
+                else -> context.getString(R.string.error_title_generation) to it
+            }
+            addError(surfacedError, conversationId, title = errorTitle)
             Logging.log(TAG, "handleMessageComplete: $it")
             Logging.log(TAG, it.stackTraceToString())
         }.onSuccess {

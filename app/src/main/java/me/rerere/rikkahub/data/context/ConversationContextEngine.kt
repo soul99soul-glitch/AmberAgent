@@ -29,6 +29,29 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ConversationContextEngine"
 
+/**
+ * Thrown when automatic context compaction fails during prepareContext.
+ *
+ * Generation cannot proceed without compaction at this point (context is over
+ * the model's window). ChatService catches this specifically and surfaces a
+ * targeted error to the UI ("上下文已满，压缩失败，请配置任务模型") rather than
+ * the generic "Generation failed: <stack>" that earlier swallowed this case
+ * into a 5-second toast users routinely missed.
+ *
+ * `phase` tells the UI handler which compaction path failed:
+ *  - "auto_force": ratio crossed forceRatio (0.85) and compactConversation
+ *    returned status=failed
+ *  - "auto_fit_model_window": post-prepare estimate still over forceRatio of
+ *    the model's contextWindow, last-ditch compaction failed too
+ *  - "manual": user-triggered compact tool returned failed
+ *
+ * `compactionReason` is the inner error message from CompactResult.error.
+ */
+class ContextCompactionFailedException(
+    val phase: String,
+    val compactionReason: String,
+) : RuntimeException("Context compression failed [$phase]: $compactionReason")
+
 class ConversationContextEngine(
     private val providerManager: ProviderManager,
     private val json: Json,
@@ -74,7 +97,13 @@ class ConversationContextEngine(
                     reason = "auto_force",
                 )
                 if (result.status == "failed") {
-                    error("Context compression failed: ${result.error ?: result.status}")
+                    // Throw typed exception instead of generic kotlin.error(): lets
+                    // ChatService.onFailure render a user-actionable message (point to
+                    // 任务模型 setting) rather than a generic "Generation failed" toast.
+                    throw ContextCompactionFailedException(
+                        phase = "auto_force",
+                        compactionReason = result.error ?: result.status,
+                    )
                 }
             } else {
                 appScope.launch(Dispatchers.IO) {
@@ -117,7 +146,10 @@ class ConversationContextEngine(
                 force = true,
             )
             if (result.status == "failed") {
-                error("Context compression failed: ${result.error ?: result.status}")
+                throw ContextCompactionFailedException(
+                    phase = "auto_fit_model_window",
+                    compactionReason = result.error ?: result.status,
+                )
             }
             latestCompacts = contextRepository.getCompacts(conversation.id)
             preparedMessages = prepareMessagesWithCompacts(
