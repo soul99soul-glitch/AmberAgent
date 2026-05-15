@@ -22,6 +22,7 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
+import me.rerere.rikkahub.data.datastore.prefs.AssistantPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
@@ -81,6 +82,10 @@ val dataSourceModule = module {
 
     single {
         ExtensionPrefs(context = get(), scope = get())
+    }
+
+    single {
+        AssistantPrefs(context = get(), scope = get())
     }
 
     single {
