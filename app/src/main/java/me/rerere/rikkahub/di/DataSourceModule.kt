@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
+import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
@@ -62,36 +63,36 @@ val dataSourceModule = module {
     }
 
     single {
-        UIPrefs(context = get(), scope = get())
+        UIPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
-        SearchPrefs(context = get(), scope = get())
+        SearchPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
-        AgentPrefs(context = get(), scope = get())
+        AgentPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
-        ProviderPrefs(context = get(), scope = get())
+        ProviderPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
-        ChatPrefs(context = get(), scope = get())
+        ChatPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
-        ExtensionPrefs(context = get(), scope = get())
+        ExtensionPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
-        AssistantPrefs(context = get(), scope = get())
+        AssistantPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
     single {
         SettingsAggregator(
-            context = get(),
+            dataStore = get<Context>().settingsStore,
             uiPrefs = get(),
             searchPrefs = get(),
             agentPrefs = get(),

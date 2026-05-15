@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.data.datastore.prefs
 
-import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.core.IOException
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.flow.StateFlow
@@ -11,7 +13,6 @@ import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 
@@ -20,31 +21,33 @@ data class AgentPrefsData(
 )
 
 class AgentPrefs(
-    context: Context,
+    private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    private val dataStore = context.settingsStore
-
     val flow: StateFlow<AgentPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
-        .map { p ->
-            AgentPrefsData(
-                agentRuntime = p[SettingsStore.AGENT_RUNTIME]?.let {
-                    JsonInstant.decodeFromString<AgentRuntimeSetting>(it)
-                } ?: AgentRuntimeSetting(),
-            )
-        }
+        .map { readFrom(it) }
         .distinctUntilChanged()
         .toMutableStateFlow(scope, AgentPrefsData())
 
     suspend fun update(transform: (AgentPrefsData) -> AgentPrefsData) {
-        val current = flow.value
-        val next = transform(current)
-        if (next == current) return
         dataStore.edit { p ->
-            p[SettingsStore.AGENT_RUNTIME] = JsonInstant.encodeToString(next.agentRuntime)
+            val current = readFrom(p)
+            val next = transform(current)
+            if (next == current) return@edit
+            writeTo(p, next)
         }
+    }
+
+    private fun readFrom(p: Preferences): AgentPrefsData = AgentPrefsData(
+        agentRuntime = p[SettingsStore.AGENT_RUNTIME]?.let {
+            JsonInstant.decodeFromString<AgentRuntimeSetting>(it)
+        } ?: AgentRuntimeSetting(),
+    )
+
+    private fun writeTo(p: MutablePreferences, data: AgentPrefsData) {
+        p[SettingsStore.AGENT_RUNTIME] = JsonInstant.encodeToString(data.agentRuntime)
     }
 }

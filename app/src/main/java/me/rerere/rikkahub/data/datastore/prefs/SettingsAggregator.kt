@@ -1,7 +1,8 @@
 package me.rerere.rikkahub.data.datastore.prefs
 
-import android.content.Context
 import android.util.Log
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +29,6 @@ import me.rerere.rikkahub.data.datastore.SeedOpenAIImageModelId
 import me.rerere.rikkahub.data.datastore.SeedRoutingQuickMessages
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.data.datastore.withAmberAgentAssistantBranding
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
@@ -47,7 +47,7 @@ private const val TAG = "SettingsAggregator"
  * surface BEFORE caller migration begins.
  */
 class SettingsAggregator(
-    context: Context,
+    private val dataStore: DataStore<Preferences>,
     private val uiPrefs: UIPrefs,
     private val searchPrefs: SearchPrefs,
     private val agentPrefs: AgentPrefs,
@@ -57,7 +57,6 @@ class SettingsAggregator(
     private val assistantPrefs: AssistantPrefs,
     scope: AppScope,
 ) {
-    private val dataStore = context.settingsStore
 
     private val _settingsFlow: MutableStateFlow<Settings> = combine(
         uiPrefs.flow,
@@ -269,7 +268,7 @@ class SettingsAggregator(
  * the value lives back through the next read. We re-apply them as part of
  * [applyCrossDomainConsistency] below.
  */
-private fun composeRawSettings(
+internal fun composeRawSettings(
     ui: UIPrefsData,
     search: SearchPrefsData,
     agent: AgentPrefsData,
@@ -355,7 +354,7 @@ private fun composeRawSettings(
  * - Apply AmberAgent assistant branding
  * - Flip both seed version flags to 1 once seeding done
  */
-private fun applyBackfillAndSeed(it: Settings): Settings {
+internal fun applyBackfillAndSeed(it: Settings): Settings {
     val shouldSeedImageModels = it.imageModelsSeededVersion < 1
     val providers = it.providers
         .filterNot { provider -> provider.id in REMOVED_DEFAULT_PROVIDER_IDS }
@@ -455,7 +454,7 @@ private fun applyBackfillAndSeed(it: Settings): Settings {
  * - Filter searchEnabledServiceIds — only services that still exist survive
  * - Dedup modeInjections / lorebooks / quickMessages (by id)
  */
-private fun applyCrossDomainConsistency(settings: Settings): Settings {
+internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     val validMcpServerIds = settings.mcpServers.map { it.id }.toSet()
     val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
     val validLorebookIds = settings.lorebooks.map { it.id }.toSet()

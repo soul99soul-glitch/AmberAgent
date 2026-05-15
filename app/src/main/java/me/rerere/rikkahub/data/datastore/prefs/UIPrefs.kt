@@ -1,7 +1,8 @@
 package me.rerere.rikkahub.data.datastore.prefs
 
-import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.core.IOException
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.flow.StateFlow
@@ -11,7 +12,6 @@ import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
@@ -26,41 +26,43 @@ data class UIPrefsData(
 )
 
 class UIPrefs(
-    context: Context,
+    private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    private val dataStore = context.settingsStore
-
     val flow: StateFlow<UIPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
-        .map { p ->
-            UIPrefsData(
-                dynamicColor = p[SettingsStore.DYNAMIC_COLOR] ?: false,
-                themeId = p[SettingsStore.THEME_ID] ?: PresetThemes[0].id,
-                developerMode = p[SettingsStore.DEVELOPER_MODE] == true,
-                displaySetting = JsonInstant.decodeFromString(
-                    p[SettingsStore.DISPLAY_SETTING] ?: "{}"
-                ),
-                launchCount = p[SettingsStore.LAUNCH_COUNT] ?: 0,
-                sponsorAlertDismissedAt = p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] ?: 0,
-            )
-        }
+        .map { readFrom(it) }
         .distinctUntilChanged()
         .toMutableStateFlow(scope, UIPrefsData())
 
     suspend fun update(transform: (UIPrefsData) -> UIPrefsData) {
-        val current = flow.value
-        val next = transform(current)
-        if (next == current) return
         dataStore.edit { p ->
-            p[SettingsStore.DYNAMIC_COLOR] = next.dynamicColor
-            p[SettingsStore.THEME_ID] = next.themeId
-            p[SettingsStore.DEVELOPER_MODE] = next.developerMode
-            p[SettingsStore.DISPLAY_SETTING] = JsonInstant.encodeToString(next.displaySetting)
-            p[SettingsStore.LAUNCH_COUNT] = next.launchCount
-            p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] = next.sponsorAlertDismissedAt
+            val current = readFrom(p)
+            val next = transform(current)
+            if (next == current) return@edit
+            writeTo(p, next)
         }
+    }
+
+    private fun readFrom(p: Preferences): UIPrefsData = UIPrefsData(
+        dynamicColor = p[SettingsStore.DYNAMIC_COLOR] ?: false,
+        themeId = p[SettingsStore.THEME_ID] ?: PresetThemes[0].id,
+        developerMode = p[SettingsStore.DEVELOPER_MODE] == true,
+        displaySetting = JsonInstant.decodeFromString(
+            p[SettingsStore.DISPLAY_SETTING] ?: "{}"
+        ),
+        launchCount = p[SettingsStore.LAUNCH_COUNT] ?: 0,
+        sponsorAlertDismissedAt = p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] ?: 0,
+    )
+
+    private fun writeTo(p: androidx.datastore.preferences.core.MutablePreferences, data: UIPrefsData) {
+        p[SettingsStore.DYNAMIC_COLOR] = data.dynamicColor
+        p[SettingsStore.THEME_ID] = data.themeId
+        p[SettingsStore.DEVELOPER_MODE] = data.developerMode
+        p[SettingsStore.DISPLAY_SETTING] = JsonInstant.encodeToString(data.displaySetting)
+        p[SettingsStore.LAUNCH_COUNT] = data.launchCount
+        p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] = data.sponsorAlertDismissedAt
     }
 }
