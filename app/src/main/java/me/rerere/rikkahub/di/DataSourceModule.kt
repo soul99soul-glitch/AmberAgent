@@ -23,6 +23,7 @@ import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
+import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
@@ -76,6 +77,10 @@ val dataSourceModule = module {
 
     single {
         ChatPrefs(context = get(), scope = get())
+    }
+
+    single {
+        ExtensionPrefs(context = get(), scope = get())
     }
 
     single {
