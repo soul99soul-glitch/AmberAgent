@@ -160,6 +160,12 @@ private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 private val TimelineHorizontalPadding = 16.dp
+
+// 2026-05-15 (1.9.7): top-level Regex avoids recompiling the pattern on every
+// recomposition of ContextCompactInProgressMarker. The streaming summary flow
+// can update at ~30Hz; per-tick Regex compile is a measurable frame-rate hit
+// on mid-tier devices.
+private val COMPACT_SUMMARY_WHITESPACE_RE = Regex("\\s+")
 private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
@@ -385,19 +391,23 @@ private fun ContextCompactInProgressMarker(
                 color = workspace.hairline,
             )
         }
-        // 2026-05-15 (1.9.6): when streamingText is non-empty, show the trailing
-        // 120 chars of the in-flight summary — gives the user a Codex-like
-        // "watch the summary being generated" feel. Whitespace is collapsed
-        // first so multi-line LLM output doesn't push the marker height around
-        // unpredictably; maxLines=2 + ellipsis keeps a stable 2-line slot.
-        // When the stream is still empty (just starting, or model is slow on
-        // first token) we fall back to the generic subtitle so the marker
-        // isn't a confusing void of whitespace.
-        val collapsed = remember(streamingText) {
-            streamingText.replace(Regex("\\s+"), " ").trim()
+        // 2026-05-15 (1.9.7): show only the PROSE prefix of the streaming
+        // summary (everything before the first `{`), not the raw JSON tail.
+        // buildCompressionPrompt asks the LLM to write a single-sentence
+        // human-readable summary BEFORE the JSON body, so the early tokens
+        // are prose; once the model starts emitting JSON we freeze the
+        // displayed text (no more updates, since `proseOnly` stops growing).
+        // Whitespace-collapsed for stable rendering height; trailing 120 chars
+        // + leading ellipsis once it overflows. When stream hasn't produced
+        // any prose yet (cold start, slow first token), fall back to the
+        // generic subtitle so the marker isn't a void of whitespace.
+        val proseOnly = remember(streamingText) {
+            val cutIndex = streamingText.indexOf('{')
+            val raw = if (cutIndex >= 0) streamingText.substring(0, cutIndex) else streamingText
+            COMPACT_SUMMARY_WHITESPACE_RE.replace(raw, " ").trim()
         }
-        val tailText = remember(collapsed) {
-            if (collapsed.length > 120) "…" + collapsed.takeLast(120) else collapsed
+        val tailText = remember(proseOnly) {
+            if (proseOnly.length > 120) "…" + proseOnly.takeLast(120) else proseOnly
         }
         Text(
             text = tailText.ifBlank { stringResource(R.string.chat_context_auto_compacting_subtitle) },

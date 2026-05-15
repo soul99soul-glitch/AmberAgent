@@ -35,6 +35,15 @@ import kotlin.uuid.Uuid
 private const val TAG = "ConversationContextEngine"
 
 /**
+ * Min millis between successive _summaryStreamFlow.update emissions while
+ * streaming a compact summary. Mirrors STREAM_UI_FLUSH_INTERVAL_MS in
+ * GenerationHandler — 33ms ≈ one frame at 30Hz; one accumulated string copy
+ * per frame is enough to feel "live" without saturating the StateFlow CAS
+ * loop and ChatList recomposition.
+ */
+private const val STREAM_FLUSH_INTERVAL_MS = 33L
+
+/**
  * Thrown when automatic context compaction fails during prepareContext.
  *
  * Generation cannot proceed without compaction at this point (context is over
@@ -305,16 +314,18 @@ class ConversationContextEngine(
                     additionalPrompt = additionalPrompt,
                     sourceMessageIds = plan.sourceMessageIds,
                 )
-                // 2026-05-15 (1.9.6): switched from generateText (single sync
-                // result) to streamText. Same final summary as before, but each
-                // delta chunk gets accumulated AND pushed to _summaryStreamFlow
-                // so the UI can render the trailing portion live under the
-                // "正在自动压缩" shimmer — answering user's "分割线下面应该自动出
-                // 压缩的内容摘要" without the 200-line streaming refactor I
-                // initially estimated. Stream API was already there in
-                // ProviderHandler; we just weren't using it.
+                // 2026-05-15 (1.9.6): switched from generateText to streamText
+                // so the UI can render the trailing portion of the summary live.
+                // 1.9.7 added a 33ms flush throttle (matches GenerationHandler's
+                // STREAM_UI_FLUSH_INTERVAL_MS) — without it, fast models pushing
+                // 30+ tokens/sec caused MutableStateFlow.update / accumulated
+                // .toString() to fire 30+ times per second, each rebuilding the
+                // (potentially KB-sized) string and triggering ChatList
+                // recomposition. 33ms ceiling = ≤30 fps update rate, plenty for
+                // smooth rolling text and bounded allocation.
                 val conversationKey = conversation.id.toString()
                 val accumulated = StringBuilder()
+                var lastFlushAt = 0L
                 providerHandler.streamText(
                     providerSetting = provider,
                     messages = listOf(UIMessage.user(prompt)),
@@ -328,10 +339,19 @@ class ConversationContextEngine(
                         .joinToString("") { it.text }
                     if (deltaText.isNotEmpty()) {
                         accumulated.append(deltaText)
-                        _summaryStreamFlow.update { map ->
-                            map + (conversationKey to accumulated.toString())
+                        val now = System.currentTimeMillis()
+                        if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_FLUSH_INTERVAL_MS) {
+                            _summaryStreamFlow.update { map ->
+                                map + (conversationKey to accumulated.toString())
+                            }
+                            lastFlushAt = now
                         }
                     }
+                }
+                // Final flush — ensure the last partial that landed within the
+                // 33ms window before stream completion makes it to the UI.
+                _summaryStreamFlow.update { map ->
+                    map + (conversationKey to accumulated.toString())
                 }
                 val summary = accumulated.toString().trim()
                     .takeIf { it.isNotEmpty() }
@@ -361,6 +381,13 @@ class ConversationContextEngine(
                     estimatedTokensAfter = compact.tokenEstimate,
                 )
             }.getOrElse { error ->
+                // 2026-05-15 (1.9.7): rethrow CancellationException explicitly.
+                // runCatching catches it like any other Throwable, which would
+                // turn a legitimate user-initiated cancel (switch conversation,
+                // stop generation, app backgrounded) into a "对话压缩失败" toast.
+                // Kotlin coroutine best practice — cancellation is structured,
+                // not a failure mode.
+                if (error is kotlinx.coroutines.CancellationException) throw error
                 Log.e(TAG, "compactConversation failed", error)
                 contextRepository.insertEvent(conversation.id, reason, null, error.message.orEmpty())
                 CompactResult(status = "failed", error = error.message ?: error::class.java.simpleName)
@@ -407,8 +434,19 @@ class ConversationContextEngine(
         additionalPrompt: String,
         sourceMessageIds: List<String>,
     ): String {
+        // 2026-05-15 (1.9.7): require a single-sentence prose preamble BEFORE
+        // the JSON. The streaming UI ("正在自动压缩" shimmer) shows the live
+        // accumulated text under the divider — without the preamble, users
+        // saw raw JSON tokens scrolling (`"goals": [...], "facts": [...]`)
+        // instead of human-readable summary. The preamble is naturally
+        // emitted as the FIRST tokens of the stream, so it lands in the
+        // marker before any JSON shows up. normalizeSummaryJson already
+        // tolerates leading prose (it uses cleaned.indexOf('{') to locate
+        // the JSON object), so this doesn't break the persisted summary
+        // parse path.
         val structuredInstructions = """
-            Return only valid JSON with these keys:
+            First, write ONE concise sentence (max 100 chars) in the user's language summarising what this conversation segment covered. This sentence is shown live to the user while the summary streams in.
+            Then on a new line, return only valid JSON with these keys:
             goals, facts, decisions, open_tasks, failed_attempts, tool_results, entities, timeline, source_message_ids.
             Preserve concrete names, files, commands, errors, user preferences, and unresolved decisions.
             source_message_ids must exactly list: ${sourceMessageIds.joinToString(", ")}.
