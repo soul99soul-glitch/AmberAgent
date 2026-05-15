@@ -381,13 +381,19 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
     /**
-     * No-op as of 2026-05-15. Previously gated a character-level tail fade-in
-     * (last ~40 chars with gradient alpha). User feedback: Claude Code's CLI
-     * streams without any alpha gradient and feels more honest; the fade
-     * was perceived as "灰尾". Param kept to avoid churning every callsite;
-     * remove once those are migrated.
+     * When true, installs a [CharRevealController] for descendant
+     * [MarkdownNode] paragraphs to fade newly-arrived characters
+     * over a short window. Caller (typically the assistant chat
+     * pipeline) should pass `streaming = true` ONLY for the trailing
+     * segment that is currently receiving tokens — earlier
+     * already-finalized blocks should pass `false` so they render
+     * via the fast path (no per-frame re-build).
+     *
+     * History: between 2026-04 and 2026-05-16 this param was a no-op
+     * holding the placeholder for the deleted "灰尾" gradient. With
+     * Phase B the parameter is meaningful again.
      */
-    @Suppress("UNUSED_PARAMETER") streaming: Boolean = false,
+    streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
     var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
@@ -404,8 +410,16 @@ fun MarkdownBlock(
             .collect { setData(it) }
     }
 
+    val revealController = rememberCharRevealController(
+        streaming = streaming,
+        content = content,
+    )
+
     TraceMarkdownComposable("Amber MarkdownBlock render") {
-      CompositionLocalProvider(LocalMarkdownFillWidth provides fillWidth) {
+      CompositionLocalProvider(
+          LocalMarkdownFillWidth provides fillWidth,
+          LocalCharRevealController provides revealController,
+      ) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
                 content = content,
@@ -972,6 +986,18 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
+    // B1 char-reveal: pull the active controller (or null when not
+    // streaming) and the base text color so the leaf path can wrap
+    // each codepoint in a SpanStyle whose alpha tracks the fade
+    // window. Reading controller?.nowNanos inside the remember key
+    // makes the AnnotatedString rebuild every frame while reveal is
+    // active — the deliberate per-frame work that delivers the
+    // smooth fade. When controller is null, key is stable and
+    // buildAnnotatedString runs once like before.
+    val revealController = LocalCharRevealController.current
+    val baseColor = LocalContentColor.current
+    val revealClock = revealController?.nowNanos ?: 0L
+
     FlowRow(
         modifier = modifier
             .fillWidthIf(LocalMarkdownFillWidth.current)
@@ -980,7 +1006,14 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
-        val annotatedString = remember(content, enableLatexRendering, onClickUrl) {
+        val annotatedString = remember(
+            content,
+            enableLatexRendering,
+            onClickUrl,
+            revealController,
+            revealClock,
+            baseColor,
+        ) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -994,6 +1027,8 @@ private fun Paragraph(
                         trim = trim,
                         enableLatexRendering = enableLatexRendering,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1103,6 +1138,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     enableLatexRendering: Boolean = true,
     onClickCitation: (String) -> Unit = {},
     onClickUrl: (String) -> Unit = {},
+    baseColor: Color = Color.Unspecified,
+    revealController: CharRevealController? = null,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1124,9 +1161,36 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     it
                 }.replace(BREAK_LINE_REGEX, "\n")
             }
-            append(
-                text = text,
-            )
+            // B1 char-reveal: when an active controller is provided AND we
+            // have a usable baseColor, split the text by codepoint and
+            // wrap each in a SpanStyle whose alpha tracks the reveal
+            // window. baseColor=Unspecified (no LocalContentColor handed
+            // down) falls through to the fast path — visually a no-op
+            // because the reveal effect requires color modulation.
+            //
+            // Offset accuracy: we use node.startOffset + i. trim/regex
+            // replacement can shift this by a few chars, but the resulting
+            // alpha jitter is invisible inside a 200ms fade.
+            if (revealController != null && baseColor != Color.Unspecified) {
+                val baseOffset = node.startOffset
+                var i = 0
+                while (i < text.length) {
+                    val cp = text.codePointAt(i)
+                    val cpLen = Character.charCount(cp)
+                    val alpha = revealController.alphaAt(baseOffset + i)
+                        .coerceIn(0f, 1f)
+                    if (alpha >= 1f) {
+                        append(text, i, i + cpLen)
+                    } else {
+                        withStyle(SpanStyle(color = baseColor.copy(alpha = alpha))) {
+                            append(text, i, i + cpLen)
+                        }
+                    }
+                    i += cpLen
+                }
+            } else {
+                append(text)
+            }
         }
 
         node.type == MarkdownElementTypes.EMPH -> {
@@ -1142,6 +1206,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1160,6 +1226,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1178,6 +1246,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1310,6 +1380,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
+                    baseColor = baseColor,
+                    revealController = revealController,
                 )
             }
         }
