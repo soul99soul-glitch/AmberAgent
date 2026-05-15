@@ -66,6 +66,14 @@ class CharRevealController internal constructor(
         private set
 
     internal fun onFrame(frameNanos: Long) {
+        // Idle short-circuit: nothing in the fade window means there's
+        // no alpha to advance. Holding nowNanos at its previous value
+        // keeps Paragraph's `remember` key stable so finalized
+        // paragraphs in a still-streaming message stop rebuilding
+        // their AnnotatedString every frame. onContentChanged will
+        // bump nowNanos when fresh chars arrive; until then we let
+        // the frame go.
+        if (revealing.isEmpty()) return
         nowNanos = frameNanos
         // Promote chars whose age has crossed the reveal window.
         while (revealing.isNotEmpty()) {
@@ -98,11 +106,18 @@ class CharRevealController internal constructor(
             contentLength = 0
         }
         if (newLength <= contentLength) return
-        val stamp = nowNanos.takeIf { it > 0L } ?: System.nanoTime()
+        // Always use the wall clock so freshly-appearing chars start
+        // their fade from "now", even if onFrame had been quiescent
+        // (idle-short-circuit above held nowNanos at a stale value).
+        // Also bump nowNanos to this stamp so the next frame's alphaAt
+        // sees a sane (≈0) delta — prevents the "first chunk after a
+        // pause renders fully revealed" glitch.
+        val stamp = System.nanoTime()
         for (offset in contentLength until newLength) {
             revealing.addLast(RevealEntry(offset, stamp))
         }
         contentLength = newLength
+        nowNanos = stamp
     }
 
     /**
