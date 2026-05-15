@@ -129,6 +129,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val timelineLoadState by vm.timelineLoadState.collectAsStateWithLifecycle()
     val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
+    val isCompacting by vm.isCompacting.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
     val pendingUserMessageState = vm.pendingUserMessages.collectAsStateWithLifecycle()
@@ -306,6 +307,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     timelineLoadState = timelineLoadState,
                     pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
+                    isCompacting = isCompacting,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -347,6 +349,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     timelineLoadState = timelineLoadState,
                     pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
+                    isCompacting = isCompacting,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -406,6 +409,7 @@ private fun ChatPageContent(
     timelineLoadState: me.rerere.rikkahub.service.ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
+    isCompacting: Boolean,
     drawerState: DrawerState,
     navController: Navigator,
     vm: ChatVM,
@@ -635,6 +639,7 @@ private fun ChatPageContent(
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
+                isCompacting = isCompacting,
                 state = chatListState,
                 loading = loadingJob != null,
                 processingStatus = processingStatus,

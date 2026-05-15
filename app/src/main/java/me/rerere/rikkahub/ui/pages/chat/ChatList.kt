@@ -28,6 +28,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -89,6 +93,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -286,6 +291,88 @@ private fun TimelineHistoryLoadingIndicator(
     }
 }
 
+/**
+ * Codex-style "auto-compacting in progress" divider — two hairlines flanking a
+ * label whose text is painted with a horizontal gradient that sweeps left→right
+ * on an infinite loop. The sweep is implemented via `TextStyle(brush=...)` with
+ * three color stops anchored around `phase`, so the highlight band slides across
+ * the glyphs without redrawing the whole row each frame. Once compaction
+ * completes the consumer swaps this for [ContextCompactMarker] (final state).
+ *
+ * Why the swap instead of fading the same widget: the "completed" marker is
+ * decorative (visual divider in the timeline) and lives forever; the
+ * "in-progress" marker is transient feedback (~5-30s) and shouldn't accumulate
+ * in chat history. Treating them as separate Composables keeps the lifetime
+ * model simple.
+ */
+@Composable
+private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
+    val workspace = workspaceColors()
+    val transition = rememberInfiniteTransition(label = "compactShimmer")
+    val phase by transition.animateFloat(
+        // Sweep range is wider than [0, 1] so the highlight band travels off both
+        // ends — gives a brief "pause" at the edges before the next pass, which
+        // reads as a deliberate rhythm rather than a frantic strobe.
+        initialValue = -0.3f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmerPhase",
+    )
+    val baseColor = workspace.muted
+    // Highlight tone: same hue as the base muted, but brighter so the band reads
+    // as a glint rather than a different color (Codex behaviour, not a rainbow).
+    val highlightColor = workspace.ink
+    val brush = remember(phase, baseColor, highlightColor) {
+        // 5-stop linear gradient: muted → muted → bright → muted → muted, with
+        // the bright stop anchored at `phase`. Width of the bright band is
+        // ~0.15 of the total in each direction = 30% of width feels lit at any
+        // given moment. Wider would wash the text, narrower would feel laser-y.
+        Brush.horizontalGradient(
+            colorStops = arrayOf(
+                0f to baseColor,
+                (phase - 0.15f).coerceIn(0f, 1f) to baseColor,
+                phase.coerceIn(0f, 1f) to highlightColor,
+                (phase + 0.15f).coerceIn(0f, 1f) to baseColor,
+                1f to baseColor,
+            ),
+        )
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = workspace.hairline,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Package01,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = workspace.muted,
+            )
+            Text(
+                text = stringResource(R.string.chat_context_auto_compacting),
+                style = MaterialTheme.typography.labelLarge.copy(brush = brush),
+            )
+        }
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = workspace.hairline,
+        )
+    }
+}
+
 @Composable
 private fun ContextCompactMarker(modifier: Modifier = Modifier) {
     val workspace = workspaceColors()
@@ -412,6 +499,7 @@ fun ChatList(
     timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
+    isCompacting: Boolean = false,
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -462,6 +550,7 @@ fun ChatList(
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
+                isCompacting = isCompacting,
                 state = state,
                 loading = loading,
                 processingStatus = processingStatus,
@@ -499,6 +588,7 @@ private fun ChatListNormal(
     timelineLoadState: ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
+    isCompacting: Boolean,
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -1162,6 +1252,24 @@ private fun ChatListNormal(
                         onCancel = { onCancelPendingMessage(pendingMessage.id) },
                         queueCount = if (index == pendingUserMessages.lastIndex) pendingUserMessages.size else null,
                         onOpenQueue = onOpenQueue,
+                    )
+                }
+            }
+
+            // Codex-style "auto-compacting now" divider. Lives between the
+            // pending-user-messages and the loading indicator so users see the
+            // sequence: [my message] → [shimmer compacting] → [AI thinking] →
+            // [final compacted divider stays in history]. Only rendered while
+            // ConversationContextEngine.compactingConversations contains this
+            // conversation — flips back to false the moment compactConversation
+            // returns (success or failure).
+            if (isCompacting) {
+                item(
+                    key = "compact-in-progress",
+                    contentType = "compact-in-progress",
+                ) {
+                    ContextCompactInProgressMarker(
+                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
                     )
                 }
             }

@@ -397,6 +397,19 @@ class ChatService(
         return getOrCreateSession(conversationId).pendingUserMessages
     }
 
+    /**
+     * Flow of "is this conversation currently being auto-compacted". Drives the
+     * Codex-style shimmer divider above the input bar — the user reported that
+     * compaction events were happening invisibly and they had no signal whether
+     * a long stall was the model thinking, the network hung, or a compaction
+     * silently running. This proxies the underlying ConversationContextEngine
+     * flow so the VM doesn't need to take a direct dependency on the engine.
+     */
+    fun getIsCompactingFlow(conversationId: Uuid): Flow<Boolean> {
+        val key = conversationId.toString()
+        return contextEngine.compactingConversations.map { key in it }
+    }
+
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
         if (getOrCreateSession(conversationId).cancelPendingUserMessage(messageId)) {
             recordPendingQueueEvent(conversationId, event = "cancel", messageId = messageId)

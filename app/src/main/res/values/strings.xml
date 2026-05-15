@@ -278,6 +278,7 @@
   <string name="chat_page_compress_warning">Context will be organized into an expandable summary. Original messages stay in this conversation.</string>
   <string name="chat_page_compressing">Compressing...</string>
   <string name="chat_context_auto_compacted">Context auto-compressed</string>
+  <string name="chat_context_auto_compacting">Auto-compressing</string>
   <string name="chat_page_delete">Delete</string>
   <string name="chat_page_dismiss_error">Dismiss error</string>
   <string name="chat_page_edit_nickname">Edit Nickname</string>

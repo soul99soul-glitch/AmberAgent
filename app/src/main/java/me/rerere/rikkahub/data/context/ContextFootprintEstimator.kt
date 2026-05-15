@@ -42,21 +42,34 @@ object ContextFootprintEstimator {
 
     private fun UIMessagePart.inputFootprintChars(): Int = when (this) {
         is UIMessagePart.Text -> text.length
-        is UIMessagePart.Reasoning -> 0
+        // 2026-05-15: Reasoning was 0 here on the theory "it's not sent back
+        // as input on the next turn." That's WRONG for several real providers
+        // (Claude Extended Thinking, Gemini reasoning) and even when the raw
+        // reasoning isn't re-sent, the prepareContext path counts it via the
+        // planner anyway. Result: UI context ring showed 32K when the model
+        // was actually receiving 173K → user surprised when GLM-5.1 stalled
+        // at "still in 30K usage". Align both estimators (this one and
+        // ConversationContextPlanner.estimatedChars) on the same rule:
+        // count reasoning at its raw length, count tool I/O un-capped.
+        is UIMessagePart.Reasoning -> reasoning.length
         is UIMessagePart.Tool -> {
-            val inputChars = input.length.coerceAtMost(2_000)
+            // Tool output cap dropped from 8_000. The provider sees the full
+            // payload, the UI ring should reflect what the provider sees.
             val outputChars = if (isExecuted) {
-                ToolResultCompactor.summarize(output, maxChars = 8_000).length
+                output.sumOf { it.inputFootprintChars() }
             } else {
                 0
             }
-            inputChars + outputChars
+            input.length + outputChars
         }
-        is UIMessagePart.ToolCall -> arguments.length.coerceAtMost(2_000)
-        is UIMessagePart.ToolResult -> content.toString().takeMiddle(8_000).length
-        is UIMessagePart.Image -> 80
-        is UIMessagePart.Video -> 80
-        is UIMessagePart.Audio -> 80
+        is UIMessagePart.ToolCall -> arguments.length
+        is UIMessagePart.ToolResult -> content.toString().length
+        // See ConversationContextPlanner.estimatedChars for the rationale on
+        // the 4500-char multimodal stand-in (≈ 1125 tokens at the /4 ratio,
+        // mid-range across OpenAI/Claude/Gemini vision token costs).
+        is UIMessagePart.Image -> 4_500
+        is UIMessagePart.Video -> 4_500
+        is UIMessagePart.Audio -> 4_500
         is UIMessagePart.Document -> fileName.length + 80
         UIMessagePart.Search -> 20
     }

@@ -166,13 +166,37 @@ object ConversationContextPlanner {
 
     private fun UIMessagePart.estimatedChars(): Int = when (this) {
         is UIMessagePart.Text -> text.length
-        is UIMessagePart.Reasoning -> reasoning.length.coerceAtMost(256)
-        is UIMessagePart.Tool -> input.length.coerceAtMost(2_000) + output.sumOf { it.estimatedChars() }.coerceAtMost(8_000)
-        is UIMessagePart.ToolCall -> arguments.toString().length.coerceAtMost(2_000)
-        is UIMessagePart.ToolResult -> content.toString().length.coerceAtMost(8_000)
-        is UIMessagePart.Image -> 80
-        is UIMessagePart.Video -> 80
-        is UIMessagePart.Audio -> 80
+        // 2026-05-15: dropped all the `.coerceAtMost(N)` caps. The old caps
+        // (reasoning=256, tool input=2000, tool output=8000) made the estimate
+        // wildly low for tool-heavy / reasoning-heavy conversations — e.g. a
+        // model council run where each turn's tool_call output is ~30KB but
+        // we counted only 8KB. UI showed 32K used / 200K budget while the
+        // model actually saw 173K → forceRatio (85%) never triggered → user's
+        // helper agent stalled mid-council with no compaction kicking in.
+        //
+        // Caps were never load-bearing for performance (`.length` on a String
+        // is O(1)); they were a stab at "approximating what we'd actually send
+        // after truncation," but the provider receives full payloads so the
+        // truer estimate is just the raw length. Pre-compact threshold (70%)
+        // is the canonical pressure-release valve and it MUST fire when real
+        // pressure exists.
+        is UIMessagePart.Reasoning -> reasoning.length
+        is UIMessagePart.Tool -> input.length + output.sumOf { it.estimatedChars() }
+        is UIMessagePart.ToolCall -> arguments.toString().length
+        is UIMessagePart.ToolResult -> content.toString().length
+        // Multimodal inputs: rough provider-agnostic token costs for the input
+        // representation that gets sent to the model. OpenAI vision: ~800-1500
+        // tokens/image depending on tile resolution. Claude vision: tokens =
+        // (w*h)/750, typical phone photos land around 1200 tokens. We can't
+        // peek into the actual bitmap dimensions here cheaply, so pick a
+        // mid-range constant. 4500 chars ≈ 1125 tokens at the same /4 ratio
+        // used below — defensible average across providers.
+        is UIMessagePart.Image -> 4_500
+        is UIMessagePart.Video -> 4_500
+        is UIMessagePart.Audio -> 4_500
+        // Document is uploaded as a file ref; the actual content typically
+        // gets injected as Text by the document-as-prompt transformer, so we
+        // only count the inline metadata here.
         is UIMessagePart.Document -> fileName.length + 80
         UIMessagePart.Search -> 20
     }

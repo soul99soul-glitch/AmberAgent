@@ -87,6 +87,16 @@ class ChatVM(
         chatService
             .getPendingUserMessagesFlow(_conversationId)
 
+    /**
+     * Whether automatic context compaction is currently in progress for THIS
+     * conversation. Drives the Codex-style "———正在自动压缩———" shimmer divider
+     * shown above the chat input while a compact summary is being generated.
+     */
+    val isCompacting: StateFlow<Boolean> =
+        chatService
+            .getIsCompactingFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val conversationJobs = chatService
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())

@@ -2,6 +2,10 @@ package me.rerere.rikkahub.data.context
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -60,6 +64,19 @@ class ConversationContextEngine(
     private val capabilitySnapshotBuilder: AgentCapabilitySnapshotBuilder,
 ) {
     private val compactMutex = Mutex()
+
+    // 2026-05-15: exposes "which conversations are currently compacting" so the
+    // UI can render a Codex-style "———正在自动压缩———" shimmer divider above the
+    // ChatInput while compactConversation runs. Without this signal the user had
+    // zero feedback that compaction was happening — a 30s+ silent stall before
+    // the next AI reply, indistinguishable from a network hang. Set membership
+    // is keyed on conversationId (Uuid as String to align with the
+    // ConversationCompact.conversationId field stored on disk).
+    private val _compactingConversations = MutableStateFlow<Set<String>>(emptySet())
+    val compactingConversations: StateFlow<Set<String>> = _compactingConversations.asStateFlow()
+
+    fun isCompacting(conversationId: Uuid): Boolean =
+        conversationId.toString() in _compactingConversations.value
 
     suspend fun prepareContext(
         conversation: Conversation?,
@@ -206,8 +223,32 @@ class ConversationContextEngine(
         additionalPrompt: String = "",
         force: Boolean = false,
     ): CompactResult = withContext(Dispatchers.IO) {
-        compactMutex.withLock {
-            runCatching {
+        // Mark this conversation as actively compacting BEFORE the mutex
+        // acquire — if another caller already holds the mutex we want the
+        // UI to start showing the shimmer the moment a compact is queued,
+        // not only when it actually starts running. Cleared in finally so
+        // even mutex-acquisition failures (theoretical) reset the flag.
+        val conversationKey = conversation.id.toString()
+        _compactingConversations.update { it + conversationKey }
+        try {
+            compactMutex.withLock {
+                compactInternal(conversation, settings, policy, model, reason, additionalPrompt, force)
+            }
+        } finally {
+            _compactingConversations.update { it - conversationKey }
+        }
+    }
+
+    private suspend fun compactInternal(
+        conversation: Conversation,
+        settings: Settings,
+        policy: CompactPolicy,
+        model: Model?,
+        reason: String,
+        additionalPrompt: String,
+        force: Boolean,
+    ): CompactResult {
+        return runCatching {
                 val compressionModel = model
                     ?: settings.resolveTaskChatModel(settings.compressModelId)
                     ?: error("No model available for compression")
@@ -281,7 +322,6 @@ class ConversationContextEngine(
                 contextRepository.insertEvent(conversation.id, reason, null, error.message.orEmpty())
                 CompactResult(status = "failed", error = error.message ?: error::class.java.simpleName)
             }
-        }
     }
 
     suspend fun invalidateCompacts(conversationId: Uuid, reason: String) {
