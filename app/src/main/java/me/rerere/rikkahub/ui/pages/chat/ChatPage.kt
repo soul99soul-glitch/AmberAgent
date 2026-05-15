@@ -130,6 +130,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val timelineLoadState by vm.timelineLoadState.collectAsStateWithLifecycle()
     val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
     val isCompacting by vm.isCompacting.collectAsStateWithLifecycle()
+    val streamingSummary by vm.streamingSummary.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
     val pendingUserMessageState = vm.pendingUserMessages.collectAsStateWithLifecycle()
@@ -308,6 +309,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
                     isCompacting = isCompacting,
+                    streamingSummary = streamingSummary,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -350,6 +352,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
                     isCompacting = isCompacting,
+                    streamingSummary = streamingSummary,
                     drawerState = drawerState,
                     navController = navController,
                     vm = vm,
@@ -410,6 +413,7 @@ private fun ChatPageContent(
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     isCompacting: Boolean,
+    streamingSummary: String,
     drawerState: DrawerState,
     navController: Navigator,
     vm: ChatVM,
@@ -641,6 +645,7 @@ private fun ChatPageContent(
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 isCompacting = isCompacting,
+                streamingSummary = streamingSummary,
                 state = chatListState,
                 loading = loadingJob != null,
                 processingStatus = processingStatus,

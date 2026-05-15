@@ -410,6 +410,17 @@ class ChatService(
         return contextEngine.compactingConversations.map { key in it }
     }
 
+    /**
+     * Live-streaming summary text for this conversation while compaction is
+     * running. Empty string when not compacting or compaction just finished.
+     * 1.9.6 feature — drives the rolling-text display under the
+     * "———正在自动压缩———" shimmer divider.
+     */
+    fun getStreamingSummaryFlow(conversationId: Uuid): Flow<String> {
+        val key = conversationId.toString()
+        return contextEngine.summaryStreamFlow.map { it[key].orEmpty() }
+    }
+
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
         if (getOrCreateSession(conversationId).cancelPendingUserMessage(messageId)) {
             recordPendingQueueEvent(conversationId, event = "cancel", messageId = messageId)

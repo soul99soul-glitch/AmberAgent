@@ -307,7 +307,10 @@ private fun TimelineHistoryLoadingIndicator(
  * model simple.
  */
 @Composable
-private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
+private fun ContextCompactInProgressMarker(
+    modifier: Modifier = Modifier,
+    streamingText: String = "",
+) {
     val workspace = workspaceColors()
     val transition = rememberInfiniteTransition(label = "compactShimmer")
     val phase by transition.animateFloat(
@@ -382,17 +385,27 @@ private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
                 color = workspace.hairline,
             )
         }
-        // Sub-line under the divider: explains what's actually happening so
-        // users don't conflate the shimmer with generic "waiting for AI".
-        // Stream-rendering the LLM-generated summary text here is a much
-        // bigger change (streamText vs generateText in compactConversation,
-        // plus a per-conversation streaming flow); for now use a static
-        // placeholder. The transient "已自动压缩" marker (8s post-compact)
-        // takes over once the summary lands.
+        // 2026-05-15 (1.9.6): when streamingText is non-empty, show the trailing
+        // 120 chars of the in-flight summary — gives the user a Codex-like
+        // "watch the summary being generated" feel. Whitespace is collapsed
+        // first so multi-line LLM output doesn't push the marker height around
+        // unpredictably; maxLines=2 + ellipsis keeps a stable 2-line slot.
+        // When the stream is still empty (just starting, or model is slow on
+        // first token) we fall back to the generic subtitle so the marker
+        // isn't a confusing void of whitespace.
+        val collapsed = remember(streamingText) {
+            streamingText.replace(Regex("\\s+"), " ").trim()
+        }
+        val tailText = remember(collapsed) {
+            if (collapsed.length > 120) "…" + collapsed.takeLast(120) else collapsed
+        }
         Text(
-            text = stringResource(R.string.chat_context_auto_compacting_subtitle),
+            text = tailText.ifBlank { stringResource(R.string.chat_context_auto_compacting_subtitle) },
             style = MaterialTheme.typography.labelSmall,
             color = workspace.muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 24.dp),
         )
     }
 }
@@ -549,6 +562,7 @@ fun ChatList(
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
     isCompacting: Boolean = false,
+    streamingSummary: String = "",
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -600,6 +614,7 @@ fun ChatList(
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 isCompacting = isCompacting,
+                streamingSummary = streamingSummary,
                 state = state,
                 loading = loading,
                 processingStatus = processingStatus,
@@ -638,6 +653,7 @@ private fun ChatListNormal(
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     isCompacting: Boolean,
+    streamingSummary: String,
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -1412,6 +1428,7 @@ private fun ChatListNormal(
                 ) {
                     ContextCompactInProgressMarker(
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                        streamingText = streamingSummary,
                     )
                 }
             } else if (showRecentlyFinishedMarker) {

@@ -97,6 +97,16 @@ class ChatVM(
             .getIsCompactingFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    /**
+     * Live-streaming summary text for the in-flight compaction. Empty string
+     * when no compaction is running. ChatList renders the trailing portion
+     * under the shimmer divider while the summary is being generated.
+     */
+    val streamingSummary: StateFlow<String> =
+        chatService
+            .getStreamingSummaryFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
     val conversationJobs = chatService
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())

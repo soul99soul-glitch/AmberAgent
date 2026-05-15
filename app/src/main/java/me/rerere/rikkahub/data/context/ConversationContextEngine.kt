@@ -20,6 +20,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.Settings
@@ -77,6 +78,18 @@ class ConversationContextEngine(
 
     fun isCompacting(conversationId: Uuid): Boolean =
         conversationId.toString() in _compactingConversations.value
+
+    // 2026-05-15 (1.9.6): live-streaming summary text per conversation. Updated
+    // on each delta chunk while compactInternal streams the summary; cleared in
+    // the finally block. UI (ContextCompactInProgressMarker) reads this and
+    // renders the trailing 120 chars under the shimmer divider so the user
+    // can see the summary being generated in real time — same vibe as
+    // watching `npm install` print progress. Once compaction finishes the
+    // stream entry is cleared and the transient 8s "已自动压缩" marker
+    // takes over with the FINAL summary preview from
+    // ConversationCompact.summary.
+    private val _summaryStreamFlow = MutableStateFlow<Map<String, String>>(emptyMap())
+    val summaryStreamFlow: StateFlow<Map<String, String>> = _summaryStreamFlow.asStateFlow()
 
     suspend fun prepareContext(
         conversation: Conversation?,
@@ -236,6 +249,12 @@ class ConversationContextEngine(
             }
         } finally {
             _compactingConversations.update { it - conversationKey }
+            // Clear any leftover streaming text — UI swaps to the transient
+            // "已自动压缩" marker which reads from ConversationCompact.summary
+            // (final, persisted). Leaving a partial in _summaryStreamFlow
+            // would either show stale streaming under the next compact or
+            // ghost under the wrong conversation.
+            _summaryStreamFlow.update { it - conversationKey }
         }
     }
 
@@ -286,12 +305,36 @@ class ConversationContextEngine(
                     additionalPrompt = additionalPrompt,
                     sourceMessageIds = plan.sourceMessageIds,
                 )
-                val result = providerHandler.generateText(
+                // 2026-05-15 (1.9.6): switched from generateText (single sync
+                // result) to streamText. Same final summary as before, but each
+                // delta chunk gets accumulated AND pushed to _summaryStreamFlow
+                // so the UI can render the trailing portion live under the
+                // "正在自动压缩" shimmer — answering user's "分割线下面应该自动出
+                // 压缩的内容摘要" without the 200-line streaming refactor I
+                // initially estimated. Stream API was already there in
+                // ProviderHandler; we just weren't using it.
+                val conversationKey = conversation.id.toString()
+                val accumulated = StringBuilder()
+                providerHandler.streamText(
                     providerSetting = provider,
                     messages = listOf(UIMessage.user(prompt)),
                     params = TextGenerationParams(model = compressionModel),
-                )
-                val summary = result.choices.firstOrNull()?.message?.toText()?.trim()
+                ).collect { chunk ->
+                    val deltaParts = chunk.choices.firstOrNull()?.let { choice ->
+                        choice.delta?.parts ?: choice.message?.parts
+                    }.orEmpty()
+                    val deltaText = deltaParts
+                        .filterIsInstance<UIMessagePart.Text>()
+                        .joinToString("") { it.text }
+                    if (deltaText.isNotEmpty()) {
+                        accumulated.append(deltaText)
+                        _summaryStreamFlow.update { map ->
+                            map + (conversationKey to accumulated.toString())
+                        }
+                    }
+                }
+                val summary = accumulated.toString().trim()
+                    .takeIf { it.isNotEmpty() }
                     ?: error("Failed to generate compact summary")
                 val normalizedSummary = normalizeSummaryJson(summary)
                 val now = System.currentTimeMillis()
