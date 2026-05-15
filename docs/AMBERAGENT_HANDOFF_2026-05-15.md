@@ -673,6 +673,53 @@ github-private/refactor/p1-godclass  18bcb40b  docs(handoff): 完整接手文档
 - 读路径后面 **line 301-411 整段** 是巨型 per-load image-model backfill cleanup（filter REMOVED_DEFAULT_PROVIDER_IDS / copyProvider metadata / seed gpt-image-2 + nano-banana-2 by UUID and modelId dedupe）— **M1.1.4 不复制这段 cleanup**，留 SettingsStore，M1.1.8 聚合层处理
 - 写路径：line 508 (providers) + line 551-553 (SEEDED_IMAGE_MODELS_V1 **条件写** `if (imageModelsSeededVersion > 0)`)
 
+### 2026-05-15 — M1.1.4 完成（5e3e4138）+ M1.1.5 完成（8d35add9）+ M1.1.6 完成（1536ab17）+ M1.1.7 完成（a7304025）
+
+7 个 Prefs 全部完成。所有 review subagent **PASS**（M1.1.4 / M1.1.5 / M1.1.6 / M1.1.7 全部 0 blocker；M1.1.4 有 2 个 disclosed warning，其他 0）。0-caller 硬检全程保持。
+
+**M1.1 全图（已完成）**：
+
+| Milestone | commit | Prefs | 字段数 | key 数 | 文件行数 |
+|---|---|---|---:|---:|---:|
+| M1.1.1 | de7eb8e3 | UIPrefs | 6 | 6 | 71 |
+| M1.1.2 | a228d8a5 | SearchPrefs | 10 | 10 | 85 |
+| M1.1.3 | 772aca5e | AgentPrefs | 1 | 1 | 50 |
+| M1.1.4 | 5e3e4138 | ProviderPrefs | 2 | 2 | 56 |
+| M1.1.5 | 8d35add9 | ChatPrefs | 16 | 16 | 111 |
+| M1.1.6 | 1536ab17 | ExtensionPrefs | 16 | 16 | 126 |
+| M1.1.7 | a7304025 | AssistantPrefs | 3 | 3 | 62 |
+| **合计** | — | 7 | 54 | **54 / 55** | 561 |
+
+PreferencesStore.kt 全部 55 个 PreferencesKey 中，**唯一未 mirror 的是 VERSION** (line 85)，仅被 V1/V2/V3Migration 读写（属于迁移基础设施，不属于任何域）。
+
+**M1.1 → M1.1.8 留债清单**（M1.1.7 review 整理）：
+
+1. **7 个 Prefs 单测**：全部缺失。M1.1.8 一起补
+2. **atomic RMW 改造**：7 个 Prefs.update 都是 `read flow.value → edit` 非 atomic 模式。0-caller 期间不暴露，切流前必须改为 `dataStore.edit { p -> /* read + write atomically */ }` 或加 Mutex
+3. **跨域 ID 一致性 cleanup 搬迁**（6 类反向引用 + 4 类内部 cleanup）：
+   - Assistant.chatModelId / modeInjectionIds / lorebookIds / quickMessageIds / mcpServers map / assistantTags ↔ ExtensionPrefs/ChatPrefs/ProviderPrefs 资源
+   - image-model backfill (PreferencesStore.kt:307+)
+   - routing-quickmessages seed (line 373+)
+   - providers REMOVED_DEFAULT_PROVIDER_IDS filter (line 309)
+   - `withAmberAgentAssistantBranding` branding (line 1074-1089)
+4. **assistants 首次安装 backfill 决策**：M1.1.8 聚合层在 disk 空时是 emit `emptyList()` 还是 `DEFAULT_ASSISTANTS`，需对齐 Settings model line 662 `DEFAULT_ASSISTANTS` 语义
+5. **god class 删除**：M1.1.8 完成切流后才能删 `class SettingsStore`（保留 PreferencesStore.kt 文件，给 Phase 3 重命名）
+6. **deviations 文档化**：raw-vs-cleaned 7 处偏差（已在各 commit message 登记）需在 M1.1.8 完成时统一审计是否全部被聚合层 cleanup 覆盖
+
+### 下一步：**M1.1.8 — Phase 1 关键转折点**（蓝图 1d，但实际可能更长）
+
+**M1.1.8 的 5 个子任务**（需用户决策拆分策略）：
+
+| 子任务 | 内容 | 风险 |
+|---|---|---|
+| M1.1.8a | 写聚合层 class（暂名 `SettingsAggregator` / `SettingsRepository`），combine 7 Prefs.flow → Settings 对象 | 低 |
+| M1.1.8b | 把 4 类 cleanup（branding / image-model backfill / routing-qm seed / REMOVED filter）从 SettingsStore reader 搬到聚合层 | 中 |
+| M1.1.8c | 7 个 Prefs 单测 + atomic RMW 改造（7 个 .update 全部重写） | 中 |
+| M1.1.8d | **切流 caller**：把所有 `koin.get<SettingsStore>().settingsFlow` 改为聚合层 — 影响面最大，可能涉及 30+ ViewModel/Worker/Repo/Service/Handler/Transformer/Page | 高 |
+| M1.1.8e | 删 `class SettingsStore`（保留 PreferencesStore.kt 文件） | 低（前置工作完整时） |
+
+**当前最新 HEAD**：`github-private/refactor/p1-godclass @ a7304025`（M1.1.7 commit）
+
 ---
 
 **文档版本**：2026-05-15 Day 1 收尾 + 后期 rebase 追加 + M1.1.2 完成追加
