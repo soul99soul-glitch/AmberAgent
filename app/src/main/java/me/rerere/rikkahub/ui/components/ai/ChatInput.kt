@@ -76,6 +76,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -1390,17 +1392,10 @@ private fun WebOperationPreviewThumbnail(
     onOpen: () -> Unit,
 ) {
     val webViewOperationStore: WebViewOperationStore = koinInject()
-    val webState by webViewOperationStore.state.collectAsState()
+    val webState by webViewOperationStore.state.collectAsStateWithLifecycle()
     val normalizedUrl = remember(url) { url.normalizedWebPreviewUrl() }
-    val isCurrentPreview = remember(
-        toolCallId,
-        normalizedUrl,
-        webState.toolCallId,
-        webState.requestedUrl,
-        webState.committedUrl,
-        webState.url,
-        webState.lastGoodPreviewUrl,
-    ) {
+    // Key only on toolCallId + normalizedUrl (stable), not on webState fields (change on every capture)
+    val isCurrentPreview = remember(toolCallId, normalizedUrl, webState.loadId) {
         webState.matchesPreview(toolCallId = toolCallId, normalizedUrl = normalizedUrl)
     }
     val thumbnailFile = webState.bestThumbnailFile(isCurrentPreview)
@@ -1899,16 +1894,10 @@ private fun OperationWebPreview(
 ) {
     val context = LocalContext.current
     val webViewOperationStore: WebViewOperationStore = koinInject()
-    val webState by webViewOperationStore.state.collectAsState()
+    val webState by webViewOperationStore.state.collectAsStateWithLifecycle()
     val normalizedUrl = remember(url) { url.normalizedWebPreviewUrl() }
-    val isCurrentPreview = remember(
-        normalizedUrl,
-        webState.toolCallId,
-        webState.requestedUrl,
-        webState.committedUrl,
-        webState.url,
-        webState.lastGoodPreviewUrl,
-    ) {
+    // Key only on normalizedUrl + loadId (stable), not on all webState fields
+    val isCurrentPreview = remember(normalizedUrl, webState.loadId) {
         webState.matchesPreview(toolCallId = "", normalizedUrl = normalizedUrl)
     }
     LaunchedEffect(normalizedUrl, isCurrentPreview) {
@@ -1917,7 +1906,6 @@ private fun OperationWebPreview(
         }
     }
     val loadId = webState.loadId.takeIf { isCurrentPreview }
-    val state = rememberWebViewState(url = url)
     DisposableEffect(loadId) {
         if (!loadId.isNullOrBlank()) {
             webViewOperationStore.markRendererActive(loadId, true)
@@ -1929,8 +1917,15 @@ private fun OperationWebPreview(
         }
     }
     val thumbnailFile = webState.bestThumbnailFile(isCurrentPreview)
-    val showLiveWebView = !loadId.isNullOrBlank() &&
-        webState.status in setOf(WebViewLoadStatus.INTERACTIVE, WebViewLoadStatus.READY)
+    val state = rememberWebViewState(url = url)
+    // derivedStateOf keyed on loadId so status transitions are coalesced within a single load.
+    // loadId changes rarely (only on new navigation), so the derivedStateOf instance is stable.
+    val statusReady by remember(loadId) {
+        derivedStateOf {
+            webState.status in setOf(WebViewLoadStatus.INTERACTIVE, WebViewLoadStatus.READY)
+        }
+    }
+    val showLiveWebView = !loadId.isNullOrBlank() && statusReady
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
@@ -2102,9 +2097,8 @@ private fun scheduleThumbnailCaptures(
     context: android.content.Context,
     loadId: String,
 ) {
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 0L, force = true)
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 600L, force = true)
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 1_500L, force = true)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 800L, force = true)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 3_000L, force = true)
 }
 
 private fun captureWebViewThumbnail(
