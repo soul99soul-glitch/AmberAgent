@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.datastore.prefs
 import android.content.Context
 import android.util.Log
 import androidx.datastore.preferences.core.edit
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -58,7 +59,7 @@ class SettingsAggregator(
 ) {
     private val dataStore = context.settingsStore
 
-    val settingsFlow: StateFlow<Settings> = combine(
+    private val _settingsFlow: MutableStateFlow<Settings> = combine(
         uiPrefs.flow,
         searchPrefs.flow,
         agentPrefs.flow,
@@ -83,6 +84,8 @@ class SettingsAggregator(
         .distinctUntilChanged()
         .toMutableStateFlow(scope, Settings.dummy())
 
+    val settingsFlow: StateFlow<Settings> get() = _settingsFlow
+
     /**
      * Atomic write — single [dataStore.edit] block writing all 55 keys.
      * Mirrors [SettingsStore.update] line 485-557 byte-for-byte so character
@@ -93,6 +96,11 @@ class SettingsAggregator(
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
+        // [M1.1.8a W1] Mirror SettingsStore.update line 484 — push value into
+        // flow eagerly so caller reading settingsFlow.value immediately after
+        // update() sees the new value (matches existing god-class semantics
+        // before the dataStore.edit reader cycle completes).
+        _settingsFlow.value = settings
         dataStore.edit { p ->
             p[SettingsStore.DYNAMIC_COLOR] = settings.dynamicColor
             p[SettingsStore.THEME_ID] = settings.themeId
@@ -452,7 +460,28 @@ private fun applyCrossDomainConsistency(settings: Settings): Settings {
     val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
     val validLorebookIds = settings.lorebooks.map { it.id }.toSet()
     val validQuickMessageIds = settings.quickMessages.map { it.id }.toSet()
+    // [M1.1.8a B1] Reader-path search cleanup. SettingsStore reader applied
+    // these inline in the raw decode (PreferencesStore.kt:197-204). The 7
+    // domain Prefs in M1.1.1-7 deliberately skipped them (raw mirror only),
+    // and SettingsStore.update writer also enforces them (line 516-525) — but
+    // a user who never wrote settings (fresh install / migration gap) would
+    // see stale values on read. Apply here so aggregator.settingsFlow is
+    // byte-equivalent to settingsStore.settingsFlow on every read path.
+    val cleanedSearchSelected = if (settings.searchServices.isEmpty()) {
+        0
+    } else {
+        settings.searchServiceSelected.coerceIn(0, settings.searchServices.lastIndex)
+    }
+    val cleanedSearchEnabledIds = settings.searchEnabledServiceIds
+        .filter { id -> settings.searchServices.any { service -> service.id == id } }
+        .ifEmpty {
+            settings.searchServices.getOrNull(cleanedSearchSelected)
+                ?.let { listOf(it.id) }
+                .orEmpty()
+        }
     return settings.copy(
+        searchServiceSelected = cleanedSearchSelected,
+        searchEnabledServiceIds = cleanedSearchEnabledIds,
         providers = settings.providers.distinctBy { it.id }.map { provider ->
             when (provider) {
                 is ProviderSetting.OpenAI -> provider.copy(
@@ -487,9 +516,6 @@ private fun applyCrossDomainConsistency(settings: Settings): Settings {
         ttsProviders = settings.ttsProviders.distinctBy { it.id },
         favoriteModels = settings.favoriteModels.filter { uuid ->
             settings.providers.flatMap { it.models }.any { m -> m.id == uuid }
-        },
-        searchEnabledServiceIds = settings.searchEnabledServiceIds.filter { id ->
-            settings.searchServices.any { service -> service.id == id }
         },
         modeInjections = settings.modeInjections.distinctBy { it.id },
         lorebooks = settings.lorebooks.distinctBy { it.id },
