@@ -10,7 +10,7 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.memory.model.MemoryCandidate
@@ -24,7 +24,7 @@ import me.rerere.rikkahub.data.memory.store.MemoryRepository
 import me.rerere.rikkahub.data.memory.telemetry.MemoryEventLogger
 
 class MemoryDreamPlanner(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepository: MemoryRepository,

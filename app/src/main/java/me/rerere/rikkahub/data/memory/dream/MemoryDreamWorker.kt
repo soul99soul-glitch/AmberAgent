@@ -3,7 +3,7 @@ package me.rerere.rikkahub.data.memory.dream
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.memory.model.MemoryEventType
 import me.rerere.rikkahub.data.memory.telemetry.MemoryEventLogger
 import org.koin.core.component.KoinComponent
@@ -16,7 +16,7 @@ class MemoryDreamWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params), KoinComponent {
     override suspend fun doWork(): Result {
-        val settings = get<SettingsStore>().settingsFlow.value
+        val settings = get<SettingsAggregator>().settingsFlow.value
         val workerSetting = settings.agentRuntime.memoryWorker
         val eventLogger = get<MemoryEventLogger>()
         val notifier = get<MemoryDreamNotifier>()

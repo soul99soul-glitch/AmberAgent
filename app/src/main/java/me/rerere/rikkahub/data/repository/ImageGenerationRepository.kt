@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.first
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.ImageAspectRatio
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.files.FilesManager
@@ -30,7 +30,7 @@ import kotlin.uuid.Uuid
  *    demand via the long-press menu in the timeline.
  */
 class ImageGenerationRepository(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val filesManager: FilesManager,
 ) {

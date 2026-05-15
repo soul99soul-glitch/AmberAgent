@@ -16,7 +16,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.cache.LruCache
 import me.rerere.common.cache.SingleFileCacheStore
 import me.rerere.rikkahub.data.ai.prompts.resolveVisionRecognitionPrompt
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import org.koin.core.component.KoinComponent
@@ -83,7 +83,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
     }
 
     suspend fun performImageRecognition(part: UIMessagePart.Image): String {
-        val settings = get<SettingsStore>().settingsFlow.value
+        val settings = get<SettingsAggregator>().settingsFlow.value
         val model = settings.findModelById(settings.ocrModelId)
             ?: throw VisualRecognitionException("请先配置视觉识别模型")
         if (Modality.IMAGE !in model.inputModalities) {
