@@ -28,6 +28,10 @@ import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.agent.board.TodayBoardDensity
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import androidx.compose.runtime.remember
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.pages.setting.ExperimentDivider
 import me.rerere.rikkahub.ui.pages.setting.ExperimentSectionCard
 import me.rerere.rikkahub.ui.pages.setting.ExperimentalSettingsScaffold
@@ -64,6 +68,41 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                 ExperimentSectionCard(title = "基本设置") {
                     SourceSwitch("启用今日看板", "开启后 Agent 会定时分析信号并生成每日看板",
                         board.enabled) { update { it.copy(enabled = !it.enabled) } }
+                    ExperimentDivider()
+                    // Model picker for board generation
+                    val boardModelUuid = board.boardModelId?.let {
+                        runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
+                    }
+                    val boardModel: Model? = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "看板模型",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = if (boardModel != null) "使用 ${boardModel.displayName}"
+                                   else "跟随主聊天模型",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = workspaceColors().muted,
+                        )
+                        ModelSelector(
+                            modelId = boardModelUuid,
+                            type = ModelType.CHAT,
+                            onSelect = { model ->
+                                update { it.copy(boardModelId = model.id.toString()) }
+                            },
+                            providers = settings.providers,
+                            allowClear = true,
+                            emptyLabel = "跟随主聊天模型",
+                            onClear = {
+                                update { it.copy(boardModelId = null) }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     ExperimentDivider()
                     val notifPermissionOk = remember {
                         runCatching {
