@@ -22,6 +22,7 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
+import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -66,6 +67,10 @@ val dataSourceModule = module {
 
     single {
         AgentPrefs(context = get(), scope = get())
+    }
+
+    single {
+        ProviderPrefs(context = get(), scope = get())
     }
 
     single {
