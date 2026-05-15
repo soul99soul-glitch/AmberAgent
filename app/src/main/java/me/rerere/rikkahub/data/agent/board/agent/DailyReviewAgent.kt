@@ -179,7 +179,10 @@ class DailyReviewAgent(
             runCatching {
                 val response = providerManager.getProviderByType(provider).generateText(
                     providerSetting = provider,
-                    messages = listOf(UIMessage.user(prompt)),
+                    messages = listOf(
+                        UIMessage.system("你是 AmberAgent 的「今日回顾」助理。根据用户提供的数据生成中文 Markdown 日报。直接输出 Markdown，不要代码围栏。"),
+                        UIMessage.user(prompt),
+                    ),
                     params = TextGenerationParams(
                         model = model,
                         customHeaders = model.customHeaders,

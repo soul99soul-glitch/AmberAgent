@@ -89,7 +89,10 @@ class BoardAgent(
         return runCatching {
             val response = providerManager.getProviderByType(provider).generateText(
                 providerSetting = provider,
-                messages = listOf(UIMessage.user(prompt)),
+                messages = listOf(
+                    UIMessage.system("你是 AmberAgent 的「今日看板」助理。基于用户提供的信号产出结构化 JSON 看板。仅输出 JSON，不要代码围栏、不要前后解释。"),
+                    UIMessage.user(prompt),
+                ),
                 params = TextGenerationParams(
                     model = model,
                     customHeaders = model.customHeaders,
