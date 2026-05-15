@@ -446,6 +446,7 @@ Phase 1 上下文（必读）:
 7. 蓝图约束遵循（单文件 < 500 行 / 单测延期到 M1.1.8 等）
 8. 未触及禁区（namespace / DataStore key 名 / 类名 SettingsStore / 其他未拆字段）
 9. 构建/装机验证（assembleNotion / firstInstallTime 保留）
+10. **硬性回归检查（M1.1.2 review 提出）**：grep 确认**所有已拆 Prefs**（UIPrefs/SearchPrefs/...，到 M1.1.7 共 7 个）**仍是 0 caller** — 仅 `DataSourceModule.kt` 注册行 + 自身定义文件。如果发现新 caller 读 `XxxPrefs.flow`，必须 FAIL：因为 M1.1.2-M1.1.7 阶段 raw-vs-cleaned 跨字段 cleanup 留在 SettingsStore，并行 Prefs 仅 mirror raw，提早接 caller 会暴露 edge case 不一致。M1.1.8 聚合层落地后才允许接 caller。
 
 输出 ## 通过项 / ## 警告 / ## 阻塞项 / ## Verdict (PASS/FAIL)
 精炼，路径+行号。
@@ -632,7 +633,24 @@ github-private/refactor/p1-godclass  18bcb40b  docs(handoff): 完整接手文档
 
 `SearchPrefs` 字段、SettingsStore 读写路径、PreferencesStore.kt 行号 — 全部未变。可以按 §6 指引直接开 M1.1.2。
 
+### 2026-05-15 — M1.1.2 SearchPrefs 完成（commit a228d8a5）
+
+- 新增 `app/.../data/datastore/prefs/SearchPrefs.kt`（85 行，10 字段 mirror raw）
+- DataSourceModule 注册 `single { SearchPrefs(get(), get()) }`（在 UIPrefs single 后）
+- 构建 `:app:assembleNotion` 17s ✓，装机 firstInstallTime `2026-01-01 00:03:03` 保留 ✓，无 crash/Koin error ✓
+- review subagent PASS（4 个 warning，0 blocker）
+- 装机设备临时用了 OPPO Find N5（PMA110），Nothing A069 当时未连接 — smoke test 不影响，baseline trace 必须切回 Nothing
+- W1（commit message 笔误说"9 key"实际 10 key）：仅是 commit message 文字错，代码 / 字段映射 / 默认值都对，不修
+- W2（M1.1.x review 必检 "0 caller"）：已写入 §11 review 模板第 10 项
+- W3/W4（atomic RMW + writer 不复制 cleanup）：M1.1.8 兑现，已登记 §7 坑 6
+
+**当前最新 HEAD**：`github-private/refactor/p1-godclass @ a228d8a5`，working tree 仅本 doc 改动。
+
+### 下一步：M1.1.3 AgentPrefs（蓝图估 1d，体量大）
+
+调研重点 — agent 域 PreferencesKey 在 PreferencesStore.kt 中分散，**不是**集中在 `// Agent` block。需要 grep `AGENT_RUNTIME`/`MODEL_COUNCIL`/`SUBAGENT`/`LIVE_MODE`/`FEISHU_OFFICE`/`TODAY_BOARD`/`TERMINAL`/`MEMORY` 等 agent 相关 key，把所有 agent-related 字段聚到 AgentPrefs。
+
 ---
 
-**文档版本**：2026-05-15 Day 1 收尾 + 后期 rebase 追加
+**文档版本**：2026-05-15 Day 1 收尾 + 后期 rebase 追加 + M1.1.2 完成追加
 **下次更新**：开 M1.3 前必须完成 `data/context/` 重新调研后小修 §5 / §6 蓝图引用
