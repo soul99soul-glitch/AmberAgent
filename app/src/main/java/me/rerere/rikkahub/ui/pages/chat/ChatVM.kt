@@ -26,7 +26,7 @@ import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.LAST_CONVERSATION_ID_PREF
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.context.ConversationContextRepository
@@ -53,7 +53,7 @@ private const val TAG = "ChatVM"
 class ChatVM(
     id: String,
     private val context: Application,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val conversationRepo: ConversationRepository,
     private val chatService: ChatService,
     private val analytics: FirebaseAnalytics,

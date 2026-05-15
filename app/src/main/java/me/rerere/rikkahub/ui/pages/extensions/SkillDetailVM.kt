@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.parseMcpServersFromJson
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillManager
 import java.io.File
@@ -35,7 +35,7 @@ data class SkillMcpConfigState(
 
 class SkillDetailVM(
     private val skillManager: SkillManager,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
 ) : ViewModel() {
 
     private val _tree = MutableStateFlow<List<SkillFileNode>>(emptyList())

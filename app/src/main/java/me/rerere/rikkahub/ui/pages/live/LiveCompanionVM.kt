@@ -9,10 +9,10 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.agent.live.LiveModeManager
 import me.rerere.rikkahub.data.agent.live.LiveModeUiState
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 
 class LiveCompanionVM(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val liveModeManager: LiveModeManager,
 ) : ViewModel() {
     val settings: StateFlow<Settings> = settingsStore.settingsFlow

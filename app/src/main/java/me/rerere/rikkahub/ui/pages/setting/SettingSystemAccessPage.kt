@@ -50,7 +50,7 @@ import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.system.AgentPermissionCapability
 import me.rerere.rikkahub.data.agent.system.AgentPermissionRisk
 import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupScope
@@ -61,7 +61,7 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingSystemAccessPage(
     permissionBroker: AgentPermissionBroker = koinInject(),
-    settingsStore: SettingsStore = koinInject(),
+    settingsStore: SettingsAggregator = koinInject(),
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current

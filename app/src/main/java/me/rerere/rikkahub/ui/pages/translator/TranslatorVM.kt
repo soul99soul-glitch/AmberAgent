@@ -11,13 +11,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.util.Locale
 
 private const val TAG = "TranslatorVM"
 
 class TranslatorVM(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val generationHandler: GenerationHandler,
 ) : ViewModel() {
     val settings: StateFlow<Settings> = settingsStore.settingsFlow

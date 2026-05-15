@@ -7,11 +7,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 
 class SettingVM(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val mcpManager: McpManager
 ) :
     ViewModel() {

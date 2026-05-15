@@ -10,7 +10,7 @@ import io.ktor.server.sse.heartbeat
 import io.ktor.server.sse.sse
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ModelType
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.BadRequestException
@@ -28,7 +28,7 @@ import java.util.Locale
 import kotlin.time.Duration.Companion.seconds
 
 fun Route.settingsRoutes(
-    settingsStore: SettingsStore
+    settingsStore: SettingsAggregator
 ) {
     route("/settings") {
         post("/assistant") {

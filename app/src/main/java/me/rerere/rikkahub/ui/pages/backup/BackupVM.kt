@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.sync.core.NO_PASSPHRASE_FALLBACK
 import me.rerere.rikkahub.data.sync.core.RestoreScope
 import me.rerere.rikkahub.data.sync.core.SyncExportRequest
@@ -31,7 +31,7 @@ import java.io.File
 import kotlin.uuid.Uuid
 
 class BackupVM(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val localBackupRepository: LocalBackupRepository,
     private val googleDriveSyncRepository: GoogleDriveSyncRepository,
     googleOAuthConfigGate: GoogleOAuthConfigGate,

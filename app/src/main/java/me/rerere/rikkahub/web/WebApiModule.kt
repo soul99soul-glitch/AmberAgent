@@ -20,7 +20,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
@@ -59,7 +59,7 @@ fun Application.configureWebApi(
     context: Context,
     chatService: ChatService,
     conversationRepo: ConversationRepository,
-    settingsStore: SettingsStore,
+    settingsStore: SettingsAggregator,
     filesManager: FilesManager
 ) {
     val jwtEnabled = settingsStore.settingsFlow.value.webServerJwtEnabled
