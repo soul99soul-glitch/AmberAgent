@@ -539,7 +539,7 @@ val appModule = module {
 
     single {
         TimeAnchorSignalCollector {
-            get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+            get<me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator>()
               .settingsFlow.value.agentRuntime.todayBoard.triggerHours
         }
     }
@@ -556,7 +556,7 @@ val appModule = module {
             boardRepository = get(),
             collectors = collectors,
             settingProvider = {
-                get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+                get<me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator>()
                     .settingsFlow.value.agentRuntime.todayBoard
             },
             onThresholdReached = { get<BoardScheduler>().runIncremental() },

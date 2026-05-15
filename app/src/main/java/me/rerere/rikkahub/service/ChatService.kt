@@ -102,7 +102,7 @@ import me.rerere.rikkahub.data.datastore.toCompactPolicy
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
@@ -180,7 +180,7 @@ private val outputTransformers by lazy {
 class ChatService(
     private val context: Application,
     private val appScope: AppScope,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val conversationRepo: ConversationRepository,
     private val memoryRepository: MemoryRepository,
     private val generationHandler: GenerationHandler,
@@ -488,7 +488,7 @@ class ChatService(
             startTimelineHistoryPrefetch(conversationId)
         } else {
             // 新建对话, 并添加预设消息
-            val currentSettings = settingsStore.settingsFlowRaw.first()
+            val currentSettings = settingsStore.settingsFlow.first()
             val assistant = currentSettings.getCurrentAssistant()
             val newConversation = Conversation.ofId(
                 id = conversationId,

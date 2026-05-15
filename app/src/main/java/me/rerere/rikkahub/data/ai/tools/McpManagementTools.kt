@@ -17,11 +17,11 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.mcp.parseMcpServersFromJson
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.files.SkillManager
 
 fun createMcpManagementTools(
-    settingsStore: SettingsStore,
+    settingsStore: SettingsAggregator,
     mcpManager: McpManager,
     skillManager: SkillManager,
 ): List<Tool> = listOf(
@@ -184,7 +184,7 @@ internal fun kotlinx.serialization.json.JsonElement.mcpArgumentsObject(): JsonOb
     }
 }
 
-private fun findMcpServer(settingsStore: SettingsStore, input: kotlinx.serialization.json.JsonElement): McpServerConfig {
+private fun findMcpServer(settingsStore: SettingsAggregator, input: kotlinx.serialization.json.JsonElement): McpServerConfig {
     val serverId = input.jsonObject["server_id"]?.jsonPrimitive?.contentOrNull
     val name = input.jsonObject["name"]?.jsonPrimitive?.contentOrNull
     return settingsStore.settingsFlow.value.mcpServers.firstOrNull { server ->

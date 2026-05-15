@@ -11,7 +11,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
@@ -23,7 +23,7 @@ fun createSkillTools(
     enabledSkills: Set<String>,
     allSkills: List<SkillMetadata>,
     skillManager: SkillManager,
-    settingsStore: SettingsStore,
+    settingsStore: SettingsAggregator,
     workspaceManager: WorkspaceManager,
 ): List<Tool> {
     val available = allSkills.filter { it.name in enabledSkills }
@@ -229,7 +229,7 @@ private fun skillValidateTool(skillManager: SkillManager, workspaceManager: Work
 
 private fun skillImportTool(
     skillManager: SkillManager,
-    settingsStore: SettingsStore,
+    settingsStore: SettingsAggregator,
     workspaceManager: WorkspaceManager,
 ) = Tool(
     name = "skill_import",
@@ -267,7 +267,7 @@ private fun skillImportTool(
     }
 )
 
-private fun skillEnableTool(settingsStore: SettingsStore, enable: Boolean) = Tool(
+private fun skillEnableTool(settingsStore: SettingsAggregator, enable: Boolean) = Tool(
     name = if (enable) "skill_enable" else "skill_disable",
     description = if (enable) {
         "Enable an installed skill for the default AmberAgent."
@@ -316,7 +316,7 @@ private fun buildSkillArray(skills: List<SkillMetadata>) = buildJsonArray {
     }
 }
 
-private suspend fun updateEnabledSkill(settingsStore: SettingsStore, name: String, enable: Boolean) {
+private suspend fun updateEnabledSkill(settingsStore: SettingsAggregator, name: String, enable: Boolean) {
     settingsStore.update { settings ->
         val currentId = settings.getCurrentAssistant().id
         settings.copy(

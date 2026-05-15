@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.WEB_SERVER_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.web.WebServerManager
 import org.koin.android.ext.android.inject
 
@@ -35,7 +35,7 @@ class WebServerService : Service() {
     }
 
     private val webServerManager: WebServerManager by inject()
-    private val settingsStore: SettingsStore by inject()
+    private val settingsStore: SettingsAggregator by inject()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
@@ -64,7 +64,7 @@ class WebServerService : Service() {
                 // START_STICKY 重启时 intent 为 null
                 startForegroundCompat()
                 serviceScope.launch {
-                    val settings = settingsStore.settingsFlowRaw.first()
+                    val settings = settingsStore.settingsFlow.first()
                     if (settings.webServerEnabled) {
                         startObservingState()
                         webServerManager.start(
