@@ -723,7 +723,15 @@ private fun ChatListNormal(
     var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
     val density = LocalDensity.current
-    val bottomFollowBufferPx = with(density) { 48.dp.toPx().toInt() }
+    // 2026-05-16: 24dp ≈ 1 line of CJK at default size. 48dp (≈ 1.7 lines)
+    // turned out to be too generous — releasing finger with one full visible
+    // line still off-screen would re-arm follow and the next chunk yanked
+    // away. Per M0.3 review feedback. If "靠近底部就跟随" feels too tight at
+    // 24dp, raise back toward 32-36dp; if a "tiny scroll → re-arm → yank"
+    // regression appears (defended originally by `!canScrollForward`), the
+    // M0.3 followMode-guard at LE_scrollProgress.else is the real backstop —
+    // tune buffer freely.
+    val bottomFollowBufferPx = with(density) { 24.dp.toPx().toInt() }
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     val workspace = workspaceColors()
 
