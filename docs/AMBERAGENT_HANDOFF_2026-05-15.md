@@ -566,5 +566,73 @@ git branch -vv
 
 ---
 
-**文档版本**：2026-05-15 Day 1 收尾
-**下次更新**：M1.1 全部完成时（或 M1.1.X 出现重要发现时）补 v2
+## 15. 状态变更追加（rolling updates，从 Day 1 收尾后增量记录）
+
+### 2026-05-15 Day 1 后期 — main 推进 21 commit + phase 分支 rebase
+
+**触发**：用户在 GitHub 上做了"小改动"实际是 21 commit / +3486-950 行 / 版本号 1.9.0 / 350。涉及 chat / context / board / radar 多个功能区。
+
+**rebase 行动**：
+- main: `e33a5e08` → `f4d03954`（fast-forward 拉下 21 commit）
+- refactor/p1-godclass: 4 个 phase commit rebase 到新 main 之上，**0 冲突**
+  - 旧 HEAD: `3d9a9d84` (Day 1 收尾)
+  - 新 HEAD: `18bcb40b`（rebase 后，远程已 force-with-lease push）
+- 4 个 phase commit 全部 byte-精确保留（UIPrefs.kt / PreferencesStore.kt:69 / DataSourceModule.kt）
+- `:app:assembleNotion` BUILD SUCCESSFUL 1m 6s ✓
+- 独立 review subagent PASS
+
+### 21 commit 对 Phase 1 进度的影响
+
+| god class | 21-commit diff | M1.1 影响 |
+|---|---|---|
+| **PreferencesStore.kt** | 0 行 | ✅ 完全不受影响，M1.1 蓝图 100% 仍适用 |
+| GenerationHandler.kt | 0 行 | ✅ |
+| 4 个 god Tools (Local/SystemAccess/FeishuOffice/WebMountPrimitive) | 0 行 | ✅ |
+| ModelCouncilManager.kt | 0 行 | ✅ |
+| **ChatService.kt** | 62 行 | ⚠️ 行数：2261 → **2303**（+42 净）。M1.3 调研数据小漂移 |
+| AppModule.kt | 27+/16- 净 +11 | ⚠️ 行数：664 → **663**（-1）。M1.5 影响轻微 |
+| **ConversationContextEngine.kt** | **+171 行** | ⚠️ 大改动（streaming summary + post-compact ring drift 等），M1.3 ContextPlanner 拆分要重新调研 |
+| AppDatabase.kt | +13 行（加 entity + version 25 + AutoMigration 24→25）| ✅ 跟 DataStore preferences 独立两套存储，不影响 UIPrefs/SettingsStore |
+| DataSourceModule.kt | +8 行（加 docSubscriptionDao + docChangeLogDao single） | ✅ rebase 已合并，跟 UIPrefs single 无重叠 |
+
+### ⭐ M1.3 ContextPlanner 重大发现 — 蓝图 §B 需小修
+
+**蓝图 §B 列 "ContextPlanner" 为 M1.3 待新抽的 5 组件之一，但实际上：**
+
+- `app/src/main/java/me/rerere/rikkahub/data/context/ConversationContextPlanner.kt` 已经存在（**231 行 object**）
+- 同目录还有：
+  - `ConversationContextEngine.kt`（**493 行**，21 commit 后）
+  - `ContextFootprintEstimator.kt`（21 commit +132 行）
+
+**现有 `ConversationContextPlanner` object 职责**：
+- ✓ Token 估算
+- ✓ Compaction plan
+- ✗ 系统提示构建 — 仍在 ContextEngine 里
+- ✗ Memory recall 注入 — 仍在 ContextEngine 里
+
+**M1.3 调整建议**（开 M1.3 时必须先做）：
+1. 花 1-2h 重新调研 `data/context/` 目录现状（用 Explore subagent）
+2. 把蓝图 §B 中 "ContextPlanner" 改写为 **"扩展现有 ConversationContextPlanner object"** 而不是 "新抽"
+3. 评估 ContextEngine 是否要彻底拆，或者只把"系统提示构建" + "Memory recall 注入"从 ContextEngine 迁到 ContextPlanner
+4. 把 ContextEngine 21 commit 加的 +171 行（streaming summary / post-compact ring drift / CJK token weight / fingerprint cap）作为 **characterization test 基线** — M1.3 拆分时不能误改这些近期 fix
+
+### 当前最新 HEAD 状态（接续 §1 项目状态机）
+
+```
+github-private/main                  f4d03954  fix(chat): single boundary marker
+                                    (21 commit ahead of e33a5e08)
+github-private/refactor/p1-godclass  18bcb40b  docs(handoff): 完整接手文档 (rebase 后)
+                                    de7eb8e3  refactor(p1): M1.1.1 — UIPrefs
+                                    a4cd9af3  docs(p1): AssistantPrefs PoC
+                                    90292404  docs(p1): 拆分蓝图 v1
+                                    f4d03954  ← (新基底，main HEAD)
+```
+
+### M1.1.2 起步 (§6) **依然有效，不受 21 commit 影响**
+
+`SearchPrefs` 字段、SettingsStore 读写路径、PreferencesStore.kt 行号 — 全部未变。可以按 §6 指引直接开 M1.1.2。
+
+---
+
+**文档版本**：2026-05-15 Day 1 收尾 + 后期 rebase 追加
+**下次更新**：开 M1.3 前必须完成 `data/context/` 重新调研后小修 §5 / §6 蓝图引用
