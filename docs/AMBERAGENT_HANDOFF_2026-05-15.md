@@ -650,6 +650,29 @@ github-private/refactor/p1-godclass  18bcb40b  docs(handoff): 完整接手文档
 
 调研重点 — agent 域 PreferencesKey 在 PreferencesStore.kt 中分散，**不是**集中在 `// Agent` block。需要 grep `AGENT_RUNTIME`/`MODEL_COUNCIL`/`SUBAGENT`/`LIVE_MODE`/`FEISHU_OFFICE`/`TODAY_BOARD`/`TERMINAL`/`MEMORY` 等 agent 相关 key，把所有 agent-related 字段聚到 AgentPrefs。
 
+### 2026-05-15 — M1.1.3 AgentPrefs 完成（commit 772aca5e）
+
+**遗漏调研结论**：穷举 PreferencesStore.kt 全部 54 个 PreferencesKey，agent 域**唯一独立 key 就是 `AGENT_RUNTIME`**（line 155）。蓝图列的 LiveMode / SubAgent / ModelCouncil / ContextCompaction / MemoryRecall / MemoryWorker / TodayBoard / GenerativeUi / HarnessDebug / SpeculativeToolExecution / FeishuOfficeEnhancement / GenerationRetry / ExternalFileAccess 都是 `AgentRuntimeSetting` 内嵌字段，整体 JSON 序列化进 `AGENT_RUNTIME` 一个 key。所以 AgentPrefs.kt 只 50 行（蓝图原文"目标 ~200 行"是 M1.1.8 聚合后目标，不是 M1.1.3 引入大小）。
+
+**改动**：
+- 新增 `app/.../data/datastore/prefs/AgentPrefs.kt`（50 行，1 字段 mirror raw）
+- DataSourceModule 注册 `single { AgentPrefs(get(), get()) }`（在 SearchPrefs single 后）
+- 构建 `:app:assembleNotion` 15s ✓，装机 firstInstallTime 保留 ✓，PID 21567 运行无 crash ✓
+- review subagent **PASS 干净**（0 warning / 0 blocker）
+- 0-caller 硬检（handoff §11 第 10 项）**首次启用**：grep 确认 UIPrefs/SearchPrefs/AgentPrefs 都仅出现在自身定义 + DataSourceModule 注册行，0 ViewModel/Worker/Repository 引用 — 现有 `agentRuntime` callers 仍走 `SettingsStore.settingsFlow.value.agentRuntime`（RikkaHubApp / Workers / Chat* / SettingTodayBoardPage 等）
+
+**当前最新 HEAD**：`github-private/refactor/p1-godclass @ 772aca5e`
+
+### 下一步：M1.1.4 ProviderPrefs（蓝图估 1d，被 ChatPrefs 单向依赖）
+
+调研重点：
+- 2 个 key：`PROVIDERS` (line 112) + `SEEDED_IMAGE_MODELS_V1` (line 171)
+- 蓝图 §B 风险 R3 — **两者必须一起搬**，否则新 ProviderPrefs 读取时找不到 seed 标志会重复 seed gpt-image-2/nano-banana-2
+- 对应 Settings 2 字段：`providers: List<ProviderSetting>` (line 661) + `imageModelsSeededVersion: Int` (line 699，**注意 boolean→int 0/1 映射**)
+- 读路径：line 235-237 (providers) + line 296 (imageModelsSeededVersion = if true 1 else 0)
+- 读路径后面 **line 301-411 整段** 是巨型 per-load image-model backfill cleanup（filter REMOVED_DEFAULT_PROVIDER_IDS / copyProvider metadata / seed gpt-image-2 + nano-banana-2 by UUID and modelId dedupe）— **M1.1.4 不复制这段 cleanup**，留 SettingsStore，M1.1.8 聚合层处理
+- 写路径：line 508 (providers) + line 551-553 (SEEDED_IMAGE_MODELS_V1 **条件写** `if (imageModelsSeededVersion > 0)`)
+
 ---
 
 **文档版本**：2026-05-15 Day 1 收尾 + 后期 rebase 追加 + M1.1.2 完成追加
