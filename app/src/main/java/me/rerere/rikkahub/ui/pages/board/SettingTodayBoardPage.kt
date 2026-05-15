@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.agent.board.TodayBoardDensity
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
+import androidx.compose.runtime.remember
 import me.rerere.rikkahub.ui.pages.setting.ExperimentDivider
 import me.rerere.rikkahub.ui.pages.setting.ExperimentSectionCard
 import me.rerere.rikkahub.ui.pages.setting.ExperimentalSettingsScaffold
@@ -51,6 +52,8 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
         ))
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+
     ExperimentalSettingsScaffold(title = "今日看板设置") { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -62,11 +65,30 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                     SourceSwitch("启用今日看板", "开启后 Agent 会定时分析信号并生成每日看板",
                         board.enabled) { update { it.copy(enabled = !it.enabled) } }
                     ExperimentDivider()
-                    SourceSwitch("系统通知", "实时捕获设备通知",
+                    val notifPermissionOk = remember {
+                        runCatching {
+                            android.provider.Settings.Secure.getString(
+                                context.contentResolver,
+                                "enabled_notification_listeners"
+                            )?.contains(context.packageName) == true
+                        }.getOrDefault(false)
+                    }
+                    SourceSwitch(
+                        "系统通知",
+                        if (notifPermissionOk) "实时捕获设备通知"
+                        else "⚠ 需要通知访问权限（设置 → 应用 → 特殊权限 → 通知访问）",
                         BoardSignalSourceType.NOTIFICATION in board.enabledSources
                     ) { toggleSource(BoardSignalSourceType.NOTIFICATION, ::update) }
                     ExperimentDivider()
-                    SourceSwitch("日历", "读取今日日程",
+                    val calendarPermissionOk = remember {
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.READ_CALENDAR
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    }
+                    SourceSwitch(
+                        "日历",
+                        if (calendarPermissionOk) "读取今日日程"
+                        else "⚠ 需要日历读取权限",
                         BoardSignalSourceType.CALENDAR in board.enabledSources
                     ) { toggleSource(BoardSignalSourceType.CALENDAR, ::update) }
                     ExperimentDivider()

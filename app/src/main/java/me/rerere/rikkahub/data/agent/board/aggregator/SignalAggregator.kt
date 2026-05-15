@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent.board.aggregator
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -49,7 +50,9 @@ class SignalAggregator(
         val enabledCollectors = collectors.filter { it.sourceType in setting.enabledSources }
         val batches = enabledCollectors.map { collector ->
             async(Dispatchers.IO) {
-                runCatching { collector.collect() }.getOrElse { emptyList() }
+                runCatching { collector.collect() }
+                    .onFailure { Log.w(TAG, "collector ${collector.sourceType} failed", it) }
+                    .getOrElse { emptyList() }
                   .map { collector to it }
             }
         }.awaitAll()
@@ -241,6 +244,8 @@ class SignalAggregator(
     }
 
     companion object {
+        private const val TAG = "SignalAggregator"
+
         /** Signals within this window are checked for dedup. */
         private const val DEDUP_WINDOW_MS = 24L * 60L * 60L * 1000L
 

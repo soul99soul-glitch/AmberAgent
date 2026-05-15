@@ -53,6 +53,8 @@ class BoardWorker(
 
         runCatching {
             aggregator.collectAll()
+        }.onFailure {
+            android.util.Log.w("BoardWorker", "collectAll failed", it)
         }
 
         val scored = aggregator.getFilteredSignals(limit = 200)
@@ -82,6 +84,10 @@ class BoardWorker(
             }
 
             BoardRunResult.Empty -> {
+                // Mark as processed: Empty means the agent reviewed the signals and
+                // found nothing board-worthy. Not marking them would cause infinite
+                // re-processing + unbounded table growth (pruneProcessedSignalsBefore
+                // only deletes processed=1 rows).
                 repository.markSignalsProcessed(scored.map { it.signal.id })
                 pruneOldItems(repository, boardDate)
                 maybeRunDailyReview(boardDate)
@@ -109,8 +115,8 @@ class BoardWorker(
         val now = ZonedDateTime.now()
         val hour = now.hour
         val phase = when (hour) {
-            in 13..14 -> DailyReviewAgent.PHASE_NOON
-            in 19..23 -> DailyReviewAgent.PHASE_EVENING
+            in 12..14 -> DailyReviewAgent.PHASE_NOON
+            in 18..23 -> DailyReviewAgent.PHASE_EVENING
             else -> return // outside review windows
         }
         runCatching {
