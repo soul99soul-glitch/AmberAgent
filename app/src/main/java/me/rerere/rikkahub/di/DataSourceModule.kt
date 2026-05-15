@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
@@ -86,6 +87,20 @@ val dataSourceModule = module {
 
     single {
         AssistantPrefs(context = get(), scope = get())
+    }
+
+    single {
+        SettingsAggregator(
+            context = get(),
+            uiPrefs = get(),
+            searchPrefs = get(),
+            agentPrefs = get(),
+            providerPrefs = get(),
+            chatPrefs = get(),
+            extensionPrefs = get(),
+            assistantPrefs = get(),
+            scope = get(),
+        )
     }
 
     single {
