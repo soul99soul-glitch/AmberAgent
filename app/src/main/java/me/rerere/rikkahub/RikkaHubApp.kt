@@ -287,6 +287,8 @@ class RikkaHubApp : Application() {
                             // CAS guards against two rapid ON_START events passing the gap check.
                             if (!lastForegroundCompensationMs.compareAndSet(last, now)) return@runCatching
                             get<BoardScheduler>().runOnce()
+                            // Also trigger doc radar check on foreground return
+                            runCatching { get<me.rerere.rikkahub.data.agent.office.radar.DocRadar>().runOnce() }
                         }.onFailure { Log.e(TAG, "foreground compensation failed", it) }
                     }
                 }
