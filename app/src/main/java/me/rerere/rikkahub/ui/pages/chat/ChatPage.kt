@@ -361,9 +361,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     onPreviewWorkspaceFile = { previewFilePath = it },
                 )
             }
-            BackHandler(drawerState.isOpen) {
-                scope.launch { drawerState.close() }
-            }
         }
     }
     if (showWorkspaceSheet) {

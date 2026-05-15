@@ -35,7 +35,9 @@ class BoardAgent(
         val prompt = BoardPrompt.build(scoredSignals, focusRules, density)
 
         val rawText = callModel(settings, prompt)
-            ?: return BoardRunResult.Failed("model call failed")
+            ?: return BoardRunResult.Failed(
+                "model call failed" + (lastCallFailureReason?.let { "：$it" } ?: "")
+            )
 
         val parsed = BoardOutputParser.parse(rawText)
             ?: retry(settings, prompt)
@@ -69,9 +71,21 @@ class BoardAgent(
         return BoardOutputParser.parse(text)
     }
 
+    /** Stores the reason for the last callModel failure for user-facing messages. */
+    private var lastCallFailureReason: String? = null
+
     private suspend fun callModel(settings: Settings, prompt: String): String? {
-        val model = resolveModel(settings) ?: return null
-        val provider = model.findProvider(settings.providers) ?: return null
+        val model = resolveModel(settings)
+        if (model == null) {
+            lastCallFailureReason = "请先配置聊天模型（设置 → 模型）"
+            return null
+        }
+        val provider = model.findProvider(settings.providers)
+        if (provider == null) {
+            lastCallFailureReason = "模型 ${model.displayName} 的提供商不可用"
+            return null
+        }
+        lastCallFailureReason = null
         return runCatching {
             val response = providerManager.getProviderByType(provider).generateText(
                 providerSetting = provider,
@@ -83,8 +97,10 @@ class BoardAgent(
                 ),
             )
             response.choices.firstOrNull()?.message?.toText()
-        }.onFailure { Log.e(TAG, "board model call failed", it) }
-            .getOrNull()
+        }.onFailure { e ->
+            Log.e(TAG, "board model call failed", e)
+            lastCallFailureReason = e.message?.take(100) ?: e::class.simpleName
+        }.getOrNull()
     }
 
     private fun resolveModel(settings: Settings): me.rerere.ai.provider.Model? {
