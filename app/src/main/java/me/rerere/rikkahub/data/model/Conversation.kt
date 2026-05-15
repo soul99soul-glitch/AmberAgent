@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.model
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -99,6 +100,14 @@ data class Conversation(
     }
 }
 
+// @Immutable: all four constructor properties are val + stable types
+// (Uuid, immutable List of @Immutable UIMessage, Int, Boolean). Lets
+// Compose skip recomposition of ChatMessage Composables when the
+// LazyColumn item passes an unchanged historical node by reference —
+// during streaming, only the trailing assistant MessageNode gets a
+// new instance; earlier nodes' references stay the same flush after
+// flush, and @Immutable converts that into a real recomposition skip.
+@Immutable
 @Serializable
 data class MessageNode(
     val id: Uuid = Uuid.random(),
