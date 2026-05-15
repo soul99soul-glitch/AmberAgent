@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -488,7 +489,7 @@ class ChatService(
             startTimelineHistoryPrefetch(conversationId)
         } else {
             // 新建对话, 并添加预设消息
-            val currentSettings = settingsStore.settingsFlow.first()
+            val currentSettings = settingsStore.settingsFlow.filterNot { it.init }.first()
             val assistant = currentSettings.getCurrentAssistant()
             val newConversation = Conversation.ofId(
                 id = conversationId,

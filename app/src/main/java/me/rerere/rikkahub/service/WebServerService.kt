@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
@@ -64,7 +65,7 @@ class WebServerService : Service() {
                 // START_STICKY 重启时 intent 为 null
                 startForegroundCompat()
                 serviceScope.launch {
-                    val settings = settingsStore.settingsFlow.first()
+                    val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
                     if (settings.webServerEnabled) {
                         startObservingState()
                         webServerManager.start(

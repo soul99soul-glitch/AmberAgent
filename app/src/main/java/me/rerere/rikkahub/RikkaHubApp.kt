@@ -25,6 +25,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.common.android.appTempFolder
@@ -137,9 +138,12 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 val store = get<SettingsAggregator>()
-                val current = store.settingsFlow.first()
+                // [M1.1.8d-3-fix] filterNot { init } 等价于 SettingsStore.settingsFlowRaw.first()
+                // 的冷流挂起语义；Aggregator 的 settingsFlow 是 MutableStateFlow(dummy()) ，
+                // 不过滤会立刻拿到 dummy 然后 update() 被 dummy guard 拒绝（launchCount 永 0）。
+                val current = store.settingsFlow.filterNot { it.init }.first()
                 store.update(current.copy(launchCount = current.launchCount + 1))
-                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlow.first().launchCount}")
+                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlow.filterNot { it.init }.first().launchCount}")
             }.onFailure {
                 Log.e(TAG, "incrementLaunchCount failed", it)
             }
@@ -179,7 +183,7 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 delay(500)
-                val settings = get<SettingsAggregator>().settingsFlow.first()
+                val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
                 if (settings.webServerEnabled) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         ContextCompat.checkSelfPermission(
