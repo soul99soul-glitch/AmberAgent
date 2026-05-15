@@ -12,6 +12,7 @@ import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
 import android.util.Log
+import me.rerere.rikkahub.BuildConfig
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -728,9 +729,12 @@ private fun ChatListNormal(
 
     // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
     // transition point so we can correlate "哗哗出字最后没贴底" timeline
-    // events from logcat. Remove with the rest of M0.1 logging after the
-    // root cause is fixed.
+    // events from logcat. Gated on BuildConfig.DEBUG so the unconditional
+    // Log.d is stripped in release variants — Android does not strip Log.d
+    // automatically without ProGuard rules. Remove with the rest of M0.1
+    // logging after the root cause is fixed.
     fun logScroll(event: String, extra: String = "") {
+        if (!BuildConfig.DEBUG) return
         Log.d(
             SCROLL_TAG,
             "[$event] follow=$followMode prog=$programmaticScrollInProgress " +
@@ -1025,21 +1029,49 @@ private fun ChatListNormal(
                 )
             }
         } else {
-            if (activeGenerationState && !programmaticScrollInProgress) {
-                // Resume follow ONLY when the list cannot scroll forward at all — i.e. the user
-                // truly scrolled back to the very bottom (no buffer wiggle room). Stricter than
-                // isAtTimelineBottom(bottomFollowBufferPx); avoids the old "tiny scroll ends
-                // within bufferPx → re-arm follow → next chunk yanks the user away" bug.
-                if (!state.canScrollForward) {
-                    logScroll("LE_scrollProgress.stop", "→ resumeBottomFollow (canScrollForward=false)")
+            // 2026-05-16 M0.3 fix: gate on followMode == PausedForUser to
+            // defeat a race where endProgrammaticScroll's withFrameNanos {}
+            // flipped prog=false BEFORE this LE re-ran on
+            // isScrollInProgress=false. Without the followMode guard we
+            // misread "programmatic scroll just ended" as "user stopped
+            // scrolling mid-list" and paused auto-follow, stranding the
+            // entire rest of the streaming response off-screen (logcat
+            // proof: 01:24:02.260-.270, follow flipped FollowingBottom →
+            // PausedForUser within the same ms as endProgrammaticScroll).
+            //
+            // Invariant: any genuine user scroll passed through pointerDown
+            // / the if-branch above and set follow=PausedForUser. So this
+            // else-branch only needs to decide "did the user release at the
+            // bottom?" — never to demote from FollowingBottom.
+            if (
+                activeGenerationState &&
+                !programmaticScrollInProgress &&
+                followMode == TimelineFollowMode.PausedForUser
+            ) {
+                // 2026-05-16: relaxed the bottom check from `!canScrollForward`
+                // (must be at the absolute scroll-max, no wiggle room) to
+                // `isAtTimelineBottom(bottomFollowBufferPx)` (within 48dp of
+                // the bottom). User feedback: the strict version felt
+                // unforgiving — had to scrub every last pixel before follow
+                // re-armed. Trade-off the M0.3 guard above mostly defeats:
+                // a short user scroll ending within 48dp could re-arm follow
+                // and the next chunk yanks back. If that resurfaces, lower
+                // bottomFollowBufferPx or add a brief user-input cooldown.
+                if (state.isAtTimelineBottom(bottomFollowBufferPx)) {
+                    logScroll("LE_scrollProgress.stop", "→ resumeBottomFollow (isAtBottom buffer=${bottomFollowBufferPx}px)")
                     resumeBottomFollow()
                 } else {
-                    logScroll("LE_scrollProgress.stop", "→ pauseAutoFollowTemporarily (canScrollForward=true)")
+                    logScroll("LE_scrollProgress.stop", "→ keep PausedForUser (not at bottom)")
                     pauseAutoFollowTemporarily(
                         mode = TimelineFollowMode.PausedForUser,
                         scheduleIdleReturn = true,
                     )
                 }
+            } else {
+                logScroll(
+                    "LE_scrollProgress.stop",
+                    "→ noop guarded (follow=$followMode prog=$programmaticScrollInProgress)"
+                )
             }
             delay(1500)
             isRecentScroll = false
@@ -1072,6 +1104,7 @@ private fun ChatListNormal(
                 !state.isScrollInProgress &&
                 state.isAtTimelineBottom(bottomFollowBufferPx)
             ) {
+                logScroll("LE_30sResume.fired", "→ resumeBottomFollow + scrollToTimelineBottom")
                 resumeBottomFollow()
                 scrollToTimelineBottom()
             }
