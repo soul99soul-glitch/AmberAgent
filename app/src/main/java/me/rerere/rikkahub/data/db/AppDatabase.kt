@@ -33,7 +33,11 @@ import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
+import me.rerere.rikkahub.data.db.entity.DocSubscriptionEntity
+import me.rerere.rikkahub.data.db.entity.DocChangeLogEntity
 import me.rerere.rikkahub.data.db.dao.DailyReviewDAO
+import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
+import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
 import me.rerere.rikkahub.data.db.entity.FeishuDocChangeEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocDependencyEntity
 import me.rerere.rikkahub.data.db.entity.FeishuDocSnapshotEntity
@@ -72,8 +76,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         BoardFocusRuleEntity::class,
         BoardWeightEntity::class,
         DailyReviewEntity::class,
+        DocSubscriptionEntity::class,
+        DocChangeLogEntity::class,
     ],
-    version = 24,
+    version = 25,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -88,6 +94,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 16, to = 17, spec = Migration_16_17::class),
         AutoMigration(from = 17, to = 18),
         AutoMigration(from = 23, to = 24),
+        AutoMigration(from = 24, to = 25),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -131,6 +138,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun boardWeightDao(): BoardWeightDAO
 
     abstract fun dailyReviewDao(): DailyReviewDAO
+
+    abstract fun docSubscriptionDao(): DocSubscriptionDAO
+
+    abstract fun docChangeLogDao(): DocChangeLogDAO
 }
 
 object TokenUsageConverter {
