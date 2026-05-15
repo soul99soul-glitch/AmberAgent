@@ -522,6 +522,7 @@ private fun ChatPageContent(
                     loading = loadingJob != null,
                     settings = setting,
                     conversation = conversation,
+                    contextCompacts = contextCompacts,
                     pendingQueueCount = pendingQueueCount,
                     hazeState = hazeState,
                     timelineScrolling = chatListState.isScrollInProgress,

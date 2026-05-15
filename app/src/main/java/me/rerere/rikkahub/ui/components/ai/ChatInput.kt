@@ -215,6 +215,7 @@ fun ChatInput(
     state: ChatInputState,
     loading: Boolean,
     conversation: Conversation,
+    contextCompacts: List<me.rerere.rikkahub.data.context.ConversationCompact> = emptyList(),
     pendingQueueCount: Int = 0,
     settings: Settings,
     hazeState: HazeState,
@@ -589,6 +590,7 @@ fun ChatInput(
                             ) {
                                 ContextUsageIndicator(
                                     conversation = conversation,
+                                    contextCompacts = contextCompacts,
                                     model = chatModel,
                                     modifier = Modifier.padding(start = 3.dp),
                                 )
@@ -750,14 +752,27 @@ fun ChatInput(
 @Composable
 private fun ContextUsageIndicator(
     conversation: Conversation,
+    contextCompacts: List<me.rerere.rikkahub.data.context.ConversationCompact>,
     model: Model?,
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
     val currentMessages = conversation.currentMessages
     val contextFingerprint = ContextFootprintEstimator.inputFingerprint(currentMessages)
-    val estimatedTokens = remember(contextFingerprint) {
-        ContextFootprintEstimator.estimateConversationInputTokens(conversation)
+    // 2026-05-15: estimator now consumes active compacts so the ring reflects
+    // the POST-substitution footprint (summary + recent messages), not the
+    // raw timeline. Without this, every successful compaction would leave the
+    // ring stuck at the pre-compact reading and the indicator would erode
+    // user trust (training them to ignore a permanently-red ring).
+    // Fingerprint must also depend on compact identity so a new compact (or
+    // an invalidation) re-runs the estimator. Combining via simple xor — both
+    // values are 64-bit hashes already, collision risk is negligible at the
+    // scale of a chat history.
+    val compactsFingerprint = remember(contextCompacts) {
+        contextCompacts.fold(0L) { acc, c -> (acc * 31) xor c.id.hashCode().toLong() xor c.tokenEstimate.toLong() }
+    }
+    val estimatedTokens = remember(contextFingerprint, compactsFingerprint) {
+        ContextFootprintEstimator.estimateConversationInputTokens(conversation, contextCompacts)
     }
     val usedTokens = estimatedTokens
     val contextWindow = remember(model?.modelId, model?.contextWindowTokens) {

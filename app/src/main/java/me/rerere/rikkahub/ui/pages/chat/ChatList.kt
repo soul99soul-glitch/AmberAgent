@@ -312,11 +312,14 @@ private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
     val phase by transition.animateFloat(
         // Sweep range is wider than [0, 1] so the highlight band travels off both
         // ends — gives a brief "pause" at the edges before the next pass, which
-        // reads as a deliberate rhythm rather than a frantic strobe.
+        // reads as a deliberate rhythm rather than a frantic strobe. 1400ms is
+        // the sweet spot the reviewer flagged: 1800ms felt sluggish, 1000ms
+        // felt frantic. Restart (not Reverse) means the highlight always goes
+        // left→right, matching Codex's reading direction.
         initialValue = -0.3f,
         targetValue = 1.3f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_800, easing = LinearEasing),
+            animation = tween(durationMillis = 1_400, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "shimmerPhase",
@@ -325,21 +328,23 @@ private fun ContextCompactInProgressMarker(modifier: Modifier = Modifier) {
     // Highlight tone: same hue as the base muted, but brighter so the band reads
     // as a glint rather than a different color (Codex behaviour, not a rainbow).
     val highlightColor = workspace.ink
-    val brush = remember(phase, baseColor, highlightColor) {
-        // 5-stop linear gradient: muted → muted → bright → muted → muted, with
-        // the bright stop anchored at `phase`. Width of the bright band is
-        // ~0.15 of the total in each direction = 30% of width feels lit at any
-        // given moment. Wider would wash the text, narrower would feel laser-y.
-        Brush.horizontalGradient(
-            colorStops = arrayOf(
-                0f to baseColor,
-                (phase - 0.15f).coerceIn(0f, 1f) to baseColor,
-                phase.coerceIn(0f, 1f) to highlightColor,
-                (phase + 0.15f).coerceIn(0f, 1f) to baseColor,
-                1f to baseColor,
-            ),
-        )
-    }
+    // No `remember` wrap here — `phase` changes every frame so caching is a
+    // no-op. Build the brush directly per recomposition; the cost is 5
+    // ColorStop allocations, which is negligible vs the canvas redraw the
+    // gradient triggers anyway.
+    // 5-stop linear gradient: muted → muted → bright → muted → muted, with
+    // the bright stop anchored at `phase`. Width of the bright band is
+    // ~0.15 of the total in each direction = 30% of width feels lit at any
+    // given moment. Wider would wash the text, narrower would feel laser-y.
+    val brush = Brush.horizontalGradient(
+        colorStops = arrayOf(
+            0f to baseColor,
+            (phase - 0.15f).coerceIn(0f, 1f) to baseColor,
+            phase.coerceIn(0f, 1f) to highlightColor,
+            (phase + 0.15f).coerceIn(0f, 1f) to baseColor,
+            1f to baseColor,
+        ),
+    )
     Row(
         modifier = modifier
             .fillMaxWidth()

@@ -165,8 +165,8 @@ object ConversationContextPlanner {
     }
 
     private fun UIMessagePart.estimatedChars(): Int = when (this) {
-        is UIMessagePart.Text -> text.length
-        // 2026-05-15: dropped all the `.coerceAtMost(N)` caps. The old caps
+        // 2026-05-15: dropped all the `.coerceAtMost(N)` caps + added CJK weight
+        // (×4 for ideographs to match BPE tokenizer density). The old caps
         // (reasoning=256, tool input=2000, tool output=8000) made the estimate
         // wildly low for tool-heavy / reasoning-heavy conversations — e.g. a
         // model council run where each turn's tool_call output is ~30KB but
@@ -174,16 +174,22 @@ object ConversationContextPlanner {
         // model actually saw 173K → forceRatio (85%) never triggered → user's
         // helper agent stalled mid-council with no compaction kicking in.
         //
-        // Caps were never load-bearing for performance (`.length` on a String
-        // is O(1)); they were a stab at "approximating what we'd actually send
-        // after truncation," but the provider receives full payloads so the
-        // truer estimate is just the raw length. Pre-compact threshold (70%)
-        // is the canonical pressure-release valve and it MUST fire when real
-        // pressure exists.
-        is UIMessagePart.Reasoning -> reasoning.length
-        is UIMessagePart.Tool -> input.length + output.sumOf { it.estimatedChars() }
-        is UIMessagePart.ToolCall -> arguments.toString().length
-        is UIMessagePart.ToolResult -> content.toString().length
+        // CJK weighting (delegated to ContextFootprintEstimator.weightedTokenChars
+        // so the planner and UI ring agree to the character): 1 CJK char ≈ 1-2
+        // BPE tokens (GLM/Qwen), 1 ASCII char ≈ 0.25 tokens. With ×4 weight on
+        // CJK chars + `/ 4` divide downstream, net effect is ~1 tok/CJK,
+        // ~0.25 tok/ASCII. Without this, a Chinese conversation was still 3×
+        // under-counted even after the caps came off.
+        //
+        // Caps were never load-bearing for performance (`String.length` is O(1));
+        // they were a stab at "approximating what we'd actually send after
+        // truncation," but the provider receives full payloads so the truer
+        // estimate is just the raw weighted length.
+        is UIMessagePart.Text -> text.weightedTokenChars()
+        is UIMessagePart.Reasoning -> reasoning.weightedTokenChars()
+        is UIMessagePart.Tool -> input.weightedTokenChars() + output.sumOf { it.estimatedChars() }
+        is UIMessagePart.ToolCall -> arguments.toString().weightedTokenChars()
+        is UIMessagePart.ToolResult -> content.toString().weightedTokenChars()
         // Multimodal inputs: rough provider-agnostic token costs for the input
         // representation that gets sent to the model. OpenAI vision: ~800-1500
         // tokens/image depending on tile resolution. Claude vision: tokens =
