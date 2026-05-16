@@ -220,13 +220,15 @@ class CharRevealController internal constructor(
         }
 
         nowNanos = frameNanos
-        // Promote entries whose age has crossed the (backpressure-
-        // adjusted) reveal window. Effective duration is recomputed
-        // each frame because queue depth changes as we promote.
+        // Promote entries whose age has crossed THEIR OWN reveal
+        // window. Each entry was stamped with the effective duration
+        // active when it was added (see B5.1 in onContentChanged), so
+        // the loop is consistent: each entry uses the duration we
+        // promised it, not whatever the queue depth happens to make
+        // effective at this frame.
         while (revealing.isNotEmpty()) {
-            val effective = effectiveRevealDurationNanos()
             val head = revealing.first()
-            if (frameNanos - head.appearNanos >= effective) {
+            if (frameNanos - head.appearNanos >= head.revealDurationNanos) {
                 revealedHead = maxOf(revealedHead, head.endOffset)
                 revealing.removeFirst()
             } else {
@@ -307,11 +309,19 @@ class CharRevealController internal constructor(
         }
 
         if (sliceFrom < newLength) {
+            // B5.1: lock the effective duration NOW for everything we're
+            // about to add. queue depth used = depth before this batch
+            // (we add below); a long batch shares one duration, which
+            // is the simpler approximation than per-entry "expected
+            // final depth" — and it's still correct in spirit (all
+            // chars in this chunk arrived at the same moment).
+            val effectiveAtStamp = effectiveRevealDurationNanos()
             sliceTailIntoEntries(
                 content = newContent,
                 startInclusive = sliceFrom,
                 endExclusive = newLength,
                 stamp = stamp,
+                revealDurationNanos = effectiveAtStamp,
                 into = revealing,
             )
         }
@@ -333,15 +343,18 @@ class CharRevealController internal constructor(
     fun alphaAt(absoluteOffset: Int): Float {
         if (absoluteOffset < revealedHead) return 1f
         if (absoluteOffset >= contentLength) return 0f
-        val effective = effectiveRevealDurationNanos()
-        if (effective <= 0L) return 1f
         // Linear search within the active queue. Entries are appended
         // in monotonically-increasing offset order, so once we pass an
         // entry whose startOffset already exceeds the lookup, nothing
         // further in the queue can contain the offset — early break.
+        // Each entry uses ITS OWN revealDurationNanos (B5.1) so the
+        // alpha curve never reverses if the queue depth changes
+        // mid-fade.
         revealing.fastForEach { entry ->
             if (entry.startOffset > absoluteOffset) return 1f
             if (absoluteOffset in entry.startOffset until entry.endOffset) {
+                val effective = entry.revealDurationNanos
+                if (effective <= 0L) return 1f
                 val age = nowNanos - entry.appearNanos
                 if (age <= 0L) return 0f
                 if (age >= effective) return 1f
@@ -364,6 +377,16 @@ class CharRevealController internal constructor(
         val startOffset: Int,  // inclusive
         val endOffset: Int,    // exclusive
         val appearNanos: Long,
+        // B5.1: effective fade window LOCKED at this entry's stamp
+        // time, computed from queue depth at the moment it was added.
+        // Per-entry duration prevents alphaAt() from snapping a char's
+        // alpha when queue depth fluctuates after the entry is in
+        // flight — without this, a depth shrink (50→35) would push
+        // effective duration up (140ms→200ms) and a char already
+        // rendering at α=0.71 would jump back to α=0.50 next frame
+        // (visible alpha regression). Stamping at entry time ties
+        // the fade rate to "what we promised when this char arrived".
+        val revealDurationNanos: Long,
     )
 
     private companion object {
@@ -385,6 +408,7 @@ class CharRevealController internal constructor(
             startInclusive: Int,
             endExclusive: Int,
             stamp: Long,
+            revealDurationNanos: Long,
             into: ArrayDeque<RevealEntry>,
         ) {
             // wordRunStart tracks the start of an in-progress Latin/digit
@@ -398,17 +422,17 @@ class CharRevealController internal constructor(
                 if (isWordBreaker) {
                     // Flush any in-progress word run first.
                     if (wordRunStart >= 0) {
-                        into.addLast(RevealEntry(wordRunStart, i, stamp))
+                        into.addLast(RevealEntry(wordRunStart, i, stamp, revealDurationNanos))
                         wordRunStart = -1
                     }
-                    into.addLast(RevealEntry(i, i + cpLen, stamp))
+                    into.addLast(RevealEntry(i, i + cpLen, stamp, revealDurationNanos))
                 } else {
                     if (wordRunStart < 0) wordRunStart = i
                 }
                 i += cpLen
             }
             if (wordRunStart >= 0) {
-                into.addLast(RevealEntry(wordRunStart, endExclusive, stamp))
+                into.addLast(RevealEntry(wordRunStart, endExclusive, stamp, revealDurationNanos))
             }
         }
 
