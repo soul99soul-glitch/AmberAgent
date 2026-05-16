@@ -110,16 +110,41 @@ class ConversationContextEngine(
         promptOverheadTokens: Int = 0,
     ): PreparedContext {
         val policy = settings.agentRuntime.contextCompaction.toCompactPolicy()
+        val editResult = if (policy.enabled) {
+            PreparedContextEditor.edit(
+                messages = messages,
+                keepRecentMessages = (policy.keepRecentTurns * 2).coerceAtLeast(4),
+            )
+        } else {
+            val estimate = ConversationContextPlanner.estimateTokens(messages)
+            PreparedContextEditResult(
+                messages = messages,
+                trace = ContextPreparationTrace(
+                    originalTokenEstimate = estimate,
+                    finalTokenEstimate = estimate,
+                    steps = emptyList(),
+                )
+            )
+        }
+        val effectiveMessages = editResult.messages
+        val effectiveConversation = conversation?.withEffectiveMessages(effectiveMessages)
         if (conversation == null || !policy.enabled) {
-            val limited = messages.limitContext(contextMessageSize)
-            return PreparedContext(limited, ConversationContextPlanner.estimateTokens(limited), false, emptyList())
+            val limited = effectiveMessages.limitContext(contextMessageSize)
+            val estimate = ConversationContextPlanner.estimateTokens(limited)
+            return PreparedContext(
+                messages = limited,
+                tokenEstimate = estimate,
+                compressionApplied = false,
+                summaryIds = emptyList(),
+                trace = editResult.trace.copy(finalTokenEstimate = estimate),
+            )
         }
 
         val compacts = contextRepository.getCompacts(conversation.id)
         val toolPromptEstimate = tools.sumOf { it.name.length + it.description.length } / 4
         val overheadEstimate = toolPromptEstimate + promptOverheadTokens.coerceAtLeast(0)
         val plan = ConversationContextPlanner.planCompaction(
-            nodes = conversation.messageNodes,
+            nodes = effectiveConversation?.messageNodes ?: conversation.messageNodes,
             activeCompacts = compacts,
             policy = policy,
             modelContextWindowTokens = model.contextWindowTokens,
@@ -158,13 +183,26 @@ class ConversationContextEngine(
         }
 
         var latestCompacts = contextRepository.getCompacts(conversation.id)
+        val traceSteps = editResult.trace.steps.toMutableList()
+        val beforeCompactEstimate = ConversationContextPlanner.estimateTokens(effectiveMessages) + overheadEstimate
         var preparedMessages = prepareMessagesWithCompacts(
-            messages = messages,
+            messages = effectiveMessages,
             activeCompacts = latestCompacts,
             policy = policy,
             contextMessageSize = contextMessageSize,
             tools = tools,
         )
+        val afterCompactEstimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+        if (latestCompacts.any { it.status == "completed" }) {
+            traceSteps += ContextPreparationStepTrace(
+                stage = "compact",
+                reason = "completed compact summaries replaced covered source messages",
+                beforeTokens = beforeCompactEstimate,
+                afterTokens = afterCompactEstimate,
+                savedTokens = (beforeCompactEstimate - afterCompactEstimate).coerceAtLeast(0),
+                changedMessages = latestCompacts.count { it.status == "completed" },
+            )
+        }
         val contextWindow = ConversationContextPlanner.estimateContextWindow(model.contextWindowTokens)
         val softTotalBudget = (contextWindow * policy.forceRatio).toInt().coerceAtLeast(4_000)
         val targetMessageBudget = (softTotalBudget - overheadEstimate)
@@ -191,27 +229,50 @@ class ConversationContextEngine(
                 )
             }
             latestCompacts = contextRepository.getCompacts(conversation.id)
+            val beforeFitCompactEstimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
             preparedMessages = prepareMessagesWithCompacts(
-                messages = messages,
+                messages = effectiveMessages,
                 activeCompacts = latestCompacts,
                 policy = fitPolicy,
                 contextMessageSize = contextMessageSize,
                 tools = tools,
             )
             estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+            traceSteps += ContextPreparationStepTrace(
+                stage = "compact",
+                reason = "forced compaction to fit model window",
+                beforeTokens = beforeFitCompactEstimate,
+                afterTokens = estimate,
+                savedTokens = (beforeFitCompactEstimate - estimate).coerceAtLeast(0),
+                changedMessages = latestCompacts.count { it.status == "completed" },
+            )
         }
         if (estimate > (contextWindow * policy.forceRatio).toInt()) {
+            val beforeFitEstimate = estimate
             preparedMessages = ConversationContextPlanner.fitMessagesToTokenBudget(
                 messages = preparedMessages,
                 maxTokens = targetMessageBudget,
             )
             estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+            traceSteps += ContextPreparationStepTrace(
+                stage = "fit",
+                reason = "prepared context still exceeded force ratio after editing/compaction",
+                beforeTokens = beforeFitEstimate,
+                afterTokens = estimate,
+                savedTokens = (beforeFitEstimate - estimate).coerceAtLeast(0),
+                changedMessages = 0,
+            )
         }
         return PreparedContext(
             messages = preparedMessages,
             tokenEstimate = estimate,
             compressionApplied = latestCompacts.any { it.status == "completed" },
             summaryIds = latestCompacts.filter { it.status == "completed" }.map { it.id },
+            trace = ContextPreparationTrace(
+                originalTokenEstimate = editResult.trace.originalTokenEstimate,
+                finalTokenEstimate = estimate,
+                steps = traceSteps,
+            ),
         )
     }
 
@@ -489,5 +550,23 @@ class ConversationContextEngine(
             "Compact summary JSON missing fields: ${missing.joinToString(", ")}"
         }
         return candidate
+    }
+
+    private fun Conversation.withEffectiveMessages(effectiveMessages: List<UIMessage>): Conversation {
+        val byId = effectiveMessages.associateBy { it.id }
+        return copy(
+            messageNodes = messageNodes.map { node ->
+                val edited = byId[node.currentMessage.id] ?: return@map node
+                if (edited == node.currentMessage) {
+                    node
+                } else {
+                    node.copy(
+                        messages = node.messages.map { message ->
+                            if (message.id == edited.id) edited else message
+                        }
+                    )
+                }
+            }
+        )
     }
 }

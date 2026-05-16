@@ -32,6 +32,30 @@ data class PreparedContext(
     val tokenEstimate: Int,
     val compressionApplied: Boolean,
     val summaryIds: List<String>,
+    val trace: ContextPreparationTrace = ContextPreparationTrace.empty(),
+)
+
+data class ContextPreparationTrace(
+    val originalTokenEstimate: Int,
+    val finalTokenEstimate: Int,
+    val steps: List<ContextPreparationStepTrace>,
+) {
+    companion object {
+        fun empty() = ContextPreparationTrace(
+            originalTokenEstimate = 0,
+            finalTokenEstimate = 0,
+            steps = emptyList(),
+        )
+    }
+}
+
+data class ContextPreparationStepTrace(
+    val stage: String,
+    val reason: String,
+    val beforeTokens: Int,
+    val afterTokens: Int,
+    val savedTokens: Int,
+    val changedMessages: Int,
 )
 
 data class CompactResult(
