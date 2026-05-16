@@ -152,7 +152,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = readOnly
         }
 
-        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain" -> {
+        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list" -> {
             mutates = false
             risk = ToolRisk.Normal
             needsApproval = false
@@ -327,7 +327,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("conversation_") || name.startsWith("session_") -> "context"
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
-    name == "tool_policy_explain" -> "utility"
+    name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
     name.startsWith("subagent_") -> "subagent"
     name.startsWith("model_council_") -> "model_council"
     name.startsWith("skill") || name == "use_skill" -> "skill"
@@ -386,7 +386,7 @@ private fun Tool.risk(): ToolRisk = when {
 private fun Tool.concurrencySafe(): Boolean = when {
     name in setOf("terminal_install_packages", "terminal_job_stop", "terminal_execute", "terminal_job_start") -> false
     name.startsWith("cron_task_") && name != "cron_task_list" -> false
-    name.startsWith("agent_task_") || name in setOf("agent_runtime_status", "tool_policy_explain") -> true
+    name.startsWith("agent_task_") || name in setOf("agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list") -> true
     name.startsWith("subagent_") || name.startsWith("model_council_") -> false
     else -> !mutatesState()
 }

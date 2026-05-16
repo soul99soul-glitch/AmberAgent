@@ -96,6 +96,7 @@ import me.rerere.rikkahub.data.agent.tools.ConversationHistoryTools
 import me.rerere.rikkahub.data.agent.tools.ModelCouncilTools
 import me.rerere.rikkahub.data.agent.tools.SubAgentTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
+import me.rerere.rikkahub.data.agent.tools.createToolSearchTool
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
@@ -2088,6 +2089,7 @@ class ChatService(
         }
         val registry = ToolRegistry.from(finalRawTools)
         val tools = registry.tools() +
+            createToolSearchTool(registry) +
             localTools.createToolsListTool(registry) +
             localTools.createToolPolicyExplainTool(registry)
         return tools.scopedToConversation(conversationId)

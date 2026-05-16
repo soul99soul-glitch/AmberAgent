@@ -49,6 +49,7 @@ import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
+import me.rerere.rikkahub.data.agent.tools.ToolExposureState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -164,6 +165,7 @@ class GenerationHandler(
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
+        val toolExposure = ToolExposureState.from(tools)
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -177,7 +179,7 @@ class GenerationHandler(
                     if (directWidgetRequested && !hasResumableTools) {
                         emptyList()
                     } else {
-                        tools
+                        toolExposure.toolsForStep()
                     }
                 )
             }
@@ -339,6 +341,7 @@ class GenerationHandler(
                 // No results to add (all tools were pending)
                 break
             }
+            toolExposure.observeExecutedTools(executedTools)
 
             // Update last message with executed tools (NOT create TOOL message)
             val lastMessage = messages.last()
