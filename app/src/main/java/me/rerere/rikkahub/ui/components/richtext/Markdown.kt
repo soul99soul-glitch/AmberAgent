@@ -34,6 +34,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -234,6 +235,13 @@ internal data class MarkdownParseResult(
     val preprocessed: String,
     val astTree: ASTNode,
     val hasHtmlBlocks: Boolean,
+    val stableTopLevelBlocks: List<MarkdownTopLevelBlockSnapshot> = emptyList(),
+)
+
+internal data class MarkdownTopLevelBlockSnapshot(
+    val key: String,
+    val parseResult: MarkdownParseResult,
+    val preserveParagraphBottomPadding: Boolean,
 )
 
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
@@ -244,6 +252,7 @@ private data class MarkdownParseCacheKey(
     val content: String,
     val contentHash: Int,
     val version: Int,
+    val preprocessed: Boolean,
 )
 
 private object MarkdownParseCache {
@@ -265,16 +274,42 @@ private object MarkdownParseCache {
     }
 
     fun get(content: String): MarkdownParseResult? = synchronized(lock) {
-        entries[key(content)]
+        entries[key(content, preprocessed = false)]
     }
 
     fun getOrParse(content: String): MarkdownParseResult {
         get(content)?.let { return it }
-        val parsed = traceMarkdown("Amber Markdown parse") {
-            parseMarkdownUncached(content)
+        return getOrParseInternal(
+            content = content,
+            preprocessed = false,
+            section = "Amber Markdown parse",
+            parser = ::parseMarkdownUncached,
+        )
+    }
+
+    fun getOrParsePreprocessed(content: String): MarkdownParseResult {
+        return getOrParseInternal(
+            content = content,
+            preprocessed = true,
+            section = "Amber Markdown parse preprocessed",
+            parser = ::parsePreprocessedMarkdownUncached,
+        )
+    }
+
+    private fun getOrParseInternal(
+        content: String,
+        preprocessed: Boolean,
+        section: String,
+        parser: (String) -> MarkdownParseResult,
+    ): MarkdownParseResult {
+        synchronized(lock) {
+            entries[key(content, preprocessed)]?.let { return it }
+        }
+        val parsed = traceMarkdown(section) {
+            parser(content)
         }
         synchronized(lock) {
-            val cacheKey = key(content)
+            val cacheKey = key(content, preprocessed)
             entries[cacheKey]?.let { return it }
             entries[cacheKey] = parsed
             totalChars += content.length
@@ -282,10 +317,11 @@ private object MarkdownParseCache {
         return parsed
     }
 
-    private fun key(content: String) = MarkdownParseCacheKey(
+    private fun key(content: String, preprocessed: Boolean) = MarkdownParseCacheKey(
         content = content,
         contentHash = content.hashCode(),
         version = MARKDOWN_PARSE_CACHE_VERSION,
+        preprocessed = preprocessed,
     )
 }
 
@@ -318,15 +354,73 @@ private fun ASTNode.containsHtmlBlocks(): Boolean {
     return children.any { it.containsHtmlBlocks() }
 }
 
-private fun parseMarkdownUncached(content: String): MarkdownParseResult {
-    val preprocessed = preProcess(content)
+private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownParseResult {
     val astTree = parser.buildMarkdownTreeFromString(preprocessed)
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
 }
 
-private fun parseStreamingMarkdownContent(content: String): MarkdownParseResult {
-    return traceMarkdown("Amber Markdown parse streaming") {
-        parseMarkdownUncached(content)
+private fun parseMarkdownUncached(content: String): MarkdownParseResult {
+    return parsePreprocessedMarkdownUncached(preProcess(content))
+}
+
+private class StreamingMarkdownParseCache {
+    private val lock = Any()
+    private var stableRawPrefix = ""
+    private var stableBlocks = emptyList<MarkdownTopLevelBlockSnapshot>()
+
+    fun reset() = synchronized(lock) {
+        stableRawPrefix = ""
+        stableBlocks = emptyList()
+    }
+
+    fun parse(content: String): MarkdownParseResult = traceMarkdown("Amber Markdown parse streaming") {
+        val baseline = synchronized(lock) {
+            if (stableRawPrefix.isNotEmpty() && content.startsWith(stableRawPrefix)) {
+                stableRawPrefix to stableBlocks
+            } else {
+                stableRawPrefix = ""
+                stableBlocks = emptyList()
+                "" to emptyList()
+            }
+        }
+
+        val (prefix, blocks) = baseline
+        val activeRaw = content.substring(prefix.length)
+        val activePreprocessed = preProcess(activeRaw)
+        if (activePreprocessed != activeRaw) {
+            reset()
+            return@traceMarkdown parseMarkdownUncached(content)
+        }
+        val activeParse = parsePreprocessedMarkdownUncached(activePreprocessed)
+        if (activeParse.hasHtmlBlocks) {
+            reset()
+            return@traceMarkdown parseMarkdownUncached(content)
+        }
+
+        val activeChildren = activeParse.astTree.children
+        if (activeChildren.size <= 1) {
+            return@traceMarkdown activeParse.copy(stableTopLevelBlocks = blocks)
+        }
+
+        val newlyStableChildren = activeChildren.dropLast(1)
+        val nextStableBlocks = blocks + newlyStableChildren.map { child ->
+            val blockContent = activePreprocessed.substring(child.startOffset, child.endOffset)
+            MarkdownTopLevelBlockSnapshot(
+                key = "${child.type}:${prefix.length + child.startOffset}:${blockContent.length}:${blockContent.hashCode()}",
+                parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
+                preserveParagraphBottomPadding = child.type == MarkdownElementTypes.PARAGRAPH &&
+                    child.nextSibling() != null &&
+                    child.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) == null,
+            )
+        }
+        val activeTailStart = newlyStableChildren.last().endOffset
+        val nextPrefixEnd = prefix.length + activeTailStart
+        synchronized(lock) {
+            stableRawPrefix = content.substring(0, nextPrefixEnd)
+            stableBlocks = nextStableBlocks
+        }
+        parsePreprocessedMarkdownUncached(activePreprocessed.substring(activeTailStart))
+            .copy(stableTopLevelBlocks = nextStableBlocks)
     }
 }
 
@@ -403,11 +497,15 @@ fun MarkdownBlock(
     streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
+    val streamingParseCache = remember {
+        StreamingMarkdownParseCache()
+    }
     var (data, setData) = remember {
         mutableStateOf(
             if (streaming) {
-                parseStreamingMarkdownContent(content)
+                streamingParseCache.parse(content)
             } else {
+                streamingParseCache.reset()
                 MarkdownParseCache.getOrParse(content)
             }
         )
@@ -429,8 +527,9 @@ fun MarkdownBlock(
                 try {
                     val parsed = withContext(Dispatchers.Default) {
                         if (latestStreaming) {
-                            parseStreamingMarkdownContent(latestContent)
+                            streamingParseCache.parse(latestContent)
                         } else {
+                            streamingParseCache.reset()
                             MarkdownParseCache.getOrParse(latestContent)
                         }
                     }
@@ -470,21 +569,59 @@ fun MarkdownBlock(
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
                     val children = data.astTree.children
-                    children.fastForEachIndexed { index, child ->
-                        val childRevealController = if (streaming && index == children.lastIndex) {
-                            revealController
-                        } else {
-                            null
+                    if (data.stableTopLevelBlocks.isNotEmpty()) {
+                        data.stableTopLevelBlocks.fastForEach { block ->
+                            key(block.key) {
+                                CompositionLocalProvider(
+                                    LocalCharRevealController provides null,
+                                ) {
+                                    val blockModifier = if (block.preserveParagraphBottomPadding) {
+                                        nodeModifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
+                                    } else {
+                                        nodeModifier
+                                    }
+                                    block.parseResult.astTree.children.fastForEach { child ->
+                                        MarkdownNode(
+                                            node = child,
+                                            content = block.parseResult.preprocessed,
+                                            modifier = blockModifier,
+                                            onClickCitation = onClickCitation,
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        CompositionLocalProvider(
-                            LocalCharRevealController provides childRevealController,
-                        ) {
-                            MarkdownNode(
-                                node = child,
-                                content = data.preprocessed,
-                                modifier = nodeModifier,
-                                onClickCitation = onClickCitation,
-                            )
+                        children.lastOrNull()?.let { activeChild ->
+                            key("active:${activeChild.type}:${activeChild.startOffset}") {
+                                CompositionLocalProvider(
+                                    LocalCharRevealController provides if (streaming) revealController else null,
+                                ) {
+                                    MarkdownNode(
+                                        node = activeChild,
+                                        content = data.preprocessed,
+                                        modifier = nodeModifier,
+                                        onClickCitation = onClickCitation,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        children.fastForEachIndexed { index, child ->
+                            val childRevealController = if (streaming && index == children.lastIndex) {
+                                revealController
+                            } else {
+                                null
+                            }
+                            CompositionLocalProvider(
+                                LocalCharRevealController provides childRevealController,
+                            ) {
+                                MarkdownNode(
+                                    node = child,
+                                    content = data.preprocessed,
+                                    modifier = nodeModifier,
+                                    onClickCitation = onClickCitation,
+                                )
+                            }
                         }
                     }
                 }
