@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.DisplaySetting
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
@@ -47,22 +47,22 @@ class UIPrefs(
     }
 
     private fun readFrom(p: Preferences): UIPrefsData = UIPrefsData(
-        dynamicColor = p[SettingsStore.DYNAMIC_COLOR] ?: false,
-        themeId = p[SettingsStore.THEME_ID] ?: PresetThemes[0].id,
-        developerMode = p[SettingsStore.DEVELOPER_MODE] == true,
+        dynamicColor = p[PreferencesKeys.DYNAMIC_COLOR] ?: false,
+        themeId = p[PreferencesKeys.THEME_ID] ?: PresetThemes[0].id,
+        developerMode = p[PreferencesKeys.DEVELOPER_MODE] == true,
         displaySetting = JsonInstant.decodeFromString(
-            p[SettingsStore.DISPLAY_SETTING] ?: "{}"
+            p[PreferencesKeys.DISPLAY_SETTING] ?: "{}"
         ),
-        launchCount = p[SettingsStore.LAUNCH_COUNT] ?: 0,
-        sponsorAlertDismissedAt = p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] ?: 0,
+        launchCount = p[PreferencesKeys.LAUNCH_COUNT] ?: 0,
+        sponsorAlertDismissedAt = p[PreferencesKeys.SPONSOR_ALERT_DISMISSED_AT] ?: 0,
     )
 
     private fun writeTo(p: androidx.datastore.preferences.core.MutablePreferences, data: UIPrefsData) {
-        p[SettingsStore.DYNAMIC_COLOR] = data.dynamicColor
-        p[SettingsStore.THEME_ID] = data.themeId
-        p[SettingsStore.DEVELOPER_MODE] = data.developerMode
-        p[SettingsStore.DISPLAY_SETTING] = JsonInstant.encodeToString(data.displaySetting)
-        p[SettingsStore.LAUNCH_COUNT] = data.launchCount
-        p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] = data.sponsorAlertDismissedAt
+        p[PreferencesKeys.DYNAMIC_COLOR] = data.dynamicColor
+        p[PreferencesKeys.THEME_ID] = data.themeId
+        p[PreferencesKeys.DEVELOPER_MODE] = data.developerMode
+        p[PreferencesKeys.DISPLAY_SETTING] = JsonInstant.encodeToString(data.displaySetting)
+        p[PreferencesKeys.LAUNCH_COUNT] = data.launchCount
+        p[PreferencesKeys.SPONSOR_ALERT_DISMISSED_AT] = data.sponsorAlertDismissedAt
     }
 }

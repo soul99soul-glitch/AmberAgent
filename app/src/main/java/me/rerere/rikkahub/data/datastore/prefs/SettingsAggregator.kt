@@ -28,7 +28,7 @@ import me.rerere.rikkahub.data.datastore.SeedOpenAIImageModel
 import me.rerere.rikkahub.data.datastore.SeedOpenAIImageModelId
 import me.rerere.rikkahub.data.datastore.SeedRoutingQuickMessages
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.data.datastore.withAmberAgentAssistantBranding
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
@@ -39,11 +39,11 @@ private const val TAG = "SettingsAggregator"
 /**
  * M1.1.8a — SettingsAggregator combines the 7 domain Prefs (UI/Search/Agent/
  * Provider/Chat/Extension/Assistant) into a single [Settings] flow with the
- * same cleanup semantics as [SettingsStore.settingsFlow].
+ * same cleanup semantics as the pre-M1.1.8e SettingsStore.settingsFlow.
  *
- * NOT YET WIRED to any caller. Phase 1 plan keeps SettingsStore as the
+ * NOT YET WIRED to any caller. Phase 1 plan kept the old SettingsStore as the (now deleted in M1.1.8e)
  * canonical Settings source until M1.1.8c-d migrate callers one batch at a
- * time. Any divergence between this and SettingsStore is a bug we want to
+ * time. Any divergence between this and the pre-M1.1.8e SettingsStore is a bug we want to
  * surface BEFORE caller migration begins.
  */
 class SettingsAggregator(
@@ -87,7 +87,7 @@ class SettingsAggregator(
 
     /**
      * Atomic write — single [dataStore.edit] block writing all 55 keys.
-     * Mirrors [SettingsStore.update] line 485-557 byte-for-byte so character
+     * Mirrors the pre-M1.1.8e SettingsStore.update line 485-557 byte-for-byte so character
      * test can prove behavioural equivalence.
      */
     suspend fun update(settings: Settings) {
@@ -95,89 +95,89 @@ class SettingsAggregator(
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
-        // [M1.1.8a W1] Mirror SettingsStore.update line 484 — push value into
+        // [M1.1.8a W1] Mirror the pre-M1.1.8e SettingsStore.update line 484 — push value into
         // flow eagerly so caller reading settingsFlow.value immediately after
         // update() sees the new value (matches existing god-class semantics
         // before the dataStore.edit reader cycle completes).
         _settingsFlow.value = settings
         dataStore.edit { p ->
-            p[SettingsStore.DYNAMIC_COLOR] = settings.dynamicColor
-            p[SettingsStore.THEME_ID] = settings.themeId
-            p[SettingsStore.DEVELOPER_MODE] = settings.developerMode
-            p[SettingsStore.DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
+            p[PreferencesKeys.DYNAMIC_COLOR] = settings.dynamicColor
+            p[PreferencesKeys.THEME_ID] = settings.themeId
+            p[PreferencesKeys.DEVELOPER_MODE] = settings.developerMode
+            p[PreferencesKeys.DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
 
-            p[SettingsStore.ENABLE_WEB_SEARCH] = settings.enableWebSearch
-            p[SettingsStore.FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
-            p[SettingsStore.SELECT_MODEL] = settings.chatModelId.toString()
-            p[SettingsStore.TITLE_MODEL] = settings.titleModelId.toString()
-            p[SettingsStore.TRANSLATE_MODEL] = settings.translateModeId.toString()
-            p[SettingsStore.SUGGESTION_MODEL] = settings.suggestionModelId.toString()
-            p[SettingsStore.IMAGE_GENERATION_MODEL] = settings.imageGenerationModelId.toString()
-            p[SettingsStore.TITLE_PROMPT] = settings.titlePrompt
-            p[SettingsStore.TRANSLATION_PROMPT] = settings.translatePrompt
-            p[SettingsStore.TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
-            p[SettingsStore.SUGGESTION_PROMPT] = settings.suggestionPrompt
-            p[SettingsStore.OCR_MODEL] = settings.ocrModelId.toString()
-            p[SettingsStore.OCR_PROMPT] = settings.ocrPrompt
-            p[SettingsStore.COMPRESS_MODEL] = settings.compressModelId.toString()
-            p[SettingsStore.COMPRESS_PROMPT] = settings.compressPrompt
-            p[SettingsStore.MODEL_GROUP_SESSION_DEFAULTS] =
+            p[PreferencesKeys.ENABLE_WEB_SEARCH] = settings.enableWebSearch
+            p[PreferencesKeys.FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
+            p[PreferencesKeys.SELECT_MODEL] = settings.chatModelId.toString()
+            p[PreferencesKeys.TITLE_MODEL] = settings.titleModelId.toString()
+            p[PreferencesKeys.TRANSLATE_MODEL] = settings.translateModeId.toString()
+            p[PreferencesKeys.SUGGESTION_MODEL] = settings.suggestionModelId.toString()
+            p[PreferencesKeys.IMAGE_GENERATION_MODEL] = settings.imageGenerationModelId.toString()
+            p[PreferencesKeys.TITLE_PROMPT] = settings.titlePrompt
+            p[PreferencesKeys.TRANSLATION_PROMPT] = settings.translatePrompt
+            p[PreferencesKeys.TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
+            p[PreferencesKeys.SUGGESTION_PROMPT] = settings.suggestionPrompt
+            p[PreferencesKeys.OCR_MODEL] = settings.ocrModelId.toString()
+            p[PreferencesKeys.OCR_PROMPT] = settings.ocrPrompt
+            p[PreferencesKeys.COMPRESS_MODEL] = settings.compressModelId.toString()
+            p[PreferencesKeys.COMPRESS_PROMPT] = settings.compressPrompt
+            p[PreferencesKeys.MODEL_GROUP_SESSION_DEFAULTS] =
                 JsonInstant.encodeToString(settings.modelGroupSessionDefaults)
 
-            p[SettingsStore.PROVIDERS] = JsonInstant.encodeToString(settings.providers)
+            p[PreferencesKeys.PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
-            p[SettingsStore.ASSISTANTS] = JsonInstant.encodeToString(settings.assistants)
-            p[SettingsStore.SELECT_ASSISTANT] = settings.assistantId.toString()
-            p[SettingsStore.ASSISTANT_TAGS] = JsonInstant.encodeToString(settings.assistantTags)
+            p[PreferencesKeys.ASSISTANTS] = JsonInstant.encodeToString(settings.assistants)
+            p[PreferencesKeys.SELECT_ASSISTANT] = settings.assistantId.toString()
+            p[PreferencesKeys.ASSISTANT_TAGS] = JsonInstant.encodeToString(settings.assistantTags)
 
-            p[SettingsStore.SEARCH_SERVICES] = JsonInstant.encodeToString(settings.searchServices)
-            p[SettingsStore.SEARCH_COMMON] =
+            p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(settings.searchServices)
+            p[PreferencesKeys.SEARCH_COMMON] =
                 JsonInstant.encodeToString(settings.searchCommonOptions)
-            p[SettingsStore.SEARCH_SELECTED] = if (settings.searchServices.isEmpty()) {
+            p[PreferencesKeys.SEARCH_SELECTED] = if (settings.searchServices.isEmpty()) {
                 0
             } else {
                 settings.searchServiceSelected.coerceIn(0, settings.searchServices.lastIndex)
             }
-            p[SettingsStore.SEARCH_ENABLED_SERVICE_IDS] = JsonInstant.encodeToString(
+            p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS] = JsonInstant.encodeToString(
                 settings.searchEnabledServiceIds.filter { id ->
                     settings.searchServices.any { service -> service.id == id }
                 }
             )
-            p[SettingsStore.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] =
+            p[PreferencesKeys.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] =
                 settings.searchBuiltinDuckDuckGoEnabled
-            p[SettingsStore.SEARCH_BUILTIN_BING_ENABLED] = settings.searchBuiltinBingEnabled
-            p[SettingsStore.SEARCH_BUILTIN_JINA_ENABLED] = settings.searchBuiltinJinaEnabled
-            p[SettingsStore.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] =
+            p[PreferencesKeys.SEARCH_BUILTIN_BING_ENABLED] = settings.searchBuiltinBingEnabled
+            p[PreferencesKeys.SEARCH_BUILTIN_JINA_ENABLED] = settings.searchBuiltinJinaEnabled
+            p[PreferencesKeys.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] =
                 settings.searchBuiltinWikipediaEnabled
-            p[SettingsStore.SEARCH_BUILTIN_HACKERNEWS_ENABLED] =
+            p[PreferencesKeys.SEARCH_BUILTIN_HACKERNEWS_ENABLED] =
                 settings.searchBuiltinHackerNewsEnabled
-            p[SettingsStore.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] =
+            p[PreferencesKeys.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] =
                 settings.searchGoogleWebViewFallbackEnabled
 
-            p[SettingsStore.MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
-            p[SettingsStore.WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
-            p[SettingsStore.S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
-            p[SettingsStore.TTS_PROVIDERS] = JsonInstant.encodeToString(settings.ttsProviders)
-            p[SettingsStore.SELECTED_TTS_PROVIDER] = settings.selectedTTSProviderId.toString()
-            p[SettingsStore.MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
-            p[SettingsStore.LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
-            p[SettingsStore.QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
-            p[SettingsStore.AGENT_RUNTIME] = JsonInstant.encodeToString(settings.agentRuntime)
-            p[SettingsStore.WEB_SERVER_ENABLED] = settings.webServerEnabled
-            p[SettingsStore.WEB_SERVER_PORT] = settings.webServerPort
-            p[SettingsStore.WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
-            p[SettingsStore.WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
-            p[SettingsStore.WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
-            p[SettingsStore.BACKUP_REMINDER_CONFIG] =
+            p[PreferencesKeys.MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
+            p[PreferencesKeys.WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
+            p[PreferencesKeys.S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
+            p[PreferencesKeys.TTS_PROVIDERS] = JsonInstant.encodeToString(settings.ttsProviders)
+            p[PreferencesKeys.SELECTED_TTS_PROVIDER] = settings.selectedTTSProviderId.toString()
+            p[PreferencesKeys.MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
+            p[PreferencesKeys.LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
+            p[PreferencesKeys.QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
+            p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(settings.agentRuntime)
+            p[PreferencesKeys.WEB_SERVER_ENABLED] = settings.webServerEnabled
+            p[PreferencesKeys.WEB_SERVER_PORT] = settings.webServerPort
+            p[PreferencesKeys.WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
+            p[PreferencesKeys.WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
+            p[PreferencesKeys.WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
+            p[PreferencesKeys.BACKUP_REMINDER_CONFIG] =
                 JsonInstant.encodeToString(settings.backupReminderConfig)
-            p[SettingsStore.SYNC_SETTINGS] = JsonInstant.encodeToString(settings.syncSettings)
-            p[SettingsStore.LAUNCH_COUNT] = settings.launchCount
-            p[SettingsStore.SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
+            p[PreferencesKeys.SYNC_SETTINGS] = JsonInstant.encodeToString(settings.syncSettings)
+            p[PreferencesKeys.LAUNCH_COUNT] = settings.launchCount
+            p[PreferencesKeys.SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
             if (settings.imageModelsSeededVersion > 0) {
-                p[SettingsStore.SEEDED_IMAGE_MODELS_V1] = true
+                p[PreferencesKeys.SEEDED_IMAGE_MODELS_V1] = true
             }
             if (settings.routingQuickMessagesSeededVersion > 0) {
-                p[SettingsStore.SEEDED_ROUTING_QUICK_MESSAGES_V1] = true
+                p[PreferencesKeys.SEEDED_ROUTING_QUICK_MESSAGES_V1] = true
             }
         }
     }
@@ -188,7 +188,7 @@ class SettingsAggregator(
 
     suspend fun updateAssistant(assistantId: Uuid) {
         dataStore.edit { p ->
-            p[SettingsStore.SELECT_ASSISTANT] = assistantId.toString()
+            p[PreferencesKeys.SELECT_ASSISTANT] = assistantId.toString()
         }
     }
 
@@ -261,10 +261,10 @@ class SettingsAggregator(
 /**
  * Phase 1 — raw assembly of [Settings] from the 7 PrefsData snapshots.
  *
- * This mirrors [SettingsStore.settingsFlowRaw] line 205-300 except for the 3
+ * This mirrors the pre-M1.1.8e SettingsStore.settingsFlowRaw line 205-300 except for the 3
  * cross-field search cleanups (search selected coerceIn / searchEnabledIds
  * filter / searchEnabledIds derived default). Those cleanups now happen at
- * the writer (SettingsStore.update line 516-525 already enforces them) so
+ * the writer (the pre-M1.1.8e SettingsStore.update line 516-525 already enforces them) so
  * the value lives back through the next read. We re-apply them as part of
  * [applyCrossDomainConsistency] below.
  */
@@ -343,7 +343,7 @@ internal fun composeRawSettings(
 /**
  * Phase 2 — per-load backfill / seed / branding.
  *
- * Byte-equivalent to [SettingsStore.settingsFlowRaw] line 301-419:
+ * Byte-equivalent to the pre-M1.1.8e SettingsStore.settingsFlowRaw line 301-419:
  * - Remove deprecated providers (REMOVED_DEFAULT_PROVIDER_IDS)
  * - Sync built-in provider metadata (description / shortDescription / brand)
  * - Seed gpt-image-2 / nano-banana-2 (gated by imageModelsSeededVersion < 1)
@@ -445,7 +445,7 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
 /**
  * Phase 3 — cross-domain consistency.
  *
- * Byte-equivalent to [SettingsStore.settingsFlowRaw] line 420-473:
+ * Byte-equivalent to the pre-M1.1.8e SettingsStore.settingsFlowRaw line 420-473:
  * - Dedup providers (by id) and dedup their models (by id)
  * - Dedup assistants (by id), filter stale mcpServers / modeInjectionIds /
  *   lorebookIds / quickMessageIds references on each assistant
@@ -459,10 +459,10 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
     val validLorebookIds = settings.lorebooks.map { it.id }.toSet()
     val validQuickMessageIds = settings.quickMessages.map { it.id }.toSet()
-    // [M1.1.8a B1] Reader-path search cleanup. SettingsStore reader applied
+    // [M1.1.8a B1] Reader-path search cleanup. the pre-M1.1.8e SettingsStore reader applied
     // these inline in the raw decode (PreferencesStore.kt:197-204). The 7
     // domain Prefs in M1.1.1-7 deliberately skipped them (raw mirror only),
-    // and SettingsStore.update writer also enforces them (line 516-525) — but
+    // and the pre-M1.1.8e SettingsStore.update writer also enforced them (line 516-525) — but
     // a user who never wrote settings (fresh install / migration gap) would
     // see stale values on read. Apply here so aggregator.settingsFlow is
     // byte-equivalent to settingsStore.settingsFlow on every read path.

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.utils.JsonInstant
@@ -47,19 +47,19 @@ class AssistantPrefs(
     }
 
     private fun readFrom(p: Preferences): AssistantPrefsData = AssistantPrefsData(
-        assistantId = p[SettingsStore.SELECT_ASSISTANT]?.let { Uuid.parse(it) }
+        assistantId = p[PreferencesKeys.SELECT_ASSISTANT]?.let { Uuid.parse(it) }
             ?: DEFAULT_ASSISTANT_ID,
         assistants = JsonInstant.decodeFromString<List<Assistant>>(
-            p[SettingsStore.ASSISTANTS] ?: "[]"
+            p[PreferencesKeys.ASSISTANTS] ?: "[]"
         ),
-        assistantTags = p[SettingsStore.ASSISTANT_TAGS]?.let {
+        assistantTags = p[PreferencesKeys.ASSISTANT_TAGS]?.let {
             JsonInstant.decodeFromString<List<Tag>>(it)
         } ?: emptyList(),
     )
 
     private fun writeTo(p: MutablePreferences, data: AssistantPrefsData) {
-        p[SettingsStore.SELECT_ASSISTANT] = data.assistantId.toString()
-        p[SettingsStore.ASSISTANTS] = JsonInstant.encodeToString(data.assistants)
-        p[SettingsStore.ASSISTANT_TAGS] = JsonInstant.encodeToString(data.assistantTags)
+        p[PreferencesKeys.SELECT_ASSISTANT] = data.assistantId.toString()
+        p[PreferencesKeys.ASSISTANTS] = JsonInstant.encodeToString(data.assistants)
+        p[PreferencesKeys.ASSISTANT_TAGS] = JsonInstant.encodeToString(data.assistantTags)
     }
 }

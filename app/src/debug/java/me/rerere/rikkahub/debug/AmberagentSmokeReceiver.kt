@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import me.rerere.ai.ui.UIMessagePart
@@ -17,7 +18,7 @@ import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.service.ChatService
 import org.koin.core.context.GlobalContext
 import java.time.Instant
@@ -166,7 +167,7 @@ class AmberAgentSmokeReceiver : BroadcastReceiver() {
 
     private suspend fun runAgentToolSmoke(context: Context, intent: Intent) {
         val koin = GlobalContext.get()
-        val settings = koin.get<SettingsStore>().settingsFlow.first()
+        val settings = koin.get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
         val chatService = withContext(Dispatchers.Main) {
             koin.get<ChatService>()
         }

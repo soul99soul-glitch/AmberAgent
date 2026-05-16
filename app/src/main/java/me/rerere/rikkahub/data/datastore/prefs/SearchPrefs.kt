@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 import me.rerere.search.SearchCommonOptions
@@ -53,36 +53,36 @@ class SearchPrefs(
     }
 
     private fun readFrom(p: Preferences): SearchPrefsData = SearchPrefsData(
-        searchServices = p[SettingsStore.SEARCH_SERVICES]?.let {
+        searchServices = p[PreferencesKeys.SEARCH_SERVICES]?.let {
             JsonInstant.decodeFromString<List<SearchServiceOptions>>(it)
         } ?: listOf(SearchServiceOptions.DEFAULT),
-        searchCommonOptions = p[SettingsStore.SEARCH_COMMON]?.let {
+        searchCommonOptions = p[PreferencesKeys.SEARCH_COMMON]?.let {
             JsonInstant.decodeFromString<SearchCommonOptions>(it)
         } ?: SearchCommonOptions(),
-        searchServiceSelected = p[SettingsStore.SEARCH_SELECTED] ?: 0,
-        searchEnabledServiceIds = p[SettingsStore.SEARCH_ENABLED_SERVICE_IDS]?.let {
+        searchServiceSelected = p[PreferencesKeys.SEARCH_SELECTED] ?: 0,
+        searchEnabledServiceIds = p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS]?.let {
             JsonInstant.decodeFromString<List<Uuid>>(it)
         } ?: emptyList(),
-        searchBuiltinDuckDuckGoEnabled = p[SettingsStore.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] != false,
-        searchBuiltinBingEnabled = p[SettingsStore.SEARCH_BUILTIN_BING_ENABLED] != false,
-        searchBuiltinJinaEnabled = p[SettingsStore.SEARCH_BUILTIN_JINA_ENABLED] != false,
-        searchBuiltinWikipediaEnabled = p[SettingsStore.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] != false,
-        searchBuiltinHackerNewsEnabled = p[SettingsStore.SEARCH_BUILTIN_HACKERNEWS_ENABLED] != false,
-        searchGoogleWebViewFallbackEnabled = p[SettingsStore.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] != false,
+        searchBuiltinDuckDuckGoEnabled = p[PreferencesKeys.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] != false,
+        searchBuiltinBingEnabled = p[PreferencesKeys.SEARCH_BUILTIN_BING_ENABLED] != false,
+        searchBuiltinJinaEnabled = p[PreferencesKeys.SEARCH_BUILTIN_JINA_ENABLED] != false,
+        searchBuiltinWikipediaEnabled = p[PreferencesKeys.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] != false,
+        searchBuiltinHackerNewsEnabled = p[PreferencesKeys.SEARCH_BUILTIN_HACKERNEWS_ENABLED] != false,
+        searchGoogleWebViewFallbackEnabled = p[PreferencesKeys.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] != false,
     )
 
     private fun writeTo(p: MutablePreferences, data: SearchPrefsData) {
-        p[SettingsStore.SEARCH_SERVICES] = JsonInstant.encodeToString(data.searchServices)
-        p[SettingsStore.SEARCH_COMMON] = JsonInstant.encodeToString(data.searchCommonOptions)
-        p[SettingsStore.SEARCH_SELECTED] = data.searchServiceSelected
-        p[SettingsStore.SEARCH_ENABLED_SERVICE_IDS] =
+        p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(data.searchServices)
+        p[PreferencesKeys.SEARCH_COMMON] = JsonInstant.encodeToString(data.searchCommonOptions)
+        p[PreferencesKeys.SEARCH_SELECTED] = data.searchServiceSelected
+        p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS] =
             JsonInstant.encodeToString(data.searchEnabledServiceIds)
-        p[SettingsStore.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] = data.searchBuiltinDuckDuckGoEnabled
-        p[SettingsStore.SEARCH_BUILTIN_BING_ENABLED] = data.searchBuiltinBingEnabled
-        p[SettingsStore.SEARCH_BUILTIN_JINA_ENABLED] = data.searchBuiltinJinaEnabled
-        p[SettingsStore.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] = data.searchBuiltinWikipediaEnabled
-        p[SettingsStore.SEARCH_BUILTIN_HACKERNEWS_ENABLED] = data.searchBuiltinHackerNewsEnabled
-        p[SettingsStore.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] =
+        p[PreferencesKeys.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] = data.searchBuiltinDuckDuckGoEnabled
+        p[PreferencesKeys.SEARCH_BUILTIN_BING_ENABLED] = data.searchBuiltinBingEnabled
+        p[PreferencesKeys.SEARCH_BUILTIN_JINA_ENABLED] = data.searchBuiltinJinaEnabled
+        p[PreferencesKeys.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] = data.searchBuiltinWikipediaEnabled
+        p[PreferencesKeys.SEARCH_BUILTIN_HACKERNEWS_ENABLED] = data.searchBuiltinHackerNewsEnabled
+        p[PreferencesKeys.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] =
             data.searchGoogleWebViewFallbackEnabled
     }
 }

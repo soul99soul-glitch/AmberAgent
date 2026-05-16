@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.map
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 
@@ -44,16 +44,16 @@ class ProviderPrefs(
     }
 
     private fun readFrom(p: Preferences): ProviderPrefsData = ProviderPrefsData(
-        providers = p[SettingsStore.PROVIDERS]?.let {
+        providers = p[PreferencesKeys.PROVIDERS]?.let {
             JsonInstant.decodeFromString<List<ProviderSetting>>(it)
         } ?: DEFAULT_PROVIDERS,
-        imageModelsSeededVersion = if (p[SettingsStore.SEEDED_IMAGE_MODELS_V1] == true) 1 else 0,
+        imageModelsSeededVersion = if (p[PreferencesKeys.SEEDED_IMAGE_MODELS_V1] == true) 1 else 0,
     )
 
     private fun writeTo(p: MutablePreferences, data: ProviderPrefsData) {
-        p[SettingsStore.PROVIDERS] = JsonInstant.encodeToString(data.providers)
+        p[PreferencesKeys.PROVIDERS] = JsonInstant.encodeToString(data.providers)
         if (data.imageModelsSeededVersion > 0) {
-            p[SettingsStore.SEEDED_IMAGE_MODELS_V1] = true
+            p[PreferencesKeys.SEEDED_IMAGE_MODELS_V1] = true
         }
     }
 }

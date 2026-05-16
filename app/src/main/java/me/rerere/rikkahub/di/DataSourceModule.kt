@@ -20,7 +20,6 @@ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
-import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
 import me.rerere.rikkahub.data.datastore.prefs.AssistantPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
@@ -58,10 +57,6 @@ import org.koin.dsl.module
 import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
-    single {
-        SettingsStore(context = get(), scope = get())
-    }
-
     single {
         UIPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }

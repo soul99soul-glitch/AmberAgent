@@ -18,7 +18,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
 import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 import kotlin.uuid.Uuid
@@ -64,51 +64,51 @@ class ChatPrefs(
     }
 
     private fun readFrom(p: Preferences): ChatPrefsData = ChatPrefsData(
-        enableWebSearch = p[SettingsStore.ENABLE_WEB_SEARCH] == true,
-        favoriteModels = p[SettingsStore.FAVORITE_MODELS]?.let {
+        enableWebSearch = p[PreferencesKeys.ENABLE_WEB_SEARCH] == true,
+        favoriteModels = p[PreferencesKeys.FAVORITE_MODELS]?.let {
             JsonInstant.decodeFromString<List<Uuid>>(it)
         } ?: emptyList(),
-        chatModelId = p[SettingsStore.SELECT_MODEL]?.let { Uuid.parse(it) }
+        chatModelId = p[PreferencesKeys.SELECT_MODEL]?.let { Uuid.parse(it) }
             ?: DEFAULT_AUTO_MODEL_ID,
-        titleModelId = p[SettingsStore.TITLE_MODEL]?.let { Uuid.parse(it) }
+        titleModelId = p[PreferencesKeys.TITLE_MODEL]?.let { Uuid.parse(it) }
             ?: DEFAULT_AUTO_MODEL_ID,
-        translateModeId = p[SettingsStore.TRANSLATE_MODEL]?.let { Uuid.parse(it) }
+        translateModeId = p[PreferencesKeys.TRANSLATE_MODEL]?.let { Uuid.parse(it) }
             ?: DEFAULT_AUTO_MODEL_ID,
-        suggestionModelId = p[SettingsStore.SUGGESTION_MODEL]?.let { Uuid.parse(it) }
+        suggestionModelId = p[PreferencesKeys.SUGGESTION_MODEL]?.let { Uuid.parse(it) }
             ?: DEFAULT_AUTO_MODEL_ID,
-        compressModelId = p[SettingsStore.COMPRESS_MODEL]?.let { Uuid.parse(it) }
+        compressModelId = p[PreferencesKeys.COMPRESS_MODEL]?.let { Uuid.parse(it) }
             ?: DEFAULT_AUTO_MODEL_ID,
-        imageGenerationModelId = p[SettingsStore.IMAGE_GENERATION_MODEL]
+        imageGenerationModelId = p[PreferencesKeys.IMAGE_GENERATION_MODEL]
             ?.let { Uuid.parse(it) } ?: Uuid.random(),
-        ocrModelId = p[SettingsStore.OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
-        titlePrompt = p[SettingsStore.TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
-        translatePrompt = p[SettingsStore.TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
-        translateThinkingBudget = p[SettingsStore.TRANSLATE_THINKING_BUDGET] ?: 0,
-        suggestionPrompt = p[SettingsStore.SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
-        ocrPrompt = p[SettingsStore.OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
-        compressPrompt = p[SettingsStore.COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
-        modelGroupSessionDefaults = p[SettingsStore.MODEL_GROUP_SESSION_DEFAULTS]?.let {
+        ocrModelId = p[PreferencesKeys.OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+        titlePrompt = p[PreferencesKeys.TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
+        translatePrompt = p[PreferencesKeys.TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
+        translateThinkingBudget = p[PreferencesKeys.TRANSLATE_THINKING_BUDGET] ?: 0,
+        suggestionPrompt = p[PreferencesKeys.SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
+        ocrPrompt = p[PreferencesKeys.OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
+        compressPrompt = p[PreferencesKeys.COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
+        modelGroupSessionDefaults = p[PreferencesKeys.MODEL_GROUP_SESSION_DEFAULTS]?.let {
             JsonInstant.decodeFromString<List<ModelGroupSessionDefault>>(it)
         } ?: emptyList(),
     )
 
     private fun writeTo(p: MutablePreferences, data: ChatPrefsData) {
-        p[SettingsStore.ENABLE_WEB_SEARCH] = data.enableWebSearch
-        p[SettingsStore.FAVORITE_MODELS] = JsonInstant.encodeToString(data.favoriteModels)
-        p[SettingsStore.SELECT_MODEL] = data.chatModelId.toString()
-        p[SettingsStore.TITLE_MODEL] = data.titleModelId.toString()
-        p[SettingsStore.TRANSLATE_MODEL] = data.translateModeId.toString()
-        p[SettingsStore.SUGGESTION_MODEL] = data.suggestionModelId.toString()
-        p[SettingsStore.COMPRESS_MODEL] = data.compressModelId.toString()
-        p[SettingsStore.IMAGE_GENERATION_MODEL] = data.imageGenerationModelId.toString()
-        p[SettingsStore.OCR_MODEL] = data.ocrModelId.toString()
-        p[SettingsStore.TITLE_PROMPT] = data.titlePrompt
-        p[SettingsStore.TRANSLATION_PROMPT] = data.translatePrompt
-        p[SettingsStore.TRANSLATE_THINKING_BUDGET] = data.translateThinkingBudget
-        p[SettingsStore.SUGGESTION_PROMPT] = data.suggestionPrompt
-        p[SettingsStore.OCR_PROMPT] = data.ocrPrompt
-        p[SettingsStore.COMPRESS_PROMPT] = data.compressPrompt
-        p[SettingsStore.MODEL_GROUP_SESSION_DEFAULTS] =
+        p[PreferencesKeys.ENABLE_WEB_SEARCH] = data.enableWebSearch
+        p[PreferencesKeys.FAVORITE_MODELS] = JsonInstant.encodeToString(data.favoriteModels)
+        p[PreferencesKeys.SELECT_MODEL] = data.chatModelId.toString()
+        p[PreferencesKeys.TITLE_MODEL] = data.titleModelId.toString()
+        p[PreferencesKeys.TRANSLATE_MODEL] = data.translateModeId.toString()
+        p[PreferencesKeys.SUGGESTION_MODEL] = data.suggestionModelId.toString()
+        p[PreferencesKeys.COMPRESS_MODEL] = data.compressModelId.toString()
+        p[PreferencesKeys.IMAGE_GENERATION_MODEL] = data.imageGenerationModelId.toString()
+        p[PreferencesKeys.OCR_MODEL] = data.ocrModelId.toString()
+        p[PreferencesKeys.TITLE_PROMPT] = data.titlePrompt
+        p[PreferencesKeys.TRANSLATION_PROMPT] = data.translatePrompt
+        p[PreferencesKeys.TRANSLATE_THINKING_BUDGET] = data.translateThinkingBudget
+        p[PreferencesKeys.SUGGESTION_PROMPT] = data.suggestionPrompt
+        p[PreferencesKeys.OCR_PROMPT] = data.ocrPrompt
+        p[PreferencesKeys.COMPRESS_PROMPT] = data.compressPrompt
+        p[PreferencesKeys.MODEL_GROUP_SESSION_DEFAULTS] =
             JsonInstant.encodeToString(data.modelGroupSessionDefaults)
     }
 }
