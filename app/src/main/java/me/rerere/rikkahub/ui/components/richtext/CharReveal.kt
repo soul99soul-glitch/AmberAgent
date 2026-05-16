@@ -399,7 +399,7 @@ class CharRevealController internal constructor(
     ) {
         val now = nowNanos // read for draw-phase invalidation
         revealing.fastForEach { entry ->
-            val age = maxOf(0L, now - entry.appearNanos)
+            val age = now - entry.appearNanos
             val effective = entry.revealDurationNanos
             val maskAlpha = when {
                 effective <= 0L -> 0f
