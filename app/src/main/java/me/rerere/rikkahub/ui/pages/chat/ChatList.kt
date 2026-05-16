@@ -811,8 +811,8 @@ private fun ChatListNormal(
         logScroll("scrollToTimelineBottom.enter", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
         try {
             // B3 (smooth-streaming-rendering-guide §10 lerp): one
-            // synchronous 35%-of-viewport step per call instead of an
-            // animateScrollBy tween. Rationale:
+            // synchronous scroll step per call instead of an animateScrollBy
+            // tween. Rationale:
             //
             //  - No in-flight animation means nothing to cancel when
             //    LE_chunk fires again on the next accumulator flush.
@@ -833,19 +833,36 @@ private fun ChatListNormal(
             //    scroll as "user stopped scrolling mid-list" — do
             //    not remove that guard thinking it's dead code.
             //
-            //  - 35% of viewport per call × ~30Hz LE_chunk cadence ≈
-            //    10 viewports/sec — fast enough to keep the streaming
-            //    tail in view, slow enough that overshoots clamp at
-            //    canScrollForward=false rather than tearing.
+            //  - Scroll by the actual measured distance to the bottom
+            //    sentinel whenever it is visible. This keeps bursty providers
+            //    (DeepSeek after a long reasoning phase, for example) from
+            //    growing the tail by more than our old fixed 35%-viewport step
+            //    and silently falling behind while followMode still says
+            //    FollowingBottom.
             //
-            //  - One step ≤ 1 viewport, so even if many calls queue
-            //    on a burst, total scroll never exceeds the natural
-            //    "stick to bottom" target.
-            if (state.layoutInfo.totalItemsCount > 0) {
-                val viewportPx = state.layoutInfo.viewportSize.height.toFloat()
-                if (viewportPx > 0f) {
-                    state.scrollBy(viewportPx * 0.35f)
-                    logScroll("scrollToTimelineBottom.afterScroll", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
+            //  - If the sentinel has already fallen out of the viewport, the
+            //    distance is unknowable from LazyListLayoutInfo. In that one
+            //    case snap to the sentinel item; following-bottom is an explicit
+            //    "stick to tail" mode, so restoring the invariant is preferable
+            //    to waiting for more chunks that may never come.
+            val totalItems = state.layoutInfo.totalItemsCount
+            if (totalItems > 0) {
+                val distancePx = state.distanceToTimelineBottomPx()
+                when {
+                    distancePx == null -> {
+                        state.scrollToItem(totalItems - 1)
+                        logScroll(
+                            "scrollToTimelineBottom.afterSnapToTail",
+                            "token=$token isAtBottom=${state.isAtTimelineBottom(0)}"
+                        )
+                    }
+                    distancePx > 0 -> {
+                        state.scrollBy(distancePx.toFloat())
+                        logScroll(
+                            "scrollToTimelineBottom.afterScroll",
+                            "token=$token distancePx=$distancePx isAtBottom=${state.isAtTimelineBottom(0)}"
+                        )
+                    }
                 }
             }
         } finally {
@@ -1755,6 +1772,14 @@ internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
     val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
     if (lastVisibleItem.index < totalItems - 1) return false
     return lastVisibleItem.offset + lastVisibleItem.size <= layoutInfo.viewportEndOffset + bufferPx
+}
+
+private fun LazyListState.distanceToTimelineBottomPx(): Int? {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) return 0
+    val bottomItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == totalItems - 1 }
+        ?: return null
+    return (bottomItem.offset + bottomItem.size - layoutInfo.viewportEndOffset).coerceAtLeast(0)
 }
 
 private fun LazyListState.markdownPrewarmTexts(
