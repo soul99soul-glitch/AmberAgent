@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.di.appModule
+import me.rerere.rikkahub.di.chatModule
 import me.rerere.rikkahub.di.dataSourceModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
@@ -67,7 +68,7 @@ class RikkaHubApp : Application() {
             androidLogger()
             androidContext(this@RikkaHubApp)
             workManagerFactory()
-            modules(appModule, viewModelModule, dataSourceModule, repositoryModule)
+            modules(appModule, chatModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
 
