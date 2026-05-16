@@ -132,6 +132,7 @@ import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.Conversation
@@ -176,6 +177,32 @@ private val SendTransitionSlideDistance = 8.dp
 // on mid-tier devices.
 private val COMPACT_SUMMARY_WHITESPACE_RE = Regex("\\s+")
 
+@Composable
+private fun SentUserMessageEnter(
+    enabled: Boolean,
+    slidePx: Int,
+    content: @Composable () -> Unit,
+) {
+    if (!enabled) {
+        content()
+        return
+    }
+    val visibleState = remember {
+        MutableTransitionState(false).apply { targetState = true }
+    }
+    AnimatedVisibility(
+        visibleState = visibleState,
+        enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
+            slideInVertically(
+                animationSpec = tween(SendTransitionEnterMillis),
+                initialOffsetY = { slidePx },
+            ),
+        exit = fadeOut(animationSpec = tween(SendTransitionExitMillis)),
+    ) {
+        content()
+    }
+}
+
 /**
  * Slice a ConversationCompact.summary to a ≤80-char one-line preview suitable
  * for the under-divider label on [ContextCompactMarker]. Strips the structured
@@ -196,8 +223,14 @@ private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineMessageInnerSpacing = 4.dp
-private val AgentWorkingIndicatorReserveHeight = 56.dp
+private val AgentWorkingIndicatorHeightEstimate = 48.dp
 private val AgentWorkingIndicatorBottomOffset = 8.dp
+private val AgentWorkingIndicatorTailBuffer = 20.dp
+private val AgentWorkingIndicatorSuggestionOffset = 54.dp
+private val AgentWorkingIndicatorReserveHeight =
+    AgentWorkingIndicatorHeightEstimate + AgentWorkingIndicatorBottomOffset + AgentWorkingIndicatorTailBuffer
+private val AgentWorkingIndicatorSuggestionReserveHeight =
+    AgentWorkingIndicatorHeightEstimate + AgentWorkingIndicatorSuggestionOffset + AgentWorkingIndicatorTailBuffer
 private val TimelineSelectionToolbarOffset = 56.dp
 private const val MarkdownPrewarmBeforeItems = 4
 private const val MarkdownPrewarmAfterItems = 8
@@ -774,6 +807,7 @@ private fun ChatListNormal(
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
     var userScrollInTimeline by remember(conversation.id) { mutableStateOf(false) }
     val density = LocalDensity.current
+    val captureProgress = LocalScrollCaptureInProgress.current
     // 2026-05-16: 24dp ≈ 1 line of CJK at default size. 48dp (≈ 1.7 lines)
     // turned out to be too generous — releasing finger with one full visible
     // line still off-screen would re-arm follow and the next chunk yanked
@@ -786,6 +820,27 @@ private fun ChatListNormal(
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     val workspace = workspaceColors()
+    val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
+        conversation.actionSuggestionTexts()
+    }
+    var retainedSuggestions by remember(conversation.id) { mutableStateOf(emptyList<String>()) }
+    val showSuggestions = actionSuggestions.isNotEmpty() && !captureProgress
+    val suggestionsVisibility = remember(conversation.id) { MutableTransitionState(false) }
+    suggestionsVisibility.targetState = showSuggestions
+
+    LaunchedEffect(actionSuggestions) {
+        if (actionSuggestions.isNotEmpty()) {
+            retainedSuggestions = actionSuggestions
+        }
+    }
+    LaunchedEffect(showSuggestions, actionSuggestions) {
+        if (!showSuggestions && retainedSuggestions.isNotEmpty()) {
+            delay(SendTransitionExitMillis.toLong())
+            if (actionSuggestions.isEmpty()) {
+                retainedSuggestions = emptyList()
+            }
+        }
+    }
 
     // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
     // transition point so we can correlate "哗哗出字最后没贴底" timeline
@@ -1076,6 +1131,24 @@ private fun ChatListNormal(
     var pendingSentUserMessageAnimationKey by remember(conversation.id) { mutableIntStateOf(0) }
     var pendingSentUserMessageAnimationBaselineId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
     var sentUserMessageAnimationId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
+    val immediateSentUserMessageAnimationId = remember(
+        conversation.id,
+        sentUserMessageAnimationKey,
+        sentUserMessageAnimationBaselineId,
+        latestMessage?.id,
+        latestMessage?.role,
+    ) {
+        if (
+            sentUserMessageAnimationKey > 0 &&
+            latestMessage?.role == MessageRole.USER &&
+            latestMessage.id != sentUserMessageAnimationBaselineId
+        ) {
+            latestMessage.id
+        } else {
+            null
+        }
+    }
+    val activeSentUserMessageAnimationId = sentUserMessageAnimationId ?: immediateSentUserMessageAnimationId
     LaunchedEffect(
         conversation.id,
         sentUserMessageAnimationKey,
@@ -1085,6 +1158,11 @@ private fun ChatListNormal(
             pendingSentUserMessageAnimationKey = sentUserMessageAnimationKey
             pendingSentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId
         }
+    }
+    LaunchedEffect(immediateSentUserMessageAnimationId) {
+        val immediateId = immediateSentUserMessageAnimationId ?: return@LaunchedEffect
+        sentUserMessageAnimationId = immediateId
+        pendingSentUserMessageAnimationKey = 0
     }
     LaunchedEffect(
         conversation.id,
@@ -1359,7 +1437,21 @@ private fun ChatListNormal(
             }
         }
 
-        LazyColumn(
+        val sessionVisibility = remember(conversation.id) {
+            MutableTransitionState(false).apply { targetState = true }
+        }
+        AnimatedVisibility(
+            visibleState = sessionVisibility,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(animationSpec = tween(140)) +
+                slideInVertically(
+                    animationSpec = tween(140),
+                    initialOffsetY = { -sendTransitionSlidePx },
+                ),
+            exit = fadeOut(animationSpec = tween(80)),
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
             state = state,
             contentPadding = PaddingValues(
                 start = TimelineHorizontalPadding,
@@ -1424,7 +1516,7 @@ private fun ChatListNormal(
                     lastMessage = isLastMessage,
                 )
                 if (virtualItems == null) {
-                    val shouldAnimateSentUserMessage = node.currentMessage.id == sentUserMessageAnimationId
+                    val shouldAnimateSentUserMessage = node.currentMessage.id == activeSentUserMessageAnimationId
                     item(
                         key = node.id,
                         contentType = "message-${node.currentMessage.role}",
@@ -1462,60 +1554,77 @@ private fun ChatListNormal(
                             // would otherwise produce. Divider above is rendered
                             // separately (outside this modifier chain), so it remains
                             // fully opaque as the boundary marker.
-                            ListSelectableItem(
-                                modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
-                                key = node.id,
-                                onSelectChange = {
-                                    if (!selectedItems.contains(node.id)) {
-                                        selectedItems.add(node.id)
-                                    } else {
-                                        selectedItems.remove(node.id)
-                                    }
-                                },
-                                selectedKeys = selectedItems,
-                                enabled = selecting,
+                            SentUserMessageEnter(
+                                enabled = shouldAnimateSentUserMessage,
+                                slidePx = sendTransitionSlidePx,
                             ) {
-                                val messageModel = remember(node.currentMessage.modelId, settings.providers) {
-                                    node.currentMessage.modelId?.let { settings.findModelById(it) }
+                                ListSelectableItem(
+                                    modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
+                                    key = node.id,
+                                    onSelectChange = {
+                                        if (!selectedItems.contains(node.id)) {
+                                            selectedItems.add(node.id)
+                                        } else {
+                                            selectedItems.remove(node.id)
+                                        }
+                                    },
+                                    selectedKeys = selectedItems,
+                                    enabled = selecting,
+                                ) {
+                                    val messageModel = remember(
+                                        node.currentMessage.modelId,
+                                        node.currentMessage.role,
+                                        isLoadingMessage,
+                                        settings.providers,
+                                        settings.chatModelId,
+                                        chatAssistant?.chatModelId,
+                                    ) {
+                                        node.currentMessage.modelId?.let { settings.findModelById(it) }
+                                            ?: if (isLoadingMessage && node.currentMessage.role == MessageRole.ASSISTANT) {
+                                                settings.getCurrentChatModel()
+                                            } else {
+                                                null
+                                            }
+                                    }
+                                    ChatMessage(
+                                        node = node,
+                                        model = messageModel,
+                                        assistant = chatAssistant,
+                                        loading = isLoadingMessage,
+                                        onRegenerate = {
+                                            onRegenerate(node.currentMessage)
+                                        },
+                                        onEdit = {
+                                            onEdit(node.currentMessage)
+                                        },
+                                        onFork = {
+                                            onForkMessage(node.currentMessage)
+                                        },
+                                        onDelete = {
+                                            onDelete(node.currentMessage)
+                                        },
+                                        onShare = {
+                                            selecting = true  // 使用 CoroutineScope 延迟状态更新
+                                            selectedItems.clear()
+                                            selectedItems.addAll(conversation.messageNodes.map { it.id }
+                                                .subList(0, index + 1))
+                                        },
+                                        onUpdate = {
+                                            onUpdateMessage(it)
+                                        },
+                                        isFavorite = node.isFavorite,
+                                        onToggleFavorite = {
+                                            onToggleFavorite?.invoke(node)
+                                        },
+                                        onTranslate = onTranslate,
+                                        onClearTranslation = onClearTranslation,
+                                        onToolApproval = onToolApproval,
+                                        onToolAnswer = onToolAnswer,
+                                        onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                        lastMessage = isLastMessage,
+                                    )
                                 }
-                                ChatMessage(
-                                    node = node,
-                                    model = messageModel,
-                                    assistant = chatAssistant,
-                                    loading = isLoadingMessage,
-                                    onRegenerate = {
-                                        onRegenerate(node.currentMessage)
-                                    },
-                                    onEdit = {
-                                        onEdit(node.currentMessage)
-                                    },
-                                    onFork = {
-                                        onForkMessage(node.currentMessage)
-                                    },
-                                    onDelete = {
-                                        onDelete(node.currentMessage)
-                                    },
-                                    onShare = {
-                                        selecting = true  // 使用 CoroutineScope 延迟状态更新
-                                        selectedItems.clear()
-                                        selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                            .subList(0, index + 1))
-                                    },
-                                    onUpdate = {
-                                        onUpdateMessage(it)
-                                    },
-                                    isFavorite = node.isFavorite,
-                                    onToggleFavorite = {
-                                        onToggleFavorite?.invoke(node)
-                                    },
-                                    onTranslate = onTranslate,
-                                    onClearTranslation = onClearTranslation,
-                                    onToolApproval = onToolApproval,
-                                    onToolAnswer = onToolAnswer,
-                                    onOpenWorkspaceFile = onOpenWorkspaceFile,
-                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                    lastMessage = isLastMessage,
-                                )
                             }
                         }
                     }
@@ -1561,8 +1670,20 @@ private fun ChatListNormal(
                                     enabled = selecting,
                                     showCheckbox = isFirstVirtualItem,
                                 ) {
-                                    val messageModel = remember(node.currentMessage.modelId, settings.providers) {
+                                    val messageModel = remember(
+                                        node.currentMessage.modelId,
+                                        node.currentMessage.role,
+                                        isLoadingMessage,
+                                        settings.providers,
+                                        settings.chatModelId,
+                                        chatAssistant?.chatModelId,
+                                    ) {
                                         node.currentMessage.modelId?.let { settings.findModelById(it) }
+                                            ?: if (isLoadingMessage && node.currentMessage.role == MessageRole.ASSISTANT) {
+                                                settings.getCurrentChatModel()
+                                            } else {
+                                                null
+                                            }
                                     }
                                     ChatMessageVirtualItemContent(
                                         node = node,
@@ -1670,7 +1791,13 @@ private fun ChatListNormal(
                         Spacer(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(AgentWorkingIndicatorReserveHeight)
+                                .height(
+                                    if (showSuggestions) {
+                                        AgentWorkingIndicatorSuggestionReserveHeight
+                                    } else {
+                                        AgentWorkingIndicatorReserveHeight
+                                    }
+                                )
                         )
                     } else {
                         Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
@@ -1710,8 +1837,6 @@ private fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            val captureProgress = LocalScrollCaptureInProgress.current
-
             // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,
@@ -1726,7 +1851,13 @@ private fun ChatListNormal(
                 visible = showPinnedAgentWorkingIndicator && !captureProgress,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = AgentWorkingIndicatorBottomOffset)
+                    .padding(
+                        bottom = if (showSuggestions) {
+                            AgentWorkingIndicatorSuggestionOffset
+                        } else {
+                            AgentWorkingIndicatorBottomOffset
+                        }
+                    )
                     .zIndex(6f),
                 enter = fadeIn(),
                 exit = fadeOut(),
@@ -1822,28 +1953,6 @@ private fun ChatListNormal(
             )
 
             // Suggestion
-            val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
-                conversation.actionSuggestionTexts()
-            }
-            var retainedSuggestions by remember(conversation.id) { mutableStateOf(emptyList<String>()) }
-            val showSuggestions = actionSuggestions.isNotEmpty() && !captureProgress
-            val suggestionsVisibility = remember(conversation.id) { MutableTransitionState(false) }
-            suggestionsVisibility.targetState = showSuggestions
-
-            LaunchedEffect(actionSuggestions) {
-                if (actionSuggestions.isNotEmpty()) {
-                    retainedSuggestions = actionSuggestions
-                }
-            }
-            LaunchedEffect(showSuggestions, actionSuggestions) {
-                if (!showSuggestions && retainedSuggestions.isNotEmpty()) {
-                    delay(SendTransitionExitMillis.toLong())
-                    if (actionSuggestions.isEmpty()) {
-                        retainedSuggestions = emptyList()
-                    }
-                }
-            }
-
             if (retainedSuggestions.isNotEmpty()) {
                 AnimatedVisibility(
                     visibleState = suggestionsVisibility,
@@ -1866,6 +1975,8 @@ private fun ChatListNormal(
                     )
                 }
             }
+            }
+        }
         }
     }
 }

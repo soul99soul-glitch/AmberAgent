@@ -156,7 +156,8 @@ fun ChatMessage(
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        if (!message.parts.isEmptyUIMessage()) {
+        val showLoadingAssistantHeader = message.role == MessageRole.ASSISTANT && loading
+        if (!message.parts.isEmptyUIMessage() || showLoadingAssistantHeader) {
             when (message.role) {
                 MessageRole.ASSISTANT -> {
                     ChatMessageAssistantAvatar(
@@ -563,7 +564,7 @@ internal fun ChatMessageVirtualItemContent(
                     .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} header measure"),
                 horizontalAlignment = Alignment.Start,
             ) {
-                if (!message.parts.isEmptyUIMessage()) {
+                if (!message.parts.isEmptyUIMessage() || loading) {
                     ChatMessageAssistantAvatar(
                         message = message,
                         model = model,

@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -236,7 +237,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val chatListState = rememberLazyListState()
     val chatAssistant = remember(setting.assistants, conversation.assistantId) {
         setting.getAssistantById(conversation.assistantId)
     }
@@ -256,6 +256,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
             pendingMessageCount = pendingUserMessages.size,
         )
+    }
+    val initialChatListIndex = remember(conversation.id, nodeId, conversation.messageNodes, lazyItemMessageIndexes) {
+        if (nodeId != null) {
+            val messageIndex = conversation.messageNodes.indexOfFirst { it.id == nodeId }
+            lazyItemMessageIndexes.firstLazyIndexForMessage(messageIndex).takeIf { messageIndex >= 0 } ?: 0
+        } else {
+            lazyItemMessageIndexes.lastIndex.coerceAtLeast(0)
+        }
+    }
+    val chatListState = key(conversation.id) {
+        rememberLazyListState(initialFirstVisibleItemIndex = initialChatListIndex)
     }
 
     LaunchedEffect(nodeId, conversation.messageNodes.size, timelineLoadState.initialized) {
