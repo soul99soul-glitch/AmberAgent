@@ -225,7 +225,7 @@ val appModule = module {
     }
 
     single {
-        FeishuDocsTools(client = get())
+        FeishuDocsTools(client = get(), pool = get())
     }
 
     single {

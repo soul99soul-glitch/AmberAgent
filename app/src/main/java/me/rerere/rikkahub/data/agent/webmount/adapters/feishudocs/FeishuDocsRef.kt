@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs
 
 import java.nio.charset.StandardCharsets
+import java.net.URI
 import java.util.Base64
+import java.util.Locale
 
 data class FeishuDocRef(
     val documentId: String,
@@ -47,6 +49,7 @@ object FeishuDocRefs {
     fun fromUrl(url: String?): FeishuDocRef? {
         val raw = url?.trim().orEmpty()
         if (raw.isBlank()) return null
+        if (!isFeishuDocumentHost(raw)) return null
         val match = DOC_URL_PATTERN.find(raw) ?: return null
         val wireType = match.groupValues[1].lowercase()
         val docType = when (wireType) {
@@ -59,6 +62,9 @@ object FeishuDocRefs {
             sourceUrl = raw,
         )
     }
+
+    fun isFeishuDocumentUrl(url: String?): Boolean =
+        fromUrl(url) != null
 
     fun encodeBlock(documentId: String, blockId: String): String =
         BLOCK_PREFIX + encodePayload(listOf(VERSION, documentId, blockId))
@@ -79,6 +85,15 @@ object FeishuDocRefs {
         runCatching {
             String(Base64.getUrlDecoder().decode(payload), StandardCharsets.UTF_8).split(SEP)
         }.getOrNull()
+
+    private fun isFeishuDocumentHost(url: String): Boolean {
+        val host = runCatching { URI(url).host?.lowercase(Locale.ROOT) }.getOrNull()
+            ?: return false
+        return host == "feishu.cn" || host.endsWith(".feishu.cn") ||
+            host == "larksuite.com" || host.endsWith(".larksuite.com") ||
+            host == "larkoffice.com" || host.endsWith(".larkoffice.com") ||
+            host == "feishu.net" || host.endsWith(".feishu.net")
+    }
 
     private val DOC_URL_PATTERN = Regex(
         """/(docx|docs|doc|wiki|sheets|base|mindnotes)/([A-Za-z0-9_-]+)""",

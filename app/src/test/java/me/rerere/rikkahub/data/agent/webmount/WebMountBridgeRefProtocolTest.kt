@@ -20,6 +20,9 @@ class WebMountBridgeRefProtocolTest {
         assertTrue(source.contains("sameFingerprint(fingerprintOf(entry.el), entry.fingerprint, requireStableRect)"))
         assertTrue(source.contains("sameFingerprint(fingerprintOf(el), entry.fingerprint, requireStableRect)"))
         assertTrue(source.contains("selector_fallback"))
+        assertTrue(source.contains("case 'feishu_snapshot'"))
+        assertTrue(source.contains("not_feishu_doc_page"))
+        assertTrue(source.contains("current_webview_session"))
     }
 
     @Test

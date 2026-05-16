@@ -449,6 +449,8 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
     // small overhead for envelope JSON".
     "feishu_docs_read" -> 220_000
     "feishu_docs_blocks" -> 180_000
+    "feishu_docs_snapshot" -> 180_000
+    "feishu_docs_markdown_pack" -> 220_000
     "github_file_read" -> 220_000
     "zhihu_answer_read" -> 90_000
     "zhihu_question_read" -> 100_000

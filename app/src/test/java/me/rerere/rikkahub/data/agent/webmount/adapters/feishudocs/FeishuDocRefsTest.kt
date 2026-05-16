@@ -37,6 +37,13 @@ class FeishuDocRefsTest {
     }
 
     @Test
+    fun rejectsFeishuLookalikeHosts() {
+        assertNull(FeishuDocRefs.fromUrl("https://not-feishu.cn.evil.com/docx/AbCdEf123"))
+        assertNull(FeishuDocRefs.fromUrl("https://evil.com/path?next=https://xiaomi.feishu.cn/docx/AbCdEf123"))
+        assertNotNull(FeishuDocRefs.fromUrl("https://xiaomi.feishu.cn/wiki/AbCdEf123"))
+    }
+
+    @Test
     fun encodesAndDecodesBlockRefs() {
         val encoded = FeishuDocRefs.encodeBlock("doc-1", "block-2")
         val decoded = FeishuDocRefs.decodeBlock(encoded)
@@ -65,7 +72,10 @@ class FeishuDocRefsTest {
         assertTrue(source.contains("put(\"block_ref\""))
         assertTrue(source.contains("parent_block_ref"))
         assertTrue(source.contains("unsupportedDocRefJson"))
-        assertTrue(source.contains("wm_open + wm_extract"))
+        assertTrue(source.contains("use_feishu_docs_snapshot"))
+        assertTrue(source.contains("name = \"feishu_docs_snapshot\""))
+        assertTrue(source.contains("name = \"feishu_docs_network_summary\""))
+        assertTrue(source.contains("name = \"feishu_docs_markdown_pack\""))
     }
 
     private fun locateTools(): File {
