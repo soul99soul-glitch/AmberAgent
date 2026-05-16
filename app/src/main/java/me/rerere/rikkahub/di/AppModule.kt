@@ -80,11 +80,6 @@ import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.font.SlidesFontRepository
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
 import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
 import me.rerere.rikkahub.data.agent.board.agent.BoardAgent
@@ -98,11 +93,6 @@ import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
 import me.rerere.rikkahub.data.agent.board.collector.TimeAnchorSignalCollector
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
-import me.rerere.rikkahub.data.memory.extraction.MemoryCandidateFilter
-import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
-import me.rerere.rikkahub.data.memory.export.MemoryFrontmatterCodec
-import me.rerere.rikkahub.data.memory.export.MemoryImportExportManager
-import me.rerere.rikkahub.data.memory.telemetry.MemoryEventLogger
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
 import me.rerere.rikkahub.utils.JsonInstant
@@ -466,39 +456,6 @@ val appModule = module {
     single {
         AILoggingManager()
     }
-
-    single {
-        MemoryEventLogger(get())
-    }
-
-    single {
-        MemoryCandidateFilter()
-    }
-
-    single {
-        MemoryExtractor(get(), get(), get(), get(), get(), get())
-    }
-
-    single {
-        MemoryDreamPlanner(get(), get(), get(), get(), get())
-    }
-
-    single {
-        MemoryDreamApplier(get(), get())
-    }
-
-    single {
-        MemoryDreamPlanStore(get(), get())
-    }
-
-    single {
-        MemoryDreamNotifier(get())
-    }
-
-    single {
-        MemoryDreamScheduler(get(), get())
-    }
-
     // Feishu Document Radar (refactored)
     single {
         FeishuChangeNotifier(get())
@@ -611,12 +568,5 @@ val appModule = module {
         )
     }
 
-    single {
-        MemoryFrontmatterCodec()
-    }
-
-    single {
-        MemoryImportExportManager(get(), get())
-    }
 
 }
