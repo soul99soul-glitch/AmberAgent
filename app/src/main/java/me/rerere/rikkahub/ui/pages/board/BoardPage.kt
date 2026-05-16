@@ -1,14 +1,11 @@
 package me.rerere.rikkahub.ui.pages.board
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
@@ -43,9 +42,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +71,7 @@ import me.rerere.rikkahub.ui.components.ui.workspaceBorder
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.navigateToChatPage
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,7 +84,8 @@ fun TodayBoardPage() {
     val boardEnabled = settings.agentRuntime.todayBoard.enabled
     val items by vm.items.collectAsStateWithLifecycle(initialValue = emptyList())
     val activeItems = items.filter { it.status == "active" }
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
     var expandedItemId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -136,48 +137,42 @@ fun TodayBoardPage() {
                 val workspace = workspaceColors()
 
                 SecondaryTabRow(
-                    selectedTabIndex = selectedTab,
+                    selectedTabIndex = pagerState.currentPage,
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                 ) {
                     Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
+                        selected = pagerState.currentPage == 0,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                         text = {
                             Text(
-                                "分区",
+                                "大看板",
                                 style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontWeight = if (pagerState.currentPage == 0) FontWeight.SemiBold else FontWeight.Normal,
                                 ),
                             )
                         },
                     )
                     Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
+                        selected = pagerState.currentPage == 1,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                         text = {
                             Text(
                                 "今日回顾",
                                 style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontWeight = if (pagerState.currentPage == 1) FontWeight.SemiBold else FontWeight.Normal,
                                 ),
                             )
                         },
                     )
                 }
 
-                AnimatedContent(
-                    targetState = selectedTab,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(150)) + slideInVertically(
-                            initialOffsetY = { it / 20 },
-                            animationSpec = tween(150),
-                        )).togetherWith(fadeOut(animationSpec = tween(100)))
-                    },
-                    label = "boardTabs",
-                ) { tab ->
-                    if (tab == 0) {
-                        BoardSectionTab(
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    when (page) {
+                        0 -> BoardSectionTab(
                             items = activeItems,
                             expandedItemId = expandedItemId,
                             onToggleExpand = { id ->
@@ -192,8 +187,8 @@ fun TodayBoardPage() {
                                 }
                             },
                         )
-                    } else {
-                        DailyReviewTab(
+
+                        1 -> DailyReviewTab(
                             review = dailyReview,
                             onRefresh = { vm.refresh() },
                         )

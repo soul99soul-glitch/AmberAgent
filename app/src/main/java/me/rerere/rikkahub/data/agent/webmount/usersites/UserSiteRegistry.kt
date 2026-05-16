@@ -131,7 +131,7 @@ class UserSiteRegistry(context: Context) {
             // site needs login, so they ended up with no Sign-in button.
             // Promote them to COOKIE on first read after the upgrade and
             // persist so it sticks.
-            val migrated = parsed.map { site ->
+            val migratedBase = parsed.map { site ->
                 var next = site
                 // Migration A: user-added sites added before the "需要登录" Switch
                 // defaulted to ANONYMOUS + no cookie → bump to COOKIE so the
@@ -164,14 +164,26 @@ class UserSiteRegistry(context: Context) {
                     next = next.copy(homepageUrl = FEISHU_DOCS_HOME)
                 }
                 next
+            }.let { sites ->
+                val seedVersion = prefs.getInt(KEY_SEED_VERSION, if (seeded) 1 else 0)
+                if (seedVersion >= CURRENT_SEED_VERSION) return@let sites
+                val existingIds = sites.map { it.id }.toSet()
+                val existingSignatures = sites.map { it.seedAutoAddSignature() }.toSet()
+                val newSeeds = SEED_SITES
+                    .filter { it.id in AUTO_ADD_SEED_IDS && it.id !in existingIds && it.seedAutoAddSignature() !in existingSignatures }
+                    .map { it.copy(addedAtMs = System.currentTimeMillis()) }
+                if (newSeeds.isEmpty()) sites else sites + newSeeds
             }
+            val migrated = migratedBase
             if (migrated != parsed) {
                 // W-5 fix: count what actually changed, not "all originally
                 // ANONYMOUS" (which over-counts when some ANONYMOUS rows
                 // didn't qualify for the user_/no-cookie/no-adapter check).
-                val changed = migrated.zip(parsed).count { (m, p) -> m != p }
+                val changed = migrated.zip(parsed).count { (m, p) -> m != p } + (migrated.size - parsed.size).coerceAtLeast(0)
                 Log.i(TAG, "Migrated $changed user site(s) to current schema (authKind / oauthProviderId backfill)")
                 persist(migrated)
+            } else if (prefs.getInt(KEY_SEED_VERSION, 0) < CURRENT_SEED_VERSION) {
+                prefs.edit().putInt(KEY_SEED_VERSION, CURRENT_SEED_VERSION).apply()
             }
             return migrated
         }
@@ -186,6 +198,7 @@ class UserSiteRegistry(context: Context) {
         prefs.edit()
             .putString(KEY_SITES, json.encodeToString(ListSerializer(UserSite.serializer()), seeds))
             .putBoolean(KEY_SEEDED, true)
+            .putInt(KEY_SEED_VERSION, CURRENT_SEED_VERSION)
             .apply()
         return seeds
     }
@@ -194,6 +207,7 @@ class UserSiteRegistry(context: Context) {
         prefs.edit()
             .putString(KEY_SITES, json.encodeToString(ListSerializer(UserSite.serializer()), sites))
             .putBoolean(KEY_SEEDED, true)
+            .putInt(KEY_SEED_VERSION, CURRENT_SEED_VERSION)
             .apply()
     }
 
@@ -202,6 +216,9 @@ class UserSiteRegistry(context: Context) {
         private const val PREFS_FILE = "amberagent_webmount_user_sites"
         private const val KEY_SITES = "sites"
         private const val KEY_SEEDED = "seeded"
+        private const val KEY_SEED_VERSION = "seed_version"
+        private const val CURRENT_SEED_VERSION = 2
+        private val AUTO_ADD_SEED_IDS = setOf("x_com", "weibo")
 
         /**
          * The 7 sites users see by default. Their ids match the matching
@@ -244,6 +261,22 @@ class UserSiteRegistry(context: Context) {
                 iconKey = "bilibili",
             ),
             UserSite(
+                id = "x_com",
+                displayName = "X.com",
+                homepageUrl = "https://x.com/i/flow/login",
+                authKind = AuthKind.COOKIE,
+                loginCookieName = "auth_token",
+                iconKey = "x_com",
+            ),
+            UserSite(
+                id = "weibo",
+                displayName = "微博",
+                homepageUrl = "https://m.weibo.cn",
+                authKind = AuthKind.COOKIE,
+                loginCookieName = "SUB",
+                iconKey = "weibo",
+            ),
+            UserSite(
                 id = "juejin",
                 displayName = "掘金",
                 homepageUrl = "https://juejin.cn/login",
@@ -278,4 +311,12 @@ class UserSiteRegistry(context: Context) {
 
         private const val FEISHU_DOCS_HOME = "https://www.feishu.cn/wiki"
     }
+}
+
+internal fun UserSite.seedAutoAddSignature(): String = when {
+    homepageUrl.contains("weibo", ignoreCase = true) || homepageUrl.contains("sina", ignoreCase = true) ||
+        displayName.contains("微博", ignoreCase = true) || id.contains("weibo", ignoreCase = true) -> "weibo"
+    homepageUrl.contains("x.com", ignoreCase = true) || homepageUrl.contains("twitter", ignoreCase = true) ||
+        id == "x_com" || id.contains("twitter", ignoreCase = true) -> "x_com"
+    else -> id
 }

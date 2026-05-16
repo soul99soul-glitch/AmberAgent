@@ -26,6 +26,12 @@ data class ICloudDriveState(
     val updatedAtMillis: Long = 0L,
 )
 
+data class ICloudDriveLoginSnapshot(
+    val loginDetected: Boolean,
+    val endpointHint: ICloudDriveWebEndpoint?,
+    val hasUploadToken: Boolean,
+)
+
 data class ICloudDriveCookieBundle(
     val header: String,
     val sourceUrls: List<String> = emptyList(),
@@ -74,6 +80,27 @@ data class ICloudDriveEntry(
     val name: String,
     val directory: Boolean,
     val sizeBytes: Long?,
+    val nodeRef: String? = null,
+    val drivewsId: String? = null,
+    val docwsId: String? = null,
+    val etag: String? = null,
+)
+
+data class ICloudDriveListResult(
+    val entries: List<ICloudDriveEntry>,
+    val totalEntries: Int,
+    val truncated: Boolean,
+)
+
+data class ICloudDriveReadResult(
+    val content: String,
+    val entry: ICloudDriveEntry,
+    val matchLevel: String,
+)
+
+data class ICloudDriveStatResult(
+    val entry: ICloudDriveEntry,
+    val matchLevel: String,
 )
 
 data class ICloudDriveResolvedPath(

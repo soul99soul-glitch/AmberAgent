@@ -92,16 +92,23 @@ private class ReasoningState(
 }
 
 @Composable
-private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<ReasoningState, Boolean> {
+private fun rememberReasoningState(
+    reasoning: UIMessagePart.Reasoning,
+    messageLoading: Boolean,
+): Pair<ReasoningState, Boolean> {
     val settings = LocalSettings.current
-    val loading = reasoning.finishedAt == null
+    val loading = messageLoading && reasoning.finishedAt == null
     val scrollState = rememberScrollState()
+    val finishedAt = reasoning.finishedAt
 
     val state = remember(reasoning.createdAt) {
         ReasoningState(
             scrollState = scrollState,
-            initialDuration = reasoning.finishedAt?.let { it - reasoning.createdAt }
-                ?: (Clock.System.now() - reasoning.createdAt)
+            initialDuration = when {
+                finishedAt != null -> finishedAt - reasoning.createdAt
+                loading -> Clock.System.now() - reasoning.createdAt
+                else -> Duration.ZERO
+            }
         )
     }
 
@@ -149,15 +156,16 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
 private fun ReasoningContent(
     reasoning: UIMessagePart.Reasoning,
     assistant: Assistant?,
+    loading: Boolean,
     expandState: ReasoningCardState,
     scrollState: ScrollState,
     fadeHeight: Float,
 ) {
     val workspace = workspaceColors()
     val isPreview = expandState == ReasoningCardState.Preview
-    val displayText = remember(reasoning.reasoning, reasoning.finishedAt, expandState) {
+    val displayText = remember(reasoning.reasoning, loading, expandState) {
         reasoning.reasoning.toDisplayReasoningText(
-            loading = reasoning.finishedAt == null,
+            loading = loading,
             expanded = expandState == ReasoningCardState.Expanded,
         )
     }
@@ -227,12 +235,14 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     reasoning: UIMessagePart.Reasoning,
     model: Model?,
     assistant: Assistant?,
+    loading: Boolean,
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
 ) {
-    val (state, loading) = rememberReasoningState(reasoning)
-    val thinkingTitle = remember(reasoning.reasoning, loading) {
-        if (loading) reasoning.reasoning.extractThinkingTitle() else null
+    val (state, reasoningLoading) = rememberReasoningState(reasoning, loading)
+    val showReasoningDuration = reasoning.finishedAt != null || reasoningLoading
+    val thinkingTitle = remember(reasoning.reasoning, reasoningLoading) {
+        if (reasoningLoading) reasoning.reasoning.extractThinkingTitle() else null
     }
     val showThinkingTitle = thinkingTitle != null
     val workspace = workspaceColors()
@@ -246,7 +256,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
 
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
-        onExpandedChange = { state.onExpandedChange(it, loading) },
+        onExpandedChange = { state.onExpandedChange(it, reasoningLoading) },
         icon = {
             Icon(
                 imageVector = HugeIcons.Brain02,
@@ -260,16 +270,20 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 ReasoningTitle(title = thinkingTitle)
             } else {
                 Text(
-                    text = stringResource(
-                        R.string.deep_thinking_seconds,
-                        state.duration.toDouble(DurationUnit.SECONDS).toFloat()
-                    ),
+                    text = if (showReasoningDuration) {
+                        stringResource(
+                            R.string.deep_thinking_seconds,
+                            state.duration.toDouble(DurationUnit.SECONDS).toFloat()
+                        )
+                    } else {
+                        stringResource(R.string.deep_thinking)
+                    },
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Normal,
                     ),
                     color = workspace.blue.copy(alpha = 0.72f),
-                    modifier = Modifier.shimmer(isLoading = loading),
+                    modifier = Modifier.shimmer(isLoading = reasoningLoading),
                 )
             }
         },
@@ -288,7 +302,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         fontWeight = FontWeight.Normal,
                     ),
                     color = workspace.blue.copy(alpha = 0.56f),
-                    modifier = Modifier.shimmer(isLoading = loading),
+                    modifier = Modifier.shimmer(isLoading = reasoningLoading),
                 )
             }
         },
@@ -298,6 +312,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             ReasoningContent(
                 reasoning = reasoning,
                 assistant = assistant,
+                loading = reasoningLoading,
                 expandState = state.expandState,
                 scrollState = state.scrollState,
                 fadeHeight = fadeHeight,

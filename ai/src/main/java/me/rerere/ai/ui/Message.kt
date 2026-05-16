@@ -1,5 +1,6 @@
 package me.rerere.ai.ui
 
+import androidx.compose.runtime.Immutable
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -16,6 +17,15 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
+//
+// @Immutable: every constructor property is a val and either a primitive,
+// a value type (Uuid, LocalDateTime, TokenUsage), or an immutable List of
+// data classes. The annotation lets Compose skip recomposition of any
+// Composable taking UIMessage as a parameter when the caller passes the
+// same reference (e.g. an unchanged historical MessageNode in
+// LazyColumn). UIMessagePart is intentionally NOT @Immutable — its
+// `var metadata` would violate the contract; see UIMessagePart.
+@Immutable
 @Serializable
 data class UIMessage(
     val id: Uuid = Uuid.random(),

@@ -15,22 +15,34 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.agent.board.TodayBoardDensity
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
+import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.pages.setting.ExperimentDivider
 import me.rerere.rikkahub.ui.pages.setting.ExperimentSectionCard
@@ -39,21 +51,75 @@ import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.components.ui.NotionSlider
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.ui.pages.setting.ExperimentDivider
-import me.rerere.rikkahub.ui.pages.setting.ExperimentSectionCard
-import me.rerere.rikkahub.ui.pages.setting.ExperimentalSettingsScaffold
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
+import kotlin.math.roundToInt
+import kotlin.uuid.Uuid
 
 @Composable
 fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
+    val boardRepository: BoardRepository = koinInject()
+    val scope = rememberCoroutineScope()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val focusRules by boardRepository.observeFocusRules().collectAsStateWithLifecycle(initialValue = emptyList())
     val board = settings.agentRuntime.todayBoard
+    var sourceWeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var weightReloadKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(weightReloadKey) {
+        sourceWeights = boardRepository.getAllWeights()
+            .filter { it.keyword == BoardWeightEntity.WHOLE_SOURCE }
+            .associate { it.sourceType to it.weight }
+    }
 
     fun update(block: (TodayBoardSetting) -> TodayBoardSetting) {
         vm.updateSettings(settings.copy(
             agentRuntime = settings.agentRuntime.copy(todayBoard = block(board))
         ))
+    }
+
+    fun addFocusRule(content: String) {
+        val trimmed = content.trim()
+        if (trimmed.isEmpty()) return
+        val now = System.currentTimeMillis()
+        scope.launch {
+            boardRepository.upsertFocusRule(
+                BoardFocusRuleEntity(
+                    id = Uuid.random().toString(),
+                    content = trimmed,
+                    active = true,
+                    sortOrder = (focusRules.maxOfOrNull { it.sortOrder } ?: 0) + 1,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+        }
+    }
+
+    fun updateFocusRule(rule: BoardFocusRuleEntity, active: Boolean) {
+        scope.launch {
+            boardRepository.upsertFocusRule(rule.copy(active = active, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun deleteFocusRule(rule: BoardFocusRuleEntity) {
+        scope.launch { boardRepository.deleteFocusRule(rule.id) }
+    }
+
+    fun updateSourceWeight(sourceType: String, weight: Int) {
+        sourceWeights = sourceWeights + (sourceType to weight)
+        scope.launch {
+            boardRepository.upsertWeight(
+                BoardWeightEntity(
+                    sourceType = sourceType,
+                    keyword = BoardWeightEntity.WHOLE_SOURCE,
+                    weight = weight,
+                    lastActionAt = System.currentTimeMillis(),
+                )
+            )
+            weightReloadKey++
+        }
     }
 
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -169,14 +235,155 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 ExperimentSectionCard(title = "关注点") {
-                    Column(Modifier.padding(12.dp)) {
-                        workspaceColors().let { ws ->
-                            Text("关注点规则将在后续版本中支持编辑", style = MaterialTheme.typography.bodySmall, color = ws.muted)
-                        }
-                    }
+                    FocusRulesEditor(
+                        rules = focusRules,
+                        onAdd = ::addFocusRule,
+                        onToggle = ::updateFocusRule,
+                        onDelete = ::deleteFocusRule,
+                    )
+                    ExperimentDivider()
+                    SourceWeightsEditor(
+                        weights = sourceWeights,
+                        onChange = ::updateSourceWeight,
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FocusRulesEditor(
+    rules: List<BoardFocusRuleEntity>,
+    onAdd: (String) -> Unit,
+    onToggle: (BoardFocusRuleEntity, Boolean) -> Unit,
+    onDelete: (BoardFocusRuleEntity) -> Unit,
+) {
+    var input by rememberSaveable { mutableStateOf("") }
+    val ws = workspaceColors()
+
+    Column(
+        Modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("自定义关注点", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "用自然语言告诉看板更该关注什么；这是软提示，不会硬过滤信号。",
+            style = MaterialTheme.typography.bodySmall,
+            color = ws.muted,
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("例如：关注飞书里和发布会有关的消息") },
+                maxLines = 2,
+                singleLine = false,
+            )
+            TextButton(
+                enabled = input.trim().isNotEmpty(),
+                onClick = {
+                    onAdd(input)
+                    input = ""
+                },
+            ) {
+                Text("添加")
+            }
+        }
+
+        if (rules.isEmpty()) {
+            Text("暂无关注点", style = MaterialTheme.typography.bodySmall, color = ws.muted)
+        } else {
+            rules.forEach { rule ->
+                FocusRuleRow(
+                    rule = rule,
+                    onToggle = { onToggle(rule, it) },
+                    onDelete = { onDelete(rule) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusRuleRow(
+    rule: BoardFocusRuleEntity,
+    onToggle: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Switch(checked = rule.active, onCheckedChange = onToggle)
+        Text(
+            text = rule.content,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (rule.active) MaterialTheme.colorScheme.onSurface else workspaceColors().muted,
+        )
+        TextButton(onClick = onDelete) {
+            Text("删除")
+        }
+    }
+}
+
+@Composable
+private fun SourceWeightsEditor(
+    weights: Map<String, Int>,
+    onChange: (sourceType: String, weight: Int) -> Unit,
+) {
+    val ws = workspaceColors()
+    Column(
+        Modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("来源权重", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "只调来源级偏好：负数少出现，正数多出现，-10 近似屏蔽。行为反馈也会微调这里；时间锚点不作为内容来源。",
+            style = MaterialTheme.typography.bodySmall,
+            color = ws.muted,
+        )
+        BOARD_WEIGHT_SOURCES.forEach { source ->
+            SourceWeightRow(
+                source = source,
+                value = weights[source.sourceType] ?: 0,
+                onChange = { onChange(source.sourceType, it) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceWeightRow(
+    source: BoardWeightSource,
+    value: Int,
+    onChange: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text(source.title, style = MaterialTheme.typography.bodyMedium)
+                Text(source.description, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+            }
+            Text(
+                text = if (value > 0) "+$value" else value.toString(),
+                style = MaterialTheme.typography.bodySmall,
+                color = workspaceColors().muted,
+            )
+        }
+        NotionSlider(
+            value = value.toFloat(),
+            onValueChangeFinished = { onChange(it.roundToInt().coerceIn(-10, 10)) },
+            valueRange = -10f..10f,
+            snapStep = 1f,
+        )
     }
 }
 
@@ -256,3 +463,17 @@ private fun toggleSource(
 ) {
     update { it.copy(enabledSources = if (source in it.enabledSources) it.enabledSources - source else it.enabledSources + source) }
 }
+
+private data class BoardWeightSource(
+    val sourceType: String,
+    val title: String,
+    val description: String,
+)
+
+private val BOARD_WEIGHT_SOURCES = listOf(
+    BoardWeightSource(BoardSignalSourceType.NOTIFICATION, "系统通知", "设备通知、应用提醒、重要推送"),
+    BoardWeightSource(BoardSignalSourceType.CALENDAR, "日历", "今日日程、会议和时间安排"),
+    BoardWeightSource(BoardSignalSourceType.FEISHU_MSG, "飞书消息", "未读消息、群聊和工作沟通"),
+    BoardWeightSource(BoardSignalSourceType.FEISHU_DOC, "飞书文档", "文档更新、索引和变更信号"),
+    BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "聊天记录", "最近对话中的真实待办和项目上下文"),
+)

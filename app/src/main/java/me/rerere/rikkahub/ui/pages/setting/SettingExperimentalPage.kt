@@ -69,8 +69,12 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.icloud.ICLOUD_CHINA_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICLOUD_GLOBAL_LOGIN_URL
 import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS
+import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS
+import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.modelcouncil.MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
@@ -81,8 +85,11 @@ import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
 import me.rerere.rikkahub.data.agent.office.radar.DocRadar
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
+import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
 import me.rerere.rikkahub.data.agent.subagent.SubAgentOverride
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
 import me.rerere.rikkahub.data.agent.subagent.applyOverride
@@ -185,8 +192,9 @@ fun SettingExperimentalSubAgentPage(
 
     val concurrencyOptions = listOf(1, 2, 3, 4, 5)
     val turnOptions = listOf(2, 4, 6, 8)
-    val timeoutOptions = listOf(60_000L, 180_000L, DEFAULT_SUB_AGENT_TIMEOUT_MS, 600_000L)
-    val budgetOptions = listOf(8_000, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS, 20_000, 40_000)
+    val timeoutOptions = listOf(60_000L, 180_000L, DEFAULT_SUB_AGENT_TIMEOUT_MS, 600_000L, EXTENDED_SUB_AGENT_TIMEOUT_MS)
+    val budgetOptions = listOf(8_000, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS)
+    val modeOptions = SubAgentMode.entries
     // null sentinel = "follow main assistant"; otherwise pick a specific reasoning level.
     val reasoningOptions: List<ReasoningLevel?> = listOf(null) + ReasoningLevel.entries
 
@@ -236,6 +244,29 @@ fun SettingExperimentalSubAgentPage(
 
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_runtime)) {
+                    SubAgentSelectRow(
+                        label = stringResource(R.string.setting_subagent_mode),
+                        options = modeOptions,
+                        selected = subAgent.mode,
+                        onSelected = { value ->
+                            update { current ->
+                                current.copy(
+                                    mode = value,
+                                    allowDynamicSubAgents = if (value == SubAgentMode.SMART_DYNAMIC) true
+                                    else current.allowDynamicSubAgents,
+                                )
+                            }
+                        },
+                        optionToString = { value ->
+                            when (value) {
+                                SubAgentMode.ROSTER -> stringResource(R.string.setting_subagent_mode_roster)
+                                SubAgentMode.SMART_DYNAMIC -> stringResource(R.string.setting_subagent_mode_smart)
+                            }
+                        },
+                    )
+                    if (subAgent.mode == SubAgentMode.SMART_DYNAMIC) {
+                        ExperimentNote(text = stringResource(R.string.setting_subagent_mode_smart_desc))
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -257,8 +288,9 @@ fun SettingExperimentalSubAgentPage(
                             )
                         }
                         Switch(
-                            checked = subAgent.allowDynamicSubAgents,
+                            checked = subAgent.mode == SubAgentMode.SMART_DYNAMIC || subAgent.allowDynamicSubAgents,
                             onCheckedChange = { checked -> update { it.copy(allowDynamicSubAgents = checked) } },
+                            enabled = subAgent.mode != SubAgentMode.SMART_DYNAMIC,
                         )
                     }
                 }
@@ -291,7 +323,18 @@ fun SettingExperimentalSubAgentPage(
                         label = stringResource(R.string.setting_subagent_output_budget),
                         options = budgetOptions,
                         selected = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
-                        onSelected = { value -> update { it.copy(outputBudgetChars = value) } },
+                        onSelected = { value ->
+                            update { current ->
+                                current.copy(
+                                    outputBudgetChars = value,
+                                    timeoutMs = if (value >= EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS) {
+                                        maxOf(current.timeoutMs, EXTENDED_SUB_AGENT_TIMEOUT_MS)
+                                    } else {
+                                        current.timeoutMs
+                                    },
+                                )
+                            }
+                        },
                         optionToString = { "${it / 1000}k" },
                     )
                 }
@@ -299,26 +342,30 @@ fun SettingExperimentalSubAgentPage(
 
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_roles)) {
-                    Text(
-                        text = stringResource(R.string.setting_subagent_roles_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspaceColors().muted,
-                    )
-                    builtIns.forEach { def ->
-                        SubAgentBuiltInRow(
-                            def = def,
-                            override = subAgent.overrides[def.id],
-                            providers = settings.providers,
-                            expanded = expandedRoleId == def.id,
-                            onToggleExpand = {
-                                expandedRoleId = if (expandedRoleId == def.id) null else def.id
-                            },
-                            onMutateOverride = { mutate -> mutateOverride(def.id) { mutate(it) } },
-                            onReset = {
-                                update { current -> current.copy(overrides = current.overrides - def.id) }
-                            },
-                            reasoningOptions = reasoningOptions,
+                    if (subAgent.mode == SubAgentMode.SMART_DYNAMIC) {
+                        ExperimentNote(text = stringResource(R.string.setting_subagent_smart_roles_hidden))
+                    } else {
+                        Text(
+                            text = stringResource(R.string.setting_subagent_roles_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = workspaceColors().muted,
                         )
+                        builtIns.forEach { def ->
+                            SubAgentBuiltInRow(
+                                def = def,
+                                override = subAgent.overrides[def.id],
+                                providers = settings.providers,
+                                expanded = expandedRoleId == def.id,
+                                onToggleExpand = {
+                                    expandedRoleId = if (expandedRoleId == def.id) null else def.id
+                                },
+                                onMutateOverride = { mutate -> mutateOverride(def.id) { mutate(it) } },
+                                onReset = {
+                                    update { current -> current.copy(overrides = current.overrides - def.id) }
+                                },
+                                reasoningOptions = reasoningOptions,
+                            )
+                        }
                     }
                 }
             }
@@ -611,9 +658,9 @@ fun SettingExperimentalModelCouncilPage(
     // Bumped to fit the new "3 core seats + up to 5 lens" model. Old code clamped at 4 which
     // truncated user lens picks the moment they touched this row after upgrading.
     val maxSeatOptions = listOf(3, 5, 6, 8)
-    val roundOptions = listOf(1, 2, 3)
-    val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L)
-    val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000)
+    val roundOptions = listOf(1, 2, 3, 4, 5)
+    val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L, EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS)
+    val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS)
 
     fun update(block: (ModelCouncilRuntimeSetting) -> ModelCouncilRuntimeSetting) {
         vm.updateSettings(
@@ -799,15 +846,33 @@ fun SettingExperimentalModelCouncilPage(
                     ModelCouncilSelectRow(
                         label = stringResource(R.string.setting_model_council_default_rounds),
                         options = roundOptions,
-                        selected = council.defaultRounds.coerceIn(1, council.maxRounds.coerceAtLeast(1)),
-                        onSelected = { value -> update { it.copy(defaultRounds = value) } },
+                        selected = council.defaultRounds.coerceIn(1, council.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS)),
+                        onSelected = { value ->
+                            update { current ->
+                                current.copy(
+                                    defaultRounds = value,
+                                    maxRounds = maxOf(current.maxRounds, value, DEFAULT_MODEL_COUNCIL_MAX_ROUNDS),
+                                )
+                            }
+                        },
                         optionToString = { it.toString() },
                     )
                     ModelCouncilSelectRow(
                         label = stringResource(R.string.setting_model_council_timeout),
                         options = timeoutOptions,
                         selected = timeoutOptions.minBy { kotlin.math.abs(it - council.seatTimeoutMs) },
-                        onSelected = { value -> update { it.copy(seatTimeoutMs = value) } },
+                        onSelected = { value ->
+                            update { current ->
+                                current.copy(
+                                    seatTimeoutMs = value,
+                                    totalTimeoutMs = if (value >= EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS) {
+                                        maxOf(current.totalTimeoutMs, EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS)
+                                    } else {
+                                        current.totalTimeoutMs
+                                    },
+                                )
+                            }
+                        },
                         optionToString = { "${it / 60_000} min" },
                     )
                     ModelCouncilSelectRow(
@@ -818,6 +883,16 @@ fun SettingExperimentalModelCouncilPage(
                             update { current ->
                                 current.copy(
                                     outputBudgetChars = value,
+                                    seatTimeoutMs = if (value >= EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS) {
+                                        maxOf(current.seatTimeoutMs, EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS)
+                                    } else {
+                                        current.seatTimeoutMs
+                                    },
+                                    totalTimeoutMs = if (value >= EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS) {
+                                        maxOf(current.totalTimeoutMs, EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS)
+                                    } else {
+                                        current.totalTimeoutMs
+                                    },
                                     defaultSeats = current.defaultSeats.map { seat ->
                                         seat.copy(outputBudgetChars = value)
                                     },
@@ -1069,6 +1144,9 @@ fun SettingExperimentalICloudPage(
     var iCloudBusy by remember { mutableStateOf(false) }
     var iCloudVaultInput by remember(iCloudState.vaultPath) { mutableStateOf(iCloudState.vaultPath) }
     val iCloudSavedToast = stringResource(R.string.setting_icloud_saved)
+    val iCloudLoginSnapshot = remember(iCloudState.updatedAtMillis, iCloudBusy, showICloudLogin) {
+        iCloudDriveManager.loginSnapshot()
+    }
 
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_icloud_title),
@@ -1173,6 +1251,22 @@ fun SettingExperimentalICloudPage(
                     ExperimentStatusRow(
                         label = stringResource(R.string.setting_experimental_capability),
                         value = iCloudState.capability.wireName,
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_icloud_endpoint_hint),
+                        value = iCloudLoginSnapshot.endpointHint?.displayName ?: stringResource(R.string.setting_icloud_endpoint_unknown),
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_icloud_login_detected),
+                        value = if (iCloudLoginSnapshot.loginDetected) {
+                            stringResource(R.string.setting_icloud_login_detected_yes)
+                        } else {
+                            stringResource(R.string.setting_icloud_login_detected_no)
+                        },
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_icloud_next_action),
+                        value = iCloudDriveManager.nextAction(iCloudState),
                     )
                     iCloudState.message?.takeIf { it.isNotBlank() }?.let { message ->
                         ExperimentNote(text = message)

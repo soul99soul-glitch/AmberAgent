@@ -102,14 +102,39 @@ class ICloudDriveClient(
                 name = child.name,
                 directory = child.isDirectory,
                 sizeBytes = child.sizeBytes,
+                drivewsId = child.drivewsid,
+                docwsId = child.docwsid,
+                etag = child.etag,
             )
         }
     }
 
-    suspend fun readText(session: ICloudDriveSession, resolvedPath: ICloudDriveResolvedPath): String {
-        val node = resolveNode(session, resolvedPath.iCloudPath)
+    suspend fun stat(
+        session: ICloudDriveSession,
+        resolvedPath: ICloudDriveResolvedPath,
+        nodeRef: ICloudDriveNodeRef? = null,
+    ): ICloudDriveStatResult {
+        val (node, matchLevel) = resolveNodeWithHint(session, resolvedPath, nodeRef)
+        return ICloudDriveStatResult(
+            entry = node.toEntry(resolvedPath.relativePath),
+            matchLevel = matchLevel,
+        )
+    }
+
+    suspend fun readText(
+        session: ICloudDriveSession,
+        resolvedPath: ICloudDriveResolvedPath,
+        nodeRef: ICloudDriveNodeRef? = null,
+    ): ICloudDriveReadResult {
+        val (node, matchLevel) = resolveNodeWithHint(session, resolvedPath, nodeRef)
         require(!node.isDirectory) { "Not a file: ${resolvedPath.relativePath}" }
-        if (node.sizeBytes == 0L) return ""
+        if (node.sizeBytes == 0L) {
+            return ICloudDriveReadResult(
+                content = "",
+                entry = node.toEntry(resolvedPath.relativePath),
+                matchLevel = matchLevel,
+            )
+        }
         val documentId = node.docwsid ?: error("iCloud node is missing docwsid: ${node.name}")
         val tokenResponse = getJson(
             url = "${session.docwsUrl}/ws/${node.zone}/download/by_id",
@@ -119,7 +144,11 @@ class ICloudDriveClient(
         val downloadUrl = tokenResponse.jsonObjectOrNull("data_token")?.string("url")
             ?: tokenResponse.jsonObjectOrNull("package_token")?.string("url")
             ?: error("iCloud did not return a download token for ${node.name}")
-        return getText(downloadUrl, session)
+        return ICloudDriveReadResult(
+            content = getText(downloadUrl, session),
+            entry = node.toEntry(resolvedPath.relativePath),
+            matchLevel = matchLevel,
+        )
     }
 
     suspend fun writeText(
@@ -172,20 +201,64 @@ class ICloudDriveClient(
                 }
             } else {
                 if (node.name.contains(query, ignoreCase = true)) {
-                    results.add(ICloudDriveSearchResult(relativePath, 0, node.name))
+                    results.add(
+                        ICloudDriveSearchResult(
+                            path = relativePath,
+                            lineNumber = 0,
+                            preview = node.name,
+                            drivewsId = node.drivewsid,
+                            docwsId = node.docwsid,
+                            etag = node.etag,
+                        )
+                    )
                     return
                 }
                 if (node.sizeBytes != null && node.sizeBytes > MAX_SEARCH_FILE_BYTES) return
-                val text = runCatching { readText(session, resolved) }.getOrNull() ?: return
+                val text = runCatching { readText(session, resolved).content }.getOrNull() ?: return
                 val line = text.lineSequence().withIndex().firstOrNull { it.value.contains(query, ignoreCase = true) }
                 if (line != null) {
-                    results.add(ICloudDriveSearchResult(relativePath, line.index + 1, line.value.take(240)))
+                    results.add(
+                        ICloudDriveSearchResult(
+                            path = relativePath,
+                            lineNumber = line.index + 1,
+                            preview = line.value.take(240),
+                            drivewsId = node.drivewsid,
+                            docwsId = node.docwsid,
+                            etag = node.etag,
+                        )
+                    )
                 }
             }
         }
         visit(basePath.relativePath)
         return results
     }
+
+    private suspend fun resolveNodeWithHint(
+        session: ICloudDriveSession,
+        resolvedPath: ICloudDriveResolvedPath,
+        nodeRef: ICloudDriveNodeRef?,
+    ): Pair<ICloudDriveNode, String> {
+        val node = resolveNode(session, resolvedPath.iCloudPath)
+        if (nodeRef == null) return node to "path"
+        return node to if (node.matches(nodeRef)) "node_ref" else "path_fallback"
+    }
+
+    private fun ICloudDriveNode.matches(ref: ICloudDriveNodeRef): Boolean =
+        drivewsid == ref.drivewsId &&
+            (ref.docwsId == null || docwsid == ref.docwsId) &&
+            (ref.etag == null || etag == ref.etag)
+
+    private fun ICloudDriveNode.toEntry(relativePath: String): ICloudDriveEntry =
+        ICloudDriveEntry(
+            path = relativePath,
+            name = name,
+            directory = isDirectory,
+            sizeBytes = sizeBytes,
+            drivewsId = drivewsid,
+            docwsId = docwsid,
+            etag = etag,
+        )
 
     private suspend fun resolveNode(session: ICloudDriveSession, path: String): ICloudDriveNode {
         var node = retrieveNode(session, ICLOUD_ROOT_DRIVEWS_ID)
@@ -475,6 +548,10 @@ data class ICloudDriveSearchResult(
     val path: String,
     val lineNumber: Int,
     val preview: String,
+    val nodeRef: String? = null,
+    val drivewsId: String? = null,
+    val docwsId: String? = null,
+    val etag: String? = null,
 )
 
 private fun JsonObject.string(name: String): String? =

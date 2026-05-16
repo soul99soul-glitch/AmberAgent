@@ -75,7 +75,8 @@ class SubAgentManager(
         }
         if (definition.dynamic) {
             val runningDynamic = runs.values.count { it.snapshot.status.running && it.snapshot.definition.dynamic }
-            if (runningDynamic >= DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS) {
+            val dynamicRunLimit = subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)
+            if (runningDynamic >= dynamicRunLimit) {
                 return@withContext errorPayload(
                     "too_many_dynamic_subagents",
                     "Dynamic subagent per-turn limit reached."
@@ -96,7 +97,7 @@ class SubAgentManager(
                     .toSet()
             )
         }
-        if (effectiveDefinition.toolAllowlist.isEmpty()) {
+        if (!effectiveDefinition.dynamic && effectiveDefinition.toolAllowlist.isEmpty()) {
             return@withContext errorPayload(
                 "no_allowed_tools",
                 "No allowed tools are currently available for subagent ${definition.id}."
@@ -206,8 +207,22 @@ class SubAgentManager(
 
     fun listBuiltIns(): List<SubAgentDefinition> {
         val setting = settingsStore.settingsFlow.value.agentRuntime.subAgent
-        val builtIns = SubAgentDefinitions.builtIns.map { it.applyOverride(setting.overrides[it.id]) }
-        return builtIns + setting.customDefinitions
+        val builtIns = if (setting.mode == SubAgentMode.SMART_DYNAMIC) {
+            emptyList()
+        } else {
+            SubAgentDefinitions.builtIns.map { it.applyOverride(setting.overrides[it.id]) }
+        }
+        val customDefinitions = if (setting.mode == SubAgentMode.SMART_DYNAMIC) {
+            setting.customDefinitions.map { custom ->
+                custom.copy(
+                    toolAllowlist = custom.toolAllowlist.intersect(SubAgentValidator.defaultDynamicReadOnlyTools),
+                    dynamic = true,
+                )
+            }
+        } else {
+            setting.customDefinitions
+        }
+        return builtIns + customDefinitions
     }
 
     /**
@@ -226,6 +241,9 @@ class SubAgentManager(
      *  decide whether to advertise @council alongside the regular subagent roster. */
     fun isModelCouncilEnabled(): Boolean =
         settingsStore.settingsFlow.value.agentRuntime.modelCouncil.enabled
+
+    fun runtimeMode(): SubAgentMode =
+        settingsStore.settingsFlow.value.agentRuntime.subAgent.mode
 
     /**
      * Keep [liveTextFlows] bounded. Iterate the flow keys (not [runs].values) so orphaned
@@ -255,9 +273,11 @@ class SubAgentManager(
         val setting = settingsStore.settingsFlow.value.agentRuntime.subAgent
         return buildJsonObject {
             put("enabled", setting.enabled)
+            put("mode", setting.mode.name.lowercase())
             put("allow_dynamic_subagents", setting.allowDynamicSubAgents)
             put("max_concurrent_runs", setting.maxConcurrentRuns)
-            put("dynamic_run_limit", DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS)
+            put("dynamic_run_limit", setting.maxConcurrentRuns)
+            put("tool_profiles", SubAgentToolProfile.entries.joinToString(",") { it.name.lowercase() })
             put("max_depth", 1)
             put("timeout_ms", setting.timeoutMs)
             put("max_turns", setting.maxTurns)

@@ -51,11 +51,11 @@ class BuiltInProfilesTest {
                 ids.add(parsed.id),
             )
         }
-        // Phase 2 M2.1 ships 12 profiles. Bumping this number requires
+        // Phase 2 M2.1 ships built-in profiles. Bumping this number requires
         // adding the file + updating the doc/commit message.
         assertEquals(
-            "expected 12 built-in profiles to ship (update test if intentional)",
-            12,
+            "expected 14 built-in profiles to ship (update test if intentional)",
+            14,
             files.size,
         )
     }

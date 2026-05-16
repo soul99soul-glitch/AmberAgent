@@ -51,7 +51,7 @@ interface ModelCouncilTextRunner {
      * Generate the seat's reply.
      * - [onChunk] is invoked with the *cumulative* text every time the provider streams in.
      *   Pass `{ }` if you don't care about live updates.
-     * - The returned String is the final (already truncated to budget) text.
+     * - The returned text is the final (already truncated to budget) text.
      */
     suspend fun generate(
         settings: Settings,
@@ -59,9 +59,15 @@ interface ModelCouncilTextRunner {
         systemPrompt: String,
         userPrompt: String,
         outputBudgetChars: Int,
+        temperature: Float? = null,
         onChunk: (String) -> Unit = {},
-    ): String
+    ): ModelCouncilTextResult
 }
+
+data class ModelCouncilTextResult(
+    val text: String,
+    val warnings: List<String> = emptyList(),
+)
 
 class ProviderModelCouncilTextRunner(
     private val providerManager: ProviderManager,
@@ -72,8 +78,9 @@ class ProviderModelCouncilTextRunner(
         systemPrompt: String,
         userPrompt: String,
         outputBudgetChars: Int,
+        temperature: Float?,
         onChunk: (String) -> Unit,
-    ): String {
+    ): ModelCouncilTextResult {
         val model = settings.findModelById(modelId) ?: error("Model not found: $modelId")
         val provider = model.findProvider(settings.providers) ?: error("Provider not found for model: ${model.displayName}")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -81,34 +88,48 @@ class ProviderModelCouncilTextRunner(
             add(UIMessage.system(systemPrompt))
             add(UIMessage.user(userPrompt))
         }
-        val params = TextGenerationParams(
-            model = model,
-            temperature = 0.2f,
-            tools = emptyList(),
-            reasoningLevel = ReasoningLevel.OFF,
-            customHeaders = model.customHeaders,
-            customBody = model.customBodies,
-        )
-        // Streaming path: per-chunk MessageChunk.choices.first.delta is the delta; we accumulate
-        // and emit the running text. The provider abstraction returns chunked deltas, so we keep
-        // a builder. If anything throws mid-stream, the partial text we already have is what
-        // callers see (better than blank).
-        val accumulated = StringBuilder()
-        providerImpl.streamText(
-            providerSetting = provider,
-            messages = messages,
-            params = params,
-        ).collect { chunk ->
-            val delta = chunk.choices.firstOrNull()?.delta?.parts
-                ?.filterIsInstance<UIMessagePart.Text>()
-                ?.joinToString("") { it.text }
-                .orEmpty()
-            if (delta.isNotEmpty()) {
-                accumulated.append(delta)
-                onChunk(accumulated.toString())
+        suspend fun streamWith(candidateTemperature: Float?): String {
+            val params = TextGenerationParams(
+                model = model,
+                tools = emptyList(),
+                reasoningLevel = ReasoningLevel.OFF,
+                customHeaders = model.customHeaders,
+                customBody = model.customBodies,
+                temperature = candidateTemperature,
+            )
+            // Streaming path: per-chunk MessageChunk.choices.first.delta is the delta; we
+            // accumulate and emit the running text.
+            val accumulated = StringBuilder()
+            providerImpl.streamText(
+                providerSetting = provider,
+                messages = messages,
+                params = params,
+            ).collect { chunk ->
+                val delta = chunk.choices.firstOrNull()?.delta?.parts
+                    ?.filterIsInstance<UIMessagePart.Text>()
+                    ?.joinToString("") { it.text }
+                    .orEmpty()
+                if (delta.isNotEmpty()) {
+                    accumulated.append(delta)
+                    onChunk(accumulated.toString())
+                }
             }
+            return accumulated.toString().take(outputBudgetChars)
         }
-        return accumulated.toString().take(outputBudgetChars)
+        return try {
+            ModelCouncilTextResult(streamWith(temperature))
+        } catch (error: Throwable) {
+            if (error is CancellationException || temperature == null || !error.isUnsupportedTemperatureError()) {
+                throw error
+            }
+            val label = listOf(provider.name, model.displayName.ifBlank { model.modelId })
+                .filter { it.isNotBlank() }
+                .joinToString(" / ")
+            ModelCouncilTextResult(
+                text = streamWith(null),
+                warnings = listOf("$label rejected temperature; retried once without temperature."),
+            )
+        }
     }
 }
 
@@ -391,6 +412,8 @@ class ModelCouncilManager(
     fun runtimeSummary(): JsonObject {
         val settings = settingsStore.settingsFlow.value
         val setting = settings.agentRuntime.modelCouncil
+        val synthesisModelId = setting.synthesisModelId ?: settings.chatModelId
+        val synthesisModelInfo = settings.describeCouncilProviderModel(synthesisModelId)
         return buildJsonObject {
             put("enabled", setting.enabled)
             put("default_seat_count", setting.defaultSeats.size)
@@ -398,13 +421,15 @@ class ModelCouncilManager(
             put("seat_composition_note", "Effective seat count at run time = 3 core (supporter/opponent/judge, always auto-injected) + user lens defaults + any extra_lens passed in tool call, deduped by role id and capped at max_seats.")
             put("max_seats", setting.maxSeats)
             put("default_rounds", setting.defaultRounds)
-            put("max_rounds", setting.maxRounds)
+            put("max_rounds", setting.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS))
             put("seat_timeout_ms", setting.seatTimeoutMs)
             put("total_timeout_ms", setting.totalTimeoutMs)
             put("output_budget_chars", setting.outputBudgetChars)
             put("show_seat_outputs", setting.showSeatOutputs)
             put("recommended_wait_timeout_ms", DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS)
-            put("synthesis_model_id", (setting.synthesisModelId ?: settings.chatModelId).toString())
+            put("synthesis_model_id", synthesisModelId.toString())
+            put("synthesis_model_name", synthesisModelInfo.modelName)
+            put("synthesis_provider_name", synthesisModelInfo.providerName)
             put("running", runs.values.count { it.snapshot.status.running })
             putJsonArray("default_seats") {
                 setting.defaultSeats.forEach { seat ->
@@ -442,12 +467,19 @@ class ModelCouncilManager(
             appendLine()
             appendLine("## Per Seat Summaries")
             appendLines(result.perSeatSummaries)
+            if (result.warnings.isNotEmpty()) {
+                appendLine()
+                appendLine("## Warnings")
+                appendLines(result.warnings)
+            }
             appendLine()
             appendLine("## Raw Turns")
             run.turns.forEach { turn ->
                 appendLine()
-                appendLine("### Round ${turn.round} · ${turn.seatName} · ${turn.status.name.lowercase()}")
+                appendLine("### Round ${turn.round} · ${turn.seatName} · ${turn.modelLabel()} · ${turn.status.name.lowercase()}")
                 appendLine()
+                turn.warnings.forEach { warning -> appendLine("> $warning") }
+                if (turn.warnings.isNotEmpty()) appendLine()
                 appendLine(turn.content.ifBlank { turn.error })
             }
         }
@@ -468,38 +500,40 @@ class ModelCouncilManager(
             promptForSeat = { seat -> openingPrompt(task, seat) },
         )
         var allTurns = roundOne
-        if (task.mode == ModelCouncilMode.DEBATE && task.rounds >= 2 && roundOne.any { it.status == ModelCouncilRunStatus.COMPLETED }) {
-            val roundTwo = runRound(
-                settings = settings,
-                setting = setting,
-                runtimeRun = runtimeRun,
-                round = 2,
-                promptForSeat = { seat -> responsePrompt(task, seat, roundOne) },
-            )
-            allTurns += roundTwo
-        }
-        if (task.mode == ModelCouncilMode.DEBATE && task.rounds >= 3 && allTurns.any { it.status == ModelCouncilRunStatus.COMPLETED }) {
-            val finalRound = runRound(
-                settings = settings,
-                setting = setting,
-                runtimeRun = runtimeRun,
-                round = 3,
-                promptForSeat = { seat -> finalPositionPrompt(task, seat, allTurns) },
-            )
-            allTurns += finalRound
+        if (task.mode == ModelCouncilMode.DEBATE) {
+            var round = 2
+            while (round <= task.rounds && allTurns.any { it.status == ModelCouncilRunStatus.COMPLETED }) {
+                val priorTurns = allTurns
+                val currentRound = round
+                val roundTurns = runRound(
+                    settings = settings,
+                    setting = setting,
+                    runtimeRun = runtimeRun,
+                    round = currentRound,
+                    promptForSeat = { seat ->
+                        if (currentRound >= 3 && currentRound == task.rounds) {
+                            finalPositionPrompt(task, seat, priorTurns)
+                        } else {
+                            responsePrompt(task, seat, priorTurns)
+                        }
+                    },
+                )
+                allTurns += roundTurns
+                round += 1
+            }
         }
 
         val completed = allTurns.filter { it.status == ModelCouncilRunStatus.COMPLETED && it.content.isNotBlank() }
         if (completed.isEmpty()) {
-            return failResult("All Model Council seats failed.")
+            return failResultFromTurns(allTurns)
         }
         val synthesis = synthesize(settings, setting, synthesisModelId, task, allTurns, runtimeRun.snapshot.runId)
-        val status = if (allTurns.any { it.status != ModelCouncilRunStatus.COMPLETED }) {
+        val status = if (synthesis.failed || allTurns.any { it.status != ModelCouncilRunStatus.COMPLETED }) {
             ModelCouncilRunStatus.PARTIAL_FAILED
         } else {
             ModelCouncilRunStatus.COMPLETED
         }
-        return status to synthesis
+        return status to synthesis.result
     }
 
     private suspend fun runRound(
@@ -511,26 +545,34 @@ class ModelCouncilManager(
     ): List<ModelCouncilTurn> = supervisorScope {
         val runId = runtimeRun.snapshot.runId
         val seatFlows = seatLiveTextFlows[runId]
-        // For round 2+, derive prior text from the canonical `runtimeRun.snapshot.turns` (the
-        // source of truth) instead of reading from the live flow. The live flow could in theory
-        // be cleared/reformatted by a future change; turns are append-only.
+        // Derive prior text from the canonical `runtimeRun.snapshot.turns` (the source of truth)
+        // instead of reading from the live flow. The live flow could in theory be
+        // cleared/reformatted by a future change; turns are append-only.
         val priorPrefixBySeat: Map<String, String> = if (round > 1) {
             runtimeRun.snapshot.seats.associate { seat ->
                 val priorTurns = runtimeRun.snapshot.turns
                     .filter { it.seatId == seat.seatId && it.round < round }
                     .sortedBy { it.round }
                 val priorText = priorTurns.joinToString("\n\n") { turn ->
-                    if (turn.round == 1) turn.content
-                    else "--- 第 ${turn.round} 轮 ---\n\n${turn.content}"
+                    "--- 第 ${turn.round} 轮 ---\n\n${turn.content}"
                 }
-                seat.seatId to if (priorText.isNotEmpty()) "$priorText\n\n--- 第 $round 轮 ---\n\n" else ""
+                seat.seatId to if (priorText.isNotEmpty()) {
+                    "$priorText\n\n--- 第 $round 轮 ---\n\n"
+                } else {
+                    "--- 第 $round 轮 ---\n\n"
+                }
             }
-        } else emptyMap()
+        } else {
+            runtimeRun.snapshot.seats.associate { seat ->
+                seat.seatId to "--- 第 $round 轮 ---\n\n"
+            }
+        }
         runtimeRun.snapshot.seats.map { seat ->
             async {
                 val systemPrompt = seatSystemPrompt(seat)
                 val seatFlow = seatFlows?.get(seat.seatId)
                 val priorPrefix = priorPrefixBySeat[seat.seatId].orEmpty()
+                val modelInfo = settings.describeCouncilSeatModel(seat)
                 val result = runCatching {
                     withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
                         generateSeatReply(
@@ -551,8 +593,11 @@ class ModelCouncilManager(
                             seatName = seat.name,
                             role = seat.role,
                             modelId = seat.modelId,
+                            modelName = modelInfo.modelName,
+                            providerName = modelInfo.providerName,
                             status = ModelCouncilRunStatus.COMPLETED,
-                            content = content.take(seat.outputBudgetChars),
+                            content = content.text.take(seat.outputBudgetChars),
+                            warnings = content.warnings,
                         )
                     },
                     onFailure = { error ->
@@ -562,12 +607,14 @@ class ModelCouncilManager(
                             seatName = seat.name,
                             role = seat.role,
                             modelId = seat.modelId,
+                            modelName = modelInfo.modelName,
+                            providerName = modelInfo.providerName,
                             status = if (error is kotlinx.coroutines.TimeoutCancellationException) {
                                 ModelCouncilRunStatus.TIMED_OUT
                             } else {
                                 ModelCouncilRunStatus.FAILED
                             },
-                            error = error.message ?: error::class.java.simpleName,
+                            error = modelInfo.decorateError(error.message ?: error::class.java.simpleName),
                         )
                     },
                 ).also { turn ->
@@ -584,10 +631,12 @@ class ModelCouncilManager(
         task: ModelCouncilTaskSpec,
         turns: List<ModelCouncilTurn>,
         runId: String,
-    ): ModelCouncilResult {
+    ): ModelCouncilSynthesisResult {
         val prompt = synthesisPrompt(task, turns)
+        val synthesisModelInfo = settings.describeCouncilProviderModel(synthesisModelId)
         val synthFlow = seatLiveTextFlows[runId]?.get(SYNTHESIZER_SEAT_KEY)
-        val text = runCatching {
+        var synthesisError = ""
+        val generated = runCatching {
             withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
                 modelRunner.generate(
                     settings = settings,
@@ -595,13 +644,15 @@ class ModelCouncilManager(
                     systemPrompt = "你是 AmberAgent 的 Model Council 裁判。只综合证据，不引入未给出的事实。",
                     userPrompt = prompt,
                     outputBudgetChars = setting.outputBudgetChars,
+                    temperature = null,
                     onChunk = { running -> synthFlow?.value = running },
                 )
             }
         }.getOrElse { error ->
-            "Synthesis failed: ${error.message ?: error::class.java.simpleName}"
-        }.take(setting.outputBudgetChars)
-        return ModelCouncilResult(
+            synthesisError = "Synthesis failed (${synthesisModelInfo.label()}): ${error.message ?: error::class.java.simpleName}"
+            ModelCouncilTextResult(text = synthesisError, warnings = emptyList())
+        }
+        val result = ModelCouncilResult(
             consensus = listOf("See final recommendation for synthesized consensus."),
             conflicts = turns.filter { it.status != ModelCouncilRunStatus.COMPLETED }
                 .map { "${it.seatName}: ${it.error}" },
@@ -610,10 +661,18 @@ class ModelCouncilManager(
                 .map { "${it.seatName}: ${it.content.take(360)}" },
             risks = turns.filter { it.status != ModelCouncilRunStatus.COMPLETED }
                 .map { "${it.seatName} did not complete." },
-            finalRecommendation = text,
+            finalRecommendation = generated.text.take(setting.outputBudgetChars),
             perSeatSummaries = turns.map { turn ->
                 "${turn.seatName} (${turn.status.name.lowercase()}): ${(turn.content.ifBlank { turn.error }).take(700)}"
             },
+            warnings = generated.warnings + turns.flatMap { turn ->
+                turn.warnings.map { warning -> "${turn.seatName}: $warning" }
+            },
+            error = synthesisError,
+        )
+        return ModelCouncilSynthesisResult(
+            result = result,
+            failed = synthesisError.isNotBlank(),
         )
     }
 
@@ -624,23 +683,26 @@ class ModelCouncilManager(
         systemPrompt: String,
         userPrompt: String,
         onChunk: (String) -> Unit,
-    ): String = when (seat.runnerType) {
+    ): ModelCouncilTextResult = when (seat.runnerType) {
         ModelCouncilSeatRunner.PROVIDER_MODEL -> modelRunner.generate(
             settings = settings,
             modelId = seat.modelId,
             systemPrompt = systemPrompt,
             userPrompt = userPrompt,
             outputBudgetChars = seat.outputBudgetChars,
+            temperature = seat.temperature,
             onChunk = onChunk,
         )
 
-        ModelCouncilSeatRunner.EXTERNAL_CLI -> externalCliRunner.generate(
-            seat = seat,
-            systemPrompt = systemPrompt,
-            userPrompt = userPrompt,
-            timeoutMs = setting.seatTimeoutMs.coerceAtLeast(1_000L),
-            outputBudgetChars = seat.outputBudgetChars,
-            onChunk = onChunk,
+        ModelCouncilSeatRunner.EXTERNAL_CLI -> ModelCouncilTextResult(
+            text = externalCliRunner.generate(
+                seat = seat,
+                systemPrompt = systemPrompt,
+                userPrompt = userPrompt,
+                timeoutMs = setting.seatTimeoutMs.coerceAtLeast(1_000L),
+                outputBudgetChars = seat.outputBudgetChars,
+                onChunk = onChunk,
+            ),
         )
     }
 
@@ -711,7 +773,8 @@ class ModelCouncilManager(
     }
 
     private fun runToPayload(run: ModelCouncilRun): JsonObject = buildJsonObject {
-        val exposeSeatOutputs = settingsStore.settingsFlow.value.agentRuntime.modelCouncil.showSeatOutputs
+        val settings = settingsStore.settingsFlow.value
+        val exposeSeatOutputs = settings.agentRuntime.modelCouncil.showSeatOutputs
         put("status", run.status.name.lowercase())
         put("run_id", run.runId)
         put("mode", run.mode.name.lowercase())
@@ -719,6 +782,13 @@ class ModelCouncilManager(
         put("started_at_ms", run.startedAtMs)
         put("updated_at_ms", run.updatedAtMs)
         put("seats", encoded(run.seats))
+        put("seat_model_labels", buildJsonObject {
+            run.seats.forEach { seat ->
+                put(seat.seatId, settings.describeCouncilSeatModel(seat).label())
+            }
+            val synthesisModelId = settings.agentRuntime.modelCouncil.synthesisModelId ?: settings.chatModelId
+            put(SYNTHESIZER_SEAT_KEY, settings.describeCouncilProviderModel(synthesisModelId).label())
+        })
         put("seat_outputs_visible", exposeSeatOutputs)
         put("turns", encoded(run.turns.map { it.visible(exposeSeatOutputs) }))
         run.result?.let { put("result", encoded(it)) }
@@ -732,6 +802,25 @@ class ModelCouncilManager(
 
     private fun failResult(message: String): Pair<ModelCouncilRunStatus, ModelCouncilResult> =
         ModelCouncilRunStatus.FAILED to ModelCouncilResult(error = message, finalRecommendation = message)
+
+    private fun failResultFromTurns(turns: List<ModelCouncilTurn>): Pair<ModelCouncilRunStatus, ModelCouncilResult> {
+        val details = turns.joinToString("\n") { turn ->
+            "- ${turn.seatName} (${turn.modelLabel()}): ${turn.error.ifBlank { turn.status.name.lowercase() }}"
+        }.ifBlank { "- No seat turns were recorded." }
+        val message = "All Model Council seats failed.\n$details"
+        return ModelCouncilRunStatus.FAILED to ModelCouncilResult(
+            conflicts = turns.map { "${it.seatName}: ${it.error.ifBlank { it.status.name.lowercase() }}" },
+            risks = turns.map { "${it.seatName} did not complete." },
+            finalRecommendation = message,
+            perSeatSummaries = turns.map { turn ->
+                "${turn.seatName} (${turn.modelLabel()} / ${turn.status.name.lowercase()}): ${turn.error.ifBlank { "No output." }}"
+            },
+            warnings = turns.flatMap { turn ->
+                turn.warnings.map { warning -> "${turn.seatName}: $warning" }
+            },
+            error = message,
+        )
+    }
 
     private fun ModelCouncilRun.toAgentTaskSnapshot() = AgentTaskSnapshot(
         taskId = runId,
@@ -776,6 +865,11 @@ class ModelCouncilManager(
         @Volatile var job: Job? = null,
     )
 
+    private data class ModelCouncilSynthesisResult(
+        val result: ModelCouncilResult,
+        val failed: Boolean,
+    )
+
     companion object {
         /** Reserved seat id for the synthesizer pane in [seatLiveTextFlows]. */
         const val SYNTHESIZER_SEAT_KEY = "__synthesizer__"
@@ -791,6 +885,24 @@ private fun ModelCouncilTurn.visible(exposeContent: Boolean): ModelCouncilTurn {
         content = content.take(700),
         error = error.take(700),
     )
+}
+
+private fun Throwable.isUnsupportedTemperatureError(): Boolean {
+    val message = generateSequence(this) { it.cause }
+        .mapNotNull { it.message }
+        .joinToString("\n")
+        .lowercase()
+    if (!message.contains("temperature")) return false
+    return listOf(
+        "unsupported parameter",
+        "unsupported param",
+        "not supported",
+        "does not support",
+        "unsupported value",
+        "unknown parameter",
+        "unrecognized parameter",
+        "不支持",
+    ).any { marker -> message.contains(marker) }
 }
 
 private fun seatSystemPrompt(seat: ModelCouncilSeat): String = """
@@ -874,7 +986,47 @@ private fun synthesisPrompt(
 """.trimIndent()
 
 private fun ModelCouncilTurn.summaryBlock(limit: Int = 700): String =
-    "Round $round / $seatName / ${status.name.lowercase()}:\n${(content.ifBlank { error }).take(limit)}"
+    "Round $round / $seatName / ${modelLabel()} / ${status.name.lowercase()}:\n${(content.ifBlank { error }).take(limit)}"
+
+private fun ModelCouncilTurn.modelLabel(): String =
+    listOf(providerName, modelName)
+        .filter { it.isNotBlank() }
+        .joinToString(" / ")
+        .ifBlank { modelId.toString() }
+
+private data class CouncilSeatModelInfo(
+    val modelName: String,
+    val providerName: String,
+)
+
+private fun Settings.describeCouncilSeatModel(seat: ModelCouncilSeat): CouncilSeatModelInfo =
+    when (seat.runnerType) {
+        ModelCouncilSeatRunner.PROVIDER_MODEL -> describeCouncilProviderModel(seat.modelId)
+
+        ModelCouncilSeatRunner.EXTERNAL_CLI -> CouncilSeatModelInfo(
+            modelName = seat.externalModel.ifBlank { seat.externalTool.ifBlank { "external_cli" } },
+            providerName = seat.externalTool.ifBlank { "external_cli" },
+        )
+    }
+
+private fun Settings.describeCouncilProviderModel(modelId: Uuid): CouncilSeatModelInfo {
+    val model = findModelById(modelId)
+    val provider = model?.findProvider(providers)
+    return CouncilSeatModelInfo(
+        modelName = model?.displayName?.takeIf { it.isNotBlank() }
+            ?: model?.modelId?.takeIf { it.isNotBlank() }
+            ?: modelId.toString(),
+        providerName = provider?.name.orEmpty(),
+    )
+}
+
+private fun CouncilSeatModelInfo.decorateError(message: String): String {
+    val label = label()
+    return if (label.isBlank()) message else "$label: $message"
+}
+
+private fun CouncilSeatModelInfo.label(): String =
+    listOf(providerName, modelName).filter { it.isNotBlank() }.joinToString(" / ")
 
 private fun StringBuilder.appendLines(lines: List<String>) {
     if (lines.isEmpty()) {

@@ -9,11 +9,14 @@ import kotlin.uuid.Uuid
 // lenses (product / marketing / pr / engineering / ux / risk) are picked per topic.
 const val DEFAULT_MODEL_COUNCIL_MAX_SEATS = 8
 const val DEFAULT_MODEL_COUNCIL_DEFAULT_ROUNDS = 2
-const val DEFAULT_MODEL_COUNCIL_MAX_ROUNDS = 3
+const val DEFAULT_MODEL_COUNCIL_MAX_ROUNDS = 5
 const val DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS = 180_000L
 const val DEFAULT_MODEL_COUNCIL_TOTAL_TIMEOUT_MS = 8 * 60_000L
 const val DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS = 12_000
 const val DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS = 180_000L
+const val EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS = 20 * 60_000L
+const val EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS = 45 * 60_000L
+const val EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS = 200_000
 const val MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER = "00000000-0000-0000-0000-000000000000"
 
 @Serializable
@@ -44,6 +47,7 @@ data class ModelCouncilSeat(
     val systemPrompt: String = "",
     @SerialName("output_budget_chars")
     val outputBudgetChars: Int = DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS,
+    val temperature: Float? = null,
     @SerialName("external_tool")
     val externalTool: String = "",
     @SerialName("external_runtime")
@@ -120,9 +124,14 @@ data class ModelCouncilTurn(
     val role: String,
     @SerialName("model_id")
     val modelId: Uuid,
+    @SerialName("model_name")
+    val modelName: String = "",
+    @SerialName("provider_name")
+    val providerName: String = "",
     val status: ModelCouncilRunStatus,
     val content: String = "",
     val error: String = "",
+    val warnings: List<String> = emptyList(),
 )
 
 @Serializable
@@ -136,6 +145,7 @@ data class ModelCouncilResult(
     val finalRecommendation: String = "",
     @SerialName("per_seat_summaries")
     val perSeatSummaries: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
     val error: String = "",
 )
 

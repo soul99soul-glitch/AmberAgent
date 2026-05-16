@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ai
 
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
+import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
 
 internal enum class MentionRoleKind {
     SUBAGENT,
@@ -18,10 +19,17 @@ internal data class MentionRoleItem(
 internal fun buildMentionRoleItems(
     subAgentEnabled: Boolean,
     modelCouncilEnabled: Boolean,
+    subAgentMode: SubAgentMode = SubAgentMode.ROSTER,
+    customSubAgents: List<SubAgentDefinition> = emptyList(),
     subAgents: List<SubAgentDefinition> = SubAgentDefinitions.builtIns,
 ): List<MentionRoleItem> = buildList {
     if (subAgentEnabled) {
-        subAgents.forEach { role ->
+        val visibleSubAgents = if (subAgentMode == SubAgentMode.SMART_DYNAMIC) {
+            customSubAgents
+        } else {
+            subAgents + customSubAgents
+        }
+        visibleSubAgents.forEach { role ->
             add(
                 MentionRoleItem(
                     id = role.id,

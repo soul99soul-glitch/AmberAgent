@@ -18,6 +18,9 @@ internal fun loginCookieCandidatesFor(site: UserSite): List<String> {
 internal fun knownLoginCookieNamesFor(site: UserSite): List<String> {
     val signature = site.signature()
     return when {
+        signature.contains("x.com") || signature.contains("twitter") ->
+            listOf("auth_token", "ct0", "twid")
+
         signature.contains("weibo") || signature.contains("微博") || signature.contains("sina") ->
             listOf("SUB", "SUBP", "SSOLoginState", "ALF", "MLOGIN")
 
@@ -28,6 +31,12 @@ internal fun knownLoginCookieNamesFor(site: UserSite): List<String> {
 internal fun extraLoginProbeUrlsFor(site: UserSite): List<String> {
     val signature = site.signature()
     return when {
+        signature.contains("x.com") || signature.contains("twitter") -> listOf(
+            "https://x.com",
+            "https://twitter.com",
+            "https://mobile.twitter.com",
+        )
+
         signature.contains("weibo") || signature.contains("微博") || signature.contains("sina") -> listOf(
             "https://weibo.com",
             "https://m.weibo.cn",

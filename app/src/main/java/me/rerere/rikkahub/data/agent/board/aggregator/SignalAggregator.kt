@@ -139,14 +139,18 @@ class SignalAggregator(
      * the agent successfully produces a board.
      */
     suspend fun getFilteredSignals(limit: Int = 200): List<ScoredSignal> {
+        return getFilteredSignalBatch(limit).surfaced
+    }
+
+    suspend fun getFilteredSignalBatch(limit: Int = 200): FilteredSignalBatch {
         val signals = boardRepository.getUnprocessedSignals(limit)
-        if (signals.isEmpty()) return emptyList()
+        if (signals.isEmpty()) return FilteredSignalBatch.EMPTY
 
         val weights = boardRepository.getAllWeights()
-        return signals
-            .map { signal -> ScoredSignal(signal, score(signal, weights)) }
-            .filter { it.score > HARD_MUTE_THRESHOLD }
-            .sortedByDescending { it.score }
+        return filterBoardSignals(
+            signals
+                .map { signal -> ScoredSignal(signal, score(signal, weights)) }
+        )
     }
 
     /** How many unprocessed signals are waiting? Used by the scheduler to check threshold. */
@@ -254,6 +258,33 @@ class SignalAggregator(
 
         /** Cooldown after firing incremental trigger to avoid burst spam. */
         private const val THRESHOLD_COOLDOWN_MS = 60_000L
+    }
+}
+
+internal fun filterBoardSignals(scored: List<ScoredSignal>): FilteredSignalBatch {
+    return FilteredSignalBatch(
+        surfaced = scored.filter(::shouldSurfaceBoardSignal).sortedByDescending { it.score },
+        consideredSignalIds = scored.map { it.signal.id },
+    )
+}
+
+internal fun shouldSurfaceBoardSignal(scored: ScoredSignal): Boolean {
+    if (scored.score <= SignalAggregator.HARD_MUTE_THRESHOLD) return false
+    return when (scored.signal.sourceType) {
+        BoardSignalSourceType.TIME -> false
+        BoardSignalSourceType.CHAT_HISTORY -> scored.score >= MIN_CHAT_HISTORY_SIGNAL_SCORE
+        else -> true
+    }
+}
+
+internal const val MIN_CHAT_HISTORY_SIGNAL_SCORE = 4
+
+data class FilteredSignalBatch(
+    val surfaced: List<ScoredSignal>,
+    val consideredSignalIds: List<String>,
+) {
+    companion object {
+        val EMPTY = FilteredSignalBatch(emptyList(), emptyList())
     }
 }
 

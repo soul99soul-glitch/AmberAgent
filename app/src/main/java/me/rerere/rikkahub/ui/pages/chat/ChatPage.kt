@@ -34,6 +34,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,6 +67,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
@@ -234,7 +237,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val chatListState = rememberLazyListState()
     val chatAssistant = remember(setting.assistants, conversation.assistantId) {
         setting.getAssistantById(conversation.assistantId)
     }
@@ -254,6 +256,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
             pendingMessageCount = pendingUserMessages.size,
         )
+    }
+    val initialChatListIndex = remember(conversation.id, nodeId, conversation.messageNodes, lazyItemMessageIndexes) {
+        if (nodeId != null) {
+            val messageIndex = conversation.messageNodes.indexOfFirst { it.id == nodeId }
+            lazyItemMessageIndexes.firstLazyIndexForMessage(messageIndex).takeIf { messageIndex >= 0 } ?: 0
+        } else {
+            lazyItemMessageIndexes.lastIndex.coerceAtLeast(0)
+        }
+    }
+    val chatListState = key(conversation.id) {
+        rememberLazyListState(initialFirstVisibleItemIndex = initialChatListIndex)
     }
 
     LaunchedEffect(nodeId, conversation.messageNodes.size, timelineLoadState.initialized) {
@@ -432,6 +445,9 @@ private fun ChatPageContent(
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
     var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
     var sendFollowRequest by remember(conversation.id) { mutableStateOf(0) }
+    var suggestionFillPulseKey by remember(conversation.id) { mutableIntStateOf(0) }
+    var sentUserMessageAnimationKey by remember(conversation.id) { mutableIntStateOf(0) }
+    var sentUserMessageAnimationBaselineId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val hazeState = rememberHazeState()
     val activityStore: AgentToolActivityStore = koinInject()
@@ -562,6 +578,7 @@ private fun ChatPageContent(
                     onOpenQueue = {
                         queuePanelOpen = true
                     },
+                    suggestionFillPulseKey = suggestionFillPulseKey,
                     onSendClick = { queueMode ->
                         if (currentChatModel == null) {
                             toaster.show("请先选择模型", type = ToastType.Error)
@@ -574,8 +591,13 @@ private fun ChatPageContent(
                             )
                         } else {
                             val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
+                            val parts = inputState.getContents()
+                            if (!parts.isEmptyInputMessage()) {
+                                sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
+                                sentUserMessageAnimationKey += 1
+                            }
                             vm.handleMessageSend(
-                                content = inputState.getContents(),
+                                content = parts,
                                 queueMode = queueMode,
                             )
                             if (shouldFollowAfterSend) {
@@ -592,8 +614,13 @@ private fun ChatPageContent(
                             )
                         } else {
                             val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
+                            val parts = inputState.getContents()
+                            if (!parts.isEmptyInputMessage()) {
+                                sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
+                                sentUserMessageAnimationKey += 1
+                            }
                             vm.handleMessageSend(
-                                content = inputState.getContents(),
+                                content = parts,
                                 answer = loadingJob != null && queueMode == PendingUserMessageMode.STEER,
                                 queueMode = queueMode,
                             )
@@ -641,6 +668,8 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                sentUserMessageAnimationKey = sentUserMessageAnimationKey,
+                sentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId,
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
@@ -692,6 +721,7 @@ private fun ChatPageContent(
                     val text = suggestion.trim()
                     if (text.isNotEmpty()) {
                         inputState.setMessageText(text)
+                        suggestionFillPulseKey += 1
                     }
                 },
                 onLongClickSuggestion = { suggestion ->
@@ -702,6 +732,8 @@ private fun ChatPageContent(
                         } else {
                             val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             inputState.editingMessage = null
+                            sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
+                            sentUserMessageAnimationKey += 1
                             vm.handleMessageSend(
                                 content = listOf(UIMessagePart.Text(text)),
                                 queueMode = PendingUserMessageMode.FOLLOWUP,
@@ -753,6 +785,8 @@ private fun ChatPageContent(
                         } else {
                             val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             inputState.editingMessage = null
+                            sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
+                            sentUserMessageAnimationKey += 1
                             vm.handleMessageSend(
                                 content = listOf(UIMessagePart.Text(text)),
                                 queueMode = PendingUserMessageMode.FOLLOWUP,

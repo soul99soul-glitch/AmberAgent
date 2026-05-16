@@ -1310,6 +1310,12 @@
   <string name="setting_icloud_write_probe">Probe Write</string>
   <string name="setting_icloud_status">Status: %1$s · Capability: %2$s</string>
   <string name="setting_icloud_saved">iCloud path saved</string>
+  <string name="setting_icloud_endpoint_hint">Endpoint</string>
+  <string name="setting_icloud_endpoint_unknown">Unknown</string>
+  <string name="setting_icloud_login_detected">Login cookie</string>
+  <string name="setting_icloud_login_detected_yes">Detected</string>
+  <string name="setting_icloud_login_detected_no">Not detected</string>
+  <string name="setting_icloud_next_action">Next action</string>
   <!-- WebMount Stations (Phase 1, experimental) -->
   <string name="setting_webmount_title">WebMount Stations</string>
   <string name="setting_webmount_desc">Experimental — turn websites into deterministic agent tools. Toggle on to expose the WebMount toolkit to every assistant; toggle off to remove it everywhere.</string>
@@ -1545,6 +1551,10 @@
   <string name="setting_subagent_title">Subagent Experimental Mode</string>
   <string name="setting_subagent_desc">Let the main Agent launch narrow isolated subagents for bounded side tasks. Includes Model Council (multi-model deliberation).</string>
   <string name="setting_subagent_section_runtime">Runtime</string>
+  <string name="setting_subagent_mode">Mode</string>
+  <string name="setting_subagent_mode_roster">Fixed roles</string>
+  <string name="setting_subagent_mode_smart">Smart mode</string>
+  <string name="setting_subagent_mode_smart_desc">The main Agent creates a temporary English-named subagent for the task. Ordinary built-in roles are hidden; Council stays available.</string>
   <string name="setting_subagent_enabled">Enable subagents</string>
   <string name="setting_subagent_enabled_desc">Expose subagent_* tools to the main Agent. Subagents stay depth-1 and isolated.</string>
   <string name="setting_subagent_dynamic">Allow dynamic roles</string>
@@ -1560,6 +1570,7 @@
   <string name="setting_subagent_output_budget_desc">Maximum result text returned to the main Agent.</string>
   <string name="setting_subagent_section_roles">Built-in roles</string>
   <string name="setting_subagent_roles_desc">Each role is a specialized subagent. Pick a model per role to mix cheap+fast and strong+slow.</string>
+  <string name="setting_subagent_smart_roles_hidden">Smart mode hides ordinary built-in roles from the main Agent. User-saved custom roles and Council remain available.</string>
   <string name="setting_subagent_section_custom">Custom roles</string>
   <string name="setting_subagent_role_model">Model</string>
   <string name="setting_subagent_role_reasoning">Reasoning</string>
