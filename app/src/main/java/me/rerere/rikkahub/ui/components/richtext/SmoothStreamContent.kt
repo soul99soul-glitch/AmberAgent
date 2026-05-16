@@ -50,11 +50,7 @@ import androidx.compose.runtime.withFrameNanos
 // baseRevealDurationMs. Two layers, one pacing (output cadence) and
 // one easing (per-char alpha), composed.
 
-// (No per-frame char floor.) B6.1 removed the coerceAtLeast(1) that
-// would have pinned effective output to ≥60 cps at 60Hz and silently
-// overridden preset.minCps (e.g. SILKY=14 would have rendered at ~60).
-// Sub-1-char per-frame releases now accumulate via [releaseResidue]
-// until they cross an integer codepoint boundary.
+private const val MIN_PROGRESS_PER_FRAME_CHARS = 1
 
 /**
  * CPS-throttled smoother. Returns a String that grows toward [content]
@@ -91,10 +87,6 @@ fun rememberSmoothStreamedContent(
     val lastInputAtNanos = remember(preset) { mutableLongStateOf(0L) }
     val lastInputCpCount = remember(preset) { mutableIntStateOf(0) }
     val lastFrameNanos = remember(preset) { mutableLongStateOf(0L) }
-    // B6.1: carry fractional codepoint releases across frames so low-CPS
-    // presets (SILKY's minCps=14 ≈ 0.23 cp/frame at 60Hz) actually run
-    // at their configured rate instead of being floored up to 60 cps.
-    val releaseResidue = remember(preset) { mutableFloatStateOf(0f) }
 
     val updatedContent by rememberUpdatedState(content)
 
@@ -105,19 +97,10 @@ fun rememberSmoothStreamedContent(
                 val now = System.nanoTime()
                 val newCpCount = countCodePoints(latest)
                 if (newCpCount < targetCpCount.intValue) {
-                    // Truncation (rare — branch switch / regen). Reset
-                    // EVERYTHING including lastFrameNanos so the next RAF
-                    // tick re-primes from zero — otherwise its stale
-                    // timestamp (potentially seconds old if the user
-                    // idled before switching branches) makes the first
-                    // deltaSec huge and a burst of chars pops in one
-                    // frame. B6.1 fix for the regression that B6 review
-                    // flagged.
+                    // Truncation (rare — branch switch / regen). Reset.
                     displayedCpCount.intValue = 0
                     lastInputCpCount.intValue = 0
                     lastInputAtNanos.longValue = 0L
-                    lastFrameNanos.longValue = 0L
-                    releaseResidue.floatValue = 0f
                     arrivalCps.floatValue = config.defaultCps.toFloat()
                     displayCps.floatValue = config.defaultCps.toFloat()
                 }
@@ -176,18 +159,11 @@ fun rememberSmoothStreamedContent(
                     displayCps.floatValue * (1f - config.emaAlpha) +
                         desiredCps * config.emaAlpha
 
-                // B6.1: accumulate fractional release residue across
-                // frames so low-CPS presets don't get floored up. A
-                // frame with sub-1-char growth is a legitimate no-op
-                // (keeps the RAF loop ticking, accumulates next time).
-                releaseResidue.floatValue += displayCps.floatValue * deltaSec
-                val release = releaseResidue.floatValue.toInt()
-                if (release > 0) {
-                    releaseResidue.floatValue -= release.toFloat()
-                    val newCount = (current + release).coerceAtMost(target)
-                    if (newCount != current) {
-                        displayedCpCount.intValue = newCount
-                    }
+                val releaseFloat = displayCps.floatValue * deltaSec
+                val release = releaseFloat.toInt().coerceAtLeast(MIN_PROGRESS_PER_FRAME_CHARS)
+                val newCount = (current + release).coerceAtMost(target)
+                if (newCount != current) {
+                    displayedCpCount.intValue = newCount
                 }
             }
         }
