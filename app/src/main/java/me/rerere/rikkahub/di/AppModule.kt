@@ -12,14 +12,8 @@ import me.rerere.rikkahub.data.ai.tools.LocalTools
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
-import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.live.LiveModeManager
-import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliModelCouncilRunner
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
-import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
-import me.rerere.rikkahub.data.agent.subagent.GenerationSubAgentRunner
-import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
@@ -98,30 +92,6 @@ val appModule = module {
 
     single {
         ConversationContextEngine(get(), get(), get(), get(), get())
-    }
-
-    single {
-        SessionAccessGrantStore()
-    }
-
-    single {
-        GenerationSubAgentRunner(get())
-    }
-
-    single {
-        SubAgentManager(get(), get(), get(), get(), get<GenerationSubAgentRunner>(), get(), get())
-    }
-
-    single {
-        ProviderModelCouncilTextRunner(get())
-    }
-
-    single {
-        ExternalCliModelCouncilRunner(get())
-    }
-
-    single {
-        ModelCouncilManager(get(), get(), get(), get(), get<ProviderModelCouncilTextRunner>(), get(), get())
     }
 
     single {
