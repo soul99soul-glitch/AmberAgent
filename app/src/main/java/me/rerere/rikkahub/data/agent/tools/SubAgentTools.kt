@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.agent.tools
 
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -60,6 +62,8 @@ class SubAgentTools(
                 if (subAgentManager.runtimeMode() == SubAgentMode.SMART_DYNAMIC) {
                     appendLine("Smart dynamic mode is enabled. Ordinary built-in role ids are hidden and disabled. Design a temporary custom_subagent only when the task is complex, clearly bounded, and benefits from isolated work.")
                     appendLine("To delegate: call subagent_start(custom_subagent={description, system_prompt, optional name, tool_profile, optional tool_allowlist}, task={objective, output_format, tools_and_sources, boundaries, context}). If name is omitted or too generic, the app assigns a stable English display name for this run.")
+                    appendLine("custom_subagent.description must say when to invoke the temporary role, e.g. \"Use when ...\" or \"何时调用：...\".")
+                    appendLine("custom_subagent.system_prompt must include explicit boundaries plus report/output instructions, e.g. \"Boundaries: ... Report output as ...\".")
                     appendLine("tool_profile options: ${toolProfileHelp()}. Default is read_only. tool_allowlist can only narrow that profile; it cannot add write, terminal, send, install, delete, or subagent_* tools.")
                     appendLine("Example: custom_subagent={\"description\":\"Use when a bounded code-reading check is useful.\",\"system_prompt\":\"Boundaries: read only, do not edit files, do not ask the user. Report output as findings with evidence and risks.\",\"tool_profile\":\"workspace_read\"}.")
                 } else {
@@ -112,18 +116,73 @@ class SubAgentTools(
 
     private fun startTool() = Tool(
         name = "subagent_start",
-        description = "Start a built-in or dynamic subagent as an isolated task. Requires task.objective, output_format, tools_and_sources, and boundaries.",
+        description = "Start a built-in or dynamic subagent as an isolated task. In smart dynamic mode, use custom_subagent and make its description explain when to invoke it; its system_prompt must include boundaries and report/output instructions.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("subagent_id", stringProp("Roster subagent id. In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
                     put("custom_subagent", buildJsonObject {
                         put("type", "object")
-                        put("description", "Optional narrow dynamic subagent definition with optional name, description, system_prompt, tool_profile, tool_allowlist, max_turns, timeout_ms, output_budget_chars. Smart mode may omit name.")
+                        put("description", "Narrow dynamic subagent definition. Required in smart dynamic mode. Smart mode may omit name; the app assigns an English display name if name is missing or too generic.")
+                        put("properties", buildJsonObject {
+                            put("name", stringProp("Optional display name. In smart dynamic mode, omit this unless a specific English name matters. Generic names are replaced."))
+                            put("description", stringProp("Required. Explain when to invoke this temporary role. Include a cue such as \"Use when ...\" or \"何时调用：...\"."))
+                            put("system_prompt", stringProp("Required. At least 80 characters. Must include explicit boundaries plus report/output instructions, e.g. \"Boundaries: read only... Report output as findings...\"."))
+                            put("tool_profile", stringProp("Optional. One of: ${toolProfileHelp()}. Default read_only."))
+                            put("tool_allowlist", buildJsonObject {
+                                put("type", "array")
+                                put("description", "Optional tool names. This can only narrow tool_profile; it cannot add write, terminal, send, install, delete, or subagent_* tools.")
+                                put("items", buildJsonObject { put("type", "string") })
+                            })
+                            put("max_turns", buildJsonObject {
+                                put("type", "integer")
+                                put("description", "Optional. Must not exceed current runtime limits.")
+                            })
+                            put("timeout_ms", buildJsonObject {
+                                put("type", "integer")
+                                put("description", "Optional. Must not exceed current runtime limits.")
+                            })
+                            put("output_budget_chars", buildJsonObject {
+                                put("type", "integer")
+                                put("description", "Optional. Must not exceed current runtime limits.")
+                            })
+                        })
+                        put("required", buildJsonArray {
+                            add("description")
+                            add("system_prompt")
+                        })
                     })
                     put("task", buildJsonObject {
                         put("type", "object")
-                        put("description", "Required task spec containing objective, output_format, tools_and_sources, boundaries, and optional context.")
+                        put("description", "Required task spec.")
+                        put("properties", buildJsonObject {
+                            put("objective", stringProp("Required. The exact subtask objective."))
+                            put("output_format", stringProp("Required. How the subagent should report back."))
+                            put("tools_and_sources", stringProp("Required. Which tools/sources it may use or should avoid."))
+                            put("boundaries", stringProp("Required. Scope limits, non-goals, and safety constraints."))
+                            put("context", stringProp("Optional. Minimal context needed for the task; do not paste the whole parent conversation."))
+                            put("session_grant_id", stringProp("Optional. Only use when the user granted historical session access."))
+                            put("history_query", stringProp("Optional. Query for history-read workflows."))
+                            put("source_session_ids", buildJsonObject {
+                                put("type", "array")
+                                put("description", "Optional session ids for granted history-read workflows.")
+                                put("items", buildJsonObject { put("type", "string") })
+                            })
+                            put("shard_index", buildJsonObject {
+                                put("type", "integer")
+                                put("description", "Optional shard index for parallel history workflows.")
+                            })
+                            put("shard_count", buildJsonObject {
+                                put("type", "integer")
+                                put("description", "Optional shard count for parallel history workflows.")
+                            })
+                        })
+                        put("required", buildJsonArray {
+                            add("objective")
+                            add("output_format")
+                            add("tools_and_sources")
+                            add("boundaries")
+                        })
                     })
                 },
                 required = listOf("task")
