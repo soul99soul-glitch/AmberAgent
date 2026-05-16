@@ -11,7 +11,9 @@
 | **M1.2** | ✅ 完成 | `30ae8b53` | 引入 3 个 Orchestrator（Send / Regenerate / Branch）作为 ChatVM → ChatService 之间的命名层。每个 Orchestrator 拥有最少非平凡职责（empty-input 校验 + analytics + 输入适配）。ChatVM 构造 +3 deps，3 个 method 改路径。AppModule + ViewModelModule 注册。Sub-agent review APPROVE。 |
 | **M1.3.1** | ✅ 完成（M1.3 整体仅做了 1/5）| `f8227273` + `f0b27279` | 抽 `PendingMessageStore` 出 ChatService —— 队列 JSON + audit jsonl 的纯文件 IO 关切外移。12 个 caller 站点机械改名。ChatService 净 -49 行，仍 ~2270 行。蓝图 M1.3.2-1.3.5（MessageTransformPipeline / ContextPlanner audit / StreamingPipeline / ToolApprovalCoordinator）**作为 follow-up 未做**。 |
 | **M1.5 (partial)** | ✅ 部分完成 | `90068114` + `658dc9d6` | 抽 chat 域 6 个 single 到独立 `ChatModule.kt`（PendingMessageStore / ChatService / 3 Orchestrators / WebServerManager）。AppModule 从 691 行降到 622 行。蓝图 §E 的 5 模块（aiModule / agentModule / webMountModule / dataModule / uiModule）+ ModelCouncilManager 拆分**作为 follow-up 未做**。 |
-| M1.8 | ✅ 完成 | (this commit) | 本快照 + 任务清单状态更新。 |
+| **M1.7** | ✅ 完成（评估，不拆）| `e7dbf8ce` + `991a4c15` | tts 模块已按 model/provider/controller 分清楚（~1858 行，最大文件 TtsController 311 行远低于 god 阈值），无须拆。 |
+| **Worker cold-flow fix** | ✅ 完成（M1.1.8e 跟进）| `e7dbf8ce` | MemoryDreamWorker / BoardWorker 改 `.settingsFlow.value` → `.filterNot { it.init }.first()`，关掉 M1.1.8e reviewer 标记的 pre-existing race（WorkManager dispatch 可能在 SettingsAggregator combine 首次 emission 前） |
+| M1.8 | ✅ 完成 | (snapshot commit) | 本快照 + 任务清单状态更新。 |
 
 ## 2. 显式未做（已记录 follow-up）
 
@@ -25,7 +27,7 @@
 | **M1.5 完整（5 子模块）** | 部分 | 只做了 chatModule；aiModule / agentModule / webMountModule / dataModule / uiModule 未做 |
 | **M1.5 ModelCouncilManager 拆分** | 未做 | 1150 行 god，需要先理解 council 运行时再切 |
 | **M1.6 Repository decoupling** | 未做 | 蓝图原定 MED 风险，影响面大 |
-| **M1.7 tts/ 命名评估** | 未做 | 蓝图原文是"评估，不一定拆"，本会话未做评估 |
+| ~~M1.7 tts/ 命名评估~~ | ✅ 已完成评估（结论不拆） | 见 `docs/M1.7_TTS_EVAL.md` |
 
 ## 3. 当前不变量（仍生效）
 
@@ -33,7 +35,7 @@
 - **F3**: 3 个 migration 文件保留 `SettingsStore.VERSION` 等 key 引用 → 已在 M1.1.8e 改成 `PreferencesKeys.VERSION`，逻辑等价。
 - **W1**: `_settingsFlow.value = settings` before `dataStore.edit`。本会话未触碰。
 - **filterNot 5 + 1 sites**: ChatService.kt × 1 / RikkaHubApp.kt × 3 / WebServerService.kt × 1 + 新增 AmberagentSmokeReceiver.kt × 1（M1.1.8e 加的）— 全保留。
-- **Cold-flow 已识别风险（pre-existing，非本会话引入）**: MemoryDreamWorker / BoardWorker 直接 `settingsFlow.value` 读，理论上 cold-start 可能读到 dummy。需要单独 follow-up commit 加 `filterNot { it.init }.first()` 替换。
+- ~~**Cold-flow 已识别风险**：MemoryDreamWorker / BoardWorker~~ ✅ **已修复**（commit `e7dbf8ce`），现在 7 个 site 全部用 `.filterNot { it.init }.first()` pattern：RikkaHubApp × 3 / ChatService × 1 / WebServerService × 1 / AmberagentSmokeReceiver × 1 / MemoryDreamWorker × 1 / BoardWorker × 1
 
 ## 4. 测试基线
 
