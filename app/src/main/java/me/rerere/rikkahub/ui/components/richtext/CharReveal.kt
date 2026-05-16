@@ -380,40 +380,7 @@ class CharRevealController internal constructor(
      */
     internal fun stableOffsetExclusive(): Int = revealedHead
 
-    /**
-     * Iterates over active reveal entries for draw-time masking.
-     *
-     * Reads [nowNanos] so that calling this from a `DrawModifier.draw`
-     * lambda invalidates the draw scope each frame — composition and
-     * layout remain stable.
-     *
-     * [action] receives (contentStartOffset, contentEndOffset, maskAlpha)
-     * where maskAlpha = 1 − revealAlpha:
-     * - 0f = fully revealed (no mask needed)
-     * - 1f = fully hidden
-     *
-     * Only entries with maskAlpha > 0.001f are delivered.
-     */
-    internal inline fun forEachMaskEntry(
-        action: (contentStart: Int, contentEnd: Int, maskAlpha: Float) -> Unit
-    ) {
-        val now = nowNanos // read for draw-phase invalidation
-        revealing.fastForEach { entry ->
-            val age = now - entry.appearNanos
-            val effective = entry.revealDurationNanos
-            val maskAlpha = when {
-                effective <= 0L -> 0f
-                age <= 0L -> 1f
-                age >= effective -> 0f
-                else -> 1f - age.toFloat() / effective.toFloat()
-            }
-            if (maskAlpha > 0.001f) {
-                action(entry.startOffset, entry.endOffset, maskAlpha)
-            }
-        }
-    }
-
-    internal data class RevealEntry(
+    private data class RevealEntry(
         val startOffset: Int,  // inclusive
         val endOffset: Int,    // exclusive
         val appearNanos: Long,

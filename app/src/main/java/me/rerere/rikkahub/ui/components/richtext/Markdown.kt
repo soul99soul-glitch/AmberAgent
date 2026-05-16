@@ -34,8 +34,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,12 +44,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -60,7 +54,6 @@ import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -250,52 +243,6 @@ internal data class MarkdownTopLevelBlockSnapshot(
     val parseResult: MarkdownParseResult,
     val preserveParagraphBottomPadding: Boolean,
 )
-
-/**
- * Maps a content-offset range to the corresponding AnnotatedString range.
- * Used by the draw-time reveal mask to convert CharRevealController offsets
- * (which are indices into the preprocessed content) to AnnotatedString
- * character positions (which TextLayoutResult uses).
- */
-internal data class OffsetMappingEntry(
-    val contentStart: Int,
-    val contentEnd: Int,
-    val annotatedStart: Int,
-    val annotatedEnd: Int,
-)
-
-/**
- * Binary-searches [map] for the entry containing [contentOffset] and
- * returns the interpolated AnnotatedString position. Falls back to
- * [contentOffset] itself when the map is empty or the offset falls
- * outside all entries — safe because the mask simply won't draw for
- * out-of-range offsets.
- */
-private fun mapContentToAnnotated(
-    map: List<OffsetMappingEntry>,
-    contentOffset: Int,
-): Int {
-    if (map.isEmpty()) return contentOffset
-    var lo = 0
-    var hi = map.lastIndex
-    while (lo <= hi) {
-        val mid = (lo + hi) ushr 1
-        val entry = map[mid]
-        when {
-            contentOffset < entry.contentStart -> hi = mid - 1
-            contentOffset >= entry.contentEnd -> lo = mid + 1
-            else -> {
-                val contentRangeSize = entry.contentEnd - entry.contentStart
-                if (contentRangeSize == 0) return entry.annotatedStart
-                val annotatedRangeSize = entry.annotatedEnd - entry.annotatedStart
-                val fraction = contentOffset - entry.contentStart
-                return entry.annotatedStart +
-                    (fraction.toLong() * annotatedRangeSize / contentRangeSize).toInt()
-            }
-        }
-    }
-    return contentOffset
-}
 
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
 private const val MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 128
@@ -1220,83 +1167,17 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
-    // Draw-time reveal: the AnnotatedString is built ONCE per content
-    // change (no revealClock in the remember key). The reveal visual
-    // effect is applied at draw time via BlendMode.DstOut, reading
-    // nowNanos in the draw scope to trigger per-frame invalidation
-    // without recomposition or relayout.
+    // B1 char-reveal: pull the active controller (or null when not
+    // streaming) and the base text color so the leaf path can wrap
+    // each codepoint in a SpanStyle whose alpha tracks the fade
+    // window. Reading controller?.nowNanos inside the remember key
+    // makes the AnnotatedString rebuild every frame while reveal is
+    // active — the deliberate per-frame work that delivers the
+    // smooth fade. When controller is null, key is stable and
+    // buildAnnotatedString runs once like before.
     val revealController = LocalCharRevealController.current
     val baseColor = LocalContentColor.current
-
-    // Build AnnotatedString and offset map together — both are stable
-    // across frames (only content changes trigger a rebuild).
-    val (annotatedString, offsetMap) = remember(
-        content,
-        enableLatexRendering,
-        onClickUrl,
-        baseColor,
-    ) {
-        val map = mutableListOf<OffsetMappingEntry>()
-        val annotated = buildAnnotatedString {
-            node.children.fastForEach { child ->
-                appendMarkdownNodeContent(
-                    node = child,
-                    content = content,
-                    inlineContents = inlineContents,
-                    colorScheme = colorScheme,
-                    onClickCitation = onClickCitation,
-                    style = textStyle,
-                    density = density,
-                    trim = trim,
-                    enableLatexRendering = enableLatexRendering,
-                    onClickUrl = onClickUrl,
-                    baseColor = baseColor,
-                    offsetMap = map,
-                )
-            }
-        }
-        annotated to map
-    }
-
-    // TextLayoutResult is needed to convert offsets to pixel rects
-    // for the draw-time mask. Updated only when layout changes.
-    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-
-    // Build the draw-time reveal mask modifier. Only active when a
-    // reveal controller is present (streaming paragraph).
-    // Pitfall notes:
-    //   - CompositingStrategy.Offscreen is REQUIRED for BlendMode.DstOut
-    //     to work correctly (坑1). Without it, the blend operates on the
-    //     parent canvas, not the text layer, producing black outlines.
-    //   - DstOut semantics: dst.α' = dst.α × (1 − src.α). To hide text
-    //     at maskAlpha=0.7, we draw src with alpha=0.7 → text becomes
-    //     30% visible. maskAlpha from controller IS already (1 − reveal).
-    //   - getPathForRange handles multi-line wrap, surrogate pairs,
-    //     bidirectional text, and Placeholder inline content correctly
-    //     (坑3, 坑4). It allocates a Path per call but the queue is small.
-    val revealModifier = if (revealController != null) {
-        Modifier
-            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-            .drawWithContent {
-                drawContent()
-                val layout = textLayoutResult ?: return@drawWithContent
-                val textLength = layout.layoutInput.text.length
-                revealController.forEachMaskEntry { contentStart, contentEnd, maskAlpha ->
-                    val aStart = mapContentToAnnotated(offsetMap, contentStart)
-                        .coerceIn(0, textLength)
-                    val aEnd = (mapContentToAnnotated(offsetMap, contentEnd - 1) + 1)
-                        .coerceIn(0, textLength)
-                    if (aStart >= aEnd) return@forEachMaskEntry
-                    val path = layout.multiParagraph.getPathForRange(aStart, aEnd)
-                    drawPath(
-                        color = Color.Black,
-                        path = path,
-                        alpha = maskAlpha,
-                        blendMode = BlendMode.DstOut,
-                    )
-                }
-            }
-    } else Modifier
+    val revealClock = revealController?.nowNanos ?: 0L
 
     FlowRow(
         modifier = modifier
@@ -1306,12 +1187,37 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
+        val annotatedString = remember(
+            content,
+            enableLatexRendering,
+            onClickUrl,
+            revealController,
+            revealClock,
+            baseColor,
+        ) {
+            buildAnnotatedString {
+                node.children.fastForEach { child ->
+                    appendMarkdownNodeContent(
+                        node = child,
+                        content = content,
+                        inlineContents = inlineContents,
+                        colorScheme = colorScheme,
+                        onClickCitation = onClickCitation,
+                        style = textStyle,
+                        density = density,
+                        trim = trim,
+                        enableLatexRendering = enableLatexRendering,
+                        onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
+                    )
+                }
+            }
+        }
+
         Text(
             text = annotatedString,
-            modifier = Modifier
-                .fillWidthIf(LocalMarkdownFillWidth.current)
-                .then(revealModifier),
-            onTextLayout = { textLayoutResult = it },
+            modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
             inlineContent = inlineContents,
             softWrap = true,
             overflow = TextOverflow.Visible,
@@ -1414,7 +1320,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     onClickCitation: (String) -> Unit = {},
     onClickUrl: (String) -> Unit = {},
     baseColor: Color = Color.Unspecified,
-    offsetMap: MutableList<OffsetMappingEntry>? = null,
+    revealController: CharRevealController? = null,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1432,18 +1338,44 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             val rawText = node.getTextInNode(content)
             val text = (if (trim) rawText.trim() else rawText)
                 .replace(BREAK_LINE_REGEX, "\n")
-            // Record content→annotated offset mapping for draw-time reveal.
-            // The mask is applied via BlendMode.DstOut in Paragraph's
-            // drawWithContent modifier — no per-frame AnnotatedString rebuild.
-            val annotatedStart = this@appendMarkdownNodeContent.length
-            append(text)
-            if (offsetMap != null && text.isNotEmpty()) {
-                offsetMap.add(OffsetMappingEntry(
-                    contentStart = node.startOffset,
-                    contentEnd = node.endOffset,
-                    annotatedStart = annotatedStart,
-                    annotatedEnd = this@appendMarkdownNodeContent.length,
-                ))
+            // B1 char-reveal: when an active controller is provided AND we
+            // have a usable baseColor, split the text by codepoint and
+            // wrap each in a SpanStyle whose alpha tracks the reveal
+            // window. baseColor=Unspecified (no LocalContentColor handed
+            // down) falls through to the fast path — visually a no-op
+            // because the reveal effect requires color modulation.
+            //
+            // Offset accuracy: the stable-prefix shortcut is only safe
+            // when this leaf text is byte-for-byte aligned with the AST
+            // source. Trimmed or <br>-collapsed leaves keep the old path.
+            if (revealController != null && baseColor != Color.Unspecified) {
+                val baseOffset = node.startOffset
+                val canAppendStablePrefix = !trim && text == rawText
+                var i = if (canAppendStablePrefix) {
+                    (revealController.stableOffsetExclusive() - baseOffset)
+                        .coerceIn(0, text.length)
+                } else {
+                    0
+                }
+                if (i > 0) {
+                    append(text, 0, i)
+                }
+                while (i < text.length) {
+                    val cp = text.codePointAt(i)
+                    val cpLen = Character.charCount(cp)
+                    val alpha = revealController.alphaAt(baseOffset + i)
+                        .coerceIn(0f, 1f)
+                    if (alpha >= 1f) {
+                        append(text, i, i + cpLen)
+                    } else {
+                        withStyle(SpanStyle(color = baseColor.copy(alpha = alpha))) {
+                            append(text, i, i + cpLen)
+                        }
+                    }
+                    i += cpLen
+                }
+            } else {
+                append(text)
             }
         }
 
@@ -1461,7 +1393,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        offsetMap = offsetMap,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1481,7 +1413,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        offsetMap = offsetMap,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1501,7 +1433,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        offsetMap = offsetMap,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1635,7 +1567,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
                     baseColor = baseColor,
-                    offsetMap = offsetMap,
+                    revealController = revealController,
                 )
             }
         }
