@@ -75,7 +75,8 @@ class SubAgentManager(
         }
         if (definition.dynamic) {
             val runningDynamic = runs.values.count { it.snapshot.status.running && it.snapshot.definition.dynamic }
-            if (runningDynamic >= DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS) {
+            val dynamicRunLimit = subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)
+            if (runningDynamic >= dynamicRunLimit) {
                 return@withContext errorPayload(
                     "too_many_dynamic_subagents",
                     "Dynamic subagent per-turn limit reached."
@@ -275,7 +276,7 @@ class SubAgentManager(
             put("mode", setting.mode.name.lowercase())
             put("allow_dynamic_subagents", setting.allowDynamicSubAgents)
             put("max_concurrent_runs", setting.maxConcurrentRuns)
-            put("dynamic_run_limit", DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS)
+            put("dynamic_run_limit", setting.maxConcurrentRuns)
             put("tool_profiles", SubAgentToolProfile.entries.joinToString(",") { it.name.lowercase() })
             put("max_depth", 1)
             put("timeout_ms", setting.timeoutMs)
