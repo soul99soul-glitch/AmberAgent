@@ -44,6 +44,7 @@ data class ModelCouncilSeat(
     val systemPrompt: String = "",
     @SerialName("output_budget_chars")
     val outputBudgetChars: Int = DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS,
+    val temperature: Float? = null,
     @SerialName("external_tool")
     val externalTool: String = "",
     @SerialName("external_runtime")
@@ -127,6 +128,7 @@ data class ModelCouncilTurn(
     val status: ModelCouncilRunStatus,
     val content: String = "",
     val error: String = "",
+    val warnings: List<String> = emptyList(),
 )
 
 @Serializable
@@ -140,6 +142,7 @@ data class ModelCouncilResult(
     val finalRecommendation: String = "",
     @SerialName("per_seat_summaries")
     val perSeatSummaries: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
     val error: String = "",
 )
 

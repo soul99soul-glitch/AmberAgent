@@ -105,7 +105,7 @@ class ModelCouncilTools(
                     put("seat_strategy", enumProp("Optional. Use agent_planned when you want the supervisor to design topic-specific seats instead of fixed supporter/opponent/judge.", listOf("default", "agent_planned")))
                     put("planned_seats", buildJsonObject {
                         put("type", "array")
-                        put("description", "Topic-specific seats for seat_strategy=agent_planned. Each item: name, role, system_prompt, optional runner_type/model_ref/external_tool/external_runtime/external_model, optional seat_id/output_budget_chars. Omit model_ref to auto-rotate through the configured council model pool.")
+                        put("description", "Topic-specific seats for seat_strategy=agent_planned. Each item: name, role, system_prompt, optional runner_type/model_ref/external_tool/external_runtime/external_model, optional seat_id/output_budget_chars/temperature. Omit model_ref to auto-rotate through the configured council model pool. Omit temperature unless the user explicitly asks for a specific sampling/diversity setting.")
                         put("items", buildJsonObject {
                             put("type", "object")
                             put("properties", buildJsonObject {
@@ -119,6 +119,7 @@ class ModelCouncilTools(
                                 put("external_runtime", enumProp("Optional terminal runtime for external_cli. Defaults to the Agent terminal runtime setting.", listOf("builtin_alpine", "android_shell", "termux_external")))
                                 put("external_model", stringProp("Optional CLI model argument, passed to Gemini CLI as --model. Example: gemini-2.5-pro."))
                                 put("output_budget_chars", integerProp("Optional per-seat output budget."))
+                                put("temperature", numberProp("Optional provider-model sampling temperature, 0..2. Omit unless the user explicitly requests more diversity or a specific temperature. If a provider rejects it, AmberAgent retries that seat once without temperature."))
                             })
                         })
                     })
@@ -139,8 +140,13 @@ class ModelCouncilTools(
                     })
                     put("seats", buildJsonObject {
                         put("type", "array")
-                        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Provider-model seats need seat_id/name/role/model_id and may include system_prompt/output_budget_chars; external CLI seats use runner_type=external_cli and external_tool=gemini_cli.")
-                        put("items", buildJsonObject { put("type", "object") })
+                        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Provider-model seats need seat_id/name/role/model_id and may include system_prompt/output_budget_chars/temperature; external CLI seats use runner_type=external_cli and external_tool=gemini_cli. Omit temperature unless explicitly requested.")
+                        put("items", buildJsonObject {
+                            put("type", "object")
+                            put("properties", buildJsonObject {
+                                put("temperature", numberProp("Optional provider-model sampling temperature, 0..2. Omit unless explicitly requested."))
+                            })
+                        })
                     })
                 }
             )
@@ -245,6 +251,11 @@ class ModelCouncilTools(
 
     private fun integerProp(description: String) = buildJsonObject {
         put("type", "integer")
+        put("description", description)
+    }
+
+    private fun numberProp(description: String) = buildJsonObject {
+        put("type", "number")
         put("description", description)
     }
 
