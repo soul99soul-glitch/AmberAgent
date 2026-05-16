@@ -86,6 +86,40 @@ class FeishuDocsClient(
         return data.s("content")
     }
 
+    suspend fun listBlocks(
+        accessToken: String,
+        documentId: String,
+        pageSize: Int,
+        pageToken: String?,
+    ): FeishuDocBlockList {
+        require(documentId.isNotBlank()) { "document_id is required" }
+        val response = http.get("$DOCX_BASE/v1/documents/$documentId/blocks") {
+            applyHeaders(accessToken)
+            parameter("page_size", pageSize.coerceIn(1, 500))
+            if (!pageToken.isNullOrBlank()) parameter("page_token", pageToken)
+        }
+        val data = parseFeishu(response, "list blocks").data ?: return FeishuDocBlockList(emptyList(), null, false)
+        val blocks = (data["items"] as? JsonArray).orEmpty().mapNotNull { entry ->
+            val obj = entry as? JsonObject ?: return@mapNotNull null
+            val blockId = obj.s("block_id") ?: return@mapNotNull null
+            val blockType = obj.i("block_type")
+            FeishuDocBlock(
+                blockId = blockId,
+                parentId = obj.s("parent_id"),
+                blockType = blockType,
+                text = obj.extractPlainText().takeIf { it.isNotBlank() },
+                headingLevel = blockType?.takeIf { it in 3..11 }?.let { it - 2 },
+                childrenCount = (obj["children"] as? JsonArray)?.size ?: 0,
+                raw = obj,
+            )
+        }
+        return FeishuDocBlockList(
+            blocks = blocks,
+            nextPageToken = data.s("next_page_token"),
+            hasMore = data["has_more"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false,
+        )
+    }
+
     suspend fun createDocument(accessToken: String, title: String, folderToken: String?): FeishuDocSummary {
         val response = http.post("$DOCX_BASE/v1/documents") {
             applyHeaders(accessToken)
@@ -336,8 +370,33 @@ class FeishuDocsClient(
     }
 
     private fun JsonObject.s(name: String): String? = this[name]?.jsonPrimitive?.contentOrNull
+    private fun JsonObject.i(name: String): Int? = this[name]?.jsonPrimitive?.intOrNull
     private fun JsonObject.l(name: String): Long? = this[name]?.jsonPrimitive?.longOrNull
     private fun JsonArray?.orEmpty(): JsonArray = this ?: JsonArray(emptyList())
+
+    private fun JsonObject.extractPlainText(): String {
+        val chunks = mutableListOf<String>()
+        TEXT_BLOCK_FIELDS.forEach { field ->
+            (this[field] as? JsonObject)?.collectTextRuns(chunks)
+        }
+        return chunks.joinToString("").replace('\u00A0', ' ').trim()
+    }
+
+    private fun JsonElement.collectTextRuns(out: MutableList<String>) {
+        when (this) {
+            is JsonObject -> {
+                this["text_run"]?.jsonObjectOrNull()?.s("content")?.let(out::add)
+                this["equation"]?.jsonObjectOrNull()?.s("content")?.let(out::add)
+                this["mention_user"]?.jsonObjectOrNull()?.s("name")?.let(out::add)
+                this["mention_doc"]?.jsonObjectOrNull()?.s("title")?.let(out::add)
+                values.forEach { it.collectTextRuns(out) }
+            }
+            is JsonArray -> forEach { it.collectTextRuns(out) }
+            else -> Unit
+        }
+    }
+
+    private fun JsonElement.jsonObjectOrNull(): JsonObject? = this as? JsonObject
 
     private data class FeishuEnvelope(val code: Int?, val data: JsonObject?)
 
@@ -345,6 +404,20 @@ class FeishuDocsClient(
         private const val DRIVE_BASE = "https://open.feishu.cn/open-apis/drive"
         private const val DOCX_BASE = "https://open.feishu.cn/open-apis/docx"
         private const val SUITE_BASE = "https://open.feishu.cn/open-apis/suite"
+        private val TEXT_BLOCK_FIELDS = listOf(
+            "text",
+            "heading1",
+            "heading2",
+            "heading3",
+            "heading4",
+            "heading5",
+            "heading6",
+            "heading7",
+            "heading8",
+            "heading9",
+            "bullet",
+            "ordered",
+        )
 
         // Block-content field name keyed by block_type. text-flavored blocks
         // (text + heading1..heading9 + bullet + ordered) all carry their
@@ -381,6 +454,22 @@ data class FeishuDocSummary(
 
 data class FeishuDocList(
     val files: List<FeishuDocSummary>,
+    val nextPageToken: String?,
+    val hasMore: Boolean,
+)
+
+data class FeishuDocBlock(
+    val blockId: String,
+    val parentId: String?,
+    val blockType: Int?,
+    val text: String?,
+    val headingLevel: Int?,
+    val childrenCount: Int,
+    val raw: JsonObject,
+)
+
+data class FeishuDocBlockList(
+    val blocks: List<FeishuDocBlock>,
     val nextPageToken: String?,
     val hasMore: Boolean,
 )

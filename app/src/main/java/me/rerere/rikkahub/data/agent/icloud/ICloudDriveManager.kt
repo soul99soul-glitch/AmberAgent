@@ -16,6 +16,7 @@ class ICloudDriveManager(
 ) {
     private val prefs = context.getSharedPreferences("amberagent_icloud_drive", Context.MODE_PRIVATE)
     private val mutex = Mutex()
+    private val nodeCache = ICloudDriveNodeCache()
     private val _state = MutableStateFlow(loadState())
     val state: StateFlow<ICloudDriveState> = _state.asStateFlow()
 
@@ -55,9 +56,33 @@ class ICloudDriveManager(
             .putLong(KEY_LAST_UPDATED_AT, updatedAtMillis)
             .apply()
         _state.value = loadState()
+        nodeCache.clear()
+    }
+
+    fun loginSnapshot(): ICloudDriveLoginSnapshot {
+        val cookies = cookieProvider.getCookies()
+        val loginDetected = !cookies.isEmpty && cookies.value("X-APPLE-WEBAUTH-TOKEN") != null
+        val endpoint = if (loginDetected) ICloudDriveWebEndpoints.preferredFor(cookies).firstOrNull() else null
+        return ICloudDriveLoginSnapshot(
+            loginDetected = loginDetected,
+            endpointHint = endpoint,
+            hasUploadToken = cookies.value("X-APPLE-WEBAUTH-VALIDATE") != null,
+        )
+    }
+
+    fun nextAction(state: ICloudDriveState = _state.value): String {
+        val login = loginSnapshot()
+        return when {
+            !state.enabled -> "Enable iCloud WebMount"
+            !login.loginDetected -> "Open iCloud login and finish 2FA"
+            state.capability == ICloudDriveCapability.NONE -> "Run the read probe"
+            state.capability == ICloudDriveCapability.READ_ONLY -> "Run the write probe if you need writes"
+            else -> "Ready"
+        }
     }
 
     suspend fun probe(): ICloudDriveState = mutex.withLock {
+        nodeCache.clear()
         updateStatus(ICloudDriveStatus.PROBING, ICloudDriveCapability.NONE, "Probing iCloud Drive session")
         runCatching {
             val session = createSession()
@@ -85,6 +110,7 @@ class ICloudDriveManager(
     }
 
     suspend fun runWriteProbe(): ICloudDriveState = mutex.withLock {
+        nodeCache.clear()
         updateStatus(ICloudDriveStatus.PROBING, ICloudDriveCapability.READ_ONLY, "Running iCloud write probe")
         runCatching {
             val session = createSession()
@@ -95,9 +121,10 @@ class ICloudDriveManager(
             )
             val content = "AmberAgent iCloud write probe\n${System.currentTimeMillis()}\n"
             client.writeText(session, probePath, content, overwrite = true)
-            val readBack = client.readText(session, probePath)
+            val readBack = client.readText(session, probePath).content
             require(readBack == content) { "Write probe read-back mismatch" }
             client.delete(session, probePath)
+            nodeCache.clear()
             prefs.edit().putBoolean(KEY_WRITE_VALIDATED, true).apply()
             updateStatus(
                 status = ICloudDriveStatus.READ_WRITE,
@@ -110,21 +137,50 @@ class ICloudDriveManager(
         }
     }
 
-    suspend fun list(path: String): ICloudDriveToolResult<List<ICloudDriveEntry>> = withReadySession(requireWrite = false) { session ->
+    suspend fun list(path: String, maxEntries: Int): ICloudDriveToolResult<ICloudDriveListResult> = withReadySession(requireWrite = false) { session ->
         val resolved = ICloudDrivePath.resolve(_state.value.vaultPath, path)
+        val entries = client.list(session, resolved).map { rememberEntry(it) }
+        val capped = entries.take(maxEntries.coerceIn(1, 500))
         ICloudDriveToolResult(
             state = _state.value,
             path = resolved.relativePath,
-            value = client.list(session, resolved),
+            value = ICloudDriveListResult(
+                entries = capped,
+                totalEntries = entries.size,
+                truncated = capped.size < entries.size,
+            ),
         )
     }
 
-    suspend fun readText(path: String): ICloudDriveToolResult<String> = withReadySession(requireWrite = false) { session ->
-        val resolved = ICloudDrivePath.resolve(_state.value.vaultPath, path)
+    suspend fun readText(
+        path: String?,
+        nodeRef: String?,
+    ): ICloudDriveToolResult<ICloudDriveReadResult> = withReadySession(requireWrite = false) { session ->
+        val decoded = nodeCache.resolve(nodeRef) ?: ICloudDriveNodeRefs.decode(nodeRef)
+        val relativePath = decoded?.path ?: path
+        require(!relativePath.isNullOrBlank()) { "path or node_ref is required" }
+        val resolved = ICloudDrivePath.resolve(_state.value.vaultPath, relativePath)
+        val result = client.readText(session, resolved, decoded)
         ICloudDriveToolResult(
             state = _state.value,
             path = resolved.relativePath,
-            value = client.readText(session, resolved),
+            value = result.copy(entry = rememberEntry(result.entry)),
+        )
+    }
+
+    suspend fun stat(
+        path: String?,
+        nodeRef: String?,
+    ): ICloudDriveToolResult<ICloudDriveStatResult> = withReadySession(requireWrite = false) { session ->
+        val decoded = nodeCache.resolve(nodeRef) ?: ICloudDriveNodeRefs.decode(nodeRef)
+        val relativePath = decoded?.path ?: path
+        require(!relativePath.isNullOrBlank()) { "path or node_ref is required" }
+        val resolved = ICloudDrivePath.resolve(_state.value.vaultPath, relativePath)
+        val result = client.stat(session, resolved, decoded)
+        ICloudDriveToolResult(
+            state = _state.value,
+            path = resolved.relativePath,
+            value = result.copy(entry = rememberEntry(result.entry)),
         )
     }
 
@@ -144,7 +200,8 @@ class ICloudDriveManager(
             ICloudDriveToolResult(
                 state = _state.value,
                 path = resolved.relativePath,
-                value = client.search(session, resolved, query, maxResults.coerceIn(1, 50)),
+                value = client.search(session, resolved, query, maxResults.coerceIn(1, 50))
+                    .map { rememberSearchResult(it) },
             )
         }
 
@@ -171,6 +228,45 @@ class ICloudDriveManager(
                 prefs.edit().putString(KEY_CLIENT_ID, it).apply()
             }
         client.validateSession(clientId, cookieProvider.getCookies())
+    }
+
+    private fun rememberEntry(entry: ICloudDriveEntry): ICloudDriveEntry {
+        val drivewsId = entry.drivewsId ?: return entry
+        val ref = ICloudDriveNodeRefs.encode(
+            ICloudDriveNodeRef(
+                path = entry.path,
+                drivewsId = drivewsId,
+                docwsId = entry.docwsId,
+                etag = entry.etag,
+            )
+        )
+        nodeCache.put(ref, entry)
+        return entry.copy(nodeRef = ref)
+    }
+
+    private fun rememberSearchResult(result: ICloudDriveSearchResult): ICloudDriveSearchResult {
+        val drivewsId = result.drivewsId ?: return result
+        val ref = ICloudDriveNodeRefs.encode(
+            ICloudDriveNodeRef(
+                path = result.path,
+                drivewsId = drivewsId,
+                docwsId = result.docwsId,
+                etag = result.etag,
+            )
+        )
+        nodeCache.put(
+            ref,
+            ICloudDriveEntry(
+                path = result.path,
+                name = result.path.substringAfterLast("/"),
+                directory = false,
+                sizeBytes = null,
+                drivewsId = result.drivewsId,
+                docwsId = result.docwsId,
+                etag = result.etag,
+            )
+        )
+        return result.copy(nodeRef = ref)
     }
 
     private fun updateStatus(
@@ -239,3 +335,37 @@ data class ICloudDriveToolResult<T>(
     val path: String,
     val value: T,
 )
+
+private class ICloudDriveNodeCache {
+    private val byRef = linkedMapOf<String, ICloudDriveEntry>()
+
+    @Synchronized
+    fun put(ref: String, entry: ICloudDriveEntry) {
+        byRef[ref] = entry
+        while (byRef.size > MAX_ENTRIES) {
+            val first = byRef.keys.firstOrNull() ?: break
+            byRef.remove(first)
+        }
+    }
+
+    @Synchronized
+    fun clear() {
+        byRef.clear()
+    }
+
+    @Synchronized
+    fun resolve(ref: String?): ICloudDriveNodeRef? {
+        if (ref.isNullOrBlank()) return null
+        val entry = byRef[ref] ?: return null
+        return ICloudDriveNodeRef(
+            path = entry.path,
+            drivewsId = entry.drivewsId,
+            docwsId = entry.docwsId,
+            etag = entry.etag,
+        )
+    }
+
+    private companion object {
+        const val MAX_ENTRIES = 1_000
+    }
+}

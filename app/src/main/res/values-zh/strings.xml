@@ -796,6 +796,12 @@
   <string name="setting_icloud_write_probe">探测写入</string>
   <string name="setting_icloud_status">状态：%1$s · 能力：%2$s</string>
   <string name="setting_icloud_saved">iCloud 路径已保存</string>
+  <string name="setting_icloud_endpoint_hint">当前区域</string>
+  <string name="setting_icloud_endpoint_unknown">未知</string>
+  <string name="setting_icloud_login_detected">登录 Cookie</string>
+  <string name="setting_icloud_login_detected_yes">已检测到</string>
+  <string name="setting_icloud_login_detected_no">未检测到</string>
+  <string name="setting_icloud_next_action">下一步</string>
   <!-- WebMount Stations (Phase 1, 实验性) -->
   <string name="setting_webmount_title">WebMount 站点</string>
   <string name="setting_webmount_desc">实验性 —— 把网站变成确定性 agent 工具。打开开关后所有 Assistant 自动获得 WebMount 工具集;关闭后全部移除。</string>

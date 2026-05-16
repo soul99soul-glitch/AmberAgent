@@ -131,6 +131,7 @@ class WebMountPrimitiveTools(
         openTool,
         stateTool,
         extractTool,
+        getTool,
         waitTool,
         clickTool,
         typeTool,
@@ -305,8 +306,9 @@ class WebMountPrimitiveTools(
             `readable` (default) returns innerText + outbound links (compatible with the legacy webview_read
             payload); `interactive` returns only clickable elements (a, button, input, [role=button|link|tab|menuitem]);
             `snapshot` returns a flattened tree of semantically interesting nodes with role / accessible name / rect /
-            visibility — useful for the agent to find the next element to click; `html` returns the outerHTML of one
-            selector. All modes cap output size to keep the agent's context manageable.
+            visibility. interactive/snapshot nodes include stable `ref`, `css`, and `fingerprint`; prefer passing
+            those refs to wm_click / wm_type / wm_get instead of inventing selectors. `html` returns the outerHTML
+            of one selector. All modes cap output size to keep the agent's context manageable.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
@@ -342,6 +344,51 @@ class WebMountPrimitiveTools(
                     put("result", payload)
                 }
                 listOf(UIMessagePart.Text(merged.toString()))
+            }
+        },
+    )
+
+    // --------------------------------------------------------------- wm_get
+
+    private val getTool = Tool(
+        name = "wm_get",
+        description = """
+            Read one element from a WebMount session without running arbitrary JavaScript. Prefer this
+            after wm_extract: pass the returned node `ref` as `target`, then choose kind=`text`, `value`,
+            `attr`, or `html`. The old selector grammar is still accepted as a fallback, but refs are
+            more stable across small DOM changes.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("Session id returned by wm_open."))
+                    put("target", stringProp("Node ref returned by wm_extract, or a selector fallback."))
+                    put("selector", stringProp("Legacy CSS / text=... / xpath=... selector fallback."))
+                    put("kind", stringProp("'text' (default) | 'value' | 'attr' | 'html'."))
+                    put("attr_name", stringProp("Attribute name when kind='attr', e.g. href or aria-label."))
+                    put("max_chars", integerProp("Maximum characters to return. Default 20000, hard cap 100000."))
+                    put("visible_only", booleanProp("Require the target to be visible (default true)."))
+                },
+                required = listOf("session_id"),
+            )
+        },
+        execute = { input ->
+            track("wm_get", "WebMount 读取节点", input) {
+                val sessionId = input.requiredString("session_id")
+                val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
+                val args = buildJsonObject {
+                    input.string("target")?.let { put("target", it) }
+                    input.string("selector")?.let { put("selector", it) }
+                    input.string("kind")?.let { put("kind", it) }
+                    input.string("attr_name")?.let { put("attr_name", it) }
+                    input.long("max_chars")?.let { put("max_chars", it) }
+                    input.boolean("visible_only")?.let { put("visible_only", it) }
+                }
+                val payload = handle.callBridge("get", args, timeoutMs = 5_000L)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("result", payload)
+                }.toString()))
             }
         },
     )
@@ -514,30 +561,32 @@ class WebMountPrimitiveTools(
     private val clickTool = Tool(
         name = "wm_click",
         description = """
-            Click an element in a WebMount session. The element is resolved via the same selector grammar
-            as wm_extract / wm_wait: plain CSS, `text=substring`, `xpath=expr`. The bridge focuses the
-            element, dispatches mousedown/mouseup, then calls .click() so default actions (form submit,
-            anchor navigation) fire. Hidden elements are scrolled into view once; if they remain hidden
-            after that, the call fails rather than clicking the wrong thing.
+            Click an element in a WebMount session. Prefer `target` with a ref returned by wm_extract;
+            selector remains available for legacy CSS / text=... / xpath=... calls. The bridge focuses
+            the element, dispatches mousedown/mouseup, then calls .click() so default actions fire.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("session_id", stringProp("Session id returned by wm_open."))
-                    put("selector", stringProp("CSS / text=... / xpath=... selector for the target element."))
+                    put("target", stringProp("Node ref returned by wm_extract, or a selector fallback."))
+                    put("selector", stringProp("Legacy CSS / text=... / xpath=... selector for the target element."))
                     put("visible_only", booleanProp("Require the element to be visible (default true)."))
                 },
-                required = listOf("session_id", "selector"),
+                required = listOf("session_id"),
             )
         },
         needsApproval = true,
         execute = { input ->
             track("wm_click", "WebMount 点击", input) {
                 val sessionId = input.requiredString("session_id")
-                val selector = input.requiredString("selector")
+                val target = input.string("target")
+                val selector = input.string("selector")
+                require(target != null || selector != null) { "wm_click requires target or selector" }
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
-                    put("selector", selector)
+                    target?.let { put("target", it) }
+                    selector?.let { put("selector", it) }
                     input.boolean("visible_only")?.let { put("visible_only", it) }
                 }
                 val payload = handle.callBridge("click", args, timeoutMs = 5_000L)
@@ -556,6 +605,7 @@ class WebMountPrimitiveTools(
         name = "wm_type",
         description = """
             Type text into an editable element (input/textarea/[contenteditable]) in a WebMount session.
+            Prefer `target` with a ref returned by wm_extract; selector remains available for legacy calls.
             Fires `input` and `change` events so frontend frameworks observe the new value. Pass
             `press_enter=true` to dispatch a synthetic Enter after typing (useful for search boxes that
             submit on Enter). `clear=true` empties the field first.
@@ -564,23 +614,27 @@ class WebMountPrimitiveTools(
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("session_id", stringProp("Session id returned by wm_open."))
-                    put("selector", stringProp("Selector for the editable element."))
+                    put("target", stringProp("Node ref returned by wm_extract, or a selector fallback."))
+                    put("selector", stringProp("Legacy selector for the editable element."))
                     put("text", stringProp("UTF-8 text to type."))
                     put("clear", booleanProp("Empty the field before typing (default false)."))
                     put("press_enter", booleanProp("Dispatch Enter keydown after typing (default false)."))
                 },
-                required = listOf("session_id", "selector", "text"),
+                required = listOf("session_id", "text"),
             )
         },
         needsApproval = true,
         execute = { input ->
             track("wm_type", "WebMount 输入", input) {
                 val sessionId = input.requiredString("session_id")
-                val selector = input.requiredString("selector")
+                val target = input.string("target")
+                val selector = input.string("selector")
+                require(target != null || selector != null) { "wm_type requires target or selector" }
                 val text = input.requiredString("text")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
-                    put("selector", selector)
+                    target?.let { put("target", it) }
+                    selector?.let { put("selector", it) }
                     put("text", text)
                     input.boolean("clear")?.let { put("clear", it) }
                     input.boolean("press_enter")?.let { put("press_enter", it) }
@@ -647,15 +701,16 @@ class WebMountPrimitiveTools(
         name = "wm_scroll",
         description = """
             Scroll a WebMount session. Three mutually exclusive modes (in priority order):
-            (1) `selector` scrolls the matched element into view; (2) `to` accepts "top" | "bottom",
-            or absolute coordinates via `to_x` + `to_y`; (3) `by_x` + `by_y` scrolls relative to the
-            current position. Reports the post-scroll {x, y}.
+            (1) `target`/`selector` scrolls the matched element into view; (2) `to` accepts "top" |
+            "bottom", or absolute coordinates via `to_x` + `to_y`; (3) `by_x` + `by_y` scrolls
+            relative to the current position. Reports the post-scroll {x, y}.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("session_id", stringProp("Session id."))
-                    put("selector", stringProp("Selector to scroll into view (CSS / text= / xpath=)."))
+                    put("target", stringProp("Node ref returned by wm_extract, or a selector fallback."))
+                    put("selector", stringProp("Legacy selector to scroll into view (CSS / text= / xpath=)."))
                     put("to", stringProp("'top' | 'bottom' for shorthand absolute scrolls."))
                     put("to_x", integerProp("Absolute x (used with to_y)."))
                     put("to_y", integerProp("Absolute y."))
@@ -671,12 +726,14 @@ class WebMountPrimitiveTools(
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
                     val selector = input.string("selector")
+                    val target = input.string("target")
                     val to = input.string("to")
                     val toX = input.long("to_x")
                     val toY = input.long("to_y")
                     val byX = input.long("by_x")
                     val byY = input.long("by_y")
                     when {
+                        target != null -> put("target", target)
                         selector != null -> put("selector", selector)
                         to != null -> put("to", to)
                         toX != null && toY != null -> put("to", buildJsonObject {
@@ -757,7 +814,7 @@ class WebMountPrimitiveTools(
         description = """
             Dispatch a synthetic keyboard event in a WebMount session. Useful for Enter / Escape / Tab /
             arrow keys after wm_type when the field doesn't auto-submit. Modifiers can be combined
-            (ctrl, shift, alt, meta). If `selector` is provided, focus moves to that element first;
+            (ctrl, shift, alt, meta). If `target` or `selector` is provided, focus moves to that element first;
             otherwise the event targets the currently-focused element.
         """.trimIndent().replace("\n", " "),
         parameters = {
@@ -765,7 +822,8 @@ class WebMountPrimitiveTools(
                 properties = buildJsonObject {
                     put("session_id", stringProp("Session id."))
                     put("key", stringProp("Key name: 'Enter', 'Escape', 'Tab', 'ArrowDown', 'a', etc."))
-                    put("selector", stringProp("Optional selector to focus before sending the key."))
+                    put("target", stringProp("Optional node ref returned by wm_extract, or selector fallback."))
+                    put("selector", stringProp("Optional legacy selector to focus before sending the key."))
                     put("ctrl", booleanProp("Hold Ctrl while pressing (default false)."))
                     put("shift", booleanProp("Hold Shift (default false)."))
                     put("alt", booleanProp("Hold Alt (default false)."))
@@ -788,6 +846,7 @@ class WebMountPrimitiveTools(
                 }
                 val args = buildJsonObject {
                     put("key", key)
+                    input.string("target")?.let { put("target", it) }
                     input.string("selector")?.let { put("selector", it) }
                     put("modifiers", mods)
                 }
@@ -806,28 +865,32 @@ class WebMountPrimitiveTools(
         name = "wm_select",
         description = """
             Choose an option in a <select> dropdown. Matches `value` against both option.value and the
-            visible option text — so the agent can use whichever it sees in wm_extract. Fires
-            input + change events so frontend frameworks observe the new selection.
+            visible option text. Prefer `target` with a ref returned by wm_extract; selector remains
+            available for legacy calls. Fires input + change events so frontend frameworks observe the new selection.
         """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("session_id", stringProp("Session id."))
-                    put("selector", stringProp("Selector for the <select> element."))
+                    put("target", stringProp("Node ref returned by wm_extract, or selector fallback."))
+                    put("selector", stringProp("Legacy selector for the <select> element."))
                     put("value", stringProp("Option value or visible text to choose."))
                 },
-                required = listOf("session_id", "selector", "value"),
+                required = listOf("session_id", "value"),
             )
         },
         needsApproval = true,
         execute = { input ->
             track("wm_select", "WebMount 选择", input) {
                 val sessionId = input.requiredString("session_id")
-                val selector = input.requiredString("selector")
+                val target = input.string("target")
+                val selector = input.string("selector")
+                require(target != null || selector != null) { "wm_select requires target or selector" }
                 val value = input.requiredString("value")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
-                    put("selector", selector)
+                    target?.let { put("target", it) }
+                    selector?.let { put("selector", it) }
                     put("value", value)
                 }
                 val payload = handle.callBridge("select", args, timeoutMs = 5_000L)

@@ -1069,6 +1069,9 @@ fun SettingExperimentalICloudPage(
     var iCloudBusy by remember { mutableStateOf(false) }
     var iCloudVaultInput by remember(iCloudState.vaultPath) { mutableStateOf(iCloudState.vaultPath) }
     val iCloudSavedToast = stringResource(R.string.setting_icloud_saved)
+    val iCloudLoginSnapshot = remember(iCloudState.updatedAtMillis, iCloudBusy, showICloudLogin) {
+        iCloudDriveManager.loginSnapshot()
+    }
 
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_icloud_title),
@@ -1173,6 +1176,22 @@ fun SettingExperimentalICloudPage(
                     ExperimentStatusRow(
                         label = stringResource(R.string.setting_experimental_capability),
                         value = iCloudState.capability.wireName,
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_icloud_endpoint_hint),
+                        value = iCloudLoginSnapshot.endpointHint?.displayName ?: stringResource(R.string.setting_icloud_endpoint_unknown),
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_icloud_login_detected),
+                        value = if (iCloudLoginSnapshot.loginDetected) {
+                            stringResource(R.string.setting_icloud_login_detected_yes)
+                        } else {
+                            stringResource(R.string.setting_icloud_login_detected_no)
+                        },
+                    )
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_icloud_next_action),
+                        value = iCloudDriveManager.nextAction(iCloudState),
                     )
                     iCloudState.message?.takeIf { it.isNotBlank() }?.let { message ->
                         ExperimentNote(text = message)

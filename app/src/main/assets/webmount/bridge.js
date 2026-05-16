@@ -11,6 +11,8 @@
 (function () {
   if (window.__amberWmReady) return;
   window.__amberWmReady = true;
+  window.__amberWmSnapshotSeq = window.__amberWmSnapshotSeq || 0;
+  window.__amberWmSnapshot = window.__amberWmSnapshot || { id: 0, entries: {} };
 
   function safeJson(v) {
     try { return JSON.stringify(v); }
@@ -147,8 +149,8 @@
   }
 
   function nodePath(el) {
-    // Cheap CSS-ish path with nth-of-type indexes. Capped at 6 segments
-    // to keep snapshot output small.
+    // Cheap CSS path with standards-compliant nth-of-type indexes.
+    // Capped at 6 segments to keep snapshot output small.
     var parts = [];
     var cur = el;
     while (cur && cur.nodeType === 1 && parts.length < 6) {
@@ -157,13 +159,162 @@
       if (parent) {
         var sibs = Array.prototype.filter.call(parent.children, function (c) { return c.tagName === cur.tagName; });
         if (sibs.length > 1) {
-          tag += ':nth(' + sibs.indexOf(cur) + ')';
+          tag += ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')';
         }
       }
       parts.unshift(tag);
       cur = cur.parentElement;
     }
     return parts.join('>');
+  }
+
+  function textPreview(el) {
+    var t = (el && (el.innerText || el.textContent) || '').replace(/\s+/g, ' ').trim();
+    return t.length > 120 ? t.substring(0, 120) : t;
+  }
+
+  function fingerprintOf(el) {
+    var r = rectOf(el);
+    var href = el && el.tagName === 'A' ? (el.href || '') : '';
+    var inputType = el && el.tagName === 'INPUT' ? (el.type || '') : '';
+    var name = accessibleName(el) || '';
+    var text = textPreview(el);
+    return {
+      key: [
+        (el.tagName || '').toLowerCase(),
+        roleOf(el) || '',
+        name,
+        text,
+        href,
+        inputType,
+      ].join('|'),
+      rect_bucket: [
+        Math.round((r[0] || 0) / 16),
+        Math.round((r[1] || 0) / 16),
+        Math.round((r[2] || 0) / 16),
+        Math.round((r[3] || 0) / 16),
+      ].join(','),
+    };
+  }
+
+  function startSnapshot() {
+    var id = ++window.__amberWmSnapshotSeq;
+    window.__amberWmSnapshot = { id: id, entries: {} };
+    return id;
+  }
+
+  function rememberSnapshotNode(el, node) {
+    var snapshot = window.__amberWmSnapshot;
+    var ref = String(Object.keys(snapshot.entries).length + 1);
+    var fp = fingerprintOf(el);
+    node.ref = ref;
+    node.css = node.path;
+    node.fingerprint = fp;
+    snapshot.entries[ref] = {
+      el: el,
+      css: node.css,
+      fingerprint: fp,
+      summary: {
+        ref: ref,
+        tag: node.tag,
+        role: node.role,
+        name: node.name,
+        text: node.text,
+        rect: node.rect,
+        visible: node.visible,
+        css: node.css,
+        fingerprint: fp,
+      },
+    };
+    return node;
+  }
+
+  function targetError(code, message, hint, candidates) {
+    return {
+      ok: false,
+      error: {
+        code: code,
+        message: message,
+        hint: hint || null,
+        candidates: (candidates || []).slice(0, 5),
+      },
+    };
+  }
+
+  function candidateSummary(el, ref) {
+    var node = describeNode(el, { text: true });
+    if (ref) node.ref = ref;
+    node.css = node.path;
+    node.fingerprint = fingerprintOf(el);
+    return node;
+  }
+
+  function sameFingerprint(a, b, requireRect) {
+    return a && b && a.key === b.key && (!requireRect || a.rect_bucket === b.rect_bucket);
+  }
+
+  function findByFingerprint(fingerprint, visibleOnly) {
+    if (!fingerprint || !fingerprint.key) return [];
+    var selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick],label,h1,h2,h3,h4,li,p,span,div';
+    var all = Array.prototype.slice.call(document.querySelectorAll(selector));
+    return all.filter(function (el) {
+      if (visibleOnly && !isVisible(el)) return false;
+      return sameFingerprint(fingerprintOf(el), fingerprint, true);
+    });
+  }
+
+  function resolveSelectorTarget(selector, visibleOnly, opts, matchLevel) {
+    var candidates = resolveSelector(selector);
+    if (visibleOnly) candidates = candidates.filter(isVisible);
+    if (candidates.length === 0) {
+      return targetError('target_not_found', 'no element matched: ' + selector, 'Use wm_extract(mode="interactive") to inspect visible refs.');
+    }
+    if (candidates.length > 1 && opts.requireUnique === true) {
+      return targetError('ambiguous_target', 'selector matched multiple elements: ' + selector, 'Use a returned ref instead of a broad selector.', candidates.map(function (el) { return candidateSummary(el); }));
+    }
+    return { ok: true, el: candidates[0], matches_n: candidates.length, match_level: matchLevel };
+  }
+
+  function resolveTarget(args, opts) {
+    opts = opts || {};
+    var visibleOnly = opts.visibleOnly !== false && args.visible_only !== false;
+    var allowFingerprintFallback = opts.allowFingerprintFallback !== false;
+    var requireStableRect = opts.requireStableRect === true;
+    var target = args.target != null ? String(args.target) : null;
+    var selector = args.selector;
+    var candidates;
+
+    if (target && window.__amberWmSnapshot && window.__amberWmSnapshot.entries[target]) {
+      var entry = window.__amberWmSnapshot.entries[target];
+      if (entry.el && entry.el.isConnected && (!visibleOnly || isVisible(entry.el)) && sameFingerprint(fingerprintOf(entry.el), entry.fingerprint, requireStableRect)) {
+        return { ok: true, el: entry.el, matches_n: 1, match_level: 'exact_ref', ref: target };
+      }
+      candidates = entry.css ? resolveSelector(entry.css).filter(function (el) {
+        return (!visibleOnly || isVisible(el)) && sameFingerprint(fingerprintOf(el), entry.fingerprint, requireStableRect);
+      }) : [];
+      if (candidates.length === 1) {
+        return { ok: true, el: candidates[0], matches_n: 1, match_level: 'css', ref: target };
+      }
+      if (allowFingerprintFallback) {
+        candidates = findByFingerprint(entry.fingerprint, visibleOnly);
+        if (candidates.length === 1) {
+          return { ok: true, el: candidates[0], matches_n: 1, match_level: 'fingerprint', ref: target };
+        }
+        if (candidates.length > 1) {
+          return targetError('ambiguous_target', 'target ref matched multiple elements after DOM changed', 'Run wm_extract again and use the new ref.', candidates.map(function (el) { return candidateSummary(el); }));
+        }
+      }
+      if (selector) {
+        var fallback = resolveSelectorTarget(selector, visibleOnly, opts, 'selector_fallback');
+        if (fallback.ok) fallback.ref = target;
+        return fallback;
+      }
+      return targetError('target_not_found', 'target ref is no longer available: ' + target, 'Run wm_extract again and use the new ref.', entry.summary ? [entry.summary] : []);
+    }
+
+    var sel = selector || target;
+    if (!sel) return targetError('missing_target', 'target or selector is required', 'Call wm_extract first, then pass a returned ref as target.');
+    return resolveSelectorTarget(sel, visibleOnly, opts, selector ? 'selector' : 'target_selector');
   }
 
   // --------------------------------------------------------------- extract
@@ -226,13 +377,15 @@
     var els = Array.prototype.slice.call(document.querySelectorAll(selector));
     var visible = args.visible_only !== false;
     var nodes = [];
+    var snapshotId = startSnapshot();
     for (var i = 0; i < els.length && nodes.length < maxNodes; i++) {
       var el = els[i];
       if (visible && !isVisible(el)) continue;
-      nodes.push(describeNode(el, { text: true }));
+      nodes.push(rememberSnapshotNode(el, describeNode(el, { text: true })));
     }
     return {
       mode: 'interactive',
+      snapshot_id: snapshotId,
       url: location.href,
       title: document.title || '',
       nodes: nodes,
@@ -253,19 +406,21 @@
     var nodes = [];
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
     var cur = walker.currentNode;
+    var snapshotId = startSnapshot();
     while (cur && nodes.length < maxNodes) {
       if (!visible || isVisible(cur)) {
         var role = roleOf(cur);
         var hasName = accessibleName(cur);
         // Only keep semantically interesting nodes when not in role/name mode.
         if (role || hasName || cur === root) {
-          nodes.push(describeNode(cur, { text: true }));
+          nodes.push(rememberSnapshotNode(cur, describeNode(cur, { text: true })));
         }
       }
       cur = walker.nextNode();
     }
     return {
       mode: 'snapshot',
+      snapshot_id: snapshotId,
       url: location.href,
       title: document.title || '',
       viewport: getViewport(),
@@ -352,15 +507,13 @@
   }
 
   function performClick(args) {
-    var sel = args.selector;
-    if (!sel) throw new Error('click requires selector');
-    var matched = resolveSelector(sel);
-    if (matched.length === 0) throw new Error('no element matched: ' + sel);
-    var target = matched[0];
+    var resolved = resolveTarget(args, { allowFingerprintFallback: false, requireStableRect: true });
+    if (!resolved.ok) return resolved;
+    var target = resolved.el;
     if (args.visible_only !== false && !isVisible(target)) {
       // Try scrollIntoView once.
       if (target.scrollIntoView) target.scrollIntoView({ block: 'center', inline: 'center' });
-      if (!isVisible(target)) throw new Error('element not visible: ' + sel);
+      if (!isVisible(target)) return targetError('target_not_visible', 'element is not visible', 'Run wm_scroll on the same target or call wm_extract again.');
     }
     if (target.focus) try { target.focus(); } catch (_) {}
     dispatchMouseEvent(target, 'mousedown');
@@ -369,21 +522,21 @@
     try { target.click(); } catch (_) {}
     return {
       ok: true,
-      target: { tag: (target.tagName || '').toLowerCase(), name: accessibleName(target), rect: rectOf(target) },
+      target: candidateSummary(target, resolved.ref),
+      matches_n: resolved.matches_n,
+      match_level: resolved.match_level,
       url: location.href,
     };
   }
 
   function performType(args) {
-    var sel = args.selector;
-    if (!sel) throw new Error('type requires selector');
     var text = args.text;
     if (typeof text !== 'string') throw new Error('type requires text string');
-    var matched = resolveSelector(sel);
-    if (matched.length === 0) throw new Error('no element matched: ' + sel);
-    var el = matched[0];
+    var resolved = resolveTarget(args, { requireUnique: true, allowFingerprintFallback: false, requireStableRect: true });
+    if (!resolved.ok) return resolved;
+    var el = resolved.el;
     if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !el.isContentEditable) {
-      throw new Error('element is not editable: ' + sel);
+      return targetError('target_not_editable', 'element is not editable', 'Use wm_extract(mode="interactive") and choose an input, textarea, or contenteditable node.', [candidateSummary(el, resolved.ref)]);
     }
     if (el.focus) try { el.focus(); } catch (_) {}
     var clear = args.clear === true;
@@ -406,8 +559,45 @@
     }
     return {
       ok: true,
-      target: { tag: (el.tagName || '').toLowerCase(), name: accessibleName(el) },
+      target: candidateSummary(el, resolved.ref),
+      matches_n: resolved.matches_n,
+      match_level: resolved.match_level,
       value_chars: (el.isContentEditable ? (el.textContent || '') : (el.value || '')).length,
+    };
+  }
+
+  function performGet(args) {
+    var resolved = resolveTarget(args, { requireUnique: true });
+    if (!resolved.ok) return resolved;
+    var el = resolved.el;
+    var kind = args.kind || 'text';
+    var value = null;
+    if (kind === 'text') {
+      value = el.innerText || el.textContent || '';
+    } else if (kind === 'value') {
+      value = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+    } else if (kind === 'html') {
+      value = el.outerHTML || '';
+    } else if (kind === 'attr') {
+      var attr = args.attr_name;
+      if (typeof attr !== 'string' || attr.length === 0) {
+        return targetError('missing_attr_name', 'kind=attr requires attr_name', 'Pass attr_name, for example "href" or "aria-label".');
+      }
+      value = el.getAttribute(attr);
+    } else {
+      return targetError('invalid_kind', 'unknown wm_get kind: ' + kind, 'Use text, value, attr, or html.');
+    }
+    var maxChars = Math.min(((args.max_chars | 0) || 20000), 100000);
+    var text = value == null ? null : String(value);
+    return {
+      ok: true,
+      kind: kind,
+      value: text == null ? null : text.substring(0, maxChars),
+      total_chars: text == null ? 0 : text.length,
+      truncated: text != null && text.length > maxChars,
+      target: candidateSummary(el, resolved.ref),
+      matches_n: resolved.matches_n,
+      match_level: resolved.match_level,
     };
   }
 
@@ -568,13 +758,19 @@
   // --------------------------------------------------------------- navigation
 
   function performScroll(args) {
-    var sel = args.selector;
-    if (sel) {
-      var matched = resolveSelector(sel);
-      if (matched.length === 0) throw new Error('no element matched: ' + sel);
-      var target = matched[0];
+    if (args.target || args.selector) {
+      var resolved = resolveTarget(args, { allowFingerprintFallback: false, requireStableRect: true });
+      if (!resolved.ok) return resolved;
+      var target = resolved.el;
       if (target.scrollIntoView) target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
-      return { ok: true, mode: 'into_view', selector: sel, after: { y: window.scrollY | 0 } };
+      return {
+        ok: true,
+        mode: 'into_view',
+        target: candidateSummary(target, resolved.ref),
+        matches_n: resolved.matches_n,
+        match_level: resolved.match_level,
+        after: { y: window.scrollY | 0 },
+      };
     }
     if (args.to) {
       var to = args.to;
@@ -608,10 +804,11 @@
     var key = args.key;
     if (typeof key !== 'string') throw new Error('keys requires key string');
     var target = document.activeElement || document.body;
-    if (args.selector) {
-      var matched = resolveSelector(args.selector);
-      if (matched.length === 0) throw new Error('no element matched: ' + args.selector);
-      target = matched[0];
+    var resolved = null;
+    if (args.target || args.selector) {
+      resolved = resolveTarget(args, { allowFingerprintFallback: false, requireStableRect: true });
+      if (!resolved.ok) return resolved;
+      target = resolved.el;
       if (target.focus) try { target.focus(); } catch (_) {}
     }
     var mods = args.modifiers || {};
@@ -629,7 +826,13 @@
     target.dispatchEvent(new KeyboardEvent('keydown', init));
     target.dispatchEvent(new KeyboardEvent('keypress', init));
     target.dispatchEvent(new KeyboardEvent('keyup', init));
-    return { ok: true, key: key, target: { tag: (target.tagName || '').toLowerCase() } };
+    return {
+      ok: true,
+      key: key,
+      target: candidateSummary(target, resolved && resolved.ref),
+      matches_n: resolved ? resolved.matches_n : 1,
+      match_level: resolved ? resolved.match_level : 'active_element',
+    };
   }
 
   function keyToCode(key, numeric) {
@@ -657,12 +860,10 @@
   }
 
   function performSelect(args) {
-    var sel = args.selector;
-    if (!sel) throw new Error('select requires selector');
-    var matched = resolveSelector(sel);
-    if (matched.length === 0) throw new Error('no element matched: ' + sel);
-    var el = matched[0];
-    if (el.tagName !== 'SELECT') throw new Error('not a <select>: ' + sel);
+    var resolved = resolveTarget(args, { requireUnique: true, allowFingerprintFallback: false, requireStableRect: true });
+    if (!resolved.ok) return resolved;
+    var el = resolved.el;
+    if (el.tagName !== 'SELECT') return targetError('target_not_select', 'target is not a <select>', 'Use wm_extract(mode="interactive") and choose a select node.', [candidateSummary(el, resolved.ref)]);
     var value = args.value;
     if (typeof value !== 'string') throw new Error('select requires value string');
     var found = false;
@@ -673,10 +874,17 @@
         break;
       }
     }
-    if (!found) throw new Error('no option matched: ' + value);
+    if (!found) return targetError('option_not_found', 'no option matched: ' + value, 'Read the select options with wm_get(kind="html") and pass the option value or text.');
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-    return { ok: true, selected_index: el.selectedIndex, value: el.value };
+    return {
+      ok: true,
+      selected_index: el.selectedIndex,
+      value: el.value,
+      target: candidateSummary(el, resolved.ref),
+      matches_n: resolved.matches_n,
+      match_level: resolved.match_level,
+    };
   }
 
   function performFind(args) {
@@ -697,6 +905,7 @@
         if (el && isVisible(el)) {
           matches.push({
             path: nodePath(el),
+            css: nodePath(el),
             rect: rectOf(el),
             text_preview: text.replace(/\s+/g, ' ').trim().substring(0, 120),
           });
@@ -705,6 +914,13 @@
       node = walker.nextNode();
     }
     return { ok: true, matches: matches, total_returned: matches.length };
+  }
+
+  function actionResult(fn) {
+    try { return fn(); }
+    catch (e) {
+      return targetError('action_failed', String(e && e.message || e), 'Inspect the page with wm_extract and retry with a returned ref.');
+    }
   }
 
   // --------------------------------------------------------------- dispatch
@@ -756,14 +972,15 @@
           AmberWM.reject(reqId, 'unknown wait kind: ' + until);
           return;
         }
-        case 'click':    AmberWM.resolve(reqId, safeJson(performClick(args))); return;
-        case 'type':     AmberWM.resolve(reqId, safeJson(performType(args))); return;
+        case 'click':    AmberWM.resolve(reqId, safeJson(actionResult(function () { return performClick(args); }))); return;
+        case 'type':     AmberWM.resolve(reqId, safeJson(actionResult(function () { return performType(args); }))); return;
+        case 'get':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performGet(args); }))); return;
         case 'eval':     AmberWM.resolve(reqId, safeJson(performEval(args))); return;
-        case 'scroll':   AmberWM.resolve(reqId, safeJson(performScroll(args))); return;
+        case 'scroll':   AmberWM.resolve(reqId, safeJson(actionResult(function () { return performScroll(args); }))); return;
         case 'back':     AmberWM.resolve(reqId, safeJson(performHistory('back'))); return;
         case 'forward':  AmberWM.resolve(reqId, safeJson(performHistory('forward'))); return;
-        case 'keys':     AmberWM.resolve(reqId, safeJson(performKeys(args))); return;
-        case 'select':   AmberWM.resolve(reqId, safeJson(performSelect(args))); return;
+        case 'keys':     AmberWM.resolve(reqId, safeJson(actionResult(function () { return performKeys(args); }))); return;
+        case 'select':   AmberWM.resolve(reqId, safeJson(actionResult(function () { return performSelect(args); }))); return;
         case 'find':     AmberWM.resolve(reqId, safeJson(performFind(args))); return;
         default:
           AmberWM.reject(reqId, 'unknown method: ' + method);

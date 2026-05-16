@@ -1310,6 +1310,12 @@
   <string name="setting_icloud_write_probe">Probe Write</string>
   <string name="setting_icloud_status">Status: %1$s · Capability: %2$s</string>
   <string name="setting_icloud_saved">iCloud path saved</string>
+  <string name="setting_icloud_endpoint_hint">Endpoint</string>
+  <string name="setting_icloud_endpoint_unknown">Unknown</string>
+  <string name="setting_icloud_login_detected">Login cookie</string>
+  <string name="setting_icloud_login_detected_yes">Detected</string>
+  <string name="setting_icloud_login_detected_no">Not detected</string>
+  <string name="setting_icloud_next_action">Next action</string>
   <!-- WebMount Stations (Phase 1, experimental) -->
   <string name="setting_webmount_title">WebMount Stations</string>
   <string name="setting_webmount_desc">Experimental — turn websites into deterministic agent tools. Toggle on to expose the WebMount toolkit to every assistant; toggle off to remove it everywhere.</string>

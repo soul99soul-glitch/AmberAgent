@@ -1,0 +1,31 @@
+{
+  "id": "x_com",
+  "name": "X.com",
+  "version": 1,
+  "origins": [
+    "https://x.com",
+    "https://twitter.com",
+    "https://mobile.twitter.com"
+  ],
+  "capabilities": ["read", "interact"],
+  "hints": {
+    "login_cookie": "auth_token",
+    "interactive_selectors": {
+      "timeline_item": "article[data-testid='tweet']",
+      "tweet_text": "div[data-testid='tweetText']",
+      "author_name": "div[data-testid='User-Name']",
+      "search_input": "input[data-testid='SearchBox_Search_Input']",
+      "compose_box": "div[data-testid='tweetTextarea_0']"
+    },
+    "rate_limit": {
+      "http_status": 429,
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:auth_token",
+    "detect_login",
+    "detect_rate_limit"
+  ],
+  "notes": "Profile-only station. Use generic wm_* ref tools for visible timeline/search/compose interactions; do not assume stable bulk API access."
+}
