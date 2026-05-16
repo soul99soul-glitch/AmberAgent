@@ -809,46 +809,38 @@ private fun ChatListNormal(
         val token = beginProgrammaticScroll()
         logScroll("scrollToTimelineBottom.enter", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
         try {
-            // 2026-05-14 v1.8.10: reverted spring spec from 1.8.9 to short
-            // LinearEasing tween. Why:
+            // B3 (smooth-streaming-rendering-guide §10 lerp): one
+            // synchronous 35%-of-viewport step per call instead of an
+            // animateScrollBy tween. Rationale:
             //
-            // 1.8.9 assumed spring preserves velocity across cancellations.
-            // That's true for `animateContentSize(spring)` (which uses a
-            // persistent SizeAnimationModifierNode.Animatable internally), but
-            // NOT for `animateScrollBy`. AOSP source confirms `animateScrollBy`
-            // wraps `animate(0f, target, spec)` in `scroll {}` — a fresh
-            // top-level `animate()` is created every call, with no persistent
-            // Animatable across cancellations. So spring's "velocity continuity"
-            // never materialized on the scroll path.
+            //  - No in-flight animation means nothing to cancel when
+            //    LE_chunk fires again on the next accumulator flush.
+            //    The historical 80ms LinearEasing tween (and the
+            //    spring(StiffnessMediumLow) before it that wedged
+            //    isScrollInProgress=true for ~1s) both relied on
+            //    cancel-on-restart; that race surface is now gone.
             //
-            // Worse, spring(StiffnessMediumLow) settles in ~800-1500ms even
-            // after the scroll has clamped at maxOffset — `isScrollInProgress`
-            // stays true the entire time, gating off subsequent
-            // scrollToTimelineBottom triggers in the collect block. Net effect:
-            // one scroll per ~1s instead of per chunk, so content accumulated
-            // for 1s then suddenly caught up — a worse cadence than the
-            // 200ms-tween version this replaced.
+            //  - scrollBy(value) is synchronous — `state.scroll {
+            //    snapToBy(value) }` under the hood, no suspension
+            //    waiting for a tween to finish. isScrollInProgress
+            //    never flips true here, so LE_scrollProgress's
+            //    "scroll just ended, check follow" path is genuinely
+            //    only entered for user gestures, not for our own
+            //    programmatic scrolls.
             //
-            // Short LinearEasing tween is the honest choice: fixed duration so
-            // isScrollInProgress flips back deterministically, linear so a
-            // mid-animation cancellation (next chunk arrives 60ms later)
-            // continues from current position toward new target without
-            // velocity discontinuity (linear has no velocity, just constant
-            // delta-per-frame). 80ms is shorter than the sample window so we
-            // never queue up multiple overlapping scrolls.
+            //  - 35% of viewport per call × ~30Hz LE_chunk cadence ≈
+            //    10 viewports/sec — fast enough to keep the streaming
+            //    tail in view, slow enough that overshoots clamp at
+            //    canScrollForward=false rather than tearing.
             //
-            // viewportPx (not *2) is enough: LazyListState clamps to
-            // maxScrollOffset, and the tail item grows by ≤ a few lines per
-            // flush, never more than viewportPx in one tick. Overscroll
-            // wasn't needed.
+            //  - One step ≤ 1 viewport, so even if many calls queue
+            //    on a burst, total scroll never exceeds the natural
+            //    "stick to bottom" target.
             if (state.layoutInfo.totalItemsCount > 0) {
                 val viewportPx = state.layoutInfo.viewportSize.height.toFloat()
                 if (viewportPx > 0f) {
-                    state.animateScrollBy(
-                        value = viewportPx,
-                        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
-                    )
-                    logScroll("scrollToTimelineBottom.afterAnimate", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
+                    state.scrollBy(viewportPx * 0.35f)
+                    logScroll("scrollToTimelineBottom.afterScroll", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
                 }
             }
         } finally {
