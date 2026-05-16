@@ -6,14 +6,17 @@
     "https://www.feishu.cn",
     "https://feishu.cn",
     "https://open.feishu.cn",
-    "https://bytedance.feishu.cn"
+    "https://bytedance.feishu.cn",
+    "https://xiaomi.feishu.cn"
   ],
   "capabilities": ["read", "write"],
   "hints": {
     "interactive_selectors": {
-      "doc_title": ".doc-title, .docs-doc-title",
-      "doc_block": ".block, [data-block-id]",
-      "block_text": ".text-editor-inner"
+      "doc_title": ".doc-title, .docs-doc-title, [data-testid='doc-title'], h1",
+      "doc_block": "[data-block-id], [data-oid], .block, .docx-block, .suite-block",
+      "block_text": ".text-editor-inner, [contenteditable='true'], .docx-text-block",
+      "outline_item": "[data-testid*='outline'], .catalog-item, .doc-outline-item",
+      "comment_anchor": "[data-comment-id], [data-testid*='comment']"
     }
   },
   "notes": "The feishu_docs_* adapter uses official OAuth + REST API and is the primary path for reads/writes. This profile only adds DOM hints for cases where wm_extract is reasoning over the web UI directly."

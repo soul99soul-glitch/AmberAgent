@@ -42,12 +42,68 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
-    fun subAgentCannotSilentlyUseSensitiveTool() {
+    fun subAgentCanUseHighRiskAutoApprovalWhenExplicitlyEnabled() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("http_request"),
+            tool = toolCall("http_request", """{"method":"POST"}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+            invocationContext = ToolInvocationContext.SubAgent,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("settings_high_risk_subagent", decision.source)
+    }
+
+    @Test
+    fun subAgentSensitiveToolStillAsksEvenWithHighRiskAutoApproval() {
         val decision = resolver.resolve(
             toolDef = approvalTool("screen_tap"),
             tool = toolCall("screen_tap"),
             autoApproveTools = true,
             autoApproveHighRiskTools = true,
+            invocationContext = ToolInvocationContext.SubAgent,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("subagent", decision.source)
+    }
+
+    @Test
+    fun subAgentHistoryReadRequiresGrantForSilentApproval() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("session_read"),
+            tool = toolCall("session_read", """{"session_id":"session-1"}"""),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+            invocationContext = ToolInvocationContext.SubAgent,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("subagent", decision.source)
+    }
+
+    @Test
+    fun subAgentHistoryReadWithGrantIsSilentlyApproved() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("session_read"),
+            tool = toolCall("session_read", """{"session_id":"session-1","grant_id":"grant-1"}"""),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+            invocationContext = ToolInvocationContext.SubAgent,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("subagent_history", decision.source)
+    }
+
+    @Test
+    fun subAgentStillNeedsApprovalWithoutHighRiskAutoApproval() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("http_request"),
+            tool = toolCall("http_request", """{"method":"POST"}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
             invocationContext = ToolInvocationContext.SubAgent,
         )
 

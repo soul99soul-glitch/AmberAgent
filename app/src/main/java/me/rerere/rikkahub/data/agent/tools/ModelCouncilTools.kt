@@ -77,6 +77,7 @@ class ModelCouncilTools(
             buildString {
                 appendLine("=== Model Council ===")
                 appendLine("@council is available when the user wants a multi-model council discussion. Prefer seat_strategy=agent_planned when the task benefits from topic-specific perspectives; provide 3-5 planned_seats with name, role, system_prompt, and optional model_ref. Use external_cli only when the user explicitly asks for a terminal/Gemini CLI participant: set allow_external_cli=true, then add a planned seat with runner_type=external_cli, external_tool=gemini_cli, and optional external_runtime/external_model. Then call model_council_start, model_council_wait/read, and synthesize the verdict.")
+                appendLine("Use mode=\"debate\" whenever the user asks for 2-5 rounds, iterative deliberation, or seats responding to each other. mode=\"compare\" is a one-shot independent comparison and always runs exactly one round.")
                 append(buildModelCouncilMentionOverrideDirective(latestUserText))
             }
         },
@@ -84,64 +85,45 @@ class ModelCouncilTools(
 
     private fun startTool() = Tool(
         name = "model_council_start",
-        description = "Start a Model Council debate. Default mode uses core seats plus optional extra_lens. For flexible councils, set seat_strategy=agent_planned and pass planned_seats; each planned seat has name/role/system_prompt and may include model_ref. External CLI seats require allow_external_cli=true plus runner_type=external_cli/external_tool=gemini_cli, and will require human approval because they start a local terminal process. Members run as pure-text participants with no AmberAgent tools.",
+        description = "Start a Model Council run. Use mode=compare for one-shot independent answers. Use mode=debate for 2-5 rounds or when seats should read/respond to previous rounds. Default mode uses core seats plus optional extra_lens. For flexible councils, set seat_strategy=agent_planned and pass planned_seats; each planned seat has name/role/system_prompt and may include model_ref. External CLI seats require allow_external_cli=true plus runner_type=external_cli/external_tool=gemini_cli, and will require human approval because they start a local terminal process. Members run as pure-text participants with no AmberAgent tools.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("task", buildJsonObject {
                         put("type", "object")
-                        put("description", "Task spec: mode(compare|debate), objective, context, output_format, evaluation_criteria, rounds, optional seat_strategy/planned_seats, and optional explicit seats.")
+                        put("description", "Task spec. Prefer this object form for council calls.")
+                        put("properties", buildJsonObject {
+                            put("mode", enumProp("Required for multi-round behavior. compare = one-shot independent answers and always one round. debate = seats see previous rounds and may run 2-5 rounds.", listOf("compare", "debate")))
+                            put("objective", stringProp("Required. Question or decision to review."))
+                            put("context", stringProp("Bounded context snapshot supplied by the supervisor."))
+                            put("output_format", stringProp("Desired final verdict shape."))
+                            put("evaluation_criteria", stringProp("Criteria for comparing answers."))
+                            put("rounds", integerProp("Debate rounds, up to the Model Council max_rounds setting. Only mode=debate honors rounds > 1; compare always uses one round."))
+                            put("allow_external_cli", buildJsonObject {
+                                put("type", "boolean")
+                                put("description", "Must be true to use any external_cli seat. Set it only when the user explicitly asked to include a local terminal/Gemini CLI participant.")
+                            })
+                            put("seat_strategy", enumProp("Optional. Use agent_planned when you want the supervisor to design topic-specific seats instead of fixed supporter/opponent/judge.", listOf("default", "agent_planned")))
+                            put("planned_seats", plannedSeatsSchema())
+                            put("extra_lens", extraLensSchema())
+                            put("seats", explicitSeatsSchema())
+                        })
+                        put("required", buildJsonArray { add("objective") })
                     })
-                    put("mode", enumProp("Optional shorthand mode when task is omitted.", listOf("compare", "debate")))
+                    put("mode", enumProp("Optional shorthand mode when task is omitted. Use debate for requested rounds > 1 or cross-seat discussion; compare always uses one round.", listOf("compare", "debate")))
                     put("objective", stringProp("Question or decision to review. Required when task is omitted."))
                     put("context", stringProp("Bounded context snapshot supplied by the supervisor."))
                     put("output_format", stringProp("Desired output shape."))
                     put("evaluation_criteria", stringProp("Criteria for comparing answers."))
-                    put("rounds", integerProp("Debate rounds. Compare always uses one round."))
+                    put("rounds", integerProp("Debate rounds, up to the Model Council max_rounds setting. Only mode=debate honors rounds > 1; compare always uses one round."))
                     put("allow_external_cli", buildJsonObject {
                         put("type", "boolean")
                         put("description", "Must be true to use any external_cli seat. Set it only when the user explicitly asked to include a local terminal/Gemini CLI participant.")
                     })
                     put("seat_strategy", enumProp("Optional. Use agent_planned when you want the supervisor to design topic-specific seats instead of fixed supporter/opponent/judge.", listOf("default", "agent_planned")))
-                    put("planned_seats", buildJsonObject {
-                        put("type", "array")
-                        put("description", "Topic-specific seats for seat_strategy=agent_planned. Each item: name, role, system_prompt, optional runner_type/model_ref/external_tool/external_runtime/external_model, optional seat_id/output_budget_chars. Omit model_ref to auto-rotate through the configured council model pool.")
-                        put("items", buildJsonObject {
-                            put("type", "object")
-                            put("properties", buildJsonObject {
-                                put("seat_id", stringProp("Optional stable id."))
-                                put("name", stringProp("Human-readable seat name, e.g. 营养策略 / 工程实现 / 反方审查."))
-                                put("role", stringProp("Short role key, e.g. nutrition, engineering, critic."))
-                                put("system_prompt", stringProp("How this seat should reason. Keep it focused and role-specific."))
-                                put("runner_type", enumProp("Optional. provider_model uses a configured chat model. external_cli runs a whitelisted local CLI participant.", listOf("provider_model", "external_cli")))
-                                put("model_ref", stringProp("Optional model reference. Match by display name, provider name, model id fragment, or UUID. If missing/unmatched, AmberAgent auto-assigns from the default council model pool."))
-                                put("external_tool", enumProp("For runner_type=external_cli. Currently supported: gemini_cli.", listOf("gemini_cli")))
-                                put("external_runtime", enumProp("Optional terminal runtime for external_cli. Defaults to the Agent terminal runtime setting.", listOf("builtin_alpine", "android_shell", "termux_external")))
-                                put("external_model", stringProp("Optional CLI model argument, passed to Gemini CLI as --model. Example: gemini-2.5-pro."))
-                                put("output_budget_chars", integerProp("Optional per-seat output budget."))
-                            })
-                        })
-                    })
-                    put("extra_lens", buildJsonObject {
-                        put("type", "array")
-                        put("description", "Default-mode domain lenses to include alongside the core seats. Prefer planned_seats for custom role design.")
-                        put("items", buildJsonObject {
-                            put("type", "string")
-                            put("enum", buildJsonArray {
-                                add("product")
-                                add("marketing")
-                                add("pr")
-                                add("engineering")
-                                add("ux")
-                                add("risk")
-                            })
-                        })
-                    })
-                    put("seats", buildJsonObject {
-                        put("type", "array")
-                        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Provider-model seats need seat_id/name/role/model_id and may include system_prompt/output_budget_chars; external CLI seats use runner_type=external_cli and external_tool=gemini_cli.")
-                        put("items", buildJsonObject { put("type", "object") })
-                    })
+                    put("planned_seats", plannedSeatsSchema())
+                    put("extra_lens", extraLensSchema())
+                    put("seats", explicitSeatsSchema())
                 }
             )
         },
@@ -246,6 +228,77 @@ class ModelCouncilTools(
     private fun integerProp(description: String) = buildJsonObject {
         put("type", "integer")
         put("description", description)
+    }
+
+    private fun numberProp(description: String) = buildJsonObject {
+        put("type", "number")
+        put("description", description)
+    }
+
+    private fun plannedSeatsSchema() = buildJsonObject {
+        put("type", "array")
+        put("description", "Topic-specific seats for seat_strategy=agent_planned. Use 3-5 seats for most councils. Each item should include name, role, system_prompt, optional runner_type/model_ref/external_tool/external_runtime/external_model, optional seat_id/output_budget_chars/temperature. Omit model_ref to auto-rotate through the configured council model pool. Omit temperature unless the user explicitly asks for a specific sampling/diversity setting.")
+        put("items", buildJsonObject {
+            put("type", "object")
+            put("properties", buildJsonObject {
+                put("seat_id", stringProp("Optional stable id."))
+                put("name", stringProp("Human-readable seat name, e.g. 营养策略 / 工程实现 / 反方审查."))
+                put("role", stringProp("Short role key, e.g. nutrition, engineering, critic."))
+                put("system_prompt", stringProp("How this seat should reason. Keep it focused and role-specific."))
+                put("runner_type", enumProp("Optional. provider_model uses a configured chat model. external_cli runs a whitelisted local CLI participant.", listOf("provider_model", "external_cli")))
+                put("model_ref", stringProp("Optional model reference. Match by display name, provider name, model id fragment, or UUID. If missing/unmatched, AmberAgent auto-assigns from the default council model pool."))
+                put("external_tool", enumProp("For runner_type=external_cli. Currently supported: gemini_cli.", listOf("gemini_cli")))
+                put("external_runtime", enumProp("Optional terminal runtime for external_cli. Defaults to the Agent terminal runtime setting.", listOf("builtin_alpine", "android_shell", "termux_external")))
+                put("external_model", stringProp("Optional CLI model argument, passed to Gemini CLI as --model. Example: gemini-2.5-pro."))
+                put("output_budget_chars", integerProp("Optional per-seat output budget."))
+                put("temperature", numberProp("Optional provider-model sampling temperature, 0..2. Omit unless the user explicitly requests more diversity or a specific temperature. If a provider rejects it, AmberAgent retries that seat once without temperature."))
+            })
+            put("required", buildJsonArray {
+                add("name")
+                add("role")
+                add("system_prompt")
+            })
+        })
+    }
+
+    private fun extraLensSchema() = buildJsonObject {
+        put("type", "array")
+        put("description", "Default-mode domain lenses to include alongside the core seats. Prefer planned_seats for custom role design.")
+        put("items", buildJsonObject {
+            put("type", "string")
+            put("enum", buildJsonArray {
+                add("product")
+                add("marketing")
+                add("pr")
+                add("engineering")
+                add("ux")
+                add("risk")
+            })
+        })
+    }
+
+    private fun explicitSeatsSchema() = buildJsonObject {
+        put("type", "array")
+        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Provider-model seats need seat_id/name/role/model_id and may include system_prompt/output_budget_chars/temperature; external CLI seats use runner_type=external_cli and external_tool=gemini_cli. Omit temperature unless explicitly requested.")
+        put("items", buildJsonObject {
+            put("type", "object")
+            put("properties", buildJsonObject {
+                put("seat_id", stringProp("Optional stable id."))
+                put("name", stringProp("Human-readable seat name."))
+                put("role", stringProp("Role id or short role key."))
+                put("model_id", stringProp("Required for provider_model explicit seats. UUID of a configured CHAT model."))
+                put("runner_type", enumProp("Optional. provider_model uses a configured chat model. external_cli runs a whitelisted local CLI participant.", listOf("provider_model", "external_cli")))
+                put("system_prompt", stringProp("Optional role prompt."))
+                put("external_tool", enumProp("For runner_type=external_cli. Currently supported: gemini_cli.", listOf("gemini_cli")))
+                put("external_runtime", enumProp("Optional terminal runtime for external_cli.", listOf("builtin_alpine", "android_shell", "termux_external")))
+                put("external_model", stringProp("Optional CLI model argument, passed to Gemini CLI as --model. Example: gemini-2.5-pro."))
+                put("output_budget_chars", integerProp("Optional per-seat output budget."))
+                put("temperature", numberProp("Optional provider-model sampling temperature, 0..2. Omit unless explicitly requested."))
+            })
+            put("required", buildJsonArray {
+                add("role")
+            })
+        })
     }
 
     private fun enumProp(description: String, values: List<String>) = buildJsonObject {

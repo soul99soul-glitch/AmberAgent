@@ -13,6 +13,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
@@ -95,6 +97,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -162,6 +165,7 @@ import me.rerere.rikkahub.data.agent.webview.WebViewLink
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatus
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatusKind
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
@@ -223,6 +227,7 @@ fun ChatInput(
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,
     sandboxActivity: SandboxActivityUiState? = null,
+    suggestionFillPulseKey: Int = 0,
     onOpenSandbox: () -> Unit = {},
     onCancelSandbox: (() -> Unit)? = null,
     onPreviousSandbox: (() -> Unit)? = null,
@@ -248,6 +253,19 @@ fun ChatInput(
     // phones that have a heavily rounded display edge.
     val composerShape = RoundedCornerShape(22.dp)
     val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE && !timelineScrolling
+    val suggestionFillPulse = remember(conversation.id) { Animatable(0f) }
+
+    LaunchedEffect(conversation.id, suggestionFillPulseKey) {
+        if (suggestionFillPulseKey > 0) {
+            suggestionFillPulse.snapTo(1f)
+            suggestionFillPulse.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 220),
+            )
+        } else {
+            suggestionFillPulse.snapTo(0f)
+        }
+    }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -538,6 +556,22 @@ fun ChatInput(
                 )
             }
 
+            val pulseFraction = suggestionFillPulse.value
+            val composerBorderColor = lerp(
+                start = workspace.hairline,
+                stop = workspace.blue.copy(alpha = 0.42f),
+                fraction = pulseFraction,
+            )
+            val composerContainerColor = if (useComposerBlur) {
+                Color.Transparent
+            } else {
+                lerp(
+                    start = hazeTintColor,
+                    stop = workspace.blueContainer,
+                    fraction = pulseFraction * 0.22f,
+                )
+            }
+
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -552,8 +586,8 @@ fun ChatInput(
                 shape = composerShape,
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, workspace.hairline),
-                color = if (useComposerBlur) Color.Transparent else hazeTintColor,
+                border = BorderStroke(1.dp, composerBorderColor),
+                color = composerContainerColor,
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
@@ -2468,12 +2502,14 @@ private fun TextInputRow(
             quickMessages,
             enabledSkills,
             settings.agentRuntime.subAgent.enabled,
+            settings.agentRuntime.subAgent.mode,
             settings.agentRuntime.modelCouncil.enabled,
         ) {
             buildSlashCommandItems(
                 quickMessages = quickMessages,
                 enabledSkills = enabledSkills,
                 subAgentEnabled = settings.agentRuntime.subAgent.enabled,
+                subAgentMode = settings.agentRuntime.subAgent.mode,
             )
         }
         val slashCommands = remember(allSlashCommands, slashQuery) {
@@ -2567,6 +2603,8 @@ private fun TextInputRow(
         val mentionMatches = mentionState?.takeIf { mentionVisible }?.let { activeMention ->
             remember(
                 settings.agentRuntime.subAgent.enabled,
+                settings.agentRuntime.subAgent.mode,
+                settings.agentRuntime.subAgent.customDefinitions,
                 settings.agentRuntime.modelCouncil.enabled,
                 activeMention.query,
             ) {
@@ -2574,6 +2612,8 @@ private fun TextInputRow(
                     items = buildMentionRoleItems(
                         subAgentEnabled = settings.agentRuntime.subAgent.enabled,
                         modelCouncilEnabled = settings.agentRuntime.modelCouncil.enabled,
+                        subAgentMode = settings.agentRuntime.subAgent.mode,
+                        customSubAgents = settings.agentRuntime.subAgent.customDefinitions,
                     ),
                     query = activeMention.query,
                 )
@@ -2893,6 +2933,7 @@ private fun buildSlashCommandItems(
     quickMessages: List<QuickMessage>,
     enabledSkills: List<SkillMetadata>,
     subAgentEnabled: Boolean,
+    subAgentMode: SubAgentMode,
 ): List<SlashCommandItem> = buildList {
     add(
         SlashCommandItem(
@@ -2917,8 +2958,13 @@ private fun buildSlashCommandItems(
                 title = "subagent",
                 description = "引导 Agent 按任务需要灵活使用 SubAgent",
                 action = SlashCommandAction.InsertText(
-                    "请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；" +
-                        "等待它们返回后，再综合成一个可执行的结论："
+                    if (subAgentMode == SubAgentMode.SMART_DYNAMIC) {
+                        "请根据这个任务的复杂度，判断是否需要临时创建合适的英文名 SubAgent；" +
+                            "为它设计清晰 prompt、边界和只读工具范围，等待返回后再综合结论："
+                    } else {
+                        "请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；" +
+                            "等待它们返回后，再综合成一个可执行的结论："
+                    }
                 ),
             )
         )

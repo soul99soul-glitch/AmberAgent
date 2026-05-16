@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -124,6 +126,7 @@ import java.io.File
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
@@ -2187,7 +2190,17 @@ class ChatService(
             return
         }
         val lastMessage = lastNode.currentMessage
-        val updatedMessage = lastMessage.finishPendingTools(::cancelToolByUser)
+        val cancelledAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        val updatedMessage = lastMessage
+            .finishPendingTools(::cancelToolByUser)
+            .let { message ->
+                if (message.role == MessageRole.ASSISTANT) {
+                    message.copy(finishedAt = message.finishedAt ?: cancelledAt)
+                } else {
+                    message
+                }
+            }
+            .finishReasoning()
         if (updatedMessage == lastMessage) {
             launchPendingMessageLoop(conversationId)
             return

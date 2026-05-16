@@ -431,6 +431,17 @@ object ModelRegistry {
         contextWindow(256_000)
     }
 
+    // Kimi Coding Plan default model (e.g. modelId "kimi-for-coding").
+    // Token order matches "kimi" → ... → "coding"; matches both
+    // "kimi-for-coding" and "kimi-coding-*" variants. KIMI_K2_* below
+    // takes priority for ids that include "k2" thanks to higher score.
+    private val KIMI_FOR_CODING = defineModel {
+        tokens("kimi", "coding")
+        visionInput()
+        toolReasoningAbility()
+        contextWindow(262_144)
+    }
+
     private val STEP_3 = defineModel {
         tokens("step", "3")
         visionInput()
@@ -630,6 +641,7 @@ object ModelRegistry {
         KIMI_K2,
         KIMI_K2_5,
         KIMI_K2_6,
+        KIMI_FOR_CODING,
         STEP_3,
         INTERN_S1,
         GLM_4_5,

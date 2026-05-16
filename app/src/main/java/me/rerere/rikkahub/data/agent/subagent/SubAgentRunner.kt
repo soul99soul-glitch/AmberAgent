@@ -8,6 +8,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -39,18 +40,19 @@ class GenerationSubAgentRunner(
         tools: List<Tool>,
         liveText: MutableStateFlow<String>,
     ): SubAgentResult {
+        val isolatedSettings = settings.toIsolatedSubAgentSettings()
         // Per-role model: explicit override → fallback to current chat model.
         // If the user removed/renamed the configured model after saving the override,
         // fall through silently rather than failing the run.
         val model = definition.modelId?.let { settings.findModelById(it) }
             ?: settings.getCurrentChatModel()
             ?: error("Current chat model is not configured")
-        val assistant = settings.getCurrentAssistant().toSubAgentAssistant(definition)
+        val assistant = settings.getCurrentAssistant().toIsolatedSubAgentAssistant(definition)
         val messages = listOf(UIMessage.user(buildTaskPrompt(definition, task)))
         var latest = messages
 
         generationHandler.generateText(
-            settings = settings,
+            settings = isolatedSettings,
             model = model,
             messages = messages,
             assistant = assistant,
@@ -58,6 +60,9 @@ class GenerationSubAgentRunner(
             tools = tools,
             maxSteps = definition.maxTurns,
             processingStatus = MutableStateFlow("SubAgent ${definition.id}"),
+            autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls,
+            autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
+            invocationContext = ToolInvocationContext.SubAgent,
             conversation = null,
         ).collect { chunk ->
             if (chunk is GenerationChunk.Messages) {
@@ -119,24 +124,6 @@ class GenerationSubAgentRunner(
         }
     }
 
-    private fun Assistant.toSubAgentAssistant(definition: SubAgentDefinition) = copy(
-        name = definition.name,
-        systemPrompt = definition.systemPrompt,
-        // streamOutput must be true so GenerationHandler emits per-token Messages chunks.
-        // Without it the underlying provider buffers the whole response and we get just one
-        // chunk at the end — UI live view stays empty until the run finishes, then jumps
-        // straight to the final text. Cost: per-chunk transformer pass, negligible.
-        streamOutput = true,
-        contextMessageSize = 0,
-        enableMemory = false,
-        useGlobalMemory = false,
-        enableRecentChatsReference = false,
-        localTools = emptyList(),
-        enabledSkills = emptySet(),
-        temperature = definition.temperature ?: temperature,
-        reasoningLevel = definition.reasoningLevel ?: reasoningLevel,
-    )
-
     private fun buildTaskPrompt(definition: SubAgentDefinition, task: SubAgentTaskSpec): String = """
         You are running as subagent `${definition.id}`.
 
@@ -176,3 +163,42 @@ class GenerationSubAgentRunner(
         """.trimIndent()
     }
 }
+
+internal fun Assistant.toIsolatedSubAgentAssistant(definition: SubAgentDefinition) = copy(
+    name = definition.name,
+    systemPrompt = definition.systemPrompt,
+    // streamOutput must be true so GenerationHandler emits per-token Messages chunks.
+    // Without it the underlying provider buffers the whole response and we get just one
+    // chunk at the end — UI live view stays empty until the run finishes, then jumps
+    // straight to the final text. Cost: per-chunk transformer pass, negligible.
+    streamOutput = true,
+    contextMessageSize = 0,
+    enableMemory = false,
+    useGlobalMemory = false,
+    enableRecentChatsReference = false,
+    presetMessages = emptyList(),
+    quickMessageIds = emptySet(),
+    regexes = emptyList(),
+    mcpServers = emptySet(),
+    localTools = emptyList(),
+    modeInjectionIds = emptySet(),
+    lorebookIds = emptySet(),
+    enabledSkills = emptySet(),
+    enableTimeReminder = false,
+    messageTemplate = "{{ message }}",
+    temperature = definition.temperature ?: temperature,
+    reasoningLevel = definition.reasoningLevel ?: reasoningLevel,
+)
+
+internal fun Settings.toIsolatedSubAgentSettings(): Settings = copy(
+    agentRuntime = agentRuntime.copy(
+        enableCoreMemory = false,
+        enableShortTermMemory = false,
+        enableLongTermMemory = false,
+        enableRecentChatsReference = false,
+        enableTimeReminder = false,
+        agentSoulMarkdown = "",
+        generativeUi = agentRuntime.generativeUi.copy(enabled = false),
+        speculativeToolExecution = agentRuntime.speculativeToolExecution.copy(enabled = false),
+    )
+)

@@ -1,11 +1,14 @@
 package me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
@@ -17,29 +20,230 @@ import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountToolHooks
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
+import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
+import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 
 /**
  * 飞书云文档 tool surface.
  *
+ *  - feishu_docs_resolve(document_id? / url? / doc_ref?)
  *  - feishu_docs_list(folder_token?, page_size?, page_token?)
- *  - feishu_docs_read(document_id)
+ *  - feishu_docs_read(document_id? / url? / doc_ref?)
+ *  - feishu_docs_blocks(document_id? / url? / doc_ref?)
  *  - feishu_docs_search(query, limit?)
  *  - feishu_docs_create(title, folder_token?)            ← needsApproval=true
  *  - feishu_docs_append_block(document_id, text)         ← needsApproval=true
  */
-class FeishuDocsTools(private val client: FeishuDocsClient) {
+class FeishuDocsTools(
+    private val client: FeishuDocsClient,
+    private val pool: WebViewPool,
+) {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     suspend fun probe(accessToken: String): Boolean = client.probe(accessToken)
 
     fun buildTools(hooks: WebMountToolHooks, oauth: WebMountOAuthClient): List<Tool> = listOf(
+        resolveTool(hooks),
+        snapshotTool(hooks),
+        networkSummaryTool(hooks),
+        markdownPackTool(hooks, oauth),
         listTool(hooks, oauth),
         readTool(hooks, oauth),
+        blocksTool(hooks, oauth),
         searchTool(hooks, oauth),
         createTool(hooks, oauth),
         appendBlockTool(hooks, oauth),
         appendHeadingTool(hooks, oauth),
         appendListItemTool(hooks, oauth),
         appendCalloutTool(hooks, oauth),
+    )
+
+    private fun resolveTool(hooks: WebMountToolHooks) = Tool(
+        name = "feishu_docs_resolve",
+        description = """
+            Resolve a 飞书 document URL, document_id, or doc_ref into a stable doc_ref. Use this before
+            read/blocks when the user gives a pasted 飞书 link. If a wiki/non-docx URL cannot be read by
+            OpenAPI, the result explicitly points to feishu_docs_snapshot.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("document_id", stringProp("飞书 docx document id"))
+                    put("url", stringProp("飞书 document URL, e.g. https://.../docx/<id>"))
+                    put("doc_ref", stringProp("Stable doc_ref returned by feishu_docs_list/search/resolve"))
+                },
+                required = emptyList(),
+            )
+        },
+        execute = { input ->
+            hooks.track("feishu_docs_resolve", "飞书 解析引用", input) {
+                val result = runCatching {
+                    val ref = resolveDocRef(input)
+                    if (ref.docType != "docx") unsupportedDocRefJson(ref) else docRefJson(ref)
+                }.getOrElse { error ->
+                    feishuErrorJson(
+                        code = "resolve_failed",
+                        message = error.message ?: error.toString(),
+                        nextAction = "Pass a Feishu docx URL/document_id/doc_ref, or open the document in WebMount and call feishu_docs_snapshot.",
+                    )
+                }
+                listOf(UIMessagePart.Text(result.toString()))
+            }
+        },
+    )
+
+    private fun snapshotTool(hooks: WebMountToolHooks) = Tool(
+        name = "feishu_docs_snapshot",
+        description = """
+            Read the currently opened 飞书/Lark cloud document page from a WebMount session. Use this when
+            OpenAPI cannot resolve a wiki link, or when the user is already viewing the document in WebMount.
+            The returned block_ref values are current-WebView-session hints for reading/reference only.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("WebMount session id returned by wm_open. Optional: if omitted, uses the first live Feishu document session."))
+                    put("max_blocks", integerProp("Max visible blocks to return. Default 80, cap 300."))
+                },
+                required = emptyList(),
+            )
+        },
+        execute = { input ->
+            hooks.track("feishu_docs_snapshot", "飞书 当前页快照", input) {
+                val result = runCatching {
+                    val handle = requireFeishuSession(input.string("session_id"))
+                    val payload = handle.callBridge(
+                        method = "feishu_snapshot",
+                        args = buildJsonObject {
+                            put("max_blocks", (input.long("max_blocks") ?: 80L).coerceIn(1L, 300L))
+                        },
+                        timeoutMs = 8_000L,
+                    )
+                    val payloadObj = payload as? JsonObject ?: error("bridge returned non-object snapshot")
+                    buildJsonObject {
+                        put("session_id", handle.sessionId)
+                        payloadObj.forEach { (key, value) -> put(key, value) }
+                    }
+                }.getOrElse { error ->
+                    val message = error.message ?: error.toString()
+                    feishuErrorJson(
+                        code = if (message.startsWith("not_feishu_doc_page")) "not_feishu_doc_page" else "snapshot_failed",
+                        message = message.removePrefix("not_feishu_doc_page:").trim(),
+                        nextAction = "Open the Feishu document with wm_open, wait for it to finish loading, then call feishu_docs_snapshot with that session_id.",
+                    )
+                }
+                listOf(UIMessagePart.Text(result.toString()))
+            }
+        },
+    )
+
+    private fun networkSummaryTool(hooks: WebMountToolHooks) = Tool(
+        name = "feishu_docs_network_summary",
+        description = """
+            Return a sanitized Feishu-specific summary of the WebMount session network log. This is for
+            diagnosing why a visible Feishu document cannot be read via OpenAPI; it never returns cookies,
+            Authorization headers, full query strings, request bodies, or raw response bodies.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("session_id", stringProp("WebMount session id. Optional: if omitted, uses the first live Feishu document session."))
+                    put("network_since", integerProp("Return events with seq > this. Default 0."))
+                    put("network_max", integerProp("Max events to summarize. Default 80, cap 200."))
+                },
+                required = emptyList(),
+            )
+        },
+        execute = { input ->
+            hooks.track("feishu_docs_network_summary", "飞书 网络摘要", input) {
+                val result = runCatching {
+                    val handle = requireFeishuSession(input.string("session_id"))
+                    val since = (input.long("network_since") ?: 0L).coerceAtLeast(0L)
+                    val max = (input.long("network_max") ?: 80L).coerceIn(1L, 200L).toInt()
+                    FeishuDocsNetworkSummary.summarize(
+                        sessionId = handle.sessionId,
+                        snapshot = handle.networkLog.snapshot(since, max),
+                    )
+                }.getOrElse { error ->
+                    feishuErrorJson(
+                        code = "network_summary_failed",
+                        message = error.message ?: error.toString(),
+                        nextAction = "Call wm_state for the session to verify that WebMount network logging is active.",
+                    )
+                }
+                listOf(UIMessagePart.Text(result.toString()))
+            }
+        },
+    )
+
+    private fun markdownPackTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
+        name = "feishu_docs_markdown_pack",
+        description = """
+            Convert a 飞书 document source into stable Markdown plus block_map. Input can be doc_ref/url/document_id
+            (OpenAPI blocks), snapshot_json from feishu_docs_snapshot, or blocks_json from feishu_docs_blocks.
+            Prefer this before summarizing, rewriting, PRD extraction, meeting notes, or daily reports.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("document_id", stringProp("飞书 docx document id"))
+                    put("url", stringProp("飞书 document URL"))
+                    put("doc_ref", stringProp("Stable doc_ref returned by feishu_docs_list/search/resolve"))
+                    put("snapshot_json", stringProp("Raw JSON string returned by feishu_docs_snapshot"))
+                    put("blocks_json", stringProp("Raw JSON string returned by feishu_docs_blocks"))
+                    put("title", stringProp("Optional title override for OpenAPI block packing"))
+                    put("start_char", integerProp("Start offset for chunked Markdown output. Default 0."))
+                    put("max_chars", integerProp("Max Markdown chars to return. Default 60_000, cap 200_000."))
+                    put("max_blocks", integerProp("OpenAPI block read cap. Default 500, cap 2_000."))
+                },
+                required = emptyList(),
+            )
+        },
+        execute = { input ->
+            hooks.track("feishu_docs_markdown_pack", "飞书 Markdown Pack", input) {
+                val result = runCatching {
+                    val start = (input.long("start_char") ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                    val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1L, 200_000L).toInt()
+                    input.string("snapshot_json")?.takeIf { it.isNotBlank() }?.let { raw ->
+                        return@runCatching FeishuDocsMarkdownPack.fromSnapshot(
+                            snapshot = json.parseToJsonElement(raw).jsonObject,
+                            startChar = start,
+                            maxChars = maxChars,
+                        )
+                    }
+                    input.string("blocks_json")?.takeIf { it.isNotBlank() }?.let { raw ->
+                        return@runCatching FeishuDocsMarkdownPack.fromBlocksPayload(
+                            payload = json.parseToJsonElement(raw).jsonObject,
+                            startChar = start,
+                            maxChars = maxChars,
+                        )
+                    }
+                    val token = requireToken(oauth)
+                    val ref = resolveDocRef(input)
+                    require(ref.docType == "docx") {
+                        "feishu_docs_markdown_pack OpenAPI mode requires docx; got ${ref.docType}. Use snapshot_json from feishu_docs_snapshot."
+                    }
+                    val maxBlocks = (input.long("max_blocks") ?: 500L).coerceIn(1L, 2_000L).toInt()
+                    val (blocks, sourceTruncated) = readBlocksForPack(token, ref.documentId, maxBlocks)
+                    FeishuDocsMarkdownPack.fromBlocks(
+                        documentId = ref.documentId,
+                        docRef = FeishuDocRefs.encode(ref),
+                        blocks = blocks,
+                        title = input.string("title"),
+                        startChar = start,
+                        maxChars = maxChars,
+                        sourceTruncated = sourceTruncated,
+                    )
+                }.getOrElse { error ->
+                    feishuErrorJson(
+                        code = "markdown_pack_failed",
+                        message = error.message ?: error.toString(),
+                        nextAction = "Pass doc_ref/url/document_id for OpenAPI blocks, or pass snapshot_json from feishu_docs_snapshot.",
+                    )
+                }
+                listOf(UIMessagePart.Text(result.toString()))
+            }
+        },
     )
 
     private fun listTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
@@ -78,29 +282,122 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
 
     private fun readTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
         name = "feishu_docs_read",
-        description = "Read a 飞书 docx document as Markdown text. `document_id` is the doc id (visible in its URL).",
+        description = """
+            Read a 飞书 docx document as Markdown text. Prefer `doc_ref`; `url` and `document_id`
+            are also accepted. Supports chunking with `start_char` + `max_chars`.
+        """.trimIndent().replace("\n", " "),
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("document_id", stringProp("飞书 docx document id"))
+                    put("url", stringProp("飞书 document URL, e.g. https://.../docx/<id>"))
+                    put("doc_ref", stringProp("Stable doc_ref returned by feishu_docs_list/search/resolve"))
+                    put("start_char", integerProp("Start offset for chunked reads. Default 0."))
                     put("max_chars", integerProp("Truncate content to this many chars. Default 60_000, cap 200_000."))
                 },
-                required = listOf("document_id"),
+                required = emptyList(),
             )
         },
         execute = { input ->
             hooks.track("feishu_docs_read", "飞书 文档读取", input) {
-                val token = requireToken(oauth)
-                val docId = input.requiredString("document_id")
-                val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1L, 200_000L).toInt()
-                val content = client.readRawContent(token, docId) ?: error("Document not found: $docId")
-                val truncated = content.length > maxChars
-                listOf(UIMessagePart.Text(buildJsonObject {
-                    put("document_id", docId)
-                    put("content", if (truncated) content.take(maxChars) else content)
-                    put("total_chars", content.length)
-                    put("truncated", truncated)
-                }.toString()))
+                val result = runCatching {
+                    val ref = resolveDocRef(input)
+                    require(ref.docType == "docx") {
+                        "feishu_docs_read currently supports docx documents; got ${ref.docType}. Use feishu_docs_snapshot for the visible WebView page."
+                    }
+                    val token = requireToken(oauth)
+                    val docId = ref.documentId
+                    val start = (input.long("start_char") ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                    val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1L, 200_000L).toInt()
+                    val content = client.readRawContent(token, docId) ?: error("Document not found: $docId")
+                    val safeStart = start.coerceAtMost(content.length)
+                    val end = (safeStart + maxChars).coerceAtMost(content.length)
+                    val truncated = end < content.length
+                    buildJsonObject {
+                        put("ok", true)
+                        put("document_id", docId)
+                        put("doc_ref", FeishuDocRefs.encode(ref))
+                        put("doc_type", ref.docType)
+                        put("content", content.substring(safeStart, end))
+                        put("start_char", safeStart)
+                        put("total_chars", content.length)
+                        put("truncated", truncated)
+                        if (truncated) put("next_start_char", end)
+                    }
+                }.getOrElse { error ->
+                    feishuErrorJson(
+                        code = "read_failed",
+                        message = error.message ?: error.toString(),
+                        nextAction = "If this is a wiki or non-docx link, open it in WebMount and call feishu_docs_snapshot. Otherwise reconnect Feishu OAuth or verify document permissions.",
+                    )
+                }
+                listOf(UIMessagePart.Text(result.toString()))
+            }
+        },
+    )
+
+    private fun blocksTool(hooks: WebMountToolHooks, oauth: WebMountOAuthClient) = Tool(
+        name = "feishu_docs_blocks",
+        description = """
+            List 飞书 docx blocks with stable block_ref values. Use it to build an outline,
+            inspect block-level structure, or choose a parent_block_ref for append tools.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("document_id", stringProp("飞书 docx document id"))
+                    put("url", stringProp("飞书 document URL, e.g. https://.../docx/<id>"))
+                    put("doc_ref", stringProp("Stable doc_ref returned by feishu_docs_list/search/resolve"))
+                    put("page_size", integerProp("1-500, default 100"))
+                    put("page_token", stringProp("Pagination cursor"))
+                    put("max_text_chars", integerProp("Truncate each block text to this many chars. Default 500."))
+                    put("include_raw", buildJsonObject {
+                        put("type", "boolean")
+                        put("description", "Include raw block JSON for debugging. Default false.")
+                    })
+                },
+                required = emptyList(),
+            )
+        },
+        execute = { input ->
+            hooks.track("feishu_docs_blocks", "飞书 Block 列表", input) {
+                val payload = runCatching {
+                    val ref = resolveDocRef(input)
+                    require(ref.docType == "docx") {
+                        "feishu_docs_blocks currently supports docx documents; got ${ref.docType}. Use feishu_docs_snapshot for the visible WebView page."
+                    }
+                    val token = requireToken(oauth)
+                    val pageSize = (input.long("page_size") ?: 100L).coerceIn(1L, 500L).toInt()
+                    val maxTextChars = (input.long("max_text_chars") ?: 500L).coerceIn(0L, 20_000L).toInt()
+                    val includeRaw = input.boolean("include_raw") == true
+                    val result = client.listBlocks(
+                        accessToken = token,
+                        documentId = ref.documentId,
+                        pageSize = pageSize,
+                        pageToken = input.string("page_token"),
+                    )
+                    buildJsonObject {
+                        put("ok", true)
+                        put("document_id", ref.documentId)
+                        put("doc_ref", FeishuDocRefs.encode(ref))
+                        put("doc_type", ref.docType)
+                        put("count", result.blocks.size)
+                        put("next_page_token", result.nextPageToken)
+                        put("has_more", result.hasMore)
+                        put("blocks", buildJsonArray {
+                            result.blocks.forEach { block ->
+                                add(blockJson(ref.documentId, block, maxTextChars, includeRaw))
+                            }
+                        })
+                    }
+                }.getOrElse { error ->
+                    feishuErrorJson(
+                        code = "blocks_failed",
+                        message = error.message ?: error.toString(),
+                        nextAction = "If OpenAPI cannot read this document, use feishu_docs_snapshot for current visible content or feishu_docs_network_summary for diagnosis.",
+                    )
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
         },
     )
@@ -175,6 +472,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                     put("document_id", stringProp("Target document id"))
                     put("text", stringProp("Plain text to append as one paragraph"))
                     put("parent_block_id", stringProp("Parent block id (optional; defaults to document root)"))
+                    put("parent_block_ref", stringProp("Stable parent block_ref from feishu_docs_blocks (optional)"))
                 },
                 required = listOf("document_id", "text"),
             )
@@ -186,7 +484,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
-                val parentBlockId = input.string("parent_block_id")
+                val parentBlockId = resolveParentBlockId(input, docId)
                 val response = client.appendTextBlock(token, docId, text, parentBlockId)
                 // Flat output per WebMountAdapter kdoc convention. Extract the
                 // useful fields from 飞书's response instead of nesting the raw
@@ -204,6 +502,9 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                     if (createdBlockIds.isNotEmpty()) {
                         put("appended_block_ids", buildJsonArray {
                             createdBlockIds.forEach { add(JsonPrimitive(it)) }
+                        })
+                        put("appended_block_refs", buildJsonArray {
+                            createdBlockIds.forEach { add(JsonPrimitive(FeishuDocRefs.encodeBlock(docId, it))) }
                         })
                     }
                 }.toString()))
@@ -226,6 +527,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                     put("level", integerProp("Heading level 1-9"))
                     put("text", stringProp("Heading text content"))
                     put("parent_block_id", stringProp("Parent block id (optional)"))
+                    put("parent_block_ref", stringProp("Stable parent block_ref from feishu_docs_blocks (optional)"))
                 },
                 required = listOf("document_id", "level", "text"),
             )
@@ -239,7 +541,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                 val level = (input.long("level") ?: error("level is required (1-9)"))
                     .coerceIn(1L, 9L).toInt()
                 val text = input.requiredString("text")
-                val parentBlockId = input.string("parent_block_id")
+                val parentBlockId = resolveParentBlockId(input, docId)
                 val response = client.appendRichBlock(
                     accessToken = token,
                     documentId = docId,
@@ -271,6 +573,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                         put("description", "true → numbered list; false (default) → bullet")
                     })
                     put("parent_block_id", stringProp("Parent block id (optional)"))
+                    put("parent_block_ref", stringProp("Stable parent block_ref from feishu_docs_blocks (optional)"))
                 },
                 required = listOf("document_id", "text"),
             )
@@ -283,7 +586,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
                 val ordered = input.boolean("ordered") == true
-                val parentBlockId = input.string("parent_block_id")
+                val parentBlockId = resolveParentBlockId(input, docId)
                 val response = client.appendRichBlock(
                     accessToken = token,
                     documentId = docId,
@@ -309,6 +612,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                     put("document_id", stringProp("Target document id"))
                     put("text", stringProp("Callout text content"))
                     put("parent_block_id", stringProp("Parent block id (optional)"))
+                    put("parent_block_ref", stringProp("Stable parent block_ref from feishu_docs_blocks (optional)"))
                 },
                 required = listOf("document_id", "text"),
             )
@@ -320,7 +624,7 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
-                val parentBlockId = input.string("parent_block_id")
+                val parentBlockId = resolveParentBlockId(input, docId)
                 val response = client.appendRichBlock(
                     accessToken = token,
                     documentId = docId,
@@ -353,6 +657,9 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
                 put("appended_block_ids", buildJsonArray {
                     createdBlockIds.forEach { add(JsonPrimitive(it)) }
                 })
+                put("appended_block_refs", buildJsonArray {
+                    createdBlockIds.forEach { add(JsonPrimitive(FeishuDocRefs.encodeBlock(docId, it))) }
+                })
             }
         }
     }
@@ -365,11 +672,129 @@ class FeishuDocsTools(private val client: FeishuDocsClient) {
         put("token", s.token)
         put("name", s.name)
         put("type", s.type)
+        if (s.type == "docx") put("doc_ref", FeishuDocRefs.encode(s.token, s.type, s.url))
         s.url?.let { put("url", it) }
         s.ownerOpenId?.let { put("owner_open_id", it) }
         s.parentToken?.let { put("parent_token", it) }
         if (s.createdAtMs > 0) put("created_at_ms", s.createdAtMs)
         if (s.modifiedAtMs > 0) put("modified_at_ms", s.modifiedAtMs)
+    }
+
+    private fun docRefJson(ref: FeishuDocRef): JsonObject = buildJsonObject {
+        put("ok", true)
+        put("document_id", ref.documentId)
+        put("doc_type", ref.docType)
+        put("doc_ref", FeishuDocRefs.encode(ref))
+        ref.sourceUrl?.let { put("url", it) }
+        put("openapi_docx_readable", ref.docType == "docx")
+    }
+
+    private fun unsupportedDocRefJson(ref: FeishuDocRef): JsonObject = buildJsonObject {
+        put("ok", false)
+        put("document_id", ref.documentId)
+        put("doc_type", ref.docType)
+        ref.sourceUrl?.let { put("url", it) }
+        put("openapi_docx_readable", false)
+        put("fallback", "use_feishu_docs_snapshot")
+        put("next_action", "Open the link in WebMount, then call feishu_docs_snapshot for the current visible page.")
+        put(
+            "message",
+            "This link is a ${ref.docType} token. feishu_docs_read/blocks currently require a docx document id; use feishu_docs_snapshot for the visible WebView page, or pass the real docx id.",
+        )
+    }
+
+    private fun blockJson(
+        documentId: String,
+        block: FeishuDocBlock,
+        maxTextChars: Int,
+        includeRaw: Boolean,
+    ): JsonObject = buildJsonObject {
+        put("block_id", block.blockId)
+        put("block_ref", FeishuDocRefs.encodeBlock(documentId, block.blockId))
+        block.parentId?.let { put("parent_id", it) }
+        block.blockType?.let { put("block_type", it) }
+        block.headingLevel?.let { put("heading_level", it) }
+        put("children_count", block.childrenCount)
+        block.text?.let { text ->
+            val capped = if (maxTextChars <= 0) "" else text.take(maxTextChars)
+            put("text", capped)
+            put("text_chars", text.length)
+            put("text_truncated", capped.length < text.length)
+        }
+        if (includeRaw) put("raw", block.raw)
+    }
+
+    private fun resolveDocRef(input: JsonElement): FeishuDocRef {
+        FeishuDocRefs.decode(input.string("doc_ref"))?.let { return it }
+        FeishuDocRefs.fromUrl(input.string("url"))?.let { return it }
+        input.string("document_id")?.takeIf { it.isNotBlank() }?.let {
+            return FeishuDocRef(documentId = it, docType = "docx")
+        }
+        error("document_id, url, or doc_ref is required")
+    }
+
+    private fun resolveParentBlockId(input: JsonElement, documentId: String): String? {
+        val blockRef = FeishuDocRefs.decodeBlock(input.string("parent_block_ref"))
+        if (blockRef != null) {
+            require(blockRef.documentId == documentId) {
+                "parent_block_ref belongs to ${blockRef.documentId}, not $documentId"
+            }
+            return blockRef.blockId
+        }
+        return input.string("parent_block_id")
+    }
+
+    private fun requireFeishuSession(sessionId: String?): SessionHandle {
+        if (!sessionId.isNullOrBlank()) {
+            val handle = pool.peek(sessionId) ?: error("WebMount session not found: $sessionId")
+            require(isFeishuDocUrl(handle.loadState.value.currentUrl)) {
+                "not_feishu_doc_page: WebMount session is not a Feishu/Lark document page: $sessionId"
+            }
+            return handle
+        }
+        return pool.listSessions().firstOrNull { handle ->
+            isFeishuDocUrl(handle.loadState.value.currentUrl)
+        } ?: error("No live Feishu document WebMount session found. Open the document with wm_open or pass session_id.")
+    }
+
+    private fun isFeishuDocUrl(url: String?): Boolean =
+        FeishuDocRefs.isFeishuDocumentUrl(url)
+
+    private suspend fun readBlocksForPack(
+        accessToken: String,
+        documentId: String,
+        maxBlocks: Int,
+    ): Pair<List<FeishuDocBlock>, Boolean> {
+        val out = mutableListOf<FeishuDocBlock>()
+        var pageToken: String? = null
+        var hasMore = true
+        while (hasMore && out.size < maxBlocks) {
+            val page = client.listBlocks(
+                accessToken = accessToken,
+                documentId = documentId,
+                pageSize = (maxBlocks - out.size).coerceIn(1, 500),
+                pageToken = pageToken,
+            )
+            out += page.blocks
+            hasMore = page.hasMore
+            pageToken = page.nextPageToken
+            if (page.blocks.isEmpty() || pageToken.isNullOrBlank()) break
+        }
+        return out to (hasMore && out.size >= maxBlocks)
+    }
+
+    private fun feishuErrorJson(
+        code: String,
+        message: String,
+        nextAction: String,
+    ): JsonObject = buildJsonObject {
+        put("ok", false)
+        put("error", buildJsonObject {
+            put("code", code)
+            put("message", message)
+            put("next_action", nextAction)
+        })
+        put("next_action", nextAction)
     }
 
     private fun stringProp(description: String) = buildJsonObject {

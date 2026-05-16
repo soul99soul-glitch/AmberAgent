@@ -31,8 +31,9 @@ object ModelCouncilValidator {
         }
         val seats = parseSeats(task, settings, councilSetting)
         validateSeats(settings, councilSetting, seats)
+        val maxRounds = councilSetting.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS)
         val rounds = (task["rounds"]?.jsonPrimitive?.intOrNull ?: councilSetting.defaultRounds)
-            .coerceIn(1, councilSetting.maxRounds.coerceAtLeast(1))
+            .coerceIn(1, maxRounds)
         return ModelCouncilTaskSpec(
             mode = mode,
             objective = task.string("objective"),
@@ -63,6 +64,9 @@ object ModelCouncilValidator {
             require(seat.seatId.isNotBlank()) { "seat_id is required" }
             require(seat.name.isNotBlank()) { "seat name is required" }
             require(seat.role.isNotBlank()) { "seat role is required" }
+            seat.temperature?.let { temperature ->
+                require(temperature in 0f..2f) { "temperature for seat ${seat.name} must be between 0 and 2." }
+            }
             when (seat.runnerType) {
                 ModelCouncilSeatRunner.PROVIDER_MODEL -> {
                     val model = settings.findModelById(seat.modelId)
@@ -134,6 +138,7 @@ object ModelCouncilValidator {
                 systemPrompt = seat.stringOrBlank("system_prompt").ifBlank { preset?.prompt.orEmpty() },
                 outputBudgetChars = (seat["output_budget_chars"]?.jsonPrimitive?.intOrNull
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
+                temperature = seat.optionalTemperature("seats[$index].temperature"),
                 externalTool = seat.stringOrBlank("external_tool"),
                 externalRuntime = seat.stringOrBlank("external_runtime"),
                 externalModel = seat.stringOrBlank("external_model"),
@@ -144,17 +149,29 @@ object ModelCouncilValidator {
         // Path 2 (default): start from user's defaultSeats, force-inject the 3 core seats
         // (supporter/opponent/judge) if missing, then add extra_lens picked by the orchestrator.
         // Composition: core (always 3) + user defaults (lens picks) + extra_lens — deduplicated by id.
-        val baseSeatModelId = requireNotNull(setting.defaultSeats.firstNotNullOfOrNull { seat ->
-            if (seat.runnerType != ModelCouncilSeatRunner.PROVIDER_MODEL) return@firstNotNullOfOrNull null
+        val modelPool = settings.defaultCouncilModelPool(setting)
+        require(modelPool.isNotEmpty()) {
+            "Model Council default mode needs at least one enabled CHAT model for auto-injected seats."
+        }
+        val usedModelIds = setting.defaultSeats.mapNotNull { seat ->
+            if (seat.runnerType != ModelCouncilSeatRunner.PROVIDER_MODEL) return@mapNotNull null
             settings.findModelById(seat.modelId)
                 ?.takeIf { it.type == ModelType.CHAT }
                 ?.id
-        }) {
-                "Model Council default mode needs at least one provider-model default seat so the auto-injected core seats (supporter / opponent / judge) have a model to run on. Either add 1+ provider-model seats, use seat_strategy=agent_planned, or pass an explicit `seats` array in the tool call."
+        }.toCollection(LinkedHashSet())
+        var autoModelIndex = 0
+        fun nextAutoModelId(): Uuid {
+            modelPool.firstOrNull { it !in usedModelIds }?.let { modelId ->
+                usedModelIds += modelId
+                return modelId
             }
+            val modelId = modelPool[(autoModelIndex++ % modelPool.size)]
+            usedModelIds += modelId
+            return modelId
+        }
         val coreInjected = ModelCouncilRolePresets.coreSeats.map { preset ->
             // Match by id (canonical) — falls back to creating a new seat using the first
-            // available default-seat's model when the user hasn't pre-configured this core seat.
+            // available model-pool candidate when the user hasn't pre-configured this core seat.
             setting.defaultSeats.firstOrNull { seat ->
                 ModelCouncilRolePresets.byName(seat.role)?.id == preset.id &&
                     seat.isDefaultSeatUsable(settings, allowExternalCli)
@@ -163,7 +180,7 @@ object ModelCouncilValidator {
                     seatId = "core-${preset.id}",
                     name = preset.name,
                     role = preset.id,
-                    modelId = baseSeatModelId,
+                    modelId = nextAutoModelId(),
                     systemPrompt = preset.prompt,
                     outputBudgetChars = setting.outputBudgetChars,
                 )
@@ -187,7 +204,7 @@ object ModelCouncilValidator {
                 seatId = "lens-${preset.id}",
                 name = preset.name,
                 role = preset.id,
-                modelId = baseSeatModelId,
+                modelId = nextAutoModelId(),
                 systemPrompt = preset.prompt,
                 outputBudgetChars = setting.outputBudgetChars,
             )
@@ -226,6 +243,17 @@ object ModelCouncilValidator {
         }
 
         val maxSeats = setting.maxSeats.coerceAtLeast(2)
+        val usedModelIds = LinkedHashSet<Uuid>()
+        var autoModelIndex = 0
+        fun nextAutoModelId(): Uuid {
+            modelPool.firstOrNull { it !in usedModelIds }?.let { modelId ->
+                usedModelIds += modelId
+                return modelId
+            }
+            val modelId = modelPool[(autoModelIndex++ % modelPool.size)]
+            usedModelIds += modelId
+            return modelId
+        }
         val seats = plannedObjects.take(maxSeats).mapIndexed { index, seat ->
             val name = seat.stringOrBlank("name").ifBlank { "席位 ${index + 1}" }
             val role = seat.stringOrBlank("role").ifBlank { name }
@@ -236,7 +264,8 @@ object ModelCouncilValidator {
             } else {
                 modelRef.takeIf { it.isNotBlank() }
                     ?.let { ref -> settings.resolveCouncilModelRef(ref) }
-                    ?: modelPool[index % modelPool.size]
+                    ?.also { usedModelIds += it }
+                    ?: nextAutoModelId()
             }
             ModelCouncilSeat(
                 seatId = seat.stringOrBlank("seat_id").ifBlank { role.toSeatId(index) },
@@ -249,6 +278,7 @@ object ModelCouncilValidator {
                     .take(MAX_PLANNED_SEAT_PROMPT_CHARS),
                 outputBudgetChars = (seat["output_budget_chars"]?.jsonPrimitive?.intOrNull
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
+                temperature = seat.optionalTemperature("planned_seats[$index].temperature"),
                 externalTool = seat.stringOrBlank("external_tool"),
                 externalRuntime = seat.stringOrBlank("external_runtime"),
                 externalModel = seat.stringOrBlank("external_model"),
@@ -270,6 +300,15 @@ object ModelCouncilValidator {
     private fun JsonObject.booleanFlag(name: String): Boolean =
         this[name]?.jsonPrimitive?.booleanOrNull ?: false
 
+    private fun JsonObject.optionalTemperature(label: String): Float? {
+        val raw = this["temperature"]?.jsonPrimitive?.contentOrNull?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val value = raw.toFloatOrNull() ?: error("$label is not a number: $raw")
+        require(value in 0f..2f) { "$label must be between 0 and 2." }
+        return value
+    }
+
     private fun JsonObject.runnerType(): ModelCouncilSeatRunner {
         val runnerType = stringOrBlank("runner_type").lowercase(Locale.ROOT)
         val externalTool = stringOrBlank("external_tool")
@@ -283,17 +322,42 @@ object ModelCouncilValidator {
     }
 
     private fun Settings.defaultCouncilModelPool(setting: ModelCouncilRuntimeSetting): List<Uuid> {
-        val fromDefaultSeats = setting.defaultSeats
-            .mapNotNull { seat -> findModelById(seat.modelId)?.takeIf { it.type == ModelType.CHAT }?.id }
-            .distinct()
-        if (fromDefaultSeats.isNotEmpty()) return fromDefaultSeats
+        val allChatCandidates = modelCandidates()
+            .filter { it.model.type == ModelType.CHAT }
+        val preferred = buildList {
+            setting.defaultSeats.forEach { seat ->
+                allChatCandidates.firstOrNull { it.model.id == seat.modelId }?.let(::add)
+            }
+            allChatCandidates.firstOrNull { it.model.id == chatModelId }?.let(::add)
+            addAll(allChatCandidates)
+        }
+        val uniqueByModel = LinkedHashMap<Uuid, ModelCandidate>()
+        preferred.forEach { candidate ->
+            uniqueByModel.putIfAbsent(candidate.model.id, candidate)
+        }
+        return uniqueByModel.values
+            .toList()
+            .roundRobinByProvider()
+            .map { it.model.id }
+    }
 
-        findModelById(chatModelId)?.takeIf { it.type == ModelType.CHAT }?.let { return listOf(it.id) }
-        return modelCandidates()
-            .map { it.model }
-            .filter { it.type == ModelType.CHAT }
-            .map { it.id }
-            .distinct()
+    private fun List<ModelCandidate>.roundRobinByProvider(): List<ModelCandidate> {
+        val buckets = LinkedHashMap<Uuid, ArrayDeque<ModelCandidate>>()
+        forEach { candidate ->
+            buckets.getOrPut(candidate.provider.id) { ArrayDeque() }.addLast(candidate)
+        }
+        val ordered = mutableListOf<ModelCandidate>()
+        while (buckets.isNotEmpty()) {
+            val iterator = buckets.iterator()
+            while (iterator.hasNext()) {
+                val bucket = iterator.next().value
+                ordered += bucket.removeFirst()
+                if (bucket.isEmpty()) {
+                    iterator.remove()
+                }
+            }
+        }
+        return ordered
     }
 
     private fun Settings.placeholderCouncilModelId(): Uuid =

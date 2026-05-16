@@ -402,6 +402,7 @@ private fun AgentToolCallCapsule(
     onClick: (() -> Unit)?,
     approvalActions: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
 ) {
     val workspace = workspaceColors()
     val tone = toolStatusTone(status)
@@ -451,7 +452,7 @@ private fun AgentToolCallCapsule(
                         modifier = Modifier.shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
                     )
                     Text(
-                        text = "$kindDescription · ${toolName.compactToolPreview(28)}",
+                        text = subtitle ?: "$kindDescription · ${toolName.compactToolPreview(28)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = workspace.muted,
                         maxLines = 1,
@@ -1647,7 +1648,14 @@ fun SubAgentTaskStepView(
     val arguments = remember(anchor.input) { anchor.inputAsJson() }
     val subagentId = arguments.getStringContent("subagent_id") ?: "subagent"
     val def = remember(subagentId) { SubAgentDefinitions.find(subagentId) }
-    val displayName = def?.name ?: subagentId
+    val customName = arguments.jsonObjectOrNull
+        ?.payloadObject("custom_subagent")
+        ?.getStringContent("name")
+        ?.takeIf { it.isNotBlank() }
+    val displayName = extractLatestSubAgentName(step.tools)
+        ?: customName
+        ?: def?.name
+        ?: subagentId
 
     // coalesceSubAgentSteps rebuilds step.tools each render even when contents are identical,
     // so remember(step.tools) wouldn't actually memoize — drop the wrap; the parse is cheap.
@@ -1729,6 +1737,19 @@ private fun parseLatestSubAgentStatus(tools: List<UIMessagePart.Tool>): SubAgent
             ?.let { return it }
     }
     return SubAgentRunStatus.RUNNING
+}
+
+private fun extractLatestSubAgentName(tools: List<UIMessagePart.Tool>): String? {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val parsed = runCatching {
+            JsonInstant.parseToJsonElement(outputText) as? JsonObject
+        }.getOrNull() ?: continue
+        val name = parsed.getStringContent("subagent_name")
+        if (!name.isNullOrBlank()) return name
+    }
+    return null
 }
 
 private fun SubAgentRunStatus.toAgentToolStatus(): AgentToolStatus = when (this) {
@@ -1917,6 +1938,7 @@ fun CouncilTaskStepView(
     step: ThinkingStep.CouncilTaskStep,
     loading: Boolean,
 ) {
+    val manager: ModelCouncilManager = koinInject()
     var showSheet by remember(step.runId) { mutableStateOf(false) }
     val parsedStatus = parseLatestCouncilStatus(step.tools)
     val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
@@ -1941,6 +1963,14 @@ fun CouncilTaskStepView(
         ModelCouncilCardStatus.INTERRUPTED -> "已中断"
     }
     val title = if (isRunning) "@Council $statusVerb · $currentPhase" else "@Council $statusVerb"
+    val seatSubtitle = remember(step.runId, step.tools) {
+        val names = manager.snapshot(step.runId)?.seats
+            ?.map { it.name.ifBlank { ModelCouncilRolePresets.byName(it.role)?.name ?: it.role } }
+            ?.filter { it.isNotBlank() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: extractCouncilSeatEntries(step.tools).map { it.label }
+        names.takeIf { it.isNotEmpty() }?.joinToString(" / ", prefix = "席位 · ")
+    }
     AgentToolCallCapsule(
         title = title,
         toolName = "model_council",
@@ -1950,6 +1980,7 @@ fun CouncilTaskStepView(
         loading = loading && isRunning,
         onClick = { showSheet = true },
         approvalActions = null,
+        subtitle = seatSubtitle,
     )
 
     if (showSheet) {
@@ -2026,13 +2057,13 @@ private fun ModelCouncilRunSheet(
 
     // Resolve seat list from the snapshot (preserves run order). Synthesizer is appended last.
     val snapshot = remember(step.runId) { manager.snapshot(step.runId) }
-    val seatTabs = remember(step.runId, snapshot?.seats) {
+    val seatTabs = remember(step.runId, snapshot?.seats, step.tools) {
         val seatEntries = snapshot?.seats?.map { seat ->
             CouncilTabEntry(
                 key = seat.seatId,
                 label = seat.name.ifBlank { ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role },
             )
-        }.orEmpty()
+        }?.takeIf { it.isNotEmpty() } ?: extractCouncilSeatEntries(step.tools)
         // Synthesizer pane is conceptually the "verdict"; show it first so the user sees the
         // bottom-line answer immediately when the run finishes.
         listOf(CouncilTabEntry(ModelCouncilManager.SYNTHESIZER_SEAT_KEY, "综合裁决")) + seatEntries
@@ -2122,7 +2153,15 @@ private fun ModelCouncilRunSheet(
                     extractFinalCouncilSeatText(step.tools, activeSeatKey)
                 } else ""
             }
-            val displayText = (liveText.ifBlank { finalText }).cleanCouncilLineBreaks()
+            val displayTextSource = if (isRunning) {
+                liveText.ifBlank { finalText }
+            } else {
+                finalText.ifBlank { liveText }
+            }
+            val displayText = displayTextSource.cleanCouncilLineBreaks()
+            val activeModelLabel = remember(step.tools, activeSeatKey) {
+                activeSeatKey?.let { extractCouncilModelLabel(step.tools, it) }.orEmpty()
+            }
             val scrollState = rememberScrollState()
             var followBottom by remember(step.runId, activeSeatKey) { mutableStateOf(true) }
             LaunchedEffect(scrollState, isRunning, activeSeatKey) {
@@ -2144,6 +2183,16 @@ private fun ModelCouncilRunSheet(
                         animationSpec = tween(durationMillis = 80, easing = LinearEasing),
                     )
                 }
+            }
+            if (activeModelLabel.isNotBlank()) {
+                Text(
+                    text = activeModelLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspace.faint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             Column(
                 modifier = Modifier
@@ -2168,10 +2217,9 @@ private fun ModelCouncilRunSheet(
                     SelectionContainer(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        MarkdownBlock(
+                        CouncilRoundContent(
                             content = displayText,
                             modifier = Modifier.fillMaxWidth(),
-                            style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
                         )
                     }
                 }
@@ -2181,6 +2229,63 @@ private fun ModelCouncilRunSheet(
 }
 
 private data class CouncilTabEntry(val key: String, val label: String)
+
+private data class CouncilRoundSection(
+    val label: String?,
+    val content: String,
+)
+
+@Composable
+private fun CouncilRoundContent(
+    content: String,
+    modifier: Modifier = Modifier,
+) {
+    val sections = remember(content) { content.toCouncilRoundSections() }
+    val workspace = workspaceColors()
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        sections.forEach { section ->
+            section.label?.let { CouncilRoundDivider(label = it) }
+            if (section.content.isNotBlank()) {
+                MarkdownBlock(
+                    content = section.content,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CouncilRoundDivider(label: String) {
+    val workspace = workspaceColors()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = workspace.blue.copy(alpha = 0.12f),
+            border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.24f)),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = workspace.blue,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = workspace.blue.copy(alpha = 0.20f),
+        )
+    }
+}
 
 @Composable
 private fun CouncilObjectiveCard(objective: String) {
@@ -2244,9 +2349,41 @@ private fun String.shouldCollapseCouncilObjective(): Boolean {
     return length > COUNCIL_OBJECTIVE_COLLAPSE_CHARS || lineCount > COUNCIL_OBJECTIVE_COLLAPSE_LINES
 }
 
+private fun String.toCouncilRoundSections(): List<CouncilRoundSection> {
+    if (!contains(COUNCIL_ROUND_MARKER_TEXT)) {
+        return listOf(CouncilRoundSection(label = null, content = this))
+    }
+    val sections = mutableListOf<CouncilRoundSection>()
+    var label: String? = null
+    val body = StringBuilder()
+
+    fun flush() {
+        val content = body.toString().trim('\n')
+        if (label != null || content.isNotBlank()) {
+            sections += CouncilRoundSection(label = label, content = content)
+        }
+        body.clear()
+    }
+
+    lineSequence().forEach { line ->
+        val match = COUNCIL_ROUND_MARKER.matchEntire(line.trim())
+        if (match != null) {
+            flush()
+            label = match.groupValues[1].replace(Regex("""\s+"""), " ")
+        } else {
+            body.appendLine(line)
+        }
+    }
+    flush()
+
+    return sections.ifEmpty { listOf(CouncilRoundSection(label = null, content = this)) }
+}
+
 private const val COUNCIL_OBJECTIVE_COLLAPSED_LINES = 3
 private const val COUNCIL_OBJECTIVE_COLLAPSE_LINES = 5
 private const val COUNCIL_OBJECTIVE_COLLAPSE_CHARS = 180
+private const val COUNCIL_ROUND_MARKER_TEXT = "--- 第"
+private val COUNCIL_ROUND_MARKER = Regex("""---\s*(第\s*\d+\s*轮)\s*---""")
 
 /** Pull the synthesizer's final text from the latest read/wait result (`result.finalRecommendation`). */
 private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): String {
@@ -2256,18 +2393,67 @@ private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): S
         val parsed = runCatching {
             JsonInstant.parseToJsonElement(outputText) as? JsonObject
         }.getOrNull() ?: continue
-        // Council payload encodes `result` as a JSON-string (manager.runToPayload uses encoded()
-        // which serializes ModelCouncilResult to a literal). Re-parse the inner string.
-        val resultStr = (parsed["result"] as? JsonPrimitive)?.contentOrNull
-        val recommendation = resultStr?.let {
-            runCatching {
-                ((JsonInstant.parseToJsonElement(it) as? JsonObject)?.get("final_recommendation")
-                    as? JsonPrimitive)?.contentOrNull
-            }.getOrNull()
-        }
+        val result = parsed.payloadObject("result") ?: continue
+        val recommendation = ((result["final_recommendation"] as? JsonPrimitive)?.contentOrNull)
+            ?.takeIf { it.isNotBlank() }
+            ?: ((result["error"] as? JsonPrimitive)?.contentOrNull)
         if (!recommendation.isNullOrBlank()) return recommendation
     }
     return ""
+}
+
+/** Pull the provider/model label for a council seat or synthesizer from the latest payload. */
+private fun extractCouncilModelLabel(tools: List<UIMessagePart.Tool>, seatId: String): String {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val parsed = runCatching {
+            JsonInstant.parseToJsonElement(outputText) as? JsonObject
+        }.getOrNull() ?: continue
+        val labels = parsed["seat_model_labels"] as? JsonObject
+        val direct = (labels?.get(seatId) as? JsonPrimitive)?.contentOrNull
+        if (!direct.isNullOrBlank()) return direct
+
+        val parsedTurns = parsed.payloadArray("turns") ?: continue
+        parsedTurns.forEach { turnElement ->
+            val turn = turnElement as? JsonObject ?: return@forEach
+            val tSeatId = (turn["seat_id"] as? JsonPrimitive)?.contentOrNull
+            if (tSeatId != seatId) return@forEach
+            val providerName = (turn["provider_name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val modelName = (turn["model_name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val label = listOf(providerName, modelName)
+                .filter { it.isNotBlank() }
+                .joinToString(" / ")
+            if (label.isNotBlank()) return label
+        }
+    }
+    return ""
+}
+
+private fun extractCouncilSeatEntries(tools: List<UIMessagePart.Tool>): List<CouncilTabEntry> {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val parsed = runCatching {
+            JsonInstant.parseToJsonElement(outputText) as? JsonObject
+        }.getOrNull() ?: continue
+        val parsedTurns = parsed.payloadArray("turns") ?: continue
+        val entries = linkedMapOf<String, String>()
+        parsedTurns.forEach { turnElement ->
+            val turn = turnElement as? JsonObject ?: return@forEach
+            val seatId = (turn["seat_id"] as? JsonPrimitive)?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+                ?: return@forEach
+            val name = (turn["seat_name"] as? JsonPrimitive)?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+                ?: return@forEach
+            entries.putIfAbsent(seatId, name)
+        }
+        if (entries.isNotEmpty()) {
+            return entries.map { (seatId, name) -> CouncilTabEntry(key = seatId, label = name) }
+        }
+    }
+    return emptyList()
 }
 
 /**
@@ -2283,26 +2469,48 @@ private fun extractFinalCouncilSeatText(tools: List<UIMessagePart.Tool>, seatId:
         val parsed = runCatching {
             JsonInstant.parseToJsonElement(outputText) as? JsonObject
         }.getOrNull() ?: continue
-        val turnsStr = (parsed["turns"] as? JsonPrimitive)?.contentOrNull ?: continue
-        val parsedTurns = runCatching {
-            JsonInstant.parseToJsonElement(turnsStr).jsonArray
-        }.getOrNull() ?: continue
+        val parsedTurns = parsed.payloadArray("turns") ?: continue
         val matching = parsedTurns.mapNotNull { turnElement ->
             val turn = turnElement as? JsonObject ?: return@mapNotNull null
             val tSeatId = (turn["seat_id"] as? JsonPrimitive)?.contentOrNull
             if (tSeatId != seatId) return@mapNotNull null
             val round = (turn["round"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 1
+            val warnings = (turn["warnings"] as? JsonArray)?.mapNotNull { warning ->
+                (warning as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            }.orEmpty()
             val content = (turn["content"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                ?: (turn["error"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }?.let { "失败：$it" }
                 ?: return@mapNotNull null
-            round to content
+            val text = buildString {
+                warnings.forEach { warning -> appendLine("提示：$warning") }
+                if (warnings.isNotEmpty()) appendLine()
+                append(content)
+            }
+            round to text
         }.sortedBy { it.first }
         if (matching.isNotEmpty()) {
             return matching.joinToString("\n\n") { (round, content) ->
-                if (round == 1) content else "--- 第 $round 轮 ---\n\n$content"
+                "--- 第 $round 轮 ---\n\n$content"
             }
         }
     }
     return ""
+}
+
+private fun JsonObject.payloadObject(name: String): JsonObject? {
+    val value = this[name] ?: return null
+    return (value as? JsonObject)
+        ?: (value as? JsonPrimitive)?.contentOrNull?.let { raw ->
+            runCatching { JsonInstant.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+        }
+}
+
+private fun JsonObject.payloadArray(name: String): JsonArray? {
+    val value = this[name] ?: return null
+    return (value as? JsonArray)
+        ?: (value as? JsonPrimitive)?.contentOrNull?.let { raw ->
+            runCatching { JsonInstant.parseToJsonElement(raw).jsonArray }.getOrNull()
+        }
 }
 
 /**

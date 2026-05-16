@@ -48,6 +48,7 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
+import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -154,6 +155,7 @@ class GenerationHandler(
         autoApproveTools: Boolean = false,
         autoApproveHighRiskTools: Boolean = false,
         autoApprovedToolNames: Set<String> = emptySet(),
+        invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
         conversation: Conversation? = null,
         consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
     ): Flow<GenerationChunk> = flow {
@@ -184,6 +186,7 @@ class GenerationHandler(
                     scope = this,
                     dispatcher = toolDispatcher,
                     maxConcurrentTools = settings.agentRuntime.speculativeToolExecution.maxConcurrentTools,
+                    invocationContext = invocationContext,
                 )
             } else {
                 null
@@ -269,6 +272,7 @@ class GenerationHandler(
                         autoApproveTools = autoApproveTools,
                         autoApproveHighRiskTools = autoApproveHighRiskTools,
                         autoApprovedToolNames = autoApprovedToolNames,
+                        invocationContext = invocationContext,
                     )
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
@@ -326,6 +330,7 @@ class GenerationHandler(
                 autoApproveTools = autoApproveTools,
                 autoApproveHighRiskTools = autoApproveHighRiskTools,
                 autoApprovedToolNames = autoApprovedToolNames,
+                invocationContext = invocationContext,
                 prefetchedTools = speculativeRunner?.reusableResults(toolsToProcess).orEmpty(),
                 retrySetting = settings.agentRuntime.generationRetry,
             )

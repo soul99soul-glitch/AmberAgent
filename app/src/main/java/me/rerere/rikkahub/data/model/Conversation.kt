@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.model
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -52,33 +53,59 @@ data class Conversation(
 
     fun updateCurrentMessages(messages: List<UIMessage>): Conversation {
         val newNodes = this.messageNodes.toMutableList()
+        var anyNodeChanged = false
 
         messages.forEachIndexed { index, message ->
-            val node = newNodes
-                .getOrElse(index) { message.toMessageNode() }
+            val existingNode = newNodes.getOrNull(index)
+            if (existingNode == null) {
+                // Brand-new index — append a fresh node.
+                newNodes.add(message.toMessageNode())
+                anyNodeChanged = true
+                return@forEachIndexed
+            }
 
-            val newMessages = node.messages.toMutableList()
-            var newMessageIndex = node.selectIndex
-            if (newMessages.any { it.id == message.id }) {
-                newMessages[newMessages.indexOfFirst { it.id == message.id }] = message
+            val existingIdx = existingNode.messages.indexOfFirst { it.id == message.id }
+            // Identity short-circuit: if the incoming UIMessage is the SAME
+            // reference as the one already at the selected slot AND that
+            // slot is the currently-selected branch, the node is unchanged
+            // for every observable purpose. Skip `node.copy(...)` so the
+            // outer reference stays stable across the 33ms streaming flush.
+            //
+            // Without this guard, ChatService.updateConversation re-emits
+            // a new MessageNode instance for *every* historical node every
+            // flush, defeating @Immutable MessageNode's reference-equality
+            // skip in LazyColumn item { ChatMessage(node = node) } —
+            // which is precisely the payoff M1.1 was meant to deliver.
+            // (See M1.1 review report for the original analysis.)
+            if (existingIdx >= 0
+                && existingNode.messages[existingIdx] === message
+                && existingNode.selectIndex == existingIdx
+            ) {
+                return@forEachIndexed
+            }
+
+            val newMessages = existingNode.messages.toMutableList()
+            var newMessageIndex = existingNode.selectIndex
+            if (existingIdx >= 0) {
+                newMessages[existingIdx] = message
             } else {
                 newMessages.add(message)
                 newMessageIndex = newMessages.lastIndex
             }
 
-            val newNode = node.copy(
+            newNodes[index] = existingNode.copy(
                 messages = newMessages,
                 selectIndex = newMessageIndex
             )
-
-            // 更新newNodes
-            if (index > newNodes.lastIndex) {
-                newNodes.add(newNode)
-            } else {
-                newNodes[index] = newNode
-            }
+            anyNodeChanged = true
         }
 
+        // If nothing changed at the node-list level either, return `this`
+        // so the outer Conversation reference is also preserved — gives
+        // every snapshotFlow downstream a chance to short-circuit too.
+        if (!anyNodeChanged && newNodes.size == this.messageNodes.size) {
+            return this
+        }
         return this.copy(
             messageNodes = newNodes
         )
@@ -99,6 +126,14 @@ data class Conversation(
     }
 }
 
+// @Immutable: all four constructor properties are val + stable types
+// (Uuid, immutable List of @Immutable UIMessage, Int, Boolean). Lets
+// Compose skip recomposition of ChatMessage Composables when the
+// LazyColumn item passes an unchanged historical node by reference —
+// during streaming, only the trailing assistant MessageNode gets a
+// new instance; earlier nodes' references stay the same flush after
+// flush, and @Immutable converts that into a real recomposition skip.
+@Immutable
 @Serializable
 data class MessageNode(
     val id: Uuid = Uuid.random(),

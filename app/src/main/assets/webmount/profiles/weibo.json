@@ -1,0 +1,33 @@
+{
+  "id": "weibo",
+  "name": "微博",
+  "version": 1,
+  "origins": [
+    "https://m.weibo.cn",
+    "https://weibo.com",
+    "https://passport.weibo.cn",
+    "https://passport.weibo.com",
+    "https://login.sina.com.cn"
+  ],
+  "capabilities": ["read", "interact"],
+  "hints": {
+    "login_cookie": "SUB",
+    "interactive_selectors": {
+      "feed_item": ".card, .m-container-max .card",
+      "post_text": ".weibo-text, .txt, article",
+      "author_name": ".m-text-cut, .name",
+      "expand_text": ".expand, .txt-cut",
+      "search_input": "input[type='search'], input[placeholder*='搜索']"
+    },
+    "rate_limit": {
+      "http_status": 418,
+      "map_to": "DEGRADED"
+    }
+  },
+  "permissions": [
+    "read_cookie:SUB",
+    "detect_login",
+    "detect_rate_limit"
+  ],
+  "notes": "Profile-only station focused on m.weibo.cn. Keep reads small and user-session scoped; generic wm_* tools provide ref-based interaction."
+}

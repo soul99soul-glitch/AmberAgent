@@ -34,6 +34,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,11 +70,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.util.fastForEachIndexed
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.BuildConfig
@@ -233,6 +235,13 @@ internal data class MarkdownParseResult(
     val preprocessed: String,
     val astTree: ASTNode,
     val hasHtmlBlocks: Boolean,
+    val stableTopLevelBlocks: List<MarkdownTopLevelBlockSnapshot> = emptyList(),
+)
+
+internal data class MarkdownTopLevelBlockSnapshot(
+    val key: String,
+    val parseResult: MarkdownParseResult,
+    val preserveParagraphBottomPadding: Boolean,
 )
 
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
@@ -243,6 +252,7 @@ private data class MarkdownParseCacheKey(
     val content: String,
     val contentHash: Int,
     val version: Int,
+    val preprocessed: Boolean,
 )
 
 private object MarkdownParseCache {
@@ -264,16 +274,42 @@ private object MarkdownParseCache {
     }
 
     fun get(content: String): MarkdownParseResult? = synchronized(lock) {
-        entries[key(content)]
+        entries[key(content, preprocessed = false)]
     }
 
     fun getOrParse(content: String): MarkdownParseResult {
         get(content)?.let { return it }
-        val parsed = traceMarkdown("Amber Markdown parse") {
-            parseMarkdownUncached(content)
+        return getOrParseInternal(
+            content = content,
+            preprocessed = false,
+            section = "Amber Markdown parse",
+            parser = ::parseMarkdownUncached,
+        )
+    }
+
+    fun getOrParsePreprocessed(content: String): MarkdownParseResult {
+        return getOrParseInternal(
+            content = content,
+            preprocessed = true,
+            section = "Amber Markdown parse preprocessed",
+            parser = ::parsePreprocessedMarkdownUncached,
+        )
+    }
+
+    private fun getOrParseInternal(
+        content: String,
+        preprocessed: Boolean,
+        section: String,
+        parser: (String) -> MarkdownParseResult,
+    ): MarkdownParseResult {
+        synchronized(lock) {
+            entries[key(content, preprocessed)]?.let { return it }
+        }
+        val parsed = traceMarkdown(section) {
+            parser(content)
         }
         synchronized(lock) {
-            val cacheKey = key(content)
+            val cacheKey = key(content, preprocessed)
             entries[cacheKey]?.let { return it }
             entries[cacheKey] = parsed
             totalChars += content.length
@@ -281,10 +317,11 @@ private object MarkdownParseCache {
         return parsed
     }
 
-    private fun key(content: String) = MarkdownParseCacheKey(
+    private fun key(content: String, preprocessed: Boolean) = MarkdownParseCacheKey(
         content = content,
         contentHash = content.hashCode(),
         version = MARKDOWN_PARSE_CACHE_VERSION,
+        preprocessed = preprocessed,
     )
 }
 
@@ -317,10 +354,74 @@ private fun ASTNode.containsHtmlBlocks(): Boolean {
     return children.any { it.containsHtmlBlocks() }
 }
 
-private fun parseMarkdownUncached(content: String): MarkdownParseResult {
-    val preprocessed = preProcess(content)
+private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownParseResult {
     val astTree = parser.buildMarkdownTreeFromString(preprocessed)
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
+}
+
+private fun parseMarkdownUncached(content: String): MarkdownParseResult {
+    return parsePreprocessedMarkdownUncached(preProcess(content))
+}
+
+private class StreamingMarkdownParseCache {
+    private val lock = Any()
+    private var stableRawPrefix = ""
+    private var stableBlocks = emptyList<MarkdownTopLevelBlockSnapshot>()
+
+    fun reset() = synchronized(lock) {
+        stableRawPrefix = ""
+        stableBlocks = emptyList()
+    }
+
+    fun parse(content: String): MarkdownParseResult = traceMarkdown("Amber Markdown parse streaming") {
+        val baseline = synchronized(lock) {
+            if (stableRawPrefix.isNotEmpty() && content.startsWith(stableRawPrefix)) {
+                stableRawPrefix to stableBlocks
+            } else {
+                stableRawPrefix = ""
+                stableBlocks = emptyList()
+                "" to emptyList()
+            }
+        }
+
+        val (prefix, blocks) = baseline
+        val activeRaw = content.substring(prefix.length)
+        val activePreprocessed = preProcess(activeRaw)
+        if (activePreprocessed != activeRaw) {
+            reset()
+            return@traceMarkdown parseMarkdownUncached(content)
+        }
+        val activeParse = parsePreprocessedMarkdownUncached(activePreprocessed)
+        if (activeParse.hasHtmlBlocks) {
+            reset()
+            return@traceMarkdown parseMarkdownUncached(content)
+        }
+
+        val activeChildren = activeParse.astTree.children
+        if (activeChildren.size <= 1) {
+            return@traceMarkdown activeParse.copy(stableTopLevelBlocks = blocks)
+        }
+
+        val newlyStableChildren = activeChildren.dropLast(1)
+        val nextStableBlocks = blocks + newlyStableChildren.map { child ->
+            val blockContent = activePreprocessed.substring(child.startOffset, child.endOffset)
+            MarkdownTopLevelBlockSnapshot(
+                key = "${child.type}:${prefix.length + child.startOffset}:${blockContent.length}:${blockContent.hashCode()}",
+                parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
+                preserveParagraphBottomPadding = child.type == MarkdownElementTypes.PARAGRAPH &&
+                    child.nextSibling() != null &&
+                    child.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) == null,
+            )
+        }
+        val activeTailStart = newlyStableChildren.last().endOffset
+        val nextPrefixEnd = prefix.length + activeTailStart
+        synchronized(lock) {
+            stableRawPrefix = content.substring(0, nextPrefixEnd)
+            stableBlocks = nextStableBlocks
+        }
+        parsePreprocessedMarkdownUncached(activePreprocessed.substring(activeTailStart))
+            .copy(stableTopLevelBlocks = nextStableBlocks)
+    }
 }
 
 internal fun prewarmMarkdownContent(content: String) {
@@ -381,31 +482,77 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
     /**
-     * No-op as of 2026-05-15. Previously gated a character-level tail fade-in
-     * (last ~40 chars with gradient alpha). User feedback: Claude Code's CLI
-     * streams without any alpha gradient and feels more honest; the fade
-     * was perceived as "灰尾". Param kept to avoid churning every callsite;
-     * remove once those are migrated.
+     * When true, installs a [CharRevealController] for descendant
+     * [MarkdownNode] paragraphs to fade newly-arrived characters
+     * over a short window. Caller (typically the assistant chat
+     * pipeline) should pass `streaming = true` ONLY for the trailing
+     * segment that is currently receiving tokens — earlier
+     * already-finalized blocks should pass `false` so they render
+     * via the fast path (no per-frame re-build).
+     *
+     * History: between 2026-04 and 2026-05-16 this param was a no-op
+     * holding the placeholder for the deleted "灰尾" gradient. With
+     * Phase B the parameter is meaningful again.
      */
-    @Suppress("UNUSED_PARAMETER") streaming: Boolean = false,
+    streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
-    var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
+    val streamingParseCache = remember {
+        StreamingMarkdownParseCache()
+    }
+    var (data, setData) = remember {
+        mutableStateOf(
+            if (streaming) {
+                streamingParseCache.parse(content)
+            } else {
+                streamingParseCache.reset()
+                MarkdownParseCache.getOrParse(content)
+            }
+        )
+    }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
     val updatedContent by rememberUpdatedState(content)
+    val updatedStreaming by rememberUpdatedState(streaming)
     LaunchedEffect(Unit) {
-        snapshotFlow { updatedContent }
+        var lastParsedContent = content
+        var lastParsedStreaming = streaming
+        snapshotFlow { updatedContent to updatedStreaming }
             .distinctUntilChanged()
-            .mapLatest { MarkdownParseCache.getOrParse(it) }
-            .catch { exception -> exception.printStackTrace() }
-            .flowOn(Dispatchers.Default)
-            .collect { setData(it) }
+            .collectLatest { (latestContent, latestStreaming) ->
+                if (latestContent == lastParsedContent && latestStreaming == lastParsedStreaming) {
+                    return@collectLatest
+                }
+                try {
+                    val parsed = withContext(Dispatchers.Default) {
+                        if (latestStreaming) {
+                            streamingParseCache.parse(latestContent)
+                        } else {
+                            streamingParseCache.reset()
+                            MarkdownParseCache.getOrParse(latestContent)
+                        }
+                    }
+                    lastParsedContent = latestContent
+                    lastParsedStreaming = latestStreaming
+                    setData(parsed)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    exception.printStackTrace()
+                }
+            }
     }
 
+    val revealController = rememberCharRevealController(
+        streaming = streaming,
+        content = data.preprocessed,
+    )
+
     TraceMarkdownComposable("Amber MarkdownBlock render") {
-      CompositionLocalProvider(LocalMarkdownFillWidth provides fillWidth) {
+      CompositionLocalProvider(
+          LocalMarkdownFillWidth provides fillWidth,
+      ) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
                 content = content,
@@ -421,13 +568,61 @@ fun MarkdownBlock(
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-                    data.astTree.children.fastForEach { child ->
-                        MarkdownNode(
-                            node = child,
-                            content = data.preprocessed,
-                            modifier = nodeModifier,
-                            onClickCitation = onClickCitation,
-                        )
+                    val children = data.astTree.children
+                    if (data.stableTopLevelBlocks.isNotEmpty()) {
+                        data.stableTopLevelBlocks.fastForEach { block ->
+                            key(block.key) {
+                                CompositionLocalProvider(
+                                    LocalCharRevealController provides null,
+                                ) {
+                                    val blockModifier = if (block.preserveParagraphBottomPadding) {
+                                        nodeModifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
+                                    } else {
+                                        nodeModifier
+                                    }
+                                    block.parseResult.astTree.children.fastForEach { child ->
+                                        MarkdownNode(
+                                            node = child,
+                                            content = block.parseResult.preprocessed,
+                                            modifier = blockModifier,
+                                            onClickCitation = onClickCitation,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        children.lastOrNull()?.let { activeChild ->
+                            key("active:${activeChild.type}:${activeChild.startOffset}") {
+                                CompositionLocalProvider(
+                                    LocalCharRevealController provides if (streaming) revealController else null,
+                                ) {
+                                    MarkdownNode(
+                                        node = activeChild,
+                                        content = data.preprocessed,
+                                        modifier = nodeModifier,
+                                        onClickCitation = onClickCitation,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        children.fastForEachIndexed { index, child ->
+                            val childRevealController = if (streaming && index == children.lastIndex) {
+                                revealController
+                            } else {
+                                null
+                            }
+                            CompositionLocalProvider(
+                                LocalCharRevealController provides childRevealController,
+                            ) {
+                                MarkdownNode(
+                                    node = child,
+                                    content = data.preprocessed,
+                                    modifier = nodeModifier,
+                                    onClickCitation = onClickCitation,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -972,6 +1167,18 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
+    // B1 char-reveal: pull the active controller (or null when not
+    // streaming) and the base text color so the leaf path can wrap
+    // each codepoint in a SpanStyle whose alpha tracks the fade
+    // window. Reading controller?.nowNanos inside the remember key
+    // makes the AnnotatedString rebuild every frame while reveal is
+    // active — the deliberate per-frame work that delivers the
+    // smooth fade. When controller is null, key is stable and
+    // buildAnnotatedString runs once like before.
+    val revealController = LocalCharRevealController.current
+    val baseColor = LocalContentColor.current
+    val revealClock = revealController?.nowNanos ?: 0L
+
     FlowRow(
         modifier = modifier
             .fillWidthIf(LocalMarkdownFillWidth.current)
@@ -980,7 +1187,14 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
-        val annotatedString = remember(content, enableLatexRendering, onClickUrl) {
+        val annotatedString = remember(
+            content,
+            enableLatexRendering,
+            onClickUrl,
+            revealController,
+            revealClock,
+            baseColor,
+        ) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -994,6 +1208,8 @@ private fun Paragraph(
                         trim = trim,
                         enableLatexRendering = enableLatexRendering,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1103,6 +1319,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     enableLatexRendering: Boolean = true,
     onClickCitation: (String) -> Unit = {},
     onClickUrl: (String) -> Unit = {},
+    baseColor: Color = Color.Unspecified,
+    revealController: CharRevealController? = null,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1117,16 +1335,48 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node is LeafASTNode -> {
-            val text = node.getTextInNode(content).let {
-                if (trim) {
-                    it.trim()
+            val rawText = node.getTextInNode(content)
+            val text = (if (trim) rawText.trim() else rawText)
+                .replace(BREAK_LINE_REGEX, "\n")
+            // B1 char-reveal: when an active controller is provided AND we
+            // have a usable baseColor, split the text by codepoint and
+            // wrap each in a SpanStyle whose alpha tracks the reveal
+            // window. baseColor=Unspecified (no LocalContentColor handed
+            // down) falls through to the fast path — visually a no-op
+            // because the reveal effect requires color modulation.
+            //
+            // Offset accuracy: the stable-prefix shortcut is only safe
+            // when this leaf text is byte-for-byte aligned with the AST
+            // source. Trimmed or <br>-collapsed leaves keep the old path.
+            if (revealController != null && baseColor != Color.Unspecified) {
+                val baseOffset = node.startOffset
+                val canAppendStablePrefix = !trim && text == rawText
+                var i = if (canAppendStablePrefix) {
+                    (revealController.stableOffsetExclusive() - baseOffset)
+                        .coerceIn(0, text.length)
                 } else {
-                    it
-                }.replace(BREAK_LINE_REGEX, "\n")
+                    0
+                }
+                if (i > 0) {
+                    append(text, 0, i)
+                }
+                while (i < text.length) {
+                    val cp = text.codePointAt(i)
+                    val cpLen = Character.charCount(cp)
+                    val alpha = revealController.alphaAt(baseOffset + i)
+                        .coerceIn(0f, 1f)
+                    if (alpha >= 1f) {
+                        append(text, i, i + cpLen)
+                    } else {
+                        withStyle(SpanStyle(color = baseColor.copy(alpha = alpha))) {
+                            append(text, i, i + cpLen)
+                        }
+                    }
+                    i += cpLen
+                }
+            } else {
+                append(text)
             }
-            append(
-                text = text,
-            )
         }
 
         node.type == MarkdownElementTypes.EMPH -> {
@@ -1142,6 +1392,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1160,6 +1412,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1178,6 +1432,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         enableLatexRendering = enableLatexRendering,
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
+                        baseColor = baseColor,
+                        revealController = revealController,
                     )
                 }
             }
@@ -1310,6 +1566,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
+                    baseColor = baseColor,
+                    revealController = revealController,
                 )
             }
         }

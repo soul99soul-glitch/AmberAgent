@@ -31,7 +31,9 @@ fun PigLoadingIndicator(modifier: Modifier = Modifier) {
             update = { imageView ->
                 (imageView.drawable as? AnimatedVectorDrawable)?.apply {
                     setTint(primaryColor)
-                    start()
+                    if (!isRunning) {
+                        start()
+                    }
                 }
             }
         )

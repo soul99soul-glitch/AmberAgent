@@ -34,15 +34,13 @@ class ModelCouncilValidatorTest {
     }
 
     @Test
-    fun emptyDefaultSeatsAreRejected() {
+    fun defaultModeFallsBackToCurrentChatModelWithoutDefaultSeats() {
         val council = ModelCouncilRuntimeSetting(enabled = true)
 
-        val error = runCatching {
-            ModelCouncilValidator.parseTask(taskInput(), settings(council), council)
-        }.exceptionOrNull()
+        val spec = ModelCouncilValidator.parseTask(taskInput(), settings(council), council)
 
-        assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("default seat"))
+        assertEquals(listOf("supporter", "opponent", "judge"), spec.seats.map { it.role })
+        assertEquals(listOf(modelAId, modelBId, modelAId), spec.seats.map { it.modelId })
     }
 
     @Test
@@ -143,7 +141,7 @@ class ModelCouncilValidatorTest {
 
         assertEquals(2, spec.seats.size)
         assertEquals(modelAId, spec.seats[0].modelId)
-        assertEquals(modelAId, spec.seats[1].modelId)
+        assertEquals(modelBId, spec.seats[1].modelId)
         assertEquals("事实整理", spec.seats[0].name)
         assertTrue(spec.seats[0].systemPrompt.contains("focus"))
     }
@@ -164,7 +162,7 @@ class ModelCouncilValidatorTest {
             councilSetting = council,
         )
 
-        assertEquals(listOf(modelAId, modelAId), spec.seats.map { it.modelId })
+        assertEquals(listOf(modelAId, modelBId), spec.seats.map { it.modelId })
     }
 
     @Test
@@ -369,6 +367,99 @@ class ModelCouncilValidatorTest {
         assertTrue(spec.seats[0].systemPrompt.contains("支持者"))
     }
 
+    @Test
+    fun debateCanUseFiveRoundsEvenWithOldStoredMaxRounds() {
+        val council = ModelCouncilRuntimeSetting(
+            enabled = true,
+            maxRounds = 3,
+        )
+
+        val spec = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                mode = "debate",
+                seats = buildJsonArray {
+                    add(tempSeat("supporter", modelAId.toString()))
+                    add(tempSeat("opponent", modelBId.toString()))
+                },
+                rounds = 5,
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
+        assertEquals(5, spec.rounds)
+    }
+
+    @Test
+    fun optionalTemperatureIsParsedAndValidated() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        val spec = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seatStrategy = "agent_planned",
+                plannedSeats = buildJsonArray {
+                    add(plannedSeat(name = "Creative", role = "creative", temperature = 0.8f))
+                    add(plannedSeat(name = "Judge", role = "judge"))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
+        assertEquals(0.8f, spec.seats[0].temperature)
+        assertEquals(null, spec.seats[1].temperature)
+
+        val error = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seatStrategy = "agent_planned",
+                    plannedSeats = buildJsonArray {
+                        add(plannedSeat(name = "Too Hot", role = "creative", temperature = 2.5f))
+                        add(plannedSeat(name = "Judge", role = "judge"))
+                    },
+                ),
+                settings = settings(council),
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("temperature"))
+    }
+
+    @Test
+    fun explicitAndPlannedSeatsAcceptExtendedOutputBudgetWhenSettingAllowsIt() {
+        val council = ModelCouncilRuntimeSetting(
+            enabled = true,
+            outputBudgetChars = EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS,
+        )
+
+        val explicit = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seats = buildJsonArray {
+                    add(tempSeat("supporter", modelAId.toString(), EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS))
+                    add(tempSeat("opponent", modelBId.toString(), EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+        val planned = ModelCouncilValidator.parseTask(
+            input = taskInput(
+                seatStrategy = "agent_planned",
+                plannedSeats = buildJsonArray {
+                    add(plannedSeat("Research", "research", outputBudgetChars = EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS))
+                    add(plannedSeat("Judge", "judge", outputBudgetChars = EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS))
+                },
+            ),
+            settings = settings(council),
+            councilSetting = council,
+        )
+
+        assertTrue(explicit.seats.all { it.outputBudgetChars == EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS })
+        assertTrue(planned.seats.all { it.outputBudgetChars == EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS })
+    }
+
     private fun settings(council: ModelCouncilRuntimeSetting): Settings =
         Settings(
             chatModelId = modelAId,
@@ -408,9 +499,10 @@ class ModelCouncilValidatorTest {
         rounds?.let { put("rounds", it) }
     }
 
-    private fun tempSeat(role: String, modelId: String) = buildJsonObject {
+    private fun tempSeat(role: String, modelId: String, outputBudgetChars: Int? = null) = buildJsonObject {
         put("role", role)
         put("model_id", modelId)
+        outputBudgetChars?.let { put("output_budget_chars", it) }
     }
 
     private fun plannedSeat(
@@ -422,6 +514,8 @@ class ModelCouncilValidatorTest {
         externalTool: String? = null,
         externalRuntime: String? = null,
         externalModel: String? = null,
+        temperature: Float? = null,
+        outputBudgetChars: Int? = null,
     ) = buildJsonObject {
         seatId?.let { put("seat_id", it) }
         put("name", name)
@@ -432,5 +526,7 @@ class ModelCouncilValidatorTest {
         externalTool?.let { put("external_tool", it) }
         externalRuntime?.let { put("external_runtime", it) }
         externalModel?.let { put("external_model", it) }
+        temperature?.let { put("temperature", it) }
+        outputBudgetChars?.let { put("output_budget_chars", it) }
     }
 }
