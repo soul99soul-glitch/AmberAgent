@@ -146,6 +146,7 @@ import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItemContent
 import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems
+import me.rerere.rikkahub.ui.components.debug.StreamProfilerOverlay
 import me.rerere.rikkahub.ui.components.message.chatMessageVirtualizationPrewarmTexts
 import me.rerere.rikkahub.ui.components.richtext.prewarmMarkdownContent
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
@@ -1596,6 +1597,17 @@ private fun ChatListNormal(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
+            )
+
+            // B4: dev-only streaming profiler overlay (FPS / reveal queue
+            // depth / degraded indicator). Self-strips in release variants
+            // via BuildConfig.DEBUG. Top-end so it doesn't overlap the
+            // ErrorCards / selection toolbar / MessageJumper at the bottom.
+            StreamProfilerOverlay(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+                    .zIndex(10f),
             )
 
             // 完成选择
