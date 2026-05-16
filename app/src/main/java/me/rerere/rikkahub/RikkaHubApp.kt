@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.common.android.appTempFolder
+import me.rerere.rikkahub.di.agentInfraModule
 import me.rerere.rikkahub.di.agentRuntimeModule
 import me.rerere.rikkahub.di.appModule
 import me.rerere.rikkahub.di.chatModule
@@ -72,7 +73,7 @@ class RikkaHubApp : Application() {
             androidLogger()
             androidContext(this@RikkaHubApp)
             workManagerFactory()
-            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, viewModelModule, dataSourceModule, repositoryModule)
+            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
 

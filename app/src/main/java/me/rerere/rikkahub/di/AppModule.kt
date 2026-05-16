@@ -9,27 +9,12 @@ import me.rerere.highlight.Highlighter
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.AILoggingManager
 import me.rerere.rikkahub.data.ai.tools.LocalTools
-import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.cron.AgentCronManager
-import me.rerere.rikkahub.data.agent.live.LiveModeManager
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
-import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
-import me.rerere.rikkahub.data.agent.task.AgentTaskStore
-import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
-import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
-import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
-import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
-import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.context.AgentCapabilitySnapshotBuilder
 import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextRepository
@@ -104,66 +89,6 @@ val appModule = module {
 
     single {
         ExternalFileTools(get(), get(), get())
-    }
-
-    single {
-        AgentToolActivityStore()
-    }
-
-    single {
-        AgentTaskStore(get(), get())
-    }
-
-    single {
-        AgentTaskScheduler(get())
-    }
-
-    single {
-        WebViewOperationStore()
-    }
-
-    single {
-        AgentLiveStatusNotifier(get())
-    }
-
-    single {
-        LiveModeManager(get(), get(), get(), get())
-    }
-
-    single {
-        AlpineRuntimeInstaller(get())
-    }
-
-    single {
-        TerminalRuntime(get(), get(), get(), get(), get(), get(), get())
-    }
-
-    single {
-        TerminalTools(get(), get())
-    }
-
-    single {
-        ScreenCaptureManager(get())
-    }
-
-    single {
-        ScreenAutomationTools(get(), get(), get())
-    }
-
-    single {
-        AgentPermissionBroker(get())
-    }
-
-    single {
-        SystemAccessTools(get(), get(), get(), get())
-    }
-
-    single {
-        AgentCronManager(get(), get(), get())
-    }
-
-    single {
-        AgentCronTools(get())
     }
 
     single {
