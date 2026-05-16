@@ -820,13 +820,17 @@ private fun ChatListNormal(
             //    isScrollInProgress=true for ~1s) both relied on
             //    cancel-on-restart; that race surface is now gone.
             //
-            //  - scrollBy(value) is synchronous — `state.scroll {
-            //    snapToBy(value) }` under the hood, no suspension
-            //    waiting for a tween to finish. isScrollInProgress
-            //    never flips true here, so LE_scrollProgress's
-            //    "scroll just ended, check follow" path is genuinely
-            //    only entered for user gestures, not for our own
-            //    programmatic scrolls.
+            //  - scrollBy(value) wraps `state.scroll(MutatePriority
+            //    .Default) { snapToBy(value) }` — the snap itself is
+            //    immediate, but the surrounding scroll() mutator
+            //    still flips isScrollInProgress true→false within a
+            //    single frame. There is NO in-flight animation to
+            //    cancel-restart, but LE_scrollProgress will still
+            //    fire on each call. M0.3's followMode==PausedForUser
+            //    guard at the LE_scrollProgress.else branch is the
+            //    reason this doesn't misclassify our programmatic
+            //    scroll as "user stopped scrolling mid-list" — do
+            //    not remove that guard thinking it's dead code.
             //
             //  - 35% of viewport per call × ~30Hz LE_chunk cadence ≈
             //    10 viewports/sec — fast enough to keep the streaming
