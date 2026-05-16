@@ -396,23 +396,11 @@ fun MarkdownBlock(
     streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
-    // B6: CPS-throttle smoother. When `streaming=true` this returns a
-    // codepoint-prefix of `content` that grows toward the latest
-    // upstream length at the preset's controlled rate — bursty
-    // chunkers (DeepSeek-style) get visually paced into a steady
-    // stream. When `streaming=false` it's a verbatim pass-through.
-    // Everything below operates on `smoothedContent` so markdown
-    // parse + char-level reveal both see the throttled prefix.
-    val smoothedContent = rememberSmoothStreamedContent(
-        content = content,
-        streaming = streaming,
-    )
-
-    var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(smoothedContent)) }
+    var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
-    val updatedContent by rememberUpdatedState(smoothedContent)
+    val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
@@ -424,7 +412,7 @@ fun MarkdownBlock(
 
     val revealController = rememberCharRevealController(
         streaming = streaming,
-        content = smoothedContent,
+        content = content,
     )
 
     TraceMarkdownComposable("Amber MarkdownBlock render") {
@@ -434,7 +422,7 @@ fun MarkdownBlock(
       ) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
-                content = smoothedContent,
+                content = content,
                 modifier = modifier.amberTraceMeasure("Amber MarkdownBlock html measure"),
                 style = style,
                 onClickCitation = onClickCitation,

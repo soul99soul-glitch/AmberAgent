@@ -44,75 +44,22 @@ import androidx.compose.runtime.withFrameNanos
 // with identical SpanStyle so this is cheap.
 
 /**
- * CPS-throttle config for the per-character output smoother (B6,
- * see [rememberSmoothStreamedContent]). Controls how fast new chars
- * are released into the rendered string regardless of how the
- * upstream chunks arrive — burst-y models like DeepSeek go from
- * "shovel 100 chars in one chunk then nothing for 200ms" to a
- * steady visual stream.
- *
- * Numbers borrowed from LobeHub `useSmoothStreamContent` PRESET_CONFIG.
- */
-data class StreamSmoothingConfig(
-    /** Starting/idle CPS used before the input-rate EMA has data. */
-    val defaultCps: Int,
-    /** Lower clamp — never release slower than this even in steady state. */
-    val minCps: Int,
-    /** Upper clamp — never release faster than this even when behind. */
-    val maxCps: Int,
-    /**
-     * Visible buffer the smoother aims to maintain (displayed lags
-     * input by ~this many ms). Smaller = snappier + can pop on burst;
-     * larger = smoother + visibly behind real arrival.
-     */
-    val targetBufferMs: Int,
-    /** EMA alpha for the input-rate / display-CPS smoothers. */
-    val emaAlpha: Float,
-)
-
-/**
  * Reveal-speed presets, modeled after the smooth-streaming-rendering
  * guide §4 / LobeHub `useSmoothStreamContent`. baseRevealDurationMs is
- * the per-char fade window when the queue is small (queueDepth ≤
+ * the fade window used when the queue is small (queueDepth ≤
  * SOFT_BACKPRESSURE_BACKLOG); under heavier load the controller
  * linearly shortens the effective duration toward 0 (instant) — see
  * [CharRevealController.effectiveRevealDurationNanos].
- *
- * smoothing controls the OUTPUT rate of newly-arrived chars (B6) —
- * separate concern from the fade window. Together they form the two
- * halves of LobeHub's smoother: throttle output cadence, then fade
- * each char as it appears.
  */
-enum class StreamRevealPreset(
-    val baseRevealDurationMs: Long,
-    val smoothing: StreamSmoothingConfig,
-) {
-    /** Snappy: ~120ms fade, ~50 cps default. Close to no animation. */
-    REALTIME(
-        baseRevealDurationMs = 120L,
-        smoothing = StreamSmoothingConfig(
-            defaultCps = 50, minCps = 24, maxCps = 96,
-            targetBufferMs = 40, emaAlpha = 0.3f,
-        ),
-    ),
+enum class StreamRevealPreset(val baseRevealDurationMs: Long) {
+    /** Snappy: ~120ms fade. Closest to "no animation but with a soft edge". */
+    REALTIME(120L),
 
-    /** Default. ~200ms fade, ~38 cps default. */
-    BALANCED(
-        baseRevealDurationMs = 200L,
-        smoothing = StreamSmoothingConfig(
-            defaultCps = 38, minCps = 18, maxCps = 72,
-            targetBufferMs = 120, emaAlpha = 0.2f,
-        ),
-    ),
+    /** Default. ~200ms — 12 frames @60Hz, matches the original B1 tuning. */
+    BALANCED(200L),
 
-    /** Slow + cinematic. ~320ms fade, ~28 cps default. */
-    SILKY(
-        baseRevealDurationMs = 320L,
-        smoothing = StreamSmoothingConfig(
-            defaultCps = 28, minCps = 14, maxCps = 56,
-            targetBufferMs = 170, emaAlpha = 0.14f,
-        ),
-    ),
+    /** Slow + cinematic. ~320ms — feels deliberate, good for long replies. */
+    SILKY(320L),
 }
 
 /** Active preset for the descendant subtree. */
