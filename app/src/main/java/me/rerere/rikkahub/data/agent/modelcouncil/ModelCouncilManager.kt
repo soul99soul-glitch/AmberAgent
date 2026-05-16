@@ -421,7 +421,7 @@ class ModelCouncilManager(
             put("seat_composition_note", "Effective seat count at run time = 3 core (supporter/opponent/judge, always auto-injected) + user lens defaults + any extra_lens passed in tool call, deduped by role id and capped at max_seats.")
             put("max_seats", setting.maxSeats)
             put("default_rounds", setting.defaultRounds)
-            put("max_rounds", setting.maxRounds)
+            put("max_rounds", setting.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS))
             put("seat_timeout_ms", setting.seatTimeoutMs)
             put("total_timeout_ms", setting.totalTimeoutMs)
             put("output_budget_chars", setting.outputBudgetChars)
@@ -500,25 +500,27 @@ class ModelCouncilManager(
             promptForSeat = { seat -> openingPrompt(task, seat) },
         )
         var allTurns = roundOne
-        if (task.mode == ModelCouncilMode.DEBATE && task.rounds >= 2 && roundOne.any { it.status == ModelCouncilRunStatus.COMPLETED }) {
-            val roundTwo = runRound(
-                settings = settings,
-                setting = setting,
-                runtimeRun = runtimeRun,
-                round = 2,
-                promptForSeat = { seat -> responsePrompt(task, seat, roundOne) },
-            )
-            allTurns += roundTwo
-        }
-        if (task.mode == ModelCouncilMode.DEBATE && task.rounds >= 3 && allTurns.any { it.status == ModelCouncilRunStatus.COMPLETED }) {
-            val finalRound = runRound(
-                settings = settings,
-                setting = setting,
-                runtimeRun = runtimeRun,
-                round = 3,
-                promptForSeat = { seat -> finalPositionPrompt(task, seat, allTurns) },
-            )
-            allTurns += finalRound
+        if (task.mode == ModelCouncilMode.DEBATE) {
+            var round = 2
+            while (round <= task.rounds && allTurns.any { it.status == ModelCouncilRunStatus.COMPLETED }) {
+                val priorTurns = allTurns
+                val currentRound = round
+                val roundTurns = runRound(
+                    settings = settings,
+                    setting = setting,
+                    runtimeRun = runtimeRun,
+                    round = currentRound,
+                    promptForSeat = { seat ->
+                        if (currentRound >= 3 && currentRound == task.rounds) {
+                            finalPositionPrompt(task, seat, priorTurns)
+                        } else {
+                            responsePrompt(task, seat, priorTurns)
+                        }
+                    },
+                )
+                allTurns += roundTurns
+                round += 1
+            }
         }
 
         val completed = allTurns.filter { it.status == ModelCouncilRunStatus.COMPLETED && it.content.isNotBlank() }

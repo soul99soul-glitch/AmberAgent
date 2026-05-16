@@ -97,7 +97,7 @@ class ModelCouncilTools(
                     put("context", stringProp("Bounded context snapshot supplied by the supervisor."))
                     put("output_format", stringProp("Desired output shape."))
                     put("evaluation_criteria", stringProp("Criteria for comparing answers."))
-                    put("rounds", integerProp("Debate rounds. Compare always uses one round."))
+                    put("rounds", integerProp("Debate rounds, up to the Model Council max_rounds setting. Compare always uses one round."))
                     put("allow_external_cli", buildJsonObject {
                         put("type", "boolean")
                         put("description", "Must be true to use any external_cli seat. Set it only when the user explicitly asked to include a local terminal/Gemini CLI participant.")

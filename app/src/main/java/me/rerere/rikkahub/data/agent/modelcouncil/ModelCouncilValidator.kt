@@ -31,8 +31,9 @@ object ModelCouncilValidator {
         }
         val seats = parseSeats(task, settings, councilSetting)
         validateSeats(settings, councilSetting, seats)
+        val maxRounds = councilSetting.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS)
         val rounds = (task["rounds"]?.jsonPrimitive?.intOrNull ?: councilSetting.defaultRounds)
-            .coerceIn(1, councilSetting.maxRounds.coerceAtLeast(1))
+            .coerceIn(1, maxRounds)
         return ModelCouncilTaskSpec(
             mode = mode,
             objective = task.string("objective"),

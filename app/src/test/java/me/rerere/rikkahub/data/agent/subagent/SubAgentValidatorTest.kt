@@ -122,10 +122,29 @@ class SubAgentValidatorTest {
         assertTrue(error!!.message!!.contains("max_turns"))
     }
 
+    @Test
+    fun dynamicRoleAcceptsExtendedBudgetWhenSettingAllowsIt() {
+        val extendedSetting = setting.copy(
+            timeoutMs = EXTENDED_SUB_AGENT_TIMEOUT_MS,
+            outputBudgetChars = EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+        )
+        val input = inputWithCustomSubagent(
+            timeoutMs = EXTENDED_SUB_AGENT_TIMEOUT_MS,
+            outputBudgetChars = EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+        )
+
+        val result = SubAgentValidator.resolveDefinition(input, extendedSetting, setOf("file_read"))
+
+        assertEquals(EXTENDED_SUB_AGENT_TIMEOUT_MS, result.definition.timeoutMs)
+        assertEquals(EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS, result.definition.outputBudgetChars)
+    }
+
     private fun inputWithCustomSubagent(
         name: String = "Focused Code Reviewer",
         toolAllowlist: List<String>? = null,
         maxTurns: Int? = null,
+        timeoutMs: Long? = null,
+        outputBudgetChars: Int? = null,
     ) = buildJsonObject {
         put("custom_subagent", buildJsonObject {
             put("name", name)
@@ -140,6 +159,8 @@ class SubAgentValidatorTest {
                 })
             }
             maxTurns?.let { put("max_turns", it) }
+            timeoutMs?.let { put("timeout_ms", it) }
+            outputBudgetChars?.let { put("output_budget_chars", it) }
         })
         put("task", buildJsonObject {
             put("objective", "Review one issue")
