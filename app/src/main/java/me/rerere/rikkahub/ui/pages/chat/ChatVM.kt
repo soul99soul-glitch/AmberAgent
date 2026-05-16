@@ -43,6 +43,9 @@ import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
+import me.rerere.rikkahub.service.orchestrator.BranchMessageOrchestrator
+import me.rerere.rikkahub.service.orchestrator.RegenerateMessageOrchestrator
+import me.rerere.rikkahub.service.orchestrator.SendMessageOrchestrator
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import java.util.Locale
@@ -60,6 +63,9 @@ class ChatVM(
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
     private val contextRepository: ConversationContextRepository,
+    private val sendMessageOrchestrator: SendMessageOrchestrator,
+    private val regenerateMessageOrchestrator: RegenerateMessageOrchestrator,
+    private val branchMessageOrchestrator: BranchMessageOrchestrator,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
@@ -206,10 +212,7 @@ class ChatVM(
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
     ) {
-        if (content.isEmptyInputMessage()) return
-        analytics.logEvent("ai_send_message", null)
-
-        chatService.sendMessage(_conversationId, content, answer, queueMode)
+        sendMessageOrchestrator.send(_conversationId, content, answer, queueMode)
     }
 
     fun cancelPendingUserMessage(messageId: String) {
@@ -248,7 +251,7 @@ class ChatVM(
     }
 
     suspend fun forkMessage(message: UIMessage): Conversation {
-        return chatService.forkConversationAtMessage(_conversationId, message.id)
+        return branchMessageOrchestrator.fork(_conversationId, message)
     }
 
     fun deleteMessage(message: UIMessage) {
@@ -269,8 +272,7 @@ class ChatVM(
         message: UIMessage,
         regenerateAssistantMsg: Boolean = true
     ) {
-        analytics.logEvent("ai_regenerate_at_message", null)
-        chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg)
+        regenerateMessageOrchestrator.regenerate(_conversationId, message, regenerateAssistantMsg)
     }
 
     fun handleToolApproval(

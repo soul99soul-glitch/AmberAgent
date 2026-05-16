@@ -651,6 +651,26 @@ val appModule = module {
     }
 
     single {
+        me.rerere.rikkahub.service.orchestrator.SendMessageOrchestrator(
+            chatService = get(),
+            analytics = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.service.orchestrator.RegenerateMessageOrchestrator(
+            chatService = get(),
+            analytics = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.service.orchestrator.BranchMessageOrchestrator(
+            chatService = get(),
+        )
+    }
+
+    single {
         WebServerManager(
             context = get(),
             appScope = get(),
