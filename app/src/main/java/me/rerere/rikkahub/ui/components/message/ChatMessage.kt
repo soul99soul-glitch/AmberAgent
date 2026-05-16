@@ -1300,6 +1300,7 @@ private fun MessagePartsBlock(
                                         reasoning = step.reasoning,
                                         model = model,
                                         assistant = assistant,
+                                        loading = loading,
                                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                     )
                                 }
