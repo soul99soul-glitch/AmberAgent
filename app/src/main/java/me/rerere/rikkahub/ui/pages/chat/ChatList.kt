@@ -168,8 +168,10 @@ private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 private const val SendTransitionEnterMillis = 150
 private const val SendTransitionExitMillis = 100
+private const val SentUserMessageEnterMillis = 280
 private val TimelineHorizontalPadding = 16.dp
 private val SendTransitionSlideDistance = 8.dp
+private val SentUserMessageSlideDistance = 18.dp
 
 // 2026-05-15 (1.9.7): top-level Regex avoids recompiling the pattern on every
 // recomposition of ContextCompactInProgressMarker. The streaming summary flow
@@ -180,7 +182,6 @@ private val COMPACT_SUMMARY_WHITESPACE_RE = Regex("\\s+")
 @Composable
 private fun SentUserMessageEnter(
     enabled: Boolean,
-    slidePx: Int,
     content: @Composable () -> Unit,
 ) {
     if (!enabled) {
@@ -190,11 +191,12 @@ private fun SentUserMessageEnter(
     val visibleState = remember {
         MutableTransitionState(false).apply { targetState = true }
     }
+    val slidePx = with(LocalDensity.current) { SentUserMessageSlideDistance.roundToPx() }
     AnimatedVisibility(
         visibleState = visibleState,
-        enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
+        enter = fadeIn(animationSpec = tween(SentUserMessageEnterMillis)) +
             slideInVertically(
-                animationSpec = tween(SendTransitionEnterMillis),
+                animationSpec = tween(SentUserMessageEnterMillis),
                 initialOffsetY = { slidePx },
             ),
         exit = fadeOut(animationSpec = tween(SendTransitionExitMillis)),
@@ -223,14 +225,7 @@ private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineMessageInnerSpacing = 4.dp
-private val AgentWorkingIndicatorHeightEstimate = 48.dp
-private val AgentWorkingIndicatorBottomOffset = 8.dp
 private val AgentWorkingIndicatorTailBuffer = 20.dp
-private val AgentWorkingIndicatorSuggestionOffset = 54.dp
-private val AgentWorkingIndicatorReserveHeight =
-    AgentWorkingIndicatorHeightEstimate + AgentWorkingIndicatorBottomOffset + AgentWorkingIndicatorTailBuffer
-private val AgentWorkingIndicatorSuggestionReserveHeight =
-    AgentWorkingIndicatorHeightEstimate + AgentWorkingIndicatorSuggestionOffset + AgentWorkingIndicatorTailBuffer
 private val TimelineSelectionToolbarOffset = 56.dp
 private const val MarkdownPrewarmBeforeItems = 4
 private const val MarkdownPrewarmAfterItems = 8
@@ -1050,7 +1045,6 @@ private fun ChatListNormal(
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
-    val showPinnedAgentWorkingIndicator = loading && followMode == TimelineFollowMode.FollowingBottom
     val chatAssistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
@@ -1556,7 +1550,6 @@ private fun ChatListNormal(
                             // fully opaque as the boundary marker.
                             SentUserMessageEnter(
                                 enabled = shouldAnimateSentUserMessage,
-                                slidePx = sendTransitionSlidePx,
                             ) {
                                 ListSelectableItem(
                                     modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
@@ -1787,31 +1780,20 @@ private fun ChatListNormal(
                     key = LoadingIndicatorKey,
                     contentType = "loading",
                 ) {
-                    if (showPinnedAgentWorkingIndicator) {
-                        Spacer(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(
-                                    if (showSuggestions) {
-                                        AgentWorkingIndicatorSuggestionReserveHeight
-                                    } else {
-                                        AgentWorkingIndicatorReserveHeight
-                                    }
-                                )
-                        )
-                    } else {
-                        Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
-                            val workingVisibility = remember {
-                                MutableTransitionState(false).apply { targetState = true }
-                            }
-                            AnimatedVisibility(
-                                visibleState = workingVisibility,
-                                enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
-                                    slideInVertically(
-                                        animationSpec = tween(SendTransitionEnterMillis),
-                                        initialOffsetY = { sendTransitionSlidePx },
-                                    ),
-                            ) {
+                    Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
+                        val workingVisibility = remember {
+                            MutableTransitionState(false).apply { targetState = true }
+                        }
+                        AnimatedVisibility(
+                            visibleState = workingVisibility,
+                            enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
+                                slideInVertically(
+                                    animationSpec = tween(SendTransitionEnterMillis),
+                                    initialOffsetY = { sendTransitionSlidePx },
+                                ),
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Spacer(modifier = Modifier.height(AgentWorkingIndicatorTailBuffer))
                                 AgentWorkingIndicator(processingStatus = processingStatus)
                             }
                         }
@@ -1846,24 +1828,6 @@ private fun ChatListNormal(
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
             )
-
-            AnimatedVisibility(
-                visible = showPinnedAgentWorkingIndicator && !captureProgress,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(
-                        bottom = if (showSuggestions) {
-                            AgentWorkingIndicatorSuggestionOffset
-                        } else {
-                            AgentWorkingIndicatorBottomOffset
-                        }
-                    )
-                    .zIndex(6f),
-                enter = fadeIn(),
-                exit = fadeOut(),
-            ) {
-                AgentWorkingIndicator(processingStatus = processingStatus)
-            }
 
             // 完成选择
             AnimatedVisibility(

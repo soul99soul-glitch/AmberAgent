@@ -118,6 +118,21 @@ import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 
+private fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
+    return any { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text.isNotBlank()
+            is UIMessagePart.Image -> part.url.isNotBlank()
+            is UIMessagePart.Document -> part.url.isNotBlank()
+            is UIMessagePart.Video -> part.url.isNotBlank()
+            is UIMessagePart.Audio -> part.url.isNotBlank()
+            is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
+            is UIMessagePart.Tool -> true
+            else -> false
+        }
+    }
+}
+
 @Composable
 fun ChatMessage(
     node: MessageNode,
@@ -156,8 +171,7 @@ fun ChatMessage(
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        val showLoadingAssistantHeader = message.role == MessageRole.ASSISTANT && loading
-        if (!message.parts.isEmptyUIMessage() || showLoadingAssistantHeader) {
+        if (message.parts.hasRenderableChatMessageContent()) {
             when (message.role) {
                 MessageRole.ASSISTANT -> {
                     ChatMessageAssistantAvatar(
@@ -564,7 +578,7 @@ internal fun ChatMessageVirtualItemContent(
                     .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} header measure"),
                 horizontalAlignment = Alignment.Start,
             ) {
-                if (!message.parts.isEmptyUIMessage() || loading) {
+                if (message.parts.hasRenderableChatMessageContent()) {
                     ChatMessageAssistantAvatar(
                         message = message,
                         model = model,
