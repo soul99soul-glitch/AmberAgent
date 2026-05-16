@@ -38,7 +38,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -723,6 +722,7 @@ private fun ChatListNormal(
     var programmaticScrollInProgress by remember(conversation.id) { mutableStateOf(false) }
     var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
+    var userScrollInTimeline by remember(conversation.id) { mutableStateOf(false) }
     val density = LocalDensity.current
     // 2026-05-16: 24dp ≈ 1 line of CJK at default size. 48dp (≈ 1.7 lines)
     // turned out to be too generous — releasing finger with one full visible
@@ -879,7 +879,15 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
-                scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
+                scope.launch {
+                    userScrollInTimeline = true
+                    try {
+                        state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount)
+                        withFrameNanos { }
+                    } finally {
+                        userScrollInTimeline = false
+                    }
+                }
                 true
             } else false
         }
@@ -1041,10 +1049,10 @@ private fun ChatListNormal(
             // jumper card to slide in/out repeatedly — user reported it as
             // "右边这个四个箭头的导航按钮疯狂的往外弹". Only mark recent-scroll
             // when the user actually initiated the gesture.
-            if (!programmaticScrollInProgress) {
+            if (userScrollInTimeline && !programmaticScrollInProgress) {
                 isRecentScroll = true
             }
-            if (activeGenerationState && !programmaticScrollInProgress) {
+            if (activeGenerationState && userScrollInTimeline && !programmaticScrollInProgress) {
                 pauseAutoFollowTemporarily(
                     mode = TimelineFollowMode.PausedForUser,
                     scheduleIdleReturn = true,
@@ -1061,10 +1069,10 @@ private fun ChatListNormal(
             // proof: 01:24:02.260-.270, follow flipped FollowingBottom →
             // PausedForUser within the same ms as endProgrammaticScroll).
             //
-            // Invariant: any genuine user scroll passed through pointerDown
-            // / the if-branch above and set follow=PausedForUser. So this
-            // else-branch only needs to decide "did the user release at the
-            // bottom?" — never to demote from FollowingBottom.
+            // Invariant: any genuine user scroll source passed through the
+            // if-branch above and set follow=PausedForUser. So this branch
+            // only needs to decide "did the user release at the bottom?" —
+            // never to demote from FollowingBottom.
             if (
                 activeGenerationState &&
                 !programmaticScrollInProgress &&
@@ -1281,18 +1289,22 @@ private fun ChatListNormal(
                 )
                 .pointerInput(activeGeneration, settings.displaySetting.enableAutoScroll, conversation.id) {
                     awaitEachGesture {
-                        // Use Initial pass so we see the touch BEFORE the LazyColumn scroll
-                        // handler does. Pause auto-follow on every finger-down (no 150ms wait,
-                        // no "sustained press" requirement) — the user touching the screen is
-                        // intent enough. The 30s resume timer below gives streaming a chance
-                        // to catch up if the user just tapped and walked away.
+                        // Use Initial pass so we can tag a real LazyColumn scroll
+                        // as user-originated before the scroll progress effect runs.
+                        // A tap alone should not pause bottom follow; the pause is
+                        // applied when LazyListState actually enters scrolling.
+                        // Do not use waitForUpOrCancellation here: LazyColumn can
+                        // consume a real drag, and we need this marker to survive
+                        // until every pointer is actually lifted.
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        logScroll("pointerDown", "enableAS=${settings.displaySetting.enableAutoScroll}")
-                        if (activeGenerationState && settings.displaySetting.enableAutoScroll) {
-                            pauseAutoFollowTemporarily(
-                                mode = TimelineFollowMode.PausedForUser,
-                                scheduleIdleReturn = true,
-                            )
+                        userScrollInTimeline = true
+                        try {
+                            logScroll("pointerDown", "enableAS=${settings.displaySetting.enableAutoScroll}")
+                            do {
+                                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                            } while (event.changes.any { it.pressed })
+                        } finally {
+                            userScrollInTimeline = false
                         }
                     }
                 }
@@ -1771,7 +1783,8 @@ internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
     if (totalItems == 0) return true
     val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
     if (lastVisibleItem.index < totalItems - 1) return false
-    return lastVisibleItem.offset + lastVisibleItem.size <= layoutInfo.viewportEndOffset + bufferPx
+    val contentBottom = lastVisibleItem.offset + lastVisibleItem.size + layoutInfo.afterContentPadding
+    return contentBottom <= layoutInfo.viewportEndOffset + bufferPx
 }
 
 private fun LazyListState.distanceToTimelineBottomPx(): Int? {
@@ -1779,7 +1792,8 @@ private fun LazyListState.distanceToTimelineBottomPx(): Int? {
     if (totalItems == 0) return 0
     val bottomItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == totalItems - 1 }
         ?: return null
-    return (bottomItem.offset + bottomItem.size - layoutInfo.viewportEndOffset).coerceAtLeast(0)
+    val contentBottom = bottomItem.offset + bottomItem.size + layoutInfo.afterContentPadding
+    return (contentBottom - layoutInfo.viewportEndOffset).coerceAtLeast(0)
 }
 
 private fun LazyListState.markdownPrewarmTexts(

@@ -69,11 +69,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.BuildConfig
@@ -323,6 +323,12 @@ private fun parseMarkdownUncached(content: String): MarkdownParseResult {
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
 }
 
+private fun parseStreamingMarkdownContent(content: String): MarkdownParseResult {
+    return traceMarkdown("Amber Markdown parse streaming") {
+        parseMarkdownUncached(content)
+    }
+}
+
 internal fun prewarmMarkdownContent(content: String) {
     if (content.isNotBlank()) {
         MarkdownParseCache.getOrParse(content)
@@ -396,18 +402,46 @@ fun MarkdownBlock(
     streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
 ) {
-    var (data, setData) = remember { mutableStateOf(MarkdownParseCache.getOrParse(content)) }
+    var (data, setData) = remember {
+        mutableStateOf(
+            if (streaming) {
+                parseStreamingMarkdownContent(content)
+            } else {
+                MarkdownParseCache.getOrParse(content)
+            }
+        )
+    }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
     val updatedContent by rememberUpdatedState(content)
+    val updatedStreaming by rememberUpdatedState(streaming)
     LaunchedEffect(Unit) {
-        snapshotFlow { updatedContent }
+        var lastParsedContent = content
+        var lastParsedStreaming = streaming
+        snapshotFlow { updatedContent to updatedStreaming }
             .distinctUntilChanged()
-            .mapLatest { MarkdownParseCache.getOrParse(it) }
-            .catch { exception -> exception.printStackTrace() }
-            .flowOn(Dispatchers.Default)
-            .collect { setData(it) }
+            .collectLatest { (latestContent, latestStreaming) ->
+                if (latestContent == lastParsedContent && latestStreaming == lastParsedStreaming) {
+                    return@collectLatest
+                }
+                try {
+                    val parsed = withContext(Dispatchers.Default) {
+                        if (latestStreaming) {
+                            parseStreamingMarkdownContent(latestContent)
+                        } else {
+                            MarkdownParseCache.getOrParse(latestContent)
+                        }
+                    }
+                    lastParsedContent = latestContent
+                    lastParsedStreaming = latestStreaming
+                    setData(parsed)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    exception.printStackTrace()
+                }
+            }
     }
 
     val revealController = rememberCharRevealController(
