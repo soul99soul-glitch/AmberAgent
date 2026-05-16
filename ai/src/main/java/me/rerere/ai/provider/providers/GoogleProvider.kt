@@ -434,7 +434,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put(
                             "text",
                             systemMessage.parts.filterIsInstance<UIMessagePart.Text>()
-                                .joinToString { it.text })
+                                .joinToString("\n\n") { it.text })
                     })
                 }
             })

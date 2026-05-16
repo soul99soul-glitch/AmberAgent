@@ -24,6 +24,9 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
@@ -296,12 +299,19 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
             val systemTextParts = systemMessage?.parts?.filterIsInstance<UIMessagePart.Text>().orEmpty()
             if (systemTextParts.isNotEmpty()) {
+                val cacheDisabled = systemTextParts.any { part ->
+                    part.metadata?.get(SYSTEM_PROMPT_CACHE_CONTROL_METADATA)?.jsonPrimitive?.contentOrNull == SYSTEM_PROMPT_CACHE_DISABLED
+                }
+                val explicitCacheIndex = systemTextParts.indexOfLast { part ->
+                    part.metadata?.get(SYSTEM_PROMPT_CACHE_CONTROL_METADATA)?.jsonPrimitive?.contentOrNull == SYSTEM_PROMPT_CACHE_EPHEMERAL
+                }
+                val cacheIndex = explicitCacheIndex.takeIf { it >= 0 } ?: systemTextParts.lastIndex
                 put("system", buildJsonArray {
                     systemTextParts.forEachIndexed { index, part ->
                         add(buildJsonObject {
                             put("type", "text")
                             put("text", part.text)
-                            if (providerSetting.promptCaching && index == systemTextParts.lastIndex) {
+                            if (providerSetting.promptCaching && !cacheDisabled && index == cacheIndex) {
                                 put("cache_control", cacheControlEphemeral())
                             }
                         })

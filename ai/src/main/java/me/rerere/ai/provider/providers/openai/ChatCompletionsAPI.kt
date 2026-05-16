@@ -595,7 +595,9 @@ class ChatCompletionsAPI(
         add(buildJsonObject {
             put("role", JsonPrimitive(message.role.name.lowercase()))
 
-            if (message.parts.isOnlyTextPart()) {
+            if (message.role == MessageRole.SYSTEM && message.parts.filterIsInstance<UIMessagePart.Text>().isNotEmpty()) {
+                put("content", message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text })
+            } else if (message.parts.isOnlyTextPart()) {
                 put("content", message.parts.filterIsInstance<UIMessagePart.Text>().first().text)
             } else {
                 putJsonArray("content") {

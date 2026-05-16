@@ -1,6 +1,12 @@
 package me.rerere.rikkahub.data.ai.transformers
 
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Assistant
@@ -238,6 +244,93 @@ class PromptInjectionTransformerTest {
         val systemText = getMessageText(result[0])
         assertTrue(systemText.startsWith("Prepended content"))
         assertTrue(systemText.contains("Original system prompt"))
+    }
+
+    @Test
+    fun `system prompt injection should preserve multipart metadata`() {
+        val injectionId = Uuid.random()
+        val injection = createModeInjection(
+            id = injectionId,
+            position = InjectionPosition.AFTER_SYSTEM_PROMPT,
+            content = "Injected after"
+        )
+        val messages = listOf(
+            UIMessage(
+                role = MessageRole.SYSTEM,
+                parts = listOf(
+                    UIMessagePart.Text(
+                        text = "Static",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                        }
+                    ),
+                    UIMessagePart.Text("Dynamic"),
+                ),
+            ),
+            UIMessage.user("Hello")
+        )
+
+        val result = transformMessages(
+            messages = messages,
+            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            modeInjections = listOf(injection),
+            lorebooks = emptyList()
+        )
+
+        val parts = result[0].parts.filterIsInstance<UIMessagePart.Text>()
+        assertEquals(3, parts.size)
+        assertEquals("Static", parts[0].text)
+        assertEquals(
+            SYSTEM_PROMPT_CACHE_EPHEMERAL,
+            parts[0].metadata!![SYSTEM_PROMPT_CACHE_CONTROL_METADATA]!!.jsonPrimitive.content
+        )
+        assertEquals("Dynamic", parts[1].text)
+        assertEquals("Injected after", parts[2].text)
+    }
+
+    @Test
+    fun `before system prompt injection should disable system prompt cache`() {
+        val injectionId = Uuid.random()
+        val injection = createModeInjection(
+            id = injectionId,
+            position = InjectionPosition.BEFORE_SYSTEM_PROMPT,
+            content = "Injected before"
+        )
+        val messages = listOf(
+            UIMessage(
+                role = MessageRole.SYSTEM,
+                parts = listOf(
+                    UIMessagePart.Text(
+                        text = "Static",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                        }
+                    ),
+                    UIMessagePart.Text("Dynamic"),
+                ),
+            ),
+            UIMessage.user("Hello")
+        )
+
+        val result = transformMessages(
+            messages = messages,
+            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            modeInjections = listOf(injection),
+            lorebooks = emptyList()
+        )
+
+        val parts = result[0].parts.filterIsInstance<UIMessagePart.Text>()
+        assertEquals(3, parts.size)
+        assertEquals("Injected before", parts[0].text)
+        assertEquals(
+            SYSTEM_PROMPT_CACHE_DISABLED,
+            parts[0].metadata!![SYSTEM_PROMPT_CACHE_CONTROL_METADATA]!!.jsonPrimitive.content
+        )
+        assertEquals("Static", parts[1].text)
+        assertEquals(
+            SYSTEM_PROMPT_CACHE_EPHEMERAL,
+            parts[1].metadata!![SYSTEM_PROMPT_CACHE_CONTROL_METADATA]!!.jsonPrimitive.content
+        )
     }
 
     @Test

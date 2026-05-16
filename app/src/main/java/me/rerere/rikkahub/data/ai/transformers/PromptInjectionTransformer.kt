@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.data.ai.transformers
 
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Assistant
@@ -117,24 +121,24 @@ internal fun applyInjections(
 
         if (beforeContent.isNotEmpty() || afterContent.isNotEmpty()) {
             val systemMessage = result[systemIndex]
-            val originalText = systemMessage.parts
-                .filterIsInstance<UIMessagePart.Text>()
-                .joinToString("") { it.text }
-
-            val newText = buildString {
-                if (beforeContent.isNotEmpty()) {
-                    append(beforeContent)
-                    appendLine()
-                }
-                append(originalText)
-                if (afterContent.isNotEmpty()) {
-                    appendLine()
-                    append(afterContent)
-                }
-            }
 
             result[systemIndex] = systemMessage.copy(
-                parts = listOf(UIMessagePart.Text(newText))
+                parts = buildList {
+                    if (beforeContent.isNotEmpty()) {
+                        add(
+                            UIMessagePart.Text(
+                                text = beforeContent,
+                                metadata = buildJsonObject {
+                                    put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED)
+                                }
+                            )
+                        )
+                    }
+                    addAll(systemMessage.parts)
+                    if (afterContent.isNotEmpty()) {
+                        add(UIMessagePart.Text(afterContent))
+                    }
+                }
             )
         }
     } else {
