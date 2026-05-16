@@ -122,7 +122,6 @@ import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
 import me.rerere.rikkahub.utils.sendNotification
-import java.io.File
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -206,6 +205,7 @@ class ChatService(
     private val agentTaskScheduler: AgentTaskScheduler,
     private val sessionAccessGrantStore: SessionAccessGrantStore,
     private val memoryExtractor: MemoryExtractor,
+    private val pendingMessageStore: PendingMessageStore,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -270,11 +270,11 @@ class ChatService(
                     id = id,
                     assistantId = settings.getCurrentAssistant().id
                 ),
-                initialPendingMessages = loadPendingUserMessages(id),
+                initialPendingMessages = pendingMessageStore.load(id),
                 scope = appScope,
                 onIdle = { removeSession(it) },
                 onPendingMessagesChanged = { sessionId, messages ->
-                    persistPendingUserMessages(sessionId, messages)
+                    pendingMessageStore.persist(sessionId, messages)
                 }
             ).also {
                 _sessionsVersion.value++
@@ -306,63 +306,6 @@ class ChatService(
 
     fun removeConversationReference(conversationId: Uuid) {
         sessions[conversationId]?.release()
-    }
-
-    private fun pendingUserMessageFile(conversationId: Uuid): File {
-        return File(context.filesDir, "amberagent/message-queue").resolve("$conversationId.json")
-    }
-
-    private fun loadPendingUserMessages(conversationId: Uuid): List<PendingUserMessage> {
-        val file = pendingUserMessageFile(conversationId)
-        if (!file.exists()) return emptyList()
-        return runCatching {
-            json.decodeFromString<List<PendingUserMessage>>(file.readText())
-        }.onFailure {
-            Log.w(TAG, "Failed to load pending user messages for $conversationId", it)
-        }.getOrDefault(emptyList())
-    }
-
-    private fun persistPendingUserMessages(conversationId: Uuid, messages: List<PendingUserMessage>) {
-        runCatching {
-            val file = pendingUserMessageFile(conversationId)
-            if (messages.isEmpty()) {
-                file.delete()
-            } else {
-                file.parentFile?.mkdirs()
-                file.writeText(json.encodeToString(messages))
-            }
-        }.onFailure {
-            Log.w(TAG, "Failed to persist pending user messages for $conversationId", it)
-        }
-    }
-
-    private fun pendingUserMessageAuditFile(conversationId: Uuid): File {
-        return File(context.filesDir, "amberagent/message-queue").resolve("$conversationId.events.jsonl")
-    }
-
-    private fun recordPendingQueueEvent(
-        conversationId: Uuid,
-        event: String,
-        messageId: String? = null,
-        count: Int? = null,
-        detail: String? = null,
-    ) {
-        runCatching {
-            val file = pendingUserMessageAuditFile(conversationId)
-            file.parentFile?.mkdirs()
-            file.appendText(
-                buildJsonObject {
-                    put("created_at_ms", System.currentTimeMillis())
-                    put("conversation_id", conversationId.toString())
-                    put("event", event)
-                    messageId?.let { put("message_id", it) }
-                    count?.let { put("count", it) }
-                    detail?.let { put("detail", it) }
-                }.toString() + "\n"
-            )
-        }.onFailure {
-            Log.w(TAG, "Failed to write pending message audit for $conversationId", it)
-        }
     }
 
     private fun launchWithConversationReference(
@@ -427,7 +370,7 @@ class ChatService(
 
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
         if (getOrCreateSession(conversationId).cancelPendingUserMessage(messageId)) {
-            recordPendingQueueEvent(conversationId, event = "cancel", messageId = messageId)
+            pendingMessageStore.recordEvent(conversationId, event = "cancel", messageId = messageId)
         }
     }
 
@@ -436,13 +379,13 @@ class ChatService(
         val count = session.pendingUserMessages.value.size
         if (count > 0) {
             session.clearPendingUserMessages()
-            recordPendingQueueEvent(conversationId, event = "clear", count = count)
+            pendingMessageStore.recordEvent(conversationId, event = "clear", count = count)
         }
     }
 
     fun movePendingUserMessage(conversationId: Uuid, messageId: String, offset: Int) {
         if (getOrCreateSession(conversationId).movePendingUserMessage(messageId, offset)) {
-            recordPendingQueueEvent(
+            pendingMessageStore.recordEvent(
                 conversationId = conversationId,
                 event = "move",
                 messageId = messageId,
@@ -633,7 +576,7 @@ class ChatService(
                     title = "消息未加入队列"
                 )
             } else {
-                recordPendingQueueEvent(
+                pendingMessageStore.recordEvent(
                     conversationId = conversationId,
                     event = "enqueue",
                     messageId = pendingMessage.id,
@@ -660,7 +603,7 @@ class ChatService(
                         title = "消息未加入队列"
                     )
                 } else {
-                    recordPendingQueueEvent(
+                    pendingMessageStore.recordEvent(
                         conversationId = conversationId,
                         event = "enqueue",
                         messageId = message.id,
@@ -676,7 +619,7 @@ class ChatService(
             while (nextMessage != null) {
                 try {
                     val dispatchMessage = session.preparePendingMessageForDispatch(nextMessage)
-                    recordPendingQueueEvent(
+                    pendingMessageStore.recordEvent(
                         conversationId = conversationId,
                         event = "dequeue",
                         messageId = dispatchMessage.id,
@@ -774,7 +717,7 @@ class ChatService(
             updateAt = Instant.now(),
         )
         saveConversation(conversationId, updatedConversation)
-        recordPendingQueueEvent(
+        pendingMessageStore.recordEvent(
             conversationId = conversationId,
             event = if (shouldResume) "pending_tool_resume" else "pending_tool_cancel",
             messageId = message.id,
@@ -836,7 +779,7 @@ class ChatService(
         var nextMessage = session.dequeueNextPendingUserMessage()
         while (nextMessage != null) {
             val dispatchMessage = session.preparePendingMessageForDispatch(nextMessage)
-            recordPendingQueueEvent(
+            pendingMessageStore.recordEvent(
                 conversationId = conversationId,
                 event = "dequeue",
                 messageId = dispatchMessage.id,
@@ -1151,7 +1094,7 @@ class ChatService(
                     val consumed = getOrCreateSession(conversationId)
                         .dequeueSteerPendingUserMessages()
                     if (consumed.isNotEmpty()) {
-                        recordPendingQueueEvent(
+                        pendingMessageStore.recordEvent(
                             conversationId = conversationId,
                             event = "steer_consumed",
                             count = consumed.size,
@@ -2181,7 +2124,7 @@ class ChatService(
         trustedRunToolNames.remove(conversationId)
         screenCaptureManager.releaseSession()
         if (sessions[conversationId]?.convertPendingSteerMessagesToFollowup() == true) {
-            recordPendingQueueEvent(conversationId, event = "steer_downgrade")
+            pendingMessageStore.recordEvent(conversationId, event = "steer_downgrade")
         }
 
         val currentConversation = getConversationFlow(conversationId).value

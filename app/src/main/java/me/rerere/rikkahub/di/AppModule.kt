@@ -622,6 +622,13 @@ val appModule = module {
     }
 
     single {
+        me.rerere.rikkahub.service.PendingMessageStore(
+            context = get(),
+            json = get(),
+        )
+    }
+
+    single {
         ChatService(
             context = get(),
             appScope = get(),
@@ -647,6 +654,7 @@ val appModule = module {
             agentTaskScheduler = get(),
             sessionAccessGrantStore = get(),
             memoryExtractor = get(),
+            pendingMessageStore = get(),
         )
     }
 
