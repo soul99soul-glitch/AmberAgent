@@ -120,6 +120,10 @@ data class ModelCouncilTurn(
     val role: String,
     @SerialName("model_id")
     val modelId: Uuid,
+    @SerialName("model_name")
+    val modelName: String = "",
+    @SerialName("provider_name")
+    val providerName: String = "",
     val status: ModelCouncilRunStatus,
     val content: String = "",
     val error: String = "",
