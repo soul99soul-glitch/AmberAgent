@@ -57,8 +57,14 @@ private const val BACKLOG_DEGRADE = 80
 /**
  * EWMA-smoothed FPS below which we drop the fade animation entirely.
  * Aligns with guide §15: "fps < 45 → revealMode = 'batch'".
+ *
+ * Hysteresis: once degraded we don't re-engage the fade until FPS
+ * recovers above [RECOVER_FPS], so a brief recovery to 46 doesn't
+ * snap fade back on and immediately re-degrade — that ping-pong
+ * would itself be jankier than staying degraded.
  */
 private const val DEGRADE_FPS = 45f
+private const val RECOVER_FPS = 55f
 
 /** EWMA alpha for the FPS smoother. 1/8 ≈ ~125ms half-life. */
 private const val FPS_EWMA_NUMERATOR = 7
@@ -92,14 +98,30 @@ class CharRevealController internal constructor(
     // animation" per guide §15.
     private var prevFrameNanos: Long = 0L
     private var avgFrameDeltaNanos: Long = 16_666_666L  // 60Hz default
+    private var degraded: Boolean = false
 
     /** Smoothed FPS. Used by [shouldDegrade] and exposed for profiler use. */
     val currentFps: Float
         get() = if (avgFrameDeltaNanos <= 0L) 60f
         else 1_000_000_000f / avgFrameDeltaNanos.toFloat()
 
-    private fun shouldDegrade(): Boolean =
-        currentFps < DEGRADE_FPS || revealing.size > BACKLOG_DEGRADE
+    private fun shouldDegrade(): Boolean {
+        // Backlog overflow always trips degrade (model is outpacing us
+        // regardless of FPS) — clears once we drain.
+        if (revealing.size > BACKLOG_DEGRADE) {
+            degraded = true
+            return true
+        }
+        // Hysteresis on FPS: enter degraded mode below DEGRADE_FPS,
+        // exit only above RECOVER_FPS.
+        val fps = currentFps
+        if (degraded) {
+            if (fps >= RECOVER_FPS) degraded = false
+        } else {
+            if (fps < DEGRADE_FPS) degraded = true
+        }
+        return degraded
+    }
 
     internal fun onFrame(frameNanos: Long) {
         // Always update the FPS EWMA, even when idle — gives us a fresh
@@ -167,13 +189,69 @@ class CharRevealController internal constructor(
         }
         if (newLength <= contentLength) return
         val stamp = System.nanoTime()
-        sliceTailIntoEntries(
-            content = newContent,
-            startInclusive = contentLength,
-            endExclusive = newLength,
-            stamp = stamp,
-            into = revealing,
-        )
+
+        // B2.1 fix for "chunk splits a word/emoji-cluster mid-glyph"
+        // visual tear (B2 reviewer P0/P1):
+        //
+        //   When the assistant emits "Hel" then "lo World" in two
+        //   chunks, B2 would create a separate entry for "lo" with a
+        //   later stamp than "Hel" — the back half of the word would
+        //   start its fade ~50ms after the front half, producing a
+        //   visible split. Same problem hits ZWJ-joined emoji
+        //   sequences split across chunks: each ZWJ component would
+        //   independently fade in.
+        //
+        //   Detection: the new tail's first codepoint is a word-runner
+        //   (not whitespace, not CJK) AND the previous trailing entry
+        //   in the queue ends exactly at contentLength AND that entry
+        //   is itself a word-run (its first codepoint is also a
+        //   word-runner). In that case, extend the existing entry
+        //   forward to the next word boundary in the new content
+        //   instead of allocating a fresh entry — so the whole word
+        //   keeps one shared appearNanos.
+        //
+        //   The chars that "extend forward" inherit the older stamp,
+        //   so the back half of the word is at most one chunk-flush
+        //   (~33-50ms) older than the rest — small enough that the
+        //   200ms fade overlaps and the word still looks unified.
+        var sliceFrom = contentLength
+        if (
+            sliceFrom < newLength &&
+            revealing.isNotEmpty() &&
+            revealing.last().endOffset == sliceFrom
+        ) {
+            val firstNewCp = newContent.codePointAt(sliceFrom)
+            val newIsWordRunner =
+                !isWhitespaceCodepoint(firstNewCp) && !isCjkCodepoint(firstNewCp)
+            if (newIsWordRunner) {
+                val tail = revealing.last()
+                val tailFirstCp = newContent.codePointAt(tail.startOffset)
+                val tailIsWordRun =
+                    !isWhitespaceCodepoint(tailFirstCp) && !isCjkCodepoint(tailFirstCp)
+                if (tailIsWordRun) {
+                    // Walk forward to the next word boundary in new content.
+                    var i = sliceFrom
+                    while (i < newLength) {
+                        val cp = newContent.codePointAt(i)
+                        if (isWhitespaceCodepoint(cp) || isCjkCodepoint(cp)) break
+                        i += Character.charCount(cp)
+                    }
+                    revealing.removeLast()
+                    revealing.addLast(tail.copy(endOffset = i))
+                    sliceFrom = i
+                }
+            }
+        }
+
+        if (sliceFrom < newLength) {
+            sliceTailIntoEntries(
+                content = newContent,
+                startInclusive = sliceFrom,
+                endExclusive = newLength,
+                stamp = stamp,
+                into = revealing,
+            )
+        }
         contentLength = newLength
         // Bump nowNanos so the next frame's alphaAt sees a sane (≈0)
         // delta — prevents the "first chunk after a pause renders fully
@@ -192,9 +270,12 @@ class CharRevealController internal constructor(
     fun alphaAt(absoluteOffset: Int): Float {
         if (absoluteOffset < revealedHead) return 1f
         if (absoluteOffset >= contentLength) return 0f
-        // Linear search within the active queue. k is small (one fade
-        // window's worth of words ≈ tens) so the linear cost is fine.
+        // Linear search within the active queue. Entries are appended
+        // in monotonically-increasing offset order, so once we pass an
+        // entry whose startOffset already exceeds the lookup, nothing
+        // further in the queue can contain the offset — early break.
         revealing.fastForEach { entry ->
+            if (entry.startOffset > absoluteOffset) return 1f
             if (absoluteOffset in entry.startOffset until entry.endOffset) {
                 val age = nowNanos - entry.appearNanos
                 if (age <= 0L) return 0f
