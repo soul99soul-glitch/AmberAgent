@@ -14,9 +14,9 @@ import kotlin.uuid.Uuid
  * Two-stage filtering:
  *
  * 1. **Keyword pre-filter**: conversations whose title or last few messages
- *    contain actionable keywords (待办/TODO/提醒/deadline/会议/方案/需要/计划
- *    etc.) pass through. Conversations with only trivial content (e.g. "帮我
- *    翻译这句话") are dropped before they enter the signal stream.
+ *    contain actionable keywords (待办/TODO/提醒/deadline/会议/方案/跟进/bug
+ *    etc.) pass through. Conversations with only trivial content or explicit
+ *    generation/rendering tests are dropped before they enter the signal stream.
  *
  * 2. **Content extraction**: instead of just emitting the title + timestamp,
  *    we extract the last [TAIL_NODE_COUNT] message turns so the Board agent
@@ -72,30 +72,11 @@ class ChatHistorySignalCollector(
                 "$role: $text"
             }
         }
-        val fullText = "$title ${tailTexts.joinToString(" ")}"
-
-        // Keyword relevance scoring
-        var score = 0
-        for ((keywords, weight) in KEYWORD_TIERS) {
-            for (kw in keywords) {
-                if (fullText.contains(kw, ignoreCase = true)) {
-                    score += weight
-                    break // one match per tier is enough
-                }
-            }
-        }
-
-        // Depth bonus: multi-turn conversations are more likely to be substantive
-        when {
-            nodeCount >= 10 -> score += 3
-            nodeCount >= 5 -> score += 2
-            nodeCount >= 3 -> score += 1
-            // Single-message conversations need a strong keyword match to pass
-            nodeCount <= 1 && score < STRONG_KEYWORD_THRESHOLD -> return null
-        }
-
-        // Hard filter: no keywords matched and conversation is short
-        if (score <= 0) return null
+        val score = ChatHistoryBoardSignalHeuristics.relevanceScore(
+            title = title,
+            tailTexts = tailTexts,
+            nodeCount = nodeCount,
+        ) ?: return null
 
         // Build rich content for the signal
         val content = buildString {
@@ -132,37 +113,90 @@ class ChatHistorySignalCollector(
 
         /** Max message turns to include in signal content. */
         private const val MAX_CONTENT_TURNS = 8
-
-        /** Minimum score for single-message conversations to pass. */
-        private const val STRONG_KEYWORD_THRESHOLD = 5
-
-        /**
-         * Keyword tiers: higher-weight keywords indicate stronger actionability.
-         * Each tier is checked independently; one match per tier contributes its weight.
-         */
-        private val KEYWORD_TIERS: List<Pair<List<String>, Int>> = listOf(
-            // Tier 1 (weight 5): explicit action / deadline signals
-            listOf(
-                "TODO", "todo", "待办", "提醒", "deadline", "截止", "到期",
-                "紧急", "urgent", "ASAP", "尽快",
-            ) to 5,
-            // Tier 2 (weight 3): planning / decision / follow-up context
-            listOf(
-                "计划", "方案", "决定", "会议", "面试", "准备",
-                "需要", "必须", "应该", "接下来", "下一步",
-                "follow up", "action item", "跟进",
-            ) to 3,
-            // Tier 3 (weight 2): project / work context
-            listOf(
-                "项目", "需求", "bug", "修复", "上线", "发布", "部署",
-                "review", "PR", "合并", "测试", "反馈",
-                "报告", "文档", "设计",
-            ) to 2,
-            // Tier 4 (weight 1): general substantive topics
-            listOf(
-                "问题", "分析", "研究", "学习", "总结",
-                "预算", "合同", "客户", "用户",
-            ) to 1,
-        )
     }
+}
+
+internal object ChatHistoryBoardSignalHeuristics {
+    fun relevanceScore(title: String, tailTexts: List<String>, nodeCount: Int): Int? {
+        val fullText = "$title ${tailTexts.joinToString(" ")}"
+        if (looksLikeLowValueTestConversation(fullText)) return null
+
+        var score = 0
+        for ((keywords, weight) in KEYWORD_TIERS) {
+            for (keyword in keywords) {
+                if (containsKeyword(fullText, keyword)) {
+                    score += weight
+                    break
+                }
+            }
+        }
+        if (score < MIN_KEYWORD_SCORE) return null
+
+        when {
+            nodeCount >= 10 -> score += 3
+            nodeCount >= 5 -> score += 2
+            nodeCount >= 3 -> score += 1
+            nodeCount <= 1 && score < STRONG_KEYWORD_THRESHOLD -> return null
+        }
+
+        return score.takeIf { it > 0 }
+    }
+
+    fun looksLikeLowValueTestConversation(text: String): Boolean {
+        return LOW_VALUE_TEST_MARKERS.any { marker ->
+            text.contains(marker, ignoreCase = true)
+        }
+    }
+
+    private fun containsKeyword(text: String, keyword: String): Boolean {
+        if (!keyword.isAsciiWord()) return text.contains(keyword, ignoreCase = true)
+        val pattern = Regex(
+            pattern = "(?<![A-Za-z0-9_])${Regex.escape(keyword)}(?![A-Za-z0-9_])",
+            option = RegexOption.IGNORE_CASE,
+        )
+        return pattern.containsMatchIn(text)
+    }
+
+    private fun String.isAsciiWord(): Boolean =
+        isNotEmpty() && all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '_' }
+
+    private const val MIN_KEYWORD_SCORE = 3
+    private const val STRONG_KEYWORD_THRESHOLD = 5
+
+    private val LOW_VALUE_TEST_MARKERS = listOf(
+        "乱码",
+        "混合语言",
+        "长文生成",
+        "长文对话",
+        "重复 prompt",
+        "重复prompt",
+        "测试 prompt",
+        "测试prompt",
+        "随便测试",
+        "流式渲染长文",
+    )
+
+    private val KEYWORD_TIERS: List<Pair<List<String>, Int>> = listOf(
+        // Explicit action / deadline signals.
+        listOf(
+            "TODO", "todo", "待办", "提醒", "deadline", "截止", "到期",
+            "紧急", "urgent", "ASAP", "尽快",
+            "follow up", "action item", "跟进", "决定", "决策",
+            "bug", "修复", "上线", "发布", "部署",
+        ) to 5,
+        // Planning, meeting, or broader work-progress signals.
+        listOf(
+            "计划", "方案", "会议", "面试", "必须",
+            "接下来", "下一步",
+        ) to 4,
+        // Project/work context; useful only with depth or stronger terms.
+        listOf(
+            "项目", "需求", "review", "PR", "合并", "反馈",
+            "报告", "文档", "设计",
+        ) to 2,
+        // High-value business context, kept weak so it cannot pass alone easily.
+        listOf(
+            "预算", "合同", "客户",
+        ) to 1,
+    )
 }

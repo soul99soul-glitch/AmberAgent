@@ -32,6 +32,8 @@ object BoardPrompt {
             appendLine("## 密度上限")
             appendLine("- action ≤ ${caps.action}，attention ≤ ${caps.attention}，info ≤ ${caps.info}")
             appendLine("- 如果可选条目多于上限，按相关性和紧急度取前 N 条，其余丢弃。")
+            appendLine("- 上限不是配额；没有足够高价值信号时可以少给，甚至输出空数组 `items: []`。")
+            appendLine("- 不要为了填满数量，把普通聊天、测试 prompt 或系统触发信号包装成看板条目。")
             appendLine()
             appendLine("## 规则")
             appendLine("- 不要编造不存在的信号或事实；所有 item 的 source_ref 必须来自下面的信号列表。")
@@ -39,6 +41,8 @@ object BoardPrompt {
             appendLine("- 可以把多个同源信号合并成一条 item（source_ref 填主信号）。")
             appendLine("- 语言一律使用**中文**。")
             appendLine("- 避免空洞建议（\"请关注\"、\"请处理\"），给出具体动作。")
+            appendLine("- `action` 只能用于明确承诺、待办、截止、跟进、bug/项目推进；普通聊天测试不能归为要做的事。")
+            appendLine("- `chat_history` 只用于可延续的真实工作上下文；不要把长文生成测试、乱码/混合语言测试、重复 prompt 当作任务来源。")
             appendLine()
             if (focusRules.isNotEmpty()) {
                 appendLine("## 用户关注点（软提示，非硬过滤）")

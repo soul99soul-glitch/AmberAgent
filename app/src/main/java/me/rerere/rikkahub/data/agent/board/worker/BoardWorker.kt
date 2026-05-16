@@ -57,8 +57,10 @@ class BoardWorker(
             android.util.Log.w("BoardWorker", "collectAll failed", it)
         }
 
-        val scored = aggregator.getFilteredSignals(limit = 200)
+        val batch = aggregator.getFilteredSignalBatch(limit = 200)
+        val scored = batch.surfaced
         if (scored.isEmpty()) {
+            repository.markSignalsProcessed(batch.consideredSignalIds)
             // No board signals, but daily review can still run (app usage, completed items)
             maybeRunDailyReview(boardDate)
             return Result.success()
@@ -73,7 +75,7 @@ class BoardWorker(
 
         when (result) {
             is BoardRunResult.Success -> {
-                repository.markSignalsProcessed(scored.map { it.signal.id })
+                repository.markSignalsProcessed(batch.consideredSignalIds)
                 notifier.notifySuccess(
                     itemCount = result.itemCount,
                     summary = result.summary,
@@ -88,7 +90,7 @@ class BoardWorker(
                 // found nothing board-worthy. Not marking them would cause infinite
                 // re-processing + unbounded table growth (pruneProcessedSignalsBefore
                 // only deletes processed=1 rows).
-                repository.markSignalsProcessed(scored.map { it.signal.id })
+                repository.markSignalsProcessed(batch.consideredSignalIds)
                 pruneOldItems(repository, boardDate)
                 maybeRunDailyReview(boardDate)
                 return Result.success()
