@@ -373,6 +373,13 @@ class CharRevealController internal constructor(
     /** Public for profilers. */
     fun queueDepth(): Int = revealing.size
 
+    /**
+     * Highest absolute text offset that no longer needs per-codepoint
+     * reveal work. Markdown uses this to append old text in one shot
+     * instead of walking the whole streaming answer every frame.
+     */
+    internal fun stableOffsetExclusive(): Int = revealedHead
+
     private data class RevealEntry(
         val startOffset: Int,  // inclusive
         val endOffset: Int,    // exclusive

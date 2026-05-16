@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -446,13 +447,12 @@ fun MarkdownBlock(
 
     val revealController = rememberCharRevealController(
         streaming = streaming,
-        content = content,
+        content = data.preprocessed,
     )
 
     TraceMarkdownComposable("Amber MarkdownBlock render") {
       CompositionLocalProvider(
           LocalMarkdownFillWidth provides fillWidth,
-          LocalCharRevealController provides revealController,
       ) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
@@ -469,13 +469,23 @@ fun MarkdownBlock(
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-                    data.astTree.children.fastForEach { child ->
-                        MarkdownNode(
-                            node = child,
-                            content = data.preprocessed,
-                            modifier = nodeModifier,
-                            onClickCitation = onClickCitation,
-                        )
+                    val children = data.astTree.children
+                    children.fastForEachIndexed { index, child ->
+                        val childRevealController = if (streaming && index == children.lastIndex) {
+                            revealController
+                        } else {
+                            null
+                        }
+                        CompositionLocalProvider(
+                            LocalCharRevealController provides childRevealController,
+                        ) {
+                            MarkdownNode(
+                                node = child,
+                                content = data.preprocessed,
+                                modifier = nodeModifier,
+                                onClickCitation = onClickCitation,
+                            )
+                        }
                     }
                 }
             }
@@ -1188,13 +1198,9 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node is LeafASTNode -> {
-            val text = node.getTextInNode(content).let {
-                if (trim) {
-                    it.trim()
-                } else {
-                    it
-                }.replace(BREAK_LINE_REGEX, "\n")
-            }
+            val rawText = node.getTextInNode(content)
+            val text = (if (trim) rawText.trim() else rawText)
+                .replace(BREAK_LINE_REGEX, "\n")
             // B1 char-reveal: when an active controller is provided AND we
             // have a usable baseColor, split the text by codepoint and
             // wrap each in a SpanStyle whose alpha tracks the reveal
@@ -1202,12 +1208,21 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             // down) falls through to the fast path — visually a no-op
             // because the reveal effect requires color modulation.
             //
-            // Offset accuracy: we use node.startOffset + i. trim/regex
-            // replacement can shift this by a few chars, but the resulting
-            // alpha jitter is invisible inside a 200ms fade.
+            // Offset accuracy: the stable-prefix shortcut is only safe
+            // when this leaf text is byte-for-byte aligned with the AST
+            // source. Trimmed or <br>-collapsed leaves keep the old path.
             if (revealController != null && baseColor != Color.Unspecified) {
                 val baseOffset = node.startOffset
-                var i = 0
+                val canAppendStablePrefix = !trim && text == rawText
+                var i = if (canAppendStablePrefix) {
+                    (revealController.stableOffsetExclusive() - baseOffset)
+                        .coerceIn(0, text.length)
+                } else {
+                    0
+                }
+                if (i > 0) {
+                    append(text, 0, i)
+                }
                 while (i < text.length) {
                     val cp = text.codePointAt(i)
                     val cpLen = Character.charCount(cp)
