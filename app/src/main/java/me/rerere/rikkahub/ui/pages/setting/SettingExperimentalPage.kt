@@ -89,6 +89,7 @@ import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_C
 import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
+import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
 import me.rerere.rikkahub.data.agent.subagent.SubAgentOverride
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
 import me.rerere.rikkahub.data.agent.subagent.applyOverride
@@ -193,6 +194,7 @@ fun SettingExperimentalSubAgentPage(
     val turnOptions = listOf(2, 4, 6, 8)
     val timeoutOptions = listOf(60_000L, 180_000L, DEFAULT_SUB_AGENT_TIMEOUT_MS, 600_000L, EXTENDED_SUB_AGENT_TIMEOUT_MS)
     val budgetOptions = listOf(8_000, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS)
+    val modeOptions = SubAgentMode.entries
     // null sentinel = "follow main assistant"; otherwise pick a specific reasoning level.
     val reasoningOptions: List<ReasoningLevel?> = listOf(null) + ReasoningLevel.entries
 
@@ -242,6 +244,29 @@ fun SettingExperimentalSubAgentPage(
 
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_runtime)) {
+                    SubAgentSelectRow(
+                        label = stringResource(R.string.setting_subagent_mode),
+                        options = modeOptions,
+                        selected = subAgent.mode,
+                        onSelected = { value ->
+                            update { current ->
+                                current.copy(
+                                    mode = value,
+                                    allowDynamicSubAgents = if (value == SubAgentMode.SMART_DYNAMIC) true
+                                    else current.allowDynamicSubAgents,
+                                )
+                            }
+                        },
+                        optionToString = { value ->
+                            when (value) {
+                                SubAgentMode.ROSTER -> stringResource(R.string.setting_subagent_mode_roster)
+                                SubAgentMode.SMART_DYNAMIC -> stringResource(R.string.setting_subagent_mode_smart)
+                            }
+                        },
+                    )
+                    if (subAgent.mode == SubAgentMode.SMART_DYNAMIC) {
+                        ExperimentNote(text = stringResource(R.string.setting_subagent_mode_smart_desc))
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -263,8 +288,9 @@ fun SettingExperimentalSubAgentPage(
                             )
                         }
                         Switch(
-                            checked = subAgent.allowDynamicSubAgents,
+                            checked = subAgent.mode == SubAgentMode.SMART_DYNAMIC || subAgent.allowDynamicSubAgents,
                             onCheckedChange = { checked -> update { it.copy(allowDynamicSubAgents = checked) } },
+                            enabled = subAgent.mode != SubAgentMode.SMART_DYNAMIC,
                         )
                     }
                 }
@@ -316,26 +342,30 @@ fun SettingExperimentalSubAgentPage(
 
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_roles)) {
-                    Text(
-                        text = stringResource(R.string.setting_subagent_roles_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspaceColors().muted,
-                    )
-                    builtIns.forEach { def ->
-                        SubAgentBuiltInRow(
-                            def = def,
-                            override = subAgent.overrides[def.id],
-                            providers = settings.providers,
-                            expanded = expandedRoleId == def.id,
-                            onToggleExpand = {
-                                expandedRoleId = if (expandedRoleId == def.id) null else def.id
-                            },
-                            onMutateOverride = { mutate -> mutateOverride(def.id) { mutate(it) } },
-                            onReset = {
-                                update { current -> current.copy(overrides = current.overrides - def.id) }
-                            },
-                            reasoningOptions = reasoningOptions,
+                    if (subAgent.mode == SubAgentMode.SMART_DYNAMIC) {
+                        ExperimentNote(text = stringResource(R.string.setting_subagent_smart_roles_hidden))
+                    } else {
+                        Text(
+                            text = stringResource(R.string.setting_subagent_roles_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = workspaceColors().muted,
                         )
+                        builtIns.forEach { def ->
+                            SubAgentBuiltInRow(
+                                def = def,
+                                override = subAgent.overrides[def.id],
+                                providers = settings.providers,
+                                expanded = expandedRoleId == def.id,
+                                onToggleExpand = {
+                                    expandedRoleId = if (expandedRoleId == def.id) null else def.id
+                                },
+                                onMutateOverride = { mutate -> mutateOverride(def.id) { mutate(it) } },
+                                onReset = {
+                                    update { current -> current.copy(overrides = current.overrides - def.id) }
+                                },
+                                reasoningOptions = reasoningOptions,
+                            )
+                        }
                     }
                 }
             }

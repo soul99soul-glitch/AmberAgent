@@ -18,7 +18,7 @@ object SubAgentValidator {
     val defaultDynamicReadOnlyTools = setOf(
         "tools_list", "file_list", "file_read", "file_search",
         "conversation_search", "conversation_expand",
-        "session_search",
+        "session_list", "session_search",
         "officepro_status", "officepro_dashboard",
         "search_web", "scrape_web",
         "apps_list", "apps_installed_list", "permissions_status", "skills_list", "mcp_list",
@@ -62,18 +62,35 @@ object SubAgentValidator {
             // but overrides map is keyed by canonical id only.
             val builtIn = SubAgentDefinitions.find(id)
             if (builtIn != null) {
+                require(setting.mode != SubAgentMode.SMART_DYNAMIC) {
+                    "Built-in subagents are disabled in smart dynamic mode; use custom_subagent."
+                }
                 return SubAgentValidationResult(builtIn.applyOverride(setting.overrides[builtIn.id]).cappedBy(setting))
             }
             val custom = setting.customDefinitions.firstOrNull {
                 it.id == id || it.name.equals(id, ignoreCase = true)
             } ?: error("Unknown subagent_id: $id")
-            return SubAgentValidationResult(custom.cappedBy(setting))
+            return SubAgentValidationResult(custom.cappedBy(setting).safeSavedCustomDefinition(setting, availableToolNames))
         }
 
         val custom = input["custom_subagent"]?.jsonObject ?: error("subagent_id or custom_subagent is required")
         require(setting.allowDynamicSubAgents) { "Dynamic subagents are disabled in settings" }
+        val smartMode = setting.mode == SubAgentMode.SMART_DYNAMIC
 
-        val rawName = custom.string("name")
+        val requestedName = custom.stringOrBlank("name")
+        val requestedId = normalizeId(requestedName)
+        val rawName = if (smartMode && (requestedName.isBlank() || requestedId.isBlank() || isGenericName(requestedId))) {
+            SmartSubAgentNames.pick(
+                seed = listOf(
+                    input["task"]?.jsonObject?.stringOrBlank("objective").orEmpty(),
+                    custom.stringOrBlank("description"),
+                    custom.stringOrBlank("system_prompt"),
+                ).joinToString("|")
+            )
+        } else {
+            require(requestedName.isNotBlank()) { "custom_subagent.name is required" }
+            requestedName
+        }
         val id = normalizeId(rawName)
         val description = custom.string("description")
         val systemPrompt = custom.string("system_prompt")
@@ -83,11 +100,14 @@ object SubAgentValidator {
             ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
             ?.filter { it.isNotBlank() }
             ?.toSet()
-        val requestedTools = explicitTools ?: defaultDynamicReadOnlyTools
+            ?.also { validateToolAllowlist(it, availableToolNames) }
+        val toolProfile = parseToolProfile(custom["tool_profile"]?.jsonPrimitive?.contentOrNull)
+        val profileTools = toolProfile.allowedToolNames()
             .filter { it in availableToolNames }
             .toSet()
-        require(requestedTools.isNotEmpty()) {
-            "Dynamic subagent has no available read-only tools"
+        val requestedTools = explicitTools?.let { profileTools.intersect(it) } ?: profileTools
+        require(toolProfile == SubAgentToolProfile.NONE || requestedTools.isNotEmpty()) {
+            "Dynamic subagent has no available tools for profile ${toolProfile.name.lowercase()}"
         }
         validateToolAllowlist(requestedTools, availableToolNames)
 
@@ -138,7 +158,7 @@ object SubAgentValidator {
 
     fun validateNarrowDynamicRole(id: String, description: String, systemPrompt: String) {
         require(id.isNotBlank()) { "custom_subagent.name must produce a non-empty id" }
-        require(genericNameParts.none { id.contains(it, ignoreCase = true) }) {
+        require(!isGenericName(id)) {
             "Dynamic subagent name is too broad: $id"
         }
         require(description.length >= 24 && description.hasInvocationCue()) {
@@ -171,11 +191,58 @@ object SubAgentValidator {
             .replace(Regex("-+"), "-")
             .trim('-')
 
+    private fun isGenericName(id: String): Boolean =
+        genericNameParts.any { id.contains(it, ignoreCase = true) }
+
+    private fun parseToolProfile(value: String?): SubAgentToolProfile {
+        val normalized = value?.trim()?.lowercase().orEmpty()
+        if (normalized.isBlank()) return SubAgentToolProfile.READ_ONLY
+        return SubAgentToolProfile.entries.firstOrNull { profile ->
+            profile.name.equals(normalized, ignoreCase = true) ||
+                profile.name.lowercase() == normalized ||
+                profile.name.lowercase().replace("_", "-") == normalized
+        } ?: error(
+            "custom_subagent.tool_profile must be one of ${
+                SubAgentToolProfile.entries.joinToString { it.name.lowercase() }
+            }; got: $value"
+        )
+    }
+
+    private fun SubAgentToolProfile.allowedToolNames(): Set<String> = when (this) {
+        SubAgentToolProfile.NONE -> emptySet()
+        SubAgentToolProfile.READ_ONLY -> defaultDynamicReadOnlyTools
+        SubAgentToolProfile.WORKSPACE_READ -> setOf(
+            "tools_list", "file_list", "file_read", "file_search",
+        )
+        SubAgentToolProfile.WEB_READ -> setOf(
+            "tools_list", "search_web", "scrape_web",
+        )
+        SubAgentToolProfile.HISTORY_READ -> setOf(
+            "tools_list",
+            "conversation_search", "conversation_expand",
+            "session_list", "session_search",
+        )
+    }
+
     private fun SubAgentDefinition.cappedBy(setting: SubAgentRuntimeSetting) = copy(
         maxTurns = maxTurns.coerceAtMost(setting.maxTurns.coerceAtLeast(1)),
         timeoutMs = timeoutMs.coerceAtMost(setting.timeoutMs.coerceAtLeast(1_000L)),
         outputBudgetChars = outputBudgetChars.coerceAtMost(setting.outputBudgetChars.coerceAtLeast(1_000)),
     )
+
+    private fun SubAgentDefinition.safeSavedCustomDefinition(
+        setting: SubAgentRuntimeSetting,
+        availableToolNames: Set<String>,
+    ): SubAgentDefinition {
+        val availableTools = toolAllowlist.filter { it in availableToolNames }.toSet()
+        validateToolAllowlist(availableTools, availableToolNames)
+        if (setting.mode != SubAgentMode.SMART_DYNAMIC) return copy(toolAllowlist = availableTools)
+        val smartTools = availableTools.intersect(defaultDynamicReadOnlyTools)
+        return copy(
+            toolAllowlist = smartTools,
+            dynamic = true,
+        )
+    }
 
     private fun JsonObject.string(name: String): String =
         this[name]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().also {

@@ -1648,7 +1648,14 @@ fun SubAgentTaskStepView(
     val arguments = remember(anchor.input) { anchor.inputAsJson() }
     val subagentId = arguments.getStringContent("subagent_id") ?: "subagent"
     val def = remember(subagentId) { SubAgentDefinitions.find(subagentId) }
-    val displayName = def?.name ?: subagentId
+    val customName = arguments.jsonObjectOrNull
+        ?.payloadObject("custom_subagent")
+        ?.getStringContent("name")
+        ?.takeIf { it.isNotBlank() }
+    val displayName = extractLatestSubAgentName(step.tools)
+        ?: customName
+        ?: def?.name
+        ?: subagentId
 
     // coalesceSubAgentSteps rebuilds step.tools each render even when contents are identical,
     // so remember(step.tools) wouldn't actually memoize — drop the wrap; the parse is cheap.
@@ -1730,6 +1737,19 @@ private fun parseLatestSubAgentStatus(tools: List<UIMessagePart.Tool>): SubAgent
             ?.let { return it }
     }
     return SubAgentRunStatus.RUNNING
+}
+
+private fun extractLatestSubAgentName(tools: List<UIMessagePart.Tool>): String? {
+    for (tool in tools.asReversed()) {
+        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+            ?: continue
+        val parsed = runCatching {
+            JsonInstant.parseToJsonElement(outputText) as? JsonObject
+        }.getOrNull() ?: continue
+        val name = parsed.getStringContent("subagent_name")
+        if (!name.isNullOrBlank()) return name
+    }
+    return null
 }
 
 private fun SubAgentRunStatus.toAgentToolStatus(): AgentToolStatus = when (this) {

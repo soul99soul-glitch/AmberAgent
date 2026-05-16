@@ -165,6 +165,7 @@ import me.rerere.rikkahub.data.agent.webview.WebViewLink
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatus
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatusKind
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
@@ -2501,12 +2502,14 @@ private fun TextInputRow(
             quickMessages,
             enabledSkills,
             settings.agentRuntime.subAgent.enabled,
+            settings.agentRuntime.subAgent.mode,
             settings.agentRuntime.modelCouncil.enabled,
         ) {
             buildSlashCommandItems(
                 quickMessages = quickMessages,
                 enabledSkills = enabledSkills,
                 subAgentEnabled = settings.agentRuntime.subAgent.enabled,
+                subAgentMode = settings.agentRuntime.subAgent.mode,
             )
         }
         val slashCommands = remember(allSlashCommands, slashQuery) {
@@ -2600,6 +2603,8 @@ private fun TextInputRow(
         val mentionMatches = mentionState?.takeIf { mentionVisible }?.let { activeMention ->
             remember(
                 settings.agentRuntime.subAgent.enabled,
+                settings.agentRuntime.subAgent.mode,
+                settings.agentRuntime.subAgent.customDefinitions,
                 settings.agentRuntime.modelCouncil.enabled,
                 activeMention.query,
             ) {
@@ -2607,6 +2612,8 @@ private fun TextInputRow(
                     items = buildMentionRoleItems(
                         subAgentEnabled = settings.agentRuntime.subAgent.enabled,
                         modelCouncilEnabled = settings.agentRuntime.modelCouncil.enabled,
+                        subAgentMode = settings.agentRuntime.subAgent.mode,
+                        customSubAgents = settings.agentRuntime.subAgent.customDefinitions,
                     ),
                     query = activeMention.query,
                 )
@@ -2926,6 +2933,7 @@ private fun buildSlashCommandItems(
     quickMessages: List<QuickMessage>,
     enabledSkills: List<SkillMetadata>,
     subAgentEnabled: Boolean,
+    subAgentMode: SubAgentMode,
 ): List<SlashCommandItem> = buildList {
     add(
         SlashCommandItem(
@@ -2950,8 +2958,13 @@ private fun buildSlashCommandItems(
                 title = "subagent",
                 description = "引导 Agent 按任务需要灵活使用 SubAgent",
                 action = SlashCommandAction.InsertText(
-                    "请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；" +
-                        "等待它们返回后，再综合成一个可执行的结论："
+                    if (subAgentMode == SubAgentMode.SMART_DYNAMIC) {
+                        "请根据这个任务的复杂度，判断是否需要临时创建合适的英文名 SubAgent；" +
+                            "为它设计清晰 prompt、边界和只读工具范围，等待返回后再综合结论："
+                    } else {
+                        "请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；" +
+                            "等待它们返回后，再综合成一个可执行的结论："
+                    }
                 ),
             )
         )

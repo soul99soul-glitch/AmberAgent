@@ -64,6 +64,7 @@ class AgentToolDispatcher(
         autoApproveTools: Boolean,
         autoApproveHighRiskTools: Boolean = false,
         autoApprovedToolNames: Set<String> = emptySet(),
+        invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
         prefetchedTools: Map<String, UIMessagePart.Tool> = emptyMap(),
         retrySetting: GenerationRetrySetting = GenerationRetrySetting(enabled = false),
     ): List<UIMessagePart.Tool> {
@@ -84,6 +85,7 @@ class AgentToolDispatcher(
                             autoApproveTools = autoApproveTools,
                             autoApproveHighRiskTools = autoApproveHighRiskTools,
                             autoApprovedToolNames = autoApprovedToolNames,
+                            invocationContext = invocationContext,
                             retrySetting = retrySetting,
                         )
                     }
@@ -98,6 +100,7 @@ class AgentToolDispatcher(
                     autoApproveTools = autoApproveTools,
                     autoApproveHighRiskTools = autoApproveHighRiskTools,
                     autoApprovedToolNames = autoApprovedToolNames,
+                    invocationContext = invocationContext,
                     retrySetting = retrySetting,
                 )?.let { executed += it }
             }

@@ -29,6 +29,7 @@ class SpeculativeToolRunner(
     private val scope: CoroutineScope,
     private val dispatcher: AgentToolDispatcher,
     private val maxConcurrentTools: Int = 4,
+    private val invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
 ) {
     private val states = ConcurrentHashMap<String, SpeculativeToolState>()
     private val jobs = ConcurrentHashMap<String, Deferred<UIMessagePart.Tool?>>()
@@ -58,6 +59,7 @@ class SpeculativeToolRunner(
                             toolDef = toolDefinitions[tool.toolName],
                             autoApproveTools = false,
                             autoApproveHighRiskTools = false,
+                            invocationContext = invocationContext,
                         )
                     }.fold(
                         onSuccess = { result ->

@@ -1037,6 +1037,10 @@
   <string name="setting_subagent_title">子代理实验模式</string>
   <string name="setting_subagent_desc">让主 Agent 为边界清楚的子任务启动隔离子代理。包含多模型审议（Council）。</string>
   <string name="setting_subagent_section_runtime">运行</string>
+  <string name="setting_subagent_mode">模式</string>
+  <string name="setting_subagent_mode_roster">固定角色</string>
+  <string name="setting_subagent_mode_smart">智能模式</string>
+  <string name="setting_subagent_mode_smart_desc">主 Agent 会按任务临时创建英文名子代理。普通内置角色会隐藏；Council 仍然可用。</string>
   <string name="setting_subagent_enabled">启用子代理</string>
   <string name="setting_subagent_enabled_desc">向主 Agent 暴露 subagent_* 工具。子代理固定深度 1，互相隔离。</string>
   <string name="setting_subagent_dynamic">允许动态角色</string>
@@ -1052,6 +1056,7 @@
   <string name="setting_subagent_output_budget_desc">返回给主 Agent 的结果文本上限。</string>
   <string name="setting_subagent_section_roles">内置角色</string>
   <string name="setting_subagent_roles_desc">每个角色是一个特化子代理，可单独选择模型，混搭快/便宜与强/慢。</string>
+  <string name="setting_subagent_smart_roles_hidden">智能模式下，普通内置角色不再暴露给主 Agent。用户保存的自定义角色和 Council 仍然保留。</string>
   <string name="setting_subagent_section_custom">自定义角色</string>
   <string name="setting_subagent_role_model">模型</string>
   <string name="setting_subagent_role_reasoning">推理强度</string>

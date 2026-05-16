@@ -15,6 +15,7 @@ const val EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS = 200_000
 @Serializable
 data class SubAgentRuntimeSetting(
     val enabled: Boolean = false,
+    val mode: SubAgentMode = SubAgentMode.ROSTER,
     val allowDynamicSubAgents: Boolean = true,
     val maxConcurrentRuns: Int = DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS,
     val timeoutMs: Long = DEFAULT_SUB_AGENT_TIMEOUT_MS,
@@ -32,6 +33,33 @@ data class SubAgentRuntimeSetting(
      */
     val customDefinitions: List<SubAgentDefinition> = emptyList(),
 )
+
+@Serializable
+enum class SubAgentMode {
+    @SerialName("roster")
+    ROSTER,
+
+    @SerialName("smart_dynamic")
+    SMART_DYNAMIC,
+}
+
+@Serializable
+enum class SubAgentToolProfile {
+    @SerialName("none")
+    NONE,
+
+    @SerialName("read_only")
+    READ_ONLY,
+
+    @SerialName("workspace_read")
+    WORKSPACE_READ,
+
+    @SerialName("web_read")
+    WEB_READ,
+
+    @SerialName("history_read")
+    HISTORY_READ,
+}
 
 /**
  * Partial override for a built-in role. Only non-null fields override the built-in default.

@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data.agent.runtime
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
@@ -9,6 +11,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.tools.ToolInvocationPolicy
 import me.rerere.rikkahub.data.agent.tools.ToolRisk
 import me.rerere.rikkahub.data.agent.tools.invocationPolicy
+import me.rerere.rikkahub.utils.JsonInstant
 import java.util.UUID
 
 enum class PermissionDecisionAction {
@@ -133,10 +136,10 @@ class PermissionDecisionResolver {
             return decision(PermissionDecisionAction.ASK, "ask_user always needs a human answer.", "hitl", policy)
         }
         if (invocationContext == ToolInvocationContext.SubAgent) {
-            if (tool.toolName in HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT) {
+            if (tool.toolName in HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT && tool.hasSessionGrant()) {
                 // Historian subagent's whole job is reading history; it has no channel
-                // back to the user to ask for approval, so a Sensitive-risk session_read
-                // would otherwise hang the run. Pre-approved here.
+                // back to the user to ask for approval. Only pre-approve when the
+                // manager already minted a bounded SessionAccessGrant for this run.
                 return decision(
                     PermissionDecisionAction.ALLOW,
                     "Historian subagent pre-approved for read-only history tool.",
@@ -145,6 +148,19 @@ class PermissionDecisionResolver {
                 )
             }
             if (policy.requiresSubAgentApproval()) {
+                if (
+                    autoApproveTools &&
+                    autoApproveHighRiskTools &&
+                    tool.toolName != ASK_USER_TOOL_NAME &&
+                    (policy.risk == ToolRisk.High || policy.mandatoryApproval)
+                ) {
+                    return decision(
+                        PermissionDecisionAction.ALLOW,
+                        "Sub Agent approval was bypassed by explicit high-risk auto-approval settings.",
+                        "settings_high_risk_subagent",
+                        policy,
+                    )
+                }
                 return decision(PermissionDecisionAction.ASK, "Sub Agent context cannot silently run this tool.", "subagent", policy)
             }
         }
@@ -182,6 +198,15 @@ class PermissionDecisionResolver {
 
     private fun ToolInvocationPolicy.requiresSubAgentApproval(): Boolean =
         mutates || risk != ToolRisk.Normal || category in setOf("screen", "terminal", "system", "external_file", "office")
+
+    private fun UIMessagePart.Tool.hasSessionGrant(): Boolean =
+        runCatching {
+            (JsonInstant.parseToJsonElement(input.ifBlank { "{}" }) as? JsonObject)
+                ?.get("grant_id")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.isNotBlank() == true
+        }.getOrDefault(false)
 }
 
 /**

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,6 +47,83 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun smartModeRejectsBuiltInSubagentId() {
+        val input = inputWithSubagentId("explorer")
+
+        val error = runCatching {
+            SubAgentValidator.resolveDefinition(
+                input,
+                setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+                setOf("file_read"),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("disabled in smart dynamic mode"))
+    }
+
+    @Test
+    fun rosterModeAllowsBuiltInSubagentId() {
+        val input = inputWithSubagentId("explorer")
+
+        val result = SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
+
+        assertEquals("explorer", result.definition.id)
+    }
+
+    @Test
+    fun smartModeAssignsEnglishNameWhenNameMissing() {
+        val input = inputWithCustomSubagent(name = null)
+
+        val result = SubAgentValidator.resolveDefinition(
+            input,
+            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            setOf("file_read"),
+        )
+
+        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun smartModeReplacesGenericNameInsteadOfFailing() {
+        val input = inputWithCustomSubagent(name = "General Helper")
+
+        val result = SubAgentValidator.resolveDefinition(
+            input,
+            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            setOf("file_read"),
+        )
+
+        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+        assertFalse(result.definition.id.contains("general"))
+    }
+
+    @Test
+    fun smartModeSavedCustomRoleIsReducedToReadOnlyDynamicTools() {
+        val saved = SubAgentDefinition(
+            id = "saved-reviewer",
+            name = "Saved Reviewer",
+            description = "Use when a saved reviewer should inspect a focused issue.",
+            systemPrompt = "Boundaries: do not edit files. Report output as findings with evidence.",
+            toolAllowlist = setOf("file_read", "terminal_execute"),
+        )
+        val smartSetting = setting.copy(
+            mode = SubAgentMode.SMART_DYNAMIC,
+            customDefinitions = listOf(saved),
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = inputWithSubagentId("saved-reviewer"),
+            setting = smartSetting,
+            availableToolNames = setOf("file_read", "terminal_execute"),
+        )
+
+        assertEquals(setOf("file_read"), result.definition.toolAllowlist)
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
     fun dynamicRoleDefaultsToAvailableReadOnlyTools() {
         val input = inputWithCustomSubagent()
 
@@ -66,6 +144,67 @@ class SubAgentValidatorTest {
 
         assertEquals(setOf("file_read", "file_search", "session_search"), result.definition.toolAllowlist)
         assertTrue(result.definition.dynamic)
+    }
+
+    @Test
+    fun dynamicRoleToolProfileNarrowsToWebRead() {
+        val input = inputWithCustomSubagent(
+            toolProfile = "web_read",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = setOf("tools_list", "file_read", "search_web", "scrape_web"),
+        )
+
+        assertEquals(setOf("tools_list", "search_web", "scrape_web"), result.definition.toolAllowlist)
+    }
+
+    @Test
+    fun dynamicRoleToolAllowlistCannotEscapeProfile() {
+        val input = inputWithCustomSubagent(
+            toolProfile = "web_read",
+            toolAllowlist = listOf("search_web", "terminal_execute"),
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = setOf("search_web", "terminal_execute"),
+        )
+
+        assertEquals(setOf("search_web"), result.definition.toolAllowlist)
+    }
+
+    @Test
+    fun dynamicRoleToolProfileNoneAllowsNoTools() {
+        val input = inputWithCustomSubagent(
+            toolProfile = "none",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = setOf("file_read"),
+        )
+
+        assertEquals(emptySet<String>(), result.definition.toolAllowlist)
+    }
+
+    @Test
+    fun dynamicHistoryProfileDoesNotIncludeFullReadTools() {
+        val input = inputWithCustomSubagent(
+            toolProfile = "history_read",
+        )
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
+            availableToolNames = setOf("session_list", "session_search", "session_read", "session_expand"),
+        )
+
+        assertEquals(setOf("session_list", "session_search"), result.definition.toolAllowlist)
     }
 
     @Test
@@ -140,19 +279,21 @@ class SubAgentValidatorTest {
     }
 
     private fun inputWithCustomSubagent(
-        name: String = "Focused Code Reviewer",
+        name: String? = "Focused Code Reviewer",
+        toolProfile: String? = null,
         toolAllowlist: List<String>? = null,
         maxTurns: Int? = null,
         timeoutMs: Long? = null,
         outputBudgetChars: Int? = null,
     ) = buildJsonObject {
         put("custom_subagent", buildJsonObject {
-            put("name", name)
+            name?.let { put("name", it) }
             put("description", "Use when a narrow read-only code review is needed for a specific file or behavior.")
             put(
                 "system_prompt",
                 "You are a narrow reviewer. Boundaries: do not edit files, do not spawn agents, and do not use tools outside the allowlist. Report output as summary, findings, evidence, risks, and next steps."
             )
+            toolProfile?.let { put("tool_profile", it) }
             toolAllowlist?.let { tools ->
                 put("tool_allowlist", buildJsonArray {
                     tools.forEach { add(JsonPrimitive(it)) }
@@ -162,6 +303,16 @@ class SubAgentValidatorTest {
             timeoutMs?.let { put("timeout_ms", it) }
             outputBudgetChars?.let { put("output_budget_chars", it) }
         })
+        put("task", buildJsonObject {
+            put("objective", "Review one issue")
+            put("output_format", "Findings with evidence")
+            put("tools_and_sources", "Use the listed tools only")
+            put("boundaries", "Do not edit files")
+        })
+    }
+
+    private fun inputWithSubagentId(id: String) = buildJsonObject {
+        put("subagent_id", id)
         put("task", buildJsonObject {
             put("objective", "Review one issue")
             put("output_format", "Findings with evidence")
