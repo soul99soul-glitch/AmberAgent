@@ -47,11 +47,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -264,18 +264,22 @@ internal data class OffsetMappingEntry(
     val annotatedEnd: Int,
 )
 
+private data class AnnotatedOffsetRange(
+    val start: Int,
+    val endExclusive: Int,
+)
+
 /**
  * Binary-searches [map] for the entry containing [contentOffset] and
- * returns the interpolated AnnotatedString position. Falls back to
- * [contentOffset] itself when the map is empty or the offset falls
- * outside all entries — safe because the mask simply won't draw for
- * out-of-range offsets.
+ * returns the interpolated AnnotatedString position, or null if the
+ * offset falls outside all mapped entries (i.e. belongs to a different
+ * paragraph / block). Callers MUST skip masking for null returns.
  */
 private fun mapContentToAnnotated(
     map: List<OffsetMappingEntry>,
     contentOffset: Int,
-): Int {
-    if (map.isEmpty()) return contentOffset
+): Int? {
+    if (map.isEmpty()) return null
     var lo = 0
     var hi = map.lastIndex
     while (lo <= hi) {
@@ -294,7 +298,56 @@ private fun mapContentToAnnotated(
             }
         }
     }
-    return contentOffset
+    return null
+}
+
+private fun mapContentRangeToAnnotated(
+    map: List<OffsetMappingEntry>,
+    contentStart: Int,
+    contentEnd: Int,
+): AnnotatedOffsetRange? {
+    if (map.isEmpty() || contentStart >= contentEnd) return null
+
+    var lo = 0
+    var hi = map.lastIndex
+    var index = map.size
+    while (lo <= hi) {
+        val mid = (lo + hi) ushr 1
+        if (map[mid].contentEnd > contentStart) {
+            index = mid
+            hi = mid - 1
+        } else {
+            lo = mid + 1
+        }
+    }
+
+    var annotatedStart: Int? = null
+    var annotatedEndExclusive: Int? = null
+    var i = index
+    while (i < map.size) {
+        val entry = map[i]
+        if (entry.contentStart >= contentEnd) break
+
+        val overlapStart = maxOf(contentStart, entry.contentStart)
+        val overlapEnd = minOf(contentEnd, entry.contentEnd)
+        if (overlapStart < overlapEnd) {
+            val start = mapContentToAnnotated(map, overlapStart)
+            val end = mapContentToAnnotated(map, overlapEnd - 1)
+            if (start != null && end != null) {
+                if (annotatedStart == null) annotatedStart = start
+                annotatedEndExclusive = end + 1
+            }
+        }
+        i++
+    }
+
+    val start = annotatedStart ?: return null
+    val endExclusive = annotatedEndExclusive ?: return null
+    return if (start < endExclusive) {
+        AnnotatedOffsetRange(start, endExclusive)
+    } else {
+        null
+    }
 }
 
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
@@ -1259,43 +1312,69 @@ private fun Paragraph(
     }
 
     // TextLayoutResult is needed to convert offsets to pixel rects
-    // for the draw-time mask. Updated only when layout changes.
-    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // for the draw-time mask. NOT keyed to annotatedString — resetting
+    // to null on every content change causes one frame without mask,
+    // which produces visible flicker during streaming. Instead we let
+    // onTextLayout naturally replace the stale layout. For the one frame
+    // where layout is stale, coerceIn keeps getPathForRange safe.
+    var textLayoutResult by remember {
+        mutableStateOf<TextLayoutResult?>(null)
+    }
 
     // Build the draw-time reveal mask modifier. Only active when a
     // reveal controller is present (streaming paragraph).
     // Pitfall notes:
-    //   - CompositingStrategy.Offscreen is REQUIRED for BlendMode.DstOut
-    //     to work correctly (坑1). Without it, the blend operates on the
-    //     parent canvas, not the text layer, producing black outlines.
+    //   - We use Canvas.saveLayer instead of graphicsLayer(Offscreen)
+    //     because graphicsLayer creates a persistent RenderNode whose
+    //     offscreen buffer may not invalidate cleanly when the draw
+    //     lambda reads nowNanos every frame — causing flicker.
     //   - DstOut semantics: dst.α' = dst.α × (1 − src.α). To hide text
     //     at maskAlpha=0.7, we draw src with alpha=0.7 → text becomes
     //     30% visible. maskAlpha from controller IS already (1 − reveal).
     //   - getPathForRange handles multi-line wrap, surrogate pairs,
-    //     bidirectional text, and Placeholder inline content correctly
-    //     (坑3, 坑4). It allocates a Path per call but the queue is small.
+    //     bidirectional text, and Placeholder inline content correctly.
+    //   - mapContentToAnnotated returns null for entries outside this
+    //     paragraph's source range — we skip those entirely.
     val revealModifier = if (revealController != null) {
-        Modifier
-            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-            .drawWithContent {
+        Modifier.drawWithContent {
+            val layout = textLayoutResult
+            if (layout == null) {
                 drawContent()
-                val layout = textLayoutResult ?: return@drawWithContent
-                val textLength = layout.layoutInput.text.length
-                revealController.forEachMaskEntry { contentStart, contentEnd, maskAlpha ->
-                    val aStart = mapContentToAnnotated(offsetMap, contentStart)
-                        .coerceIn(0, textLength)
-                    val aEnd = (mapContentToAnnotated(offsetMap, contentEnd - 1) + 1)
-                        .coerceIn(0, textLength)
-                    if (aStart >= aEnd) return@forEachMaskEntry
-                    val path = layout.multiParagraph.getPathForRange(aStart, aEnd)
-                    drawPath(
-                        color = Color.Black,
-                        path = path,
-                        alpha = maskAlpha,
-                        blendMode = BlendMode.DstOut,
-                    )
-                }
+                return@drawWithContent
             }
+            // Manually manage offscreen buffer: draw text into it,
+            // apply DstOut mask, then composite back. This avoids the
+            // graphicsLayer RenderNode caching issue.
+            val paint = Paint()
+            drawContext.canvas.saveLayer(
+                Rect(0f, 0f, size.width, size.height),
+                paint
+            )
+            drawContent()
+            val textLength = layout.layoutInput.text.length
+            val paragraphContentStart = offsetMap.firstOrNull()?.contentStart ?: 0
+            val paragraphContentEnd = offsetMap.lastOrNull()?.contentEnd ?: 0
+            revealController.forEachMaskEntry { contentStart, contentEnd, maskAlpha ->
+                // Clip reveal entry to this paragraph's mapped source range.
+                val visibleStart = maxOf(contentStart, paragraphContentStart)
+                val visibleEnd = minOf(contentEnd, paragraphContentEnd)
+                if (visibleStart >= visibleEnd) return@forEachMaskEntry
+
+                val annotatedRange = mapContentRangeToAnnotated(offsetMap, visibleStart, visibleEnd)
+                    ?: return@forEachMaskEntry
+                val aEndExclusive = annotatedRange.endExclusive.coerceIn(0, textLength)
+                val aStartClamped = annotatedRange.start.coerceIn(0, textLength)
+                if (aStartClamped >= aEndExclusive) return@forEachMaskEntry
+                val path = layout.multiParagraph.getPathForRange(aStartClamped, aEndExclusive)
+                drawPath(
+                    color = Color.Black,
+                    path = path,
+                    alpha = maskAlpha,
+                    blendMode = BlendMode.DstOut,
+                )
+            }
+            drawContext.canvas.restore()
+        }
     } else Modifier
 
     FlowRow(
@@ -1421,10 +1500,14 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
 
         node.type == GFMTokenTypes.GFM_AUTOLINK -> {
             val link = node.getTextInNode(content)
+            val aStart = this@appendMarkdownNodeContent.length
             withLink(openUrlLinkAnnotation(link, onClickUrl)) {
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                     append(link)
                 }
+            }
+            if (offsetMap != null && link.isNotEmpty()) {
+                offsetMap.add(OffsetMappingEntry(node.startOffset, node.endOffset, aStart, this@appendMarkdownNodeContent.length))
             }
         }
 
@@ -1510,13 +1593,15 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         node.type == MarkdownElementTypes.INLINE_LINK -> {
             val linkDest =
                 node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
-            val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content)
+            val linkTextNode = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
+            val linkText = linkTextNode?.getTextInNode(content)
                 ?.trim { it == '[' || it == ']' } ?: linkDest
             if (linkText.startsWith("citation,")) {
                 // 如果是引用，则特殊处理
                 val domain = linkText.substringAfter("citation,")
                 val id = linkDest
                 if (id.length == 6) {
+                    val aStart = this@appendMarkdownNodeContent.length
                     inlineContents.putIfAbsent(
                         "citation:$linkDest", InlineTextContent(
                             placeholder = Placeholder(
@@ -1548,8 +1633,17 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                             })
                     )
                     appendInlineContent("citation:$linkDest")
+                    if (offsetMap != null) {
+                        val textNodeRange = linkTextNode?.let { it.startOffset..it.endOffset }
+                            ?: (node.startOffset..node.endOffset)
+                        offsetMap.add(OffsetMappingEntry(
+                            textNodeRange.first, textNodeRange.last,
+                            aStart, this@appendMarkdownNodeContent.length,
+                        ))
+                    }
                 }
             } else {
+                val aStart = this@appendMarkdownNodeContent.length
                 withLink(openUrlLinkAnnotation(linkDest, onClickUrl)) {
                     withStyle(
                         SpanStyle(
@@ -1559,22 +1653,36 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         append(linkText)
                     }
                 }
+                if (offsetMap != null && linkText.isNotEmpty()) {
+                    val textNodeRange = linkTextNode?.let { it.startOffset..it.endOffset }
+                        ?: (node.startOffset..node.endOffset)
+                    offsetMap.add(OffsetMappingEntry(
+                        textNodeRange.first, textNodeRange.last,
+                        aStart, this@appendMarkdownNodeContent.length,
+                    ))
+                }
             }
         }
 
         node.type == MarkdownElementTypes.AUTOLINK -> {
             val links = node.children.trim(MarkdownTokenTypes.LT, 1).trim(MarkdownTokenTypes.GT, 1)
             links.fastForEach { link ->
-                withLink(openUrlLinkAnnotation(link.getTextInNode(content), onClickUrl)) {
+                val linkText = link.getTextInNode(content)
+                val aStart = this@appendMarkdownNodeContent.length
+                withLink(openUrlLinkAnnotation(linkText, onClickUrl)) {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                        append(link.getTextInNode(content))
+                        append(linkText)
                     }
+                }
+                if (offsetMap != null && linkText.isNotEmpty()) {
+                    offsetMap.add(OffsetMappingEntry(link.startOffset, link.endOffset, aStart, this@appendMarkdownNodeContent.length))
                 }
             }
         }
 
         node.type == MarkdownElementTypes.CODE_SPAN -> {
             val code = node.getTextInNode(content).trim('`')
+            val aStart = this@appendMarkdownNodeContent.length
             withStyle(
                 SpanStyle(
                     fontFamily = FontFamily.Monospace,
@@ -1584,12 +1692,16 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             ) {
                 append(code)
             }
+            if (offsetMap != null && code.isNotEmpty()) {
+                offsetMap.add(OffsetMappingEntry(node.startOffset, node.endOffset, aStart, this@appendMarkdownNodeContent.length))
+            }
         }
 
         node.type == GFMElementTypes.INLINE_MATH -> {
+            val formula = node.getTextInNode(content)
+            val aStart = this@appendMarkdownNodeContent.length
             if (enableLatexRendering) {
                 // formula as id
-                val formula = node.getTextInNode(content)
                 appendInlineContent(formula, "[Latex]")
                 val (width, height) = with(density) {
                     assumeLatexSize(
@@ -1609,7 +1721,6 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 )
             } else {
                 // 禁用 LaTeX 渲染时，以等宽字体显示原始公式
-                val formula = node.getTextInNode(content)
                 withStyle(
                     SpanStyle(
                         fontFamily = FontFamily.Monospace,
@@ -1618,6 +1729,9 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 ) {
                     append(formula)
                 }
+            }
+            if (offsetMap != null && formula.isNotEmpty()) {
+                offsetMap.add(OffsetMappingEntry(node.startOffset, node.endOffset, aStart, this@appendMarkdownNodeContent.length))
             }
         }
 
