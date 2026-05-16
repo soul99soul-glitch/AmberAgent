@@ -159,7 +159,7 @@ class SubAgentManager(
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
             val result = runCatching {
                 withTimeout(definition.timeoutMs) {
-                    runner.run(settings, effectiveDefinition, effectiveTask, allowedTools, liveText)
+                    runner.run(settings, effectiveDefinition, effectiveTask, scopedSubAgentTools(allowedTools), liveText)
                 }
             }.fold(
                 onSuccess = { it },
@@ -171,7 +171,7 @@ class SubAgentManager(
                     )
                 }
             )
-            finish(runId, result)
+            finish(runId, result, displayText = liveText.value)
         }
 
         runToPayload(run)
@@ -286,7 +286,7 @@ class SubAgentManager(
         }
     }
 
-    private fun finish(runId: String, result: SubAgentResult) {
+    private fun finish(runId: String, result: SubAgentResult, displayText: String = "") {
         val runtimeRun = runs[runId] ?: return
         val current = runtimeRun.snapshot
         if (!current.status.running) return
@@ -294,6 +294,7 @@ class SubAgentManager(
         val next = current.copy(
             status = status,
             result = result,
+            displayText = displayText.ifBlank { current.displayText },
             updatedAtMs = Instant.now().toEpochMilli(),
         )
         runtimeRun.snapshot = next
@@ -306,7 +307,7 @@ class SubAgentManager(
                 cancelCapability = false,
             )
         }
-        appendEvent(runtimeRun, "finished", runToPayload(next))
+        appendEvent(runtimeRun, "finished", runToPayload(next, includeDisplayText = true))
     }
 
     private fun readMissingRun(runId: String): JsonObject {
@@ -332,20 +333,8 @@ class SubAgentManager(
         File(runtimeRun.snapshot.transcriptPath).appendText(line.toString() + "\n")
     }
 
-    private fun runToPayload(run: SubAgentRun): JsonObject = buildJsonObject {
-        put("status", run.status.name.lowercase())
-        put("run_id", run.runId)
-        put("subagent_id", run.definition.id)
-        put("subagent_name", run.definition.name)
-        put("dynamic", run.definition.dynamic)
-        put("transcript_path", run.transcriptPath)
-        put("started_at_ms", run.startedAtMs)
-        put("updated_at_ms", run.updatedAtMs)
-        put("definition", json.encodeToString(run.definition))
-        put("task", json.encodeToString(run.task))
-        run.task.sessionGrantId.takeIf { it.isNotBlank() }?.let { put("session_grant_id", it) }
-        run.result?.let { put("result", json.encodeToString(it)) }
-    }
+    private fun runToPayload(run: SubAgentRun, includeDisplayText: Boolean = false): JsonObject =
+        subAgentRunToPayload(run, json, includeDisplayText)
 
     private fun errorPayload(code: String, message: String): JsonObject = buildJsonObject {
         put("status", "failed")
@@ -403,5 +392,28 @@ class SubAgentManager(
 
         /** Soft cap on how many run-text flows we keep around. Plenty for normal use. */
         const val LIVE_TEXT_CAP = 64
+    }
+}
+
+internal fun subAgentRunToPayload(
+    run: SubAgentRun,
+    json: Json,
+    includeDisplayText: Boolean = false,
+): JsonObject = buildJsonObject {
+    put("status", run.status.name.lowercase())
+    put("run_id", run.runId)
+    put("subagent_id", run.definition.id)
+    put("subagent_name", run.definition.name)
+    put("dynamic", run.definition.dynamic)
+    put("transcript_path", run.transcriptPath)
+    put("started_at_ms", run.startedAtMs)
+    put("updated_at_ms", run.updatedAtMs)
+    put("definition", json.encodeToString(run.definition))
+    put("task", json.encodeToString(run.task))
+    run.task.sessionGrantId.takeIf { it.isNotBlank() }?.let { put("session_grant_id", it) }
+    run.result?.let { put("result", json.encodeToString(it)) }
+    if (run.displayText.isNotBlank()) {
+        put("display_text_chars", run.displayText.length)
+        if (includeDisplayText) put("display_text", run.displayText)
     }
 }

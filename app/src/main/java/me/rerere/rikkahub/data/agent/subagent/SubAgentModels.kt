@@ -173,6 +173,7 @@ data class SubAgentResult(
     val findings: List<String> = emptyList(),
     val evidence: List<String> = emptyList(),
     val risks: List<String> = emptyList(),
+    val confidence: String = "",
     @SerialName("recommended_next_steps")
     val recommendedNextSteps: List<String> = emptyList(),
     val error: String = "",
@@ -188,6 +189,8 @@ data class SubAgentRun(
     val task: SubAgentTaskSpec,
     val status: SubAgentRunStatus,
     val result: SubAgentResult? = null,
+    @SerialName("display_text")
+    val displayText: String = "",
     @SerialName("transcript_path")
     val transcriptPath: String,
     @SerialName("started_at_ms")

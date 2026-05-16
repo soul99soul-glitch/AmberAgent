@@ -49,7 +49,9 @@ class GenerationSubAgentRunner(
             ?: error("Current chat model is not configured")
         val assistant = settings.getCurrentAssistant().toIsolatedSubAgentAssistant(definition)
         val messages = listOf(UIMessage.user(buildTaskPrompt(definition, task)))
+        val reportCapture = SubAgentReportCapture()
         var latest = messages
+        var supervisorDisplayText = ""
 
         generationHandler.generateText(
             settings = isolatedSettings,
@@ -57,7 +59,7 @@ class GenerationSubAgentRunner(
             messages = messages,
             assistant = assistant,
             memories = emptyList(),
-            tools = tools,
+            tools = tools + reportCapture.tool(),
             maxSteps = definition.maxTurns,
             processingStatus = MutableStateFlow("SubAgent ${definition.id}"),
             autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls,
@@ -78,6 +80,9 @@ class GenerationSubAgentRunner(
             }
         }
 
+        supervisorDisplayText = renderAssistantTranscriptForDisplay(latest).take(definition.outputBudgetChars)
+        if (supervisorDisplayText.isNotBlank()) liveText.value = supervisorDisplayText
+
         val pendingTool = latest.lastOrNull()?.getTools()
             ?.firstOrNull { it.approvalState is ToolApprovalState.Pending }
         if (pendingTool != null) {
@@ -89,15 +94,41 @@ class GenerationSubAgentRunner(
             )
         }
 
-        val text = latest.lastOrNull()?.toText().orEmpty().take(definition.outputBudgetChars)
+        if (!reportCapture.hasReport) {
+            latest = latest + UIMessage.user(
+                """
+                Internal supervisor reminder: call `${SUBAGENT_REPORT_TOOL_NAME}` now with the compact structured result.
+                The report tool is injected directly into this subagent run and may not appear in tools_list/catalog output.
+                Do not repeat the full visible answer; keep any final text short.
+                """.trimIndent()
+            )
+            generationHandler.generateText(
+                settings = isolatedSettings,
+                model = model,
+                messages = latest,
+                assistant = assistant,
+                memories = emptyList(),
+                tools = tools + reportCapture.tool(),
+                maxSteps = SUBAGENT_REPORT_RETRY_STEPS,
+                processingStatus = MutableStateFlow("SubAgent ${definition.id} report"),
+                autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls,
+                autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
+                invocationContext = ToolInvocationContext.SubAgent,
+                conversation = null,
+            ).collect { chunk ->
+                if (chunk is GenerationChunk.Messages) {
+                    latest = chunk.messages
+                }
+            }
+        }
+
+        val finalDisplayText = supervisorDisplayText
+            .ifBlank { renderAssistantTranscriptForDisplay(latest).take(definition.outputBudgetChars) }
         // Final write to liveText so a sheet opened/refreshed AFTER completion still shows the
-        // canonical answer (the in-loop renderer above includes reasoning prefix; once we know
-        // the run finished cleanly the user wants the clean text only).
-        if (text.isNotBlank()) liveText.value = text
-        return SubAgentResult(
-            status = SubAgentRunStatus.COMPLETED,
-            summary = text.ifBlank { "Subagent completed without text output." },
-        )
+        // human-facing answer. A report-only retry is intentionally not allowed to replace the
+        // user's visible transcript with internal reminder chatter.
+        if (finalDisplayText.isNotBlank()) liveText.value = finalDisplayText
+        return reportCapture.resultOrFallback(finalDisplayText)
     }
 
     /**
@@ -124,6 +155,14 @@ class GenerationSubAgentRunner(
         }
     }
 
+    private fun renderAssistantTranscriptForDisplay(messages: List<UIMessage>): String =
+        messages
+            .filter { it.role == MessageRole.ASSISTANT }
+            .map { it.toText().trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString("\n\n")
+
     private fun buildTaskPrompt(definition: SubAgentDefinition, task: SubAgentTaskSpec): String = """
         You are running as subagent `${definition.id}`.
 
@@ -143,6 +182,12 @@ class GenerationSubAgentRunner(
         ${task.context.ifBlank { "(none)" }}
 
         ${historyGrantPrompt(task)}
+
+        Subagent reporting:
+        - Keep writing normal Markdown for the human live panel; do not print JSON or machine-only wrappers.
+        - Before you finish, call `${SUBAGENT_REPORT_TOOL_NAME}` once with the compact result the supervisor should consume: summary, findings, evidence, risks, recommended_next_steps, and confidence.
+        - `${SUBAGENT_REPORT_TOOL_NAME}` is an internal injected tool for this subagent run. It may not appear in tools_list or tool catalog output; use it anyway when you are done.
+        - The report tool is not the human-facing answer. It is the structured channel back to the main agent.
 
         Return only the useful result for the supervisor. Do not ask the user follow-up questions.
     """.trimIndent()
@@ -202,3 +247,5 @@ internal fun Settings.toIsolatedSubAgentSettings(): Settings = copy(
         speculativeToolExecution = agentRuntime.speculativeToolExecution.copy(enabled = false),
     )
 )
+
+private const val SUBAGENT_REPORT_RETRY_STEPS = 2
