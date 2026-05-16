@@ -43,8 +43,35 @@ import androidx.compose.runtime.withFrameNanos
 // returns the same alpha — Compose Text deduplicates adjacent spans
 // with identical SpanStyle so this is cheap.
 
-/** Default fade-in window for newly-arrived words. ~12 frames @60Hz. */
-private const val DEFAULT_REVEAL_DURATION_MS = 200L
+/**
+ * Reveal-speed presets, modeled after the smooth-streaming-rendering
+ * guide §4 / LobeHub `useSmoothStreamContent`. baseRevealDurationMs is
+ * the fade window used when the queue is small (queueDepth ≤
+ * SOFT_BACKPRESSURE_BACKLOG); under heavier load the controller
+ * linearly shortens the effective duration toward 0 (instant) — see
+ * [CharRevealController.effectiveRevealDurationNanos].
+ */
+enum class StreamRevealPreset(val baseRevealDurationMs: Long) {
+    /** Snappy: ~120ms fade. Closest to "no animation but with a soft edge". */
+    REALTIME(120L),
+
+    /** Default. ~200ms — 12 frames @60Hz, matches the original B1 tuning. */
+    BALANCED(200L),
+
+    /** Slow + cinematic. ~320ms — feels deliberate, good for long replies. */
+    SILKY(320L),
+}
+
+/** Active preset for the descendant subtree. */
+val LocalStreamRevealPreset = compositionLocalOf { StreamRevealPreset.BALANCED }
+
+/**
+ * Backlog threshold where the soft backpressure ramp begins. Below
+ * this the controller honors the preset's full reveal duration. Above
+ * this the duration scales linearly down toward [BACKLOG_DEGRADE]
+ * where it hits 0 (instant).
+ */
+private const val SOFT_BACKPRESSURE_BACKLOG = 30
 
 /**
  * If the unfinished-reveal queue exceeds this many entries the model is
@@ -53,6 +80,15 @@ private const val DEFAULT_REVEAL_DURATION_MS = 200L
  * case ≈ 50 entries within one fade window.
  */
 private const val BACKLOG_DEGRADE = 80
+
+/** Linear backpressure floor: at BACKLOG_DEGRADE the effective duration
+ * is this fraction of the preset's base. Below SOFT_BACKPRESSURE_BACKLOG
+ * the factor is 1.0; the ramp lerps between them.
+ *
+ * 0.30 means a 200ms preset compresses to 60ms at queueDepth=80 — fast
+ * enough to catch up, slow enough that the fade is still visible.
+ */
+private const val BACKPRESSURE_DURATION_FLOOR = 0.30f
 
 /**
  * EWMA-smoothed FPS below which we drop the fade animation entirely.
@@ -74,6 +110,30 @@ private const val FPS_EWMA_DENOMINATOR = 8
 class CharRevealController internal constructor(
     private val revealDurationNanos: Long,
 ) {
+    /**
+     * Linearly shortens the fade window when the queue is backed up,
+     * borrowed from LobeHub `useStreamQueue`'s `1 + queueLength × 0.3`
+     * acceleration. Returns:
+     *  - revealDurationNanos      when depth ≤ SOFT_BACKPRESSURE_BACKLOG
+     *  - revealDurationNanos × FLOOR  when depth ≥ BACKLOG_DEGRADE
+     *  - linear interp in between
+     *
+     * `shouldDegrade` still trips at BACKLOG_DEGRADE and bypasses the
+     * fade entirely (alpha jumps to 1f); this function exists for the
+     * smooth ramp before that hard cliff.
+     */
+    private fun effectiveRevealDurationNanos(): Long {
+        val depth = revealing.size
+        if (depth <= SOFT_BACKPRESSURE_BACKLOG) return revealDurationNanos
+        if (depth >= BACKLOG_DEGRADE) {
+            return (revealDurationNanos * BACKPRESSURE_DURATION_FLOOR).toLong()
+        }
+        val ratio = (depth - SOFT_BACKPRESSURE_BACKLOG).toFloat() /
+            (BACKLOG_DEGRADE - SOFT_BACKPRESSURE_BACKLOG).toFloat()
+        val scale = 1f - ratio * (1f - BACKPRESSURE_DURATION_FLOOR)
+        return (revealDurationNanos * scale).toLong()
+    }
+
     // Highest offset whose codepoint is fully revealed (alpha == 1f).
     // Below this is the fast path — no per-codepoint alpha computation.
     private var revealedHead: Int = 0
@@ -160,10 +220,13 @@ class CharRevealController internal constructor(
         }
 
         nowNanos = frameNanos
-        // Promote entries whose age has crossed the reveal window.
+        // Promote entries whose age has crossed the (backpressure-
+        // adjusted) reveal window. Effective duration is recomputed
+        // each frame because queue depth changes as we promote.
         while (revealing.isNotEmpty()) {
+            val effective = effectiveRevealDurationNanos()
             val head = revealing.first()
-            if (frameNanos - head.appearNanos >= revealDurationNanos) {
+            if (frameNanos - head.appearNanos >= effective) {
                 revealedHead = maxOf(revealedHead, head.endOffset)
                 revealing.removeFirst()
             } else {
@@ -270,6 +333,8 @@ class CharRevealController internal constructor(
     fun alphaAt(absoluteOffset: Int): Float {
         if (absoluteOffset < revealedHead) return 1f
         if (absoluteOffset >= contentLength) return 0f
+        val effective = effectiveRevealDurationNanos()
+        if (effective <= 0L) return 1f
         // Linear search within the active queue. Entries are appended
         // in monotonically-increasing offset order, so once we pass an
         // entry whose startOffset already exceeds the lookup, nothing
@@ -279,8 +344,8 @@ class CharRevealController internal constructor(
             if (absoluteOffset in entry.startOffset until entry.endOffset) {
                 val age = nowNanos - entry.appearNanos
                 if (age <= 0L) return 0f
-                if (age >= revealDurationNanos) return 1f
-                return age.toFloat() / revealDurationNanos.toFloat()
+                if (age >= effective) return 1f
+                return age.toFloat() / effective.toFloat()
             }
         }
         // Fall-through: shouldn't happen if onContentChanged was called
@@ -382,11 +447,11 @@ val LocalCharRevealController = compositionLocalOf<CharRevealController?> { null
 fun rememberCharRevealController(
     streaming: Boolean,
     content: String,
-    revealDurationMs: Long = DEFAULT_REVEAL_DURATION_MS,
+    preset: StreamRevealPreset = LocalStreamRevealPreset.current,
 ): CharRevealController? {
     if (!streaming) return null
-    val controller = remember(revealDurationMs) {
-        CharRevealController(revealDurationNanos = revealDurationMs * 1_000_000L)
+    val controller = remember(preset) {
+        CharRevealController(revealDurationNanos = preset.baseRevealDurationMs * 1_000_000L)
     }
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(controller) {
