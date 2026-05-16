@@ -193,6 +193,8 @@ private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineMessageInnerSpacing = 4.dp
+private val AgentWorkingIndicatorReserveHeight = 56.dp
+private val AgentWorkingIndicatorBottomOffset = 8.dp
 private val TimelineSelectionToolbarOffset = 56.dp
 private const val MarkdownPrewarmBeforeItems = 4
 private const val MarkdownPrewarmAfterItems = 8
@@ -317,6 +319,45 @@ private fun TimelineHistoryLoadingIndicator(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun AgentWorkingIndicator(
+    processingStatus: String?,
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = workspace.paper,
+        contentColor = workspace.muted,
+        tonalElevation = 0.dp,
+        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, workspace.hairline),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PigLoadingIndicator(
+                modifier = Modifier.size(24.dp)
+            )
+            AnimatedVisibility(
+                visible = processingStatus != null,
+            ) {
+                Text(
+                    text = processingStatus ?: "",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 220.dp),
+                )
+            }
         }
     }
 }
@@ -944,6 +985,7 @@ private fun ChatListNormal(
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
+    val showPinnedAgentWorkingIndicator = loading && followMode == TimelineFollowMode.FollowingBottom
     val chatAssistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
@@ -1568,33 +1610,15 @@ private fun ChatListNormal(
                     key = LoadingIndicatorKey,
                     contentType = "loading",
                 ) {
-                    Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = workspace.paper,
-                            contentColor = workspace.muted,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 1.dp,
-                            border = BorderStroke(1.dp, workspace.hairline),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                PigLoadingIndicator(
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                AnimatedVisibility(
-                                    visible = processingStatus != null,
-                                ) {
-                                    Text(
-                                        text = processingStatus ?: "",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = workspace.muted,
-                                    )
-                                }
-                            }
+                    if (showPinnedAgentWorkingIndicator) {
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(AgentWorkingIndicatorReserveHeight)
+                        )
+                    } else {
+                        Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
+                            AgentWorkingIndicator(processingStatus = processingStatus)
                         }
                     }
                 }
@@ -1618,6 +1642,8 @@ private fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            val captureProgress = LocalScrollCaptureInProgress.current
+
             // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,
@@ -1638,6 +1664,18 @@ private fun ChatListNormal(
                     .padding(top = 8.dp, end = 8.dp)
                     .zIndex(10f),
             )
+
+            AnimatedVisibility(
+                visible = showPinnedAgentWorkingIndicator && !captureProgress,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = AgentWorkingIndicatorBottomOffset)
+                    .zIndex(6f),
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                AgentWorkingIndicator(processingStatus = processingStatus)
+            }
 
             // 完成选择
             AnimatedVisibility(
@@ -1717,8 +1755,6 @@ private fun ChatListNormal(
                 selectedMessages = conversation.messageNodes.filter { it.id in selectedItems }
                     .map { it.currentMessage }
             )
-
-            val captureProgress = LocalScrollCaptureInProgress.current
 
             // 消息快速跳转
             MessageJumper(
