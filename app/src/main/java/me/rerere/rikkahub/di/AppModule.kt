@@ -13,9 +13,6 @@ import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnAdapter
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnClient
 import me.rerere.rikkahub.data.agent.webmount.adapters.hackernews.HnTools
@@ -66,7 +63,6 @@ import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
 import me.rerere.rikkahub.data.agent.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
-import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
@@ -116,22 +112,6 @@ val appModule = module {
 
     single {
         WorkspaceTools(get(), get())
-    }
-
-    single {
-        ICloudDriveCookieProvider()
-    }
-
-    single {
-        ICloudDriveClient(get(), get())
-    }
-
-    single {
-        ICloudDriveManager(get(), get(), get())
-    }
-
-    single {
-        ICloudDriveTools(get(), get())
     }
 
     // WebMount Stations (experimental, Phase 1).
