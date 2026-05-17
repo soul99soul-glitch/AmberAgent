@@ -45,6 +45,30 @@ class ToolSearchTest {
         assertEquals(0, payload["matches_count"]!!.jsonPrimitive.contentOrNull!!.toInt())
         assertTrue(payload["category_candidates"]!!.jsonArray.isNotEmpty())
         assertTrue(payload["debug_hint"]!!.jsonPrimitive.contentOrNull!!.contains("tools_list"))
+        assertTrue(payload["debug_hint"]!!.jsonPrimitive.contentOrNull!!.contains("tool_search"))
+    }
+
+    @Test
+    fun searchMatchesChineseAliasesForCommonCapabilities() {
+        val registry = ToolRegistry.from(
+            listOf(
+                tool("screen_screenshot", "Capture one screen frame for VLM reasoning."),
+                tool("screen_click", "Tap screen coordinates."),
+                tool("feishu_docs_snapshot", "Read current Feishu document page structure."),
+                tool("subagent_start", "Start a subagent."),
+                tool("terminal_execute", "Execute a shell command."),
+            )
+        )
+
+        fun expanded(query: String): List<String> =
+            ToolSearchIndex(registry).searchPayload(query, null, 1)["expanded_tools"]!!.jsonArray
+                .mapNotNull { it.jsonPrimitive.contentOrNull }
+
+        assertEquals(listOf("screen_screenshot"), expanded("截图"))
+        assertEquals(listOf("screen_click"), expanded("点击屏幕"))
+        assertEquals(listOf("feishu_docs_snapshot"), expanded("飞书云文档"))
+        assertEquals(listOf("subagent_start"), expanded("子代理"))
+        assertEquals(listOf("terminal_execute"), expanded("终端命令"))
     }
 
     @Test
@@ -112,6 +136,30 @@ class ToolSearchTest {
         )
 
         assertTrue("hidden_tool_7" in exposure.toolsForStep().map { it.name })
+    }
+
+    @Test
+    fun toolsListOutputDoesNotExposeHiddenTools() {
+        val hiddenTools = (0 until 45).map { tool("hidden_tool_$it", "Hidden capability $it") }
+        val exposure = ToolExposureState.from(
+            hiddenTools + tool("file_read", "Read workspace file.") + tool(TOOL_SEARCH_TOOL_NAME) + tool("tools_list")
+        )
+
+        assertTrue(exposure.enabled)
+        assertFalse("hidden_tool_7" in exposure.toolsForStep().map { it.name })
+
+        exposure.observeExecutedTools(
+            listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "list-1",
+                    toolName = "tools_list",
+                    input = "{}",
+                    output = listOf(UIMessagePart.Text("""{"tools":[{"name":"hidden_tool_7"}]}""")),
+                )
+            )
+        )
+
+        assertFalse("hidden_tool_7" in exposure.toolsForStep().map { it.name })
     }
 
     @Test

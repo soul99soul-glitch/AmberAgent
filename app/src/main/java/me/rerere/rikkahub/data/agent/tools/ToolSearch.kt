@@ -30,7 +30,7 @@ fun createToolSearchTool(registry: ToolRegistry) = Tool(
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("query", stringProp("Required. What capability you need, e.g. \"read PDF\", \"call Feishu MCP\", \"webview click\", or \"list calendar\"."))
+                put("query", stringProp("Required. What capability you need, e.g. \"read PDF\", \"call Feishu MCP\", \"webview click\", \"截图\", or an exact tool name from tools_list."))
                 put("category", stringProp("Optional category filter, e.g. workspace, terminal, web, webview, webmount, screen, system, memory, context, subagent, model_council, mcp, office, skill."))
                 put("limit", buildJsonObject {
                     put("type", "integer")
@@ -55,7 +55,8 @@ fun createToolSearchTool(registry: ToolRegistry) = Tool(
         Tool discovery:
         - This run has ${registry.metadata.size} generated tools across categories: $categories.
         - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
-        - `tools_list` is a debug/catalog view; prefer `$TOOL_SEARCH_TOOL_NAME` for ordinary tool discovery when the catalog is large.
+        - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
+        - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
         - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
         """.trimIndent()
     },
@@ -101,6 +102,7 @@ class ToolSearchIndex(
             })
             put("matches_count", matches.size)
             put("expanded_tools", buildJsonArray { expandedTools.forEach(::add) })
+            put("callability_note", "Only tools in expanded_tools are newly callable on the next model step. tools_list is catalog/debug only and does not expose hidden schemas.")
             put("trace", buildJsonObject {
                 put("mode", if (registry.metadata.size > TOOL_SEARCH_AUTO_THRESHOLD) "lazy" else "bypass")
                 put("query", query)
@@ -124,9 +126,9 @@ class ToolSearchIndex(
                             })
                         }
                 })
-                put("debug_hint", "No matching tool was expanded. Try a more concrete query or call tools_list(category=..., include_schema=false) for a catalog view.")
+                put("debug_hint", "No matching tool was expanded. Try a more concrete Chinese/English query, or use tools_list only to identify an exact tool name and then call tool_search(query=\"<exact_tool_name>\").")
             } else {
-                put("next_step", "The tools in expanded_tools are available with full schemas on the next model step. Execute them normally; permissions still apply.")
+                put("next_step", "On the next model step, call one of expanded_tools exactly. Do not call tools only seen in tools_list unless you first expose them with tool_search(query=\"<exact_tool_name>\"). Permissions still apply.")
             }
         }
     }
@@ -136,7 +138,8 @@ class ToolSearchIndex(
         category: String?,
         limit: Int,
     ): List<ScoredTool> {
-        val tokens = query.lowercase(Locale.ROOT)
+        val normalizedQuery = query.trim().lowercase(Locale.ROOT)
+        val tokens = normalizedQuery
             .split(Regex("""\s+"""))
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -146,7 +149,7 @@ class ToolSearchIndex(
             .filter { category == null || it.category.lowercase(Locale.ROOT) == category }
             .mapNotNull { metadata ->
                 val tool = toolsByName[metadata.name] ?: return@mapNotNull null
-                val score = scoreTool(metadata, tool, tokens, category)
+                val score = scoreTool(metadata, tool, normalizedQuery, tokens, category)
                 if (score <= 0) null else ScoredTool(metadata, tool, score)
             }
             .sortedWith(compareByDescending<ScoredTool> { it.score }.thenBy { it.metadata.name })
@@ -157,6 +160,7 @@ class ToolSearchIndex(
     private fun scoreTool(
         metadata: ToolMetadata,
         tool: Tool,
+        query: String,
         tokens: List<String>,
         category: String?,
     ): Int {
@@ -166,6 +170,8 @@ class ToolSearchIndex(
         val name = metadata.name.lowercase(Locale.ROOT)
         val description = tool.description.lowercase(Locale.ROOT)
         val categoryText = metadata.category.lowercase(Locale.ROOT)
+        if (query == name) score += 240
+        if (tokens.any { it == name }) score += 180
         tokens.forEach { token ->
             score += when {
                 name == token -> 120
@@ -177,9 +183,52 @@ class ToolSearchIndex(
                 else -> 0
             }
         }
+        searchAliases(metadata).forEach { alias ->
+            val normalizedAlias = alias.lowercase(Locale.ROOT)
+            score += when {
+                query == normalizedAlias -> 100
+                query.contains(normalizedAlias) -> 55
+                normalizedAlias.contains(query) && query.length >= 2 -> 32
+                tokens.any { it == normalizedAlias } -> 80
+                tokens.any { normalizedAlias.contains(it) && it.length >= 2 } -> 24
+                else -> 0
+            }
+        }
         if (tokens.any { token -> name.split('_').contains(token) }) score += 30
         if (score > 0 && !metadata.mutates && metadata.risk == ToolRisk.Normal) score += 2
         return score
+    }
+
+    private fun searchAliases(metadata: ToolMetadata): List<String> = buildList {
+        val name = metadata.name
+        val category = metadata.category
+        when {
+            name == "screen_screenshot" -> addAll(listOf("截图", "截屏", "屏幕截图", "看屏幕", "screenshot"))
+            name == "screen_read_ui" -> addAll(listOf("读屏幕", "读取屏幕", "ui 树", "UI 树", "当前页面", "看页面"))
+            name.startsWith("screen_click") || name.startsWith("screen_tap") -> addAll(listOf("点击", "点一下", "点击屏幕", "tap"))
+            name.startsWith("screen_") -> addAll(listOf("屏幕", "手机屏幕", "滑动", "输入"))
+        }
+        if (name.startsWith("wm_") || category.contains("webmount")) {
+            addAll(listOf("网页", "浏览器", "webview", "WebView", "webmount", "打开网页", "点击网页", "读取网页"))
+        }
+        if (name.startsWith("feishu_docs_") || category.contains("feishu")) {
+            addAll(listOf("飞书", "云文档", "飞书云文档", "wiki", "知识库", "文档", "表格", "会议纪要"))
+        }
+        if (name.startsWith("subagent_")) {
+            addAll(listOf("子代理", "subagent", "副 agent", "副代理"))
+        }
+        if (name.startsWith("model_council_")) {
+            addAll(listOf("议会", "多模型", "council", "模型会议"))
+        }
+        if (name.startsWith("file_")) {
+            addAll(listOf("文件", "工作区", "搜索文件", "读文件", "写文件"))
+        }
+        if (name.startsWith("terminal_")) {
+            addAll(listOf("终端", "命令", "脚本", "运行命令", "terminal"))
+        }
+        if (name.startsWith("mcp_") || category == "mcp") {
+            addAll(listOf("mcp", "MCP", "外部工具"))
+        }
     }
 
     private fun ScoredTool.toJson(): JsonObject = buildJsonObject {

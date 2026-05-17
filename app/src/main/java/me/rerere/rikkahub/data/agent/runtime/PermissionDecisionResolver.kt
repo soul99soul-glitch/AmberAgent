@@ -102,7 +102,12 @@ class PermissionDecisionResolver {
             return PermissionDecision(action, reason, source, trace)
         }
         if (toolDef == null) {
-            return decision(PermissionDecisionAction.DENY, "Tool not found.", "tool_lookup", null)
+            return decision(
+                PermissionDecisionAction.DENY,
+                "Tool not found or not exposed. If this tool came from tools_list, call tool_search with query=\"${tool.toolName}\" first, then retry.",
+                "tool_lookup",
+                null
+            )
         }
         val policy = toolDef.invocationPolicy(tool.input)
         if (tool.approvalState !is ToolApprovalState.Auto) {

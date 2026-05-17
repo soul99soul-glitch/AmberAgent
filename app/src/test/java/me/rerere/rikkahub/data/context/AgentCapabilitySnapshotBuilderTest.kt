@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.agent.task.AgentTaskRecoveryState
 import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
 import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
 import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -34,6 +35,9 @@ class AgentCapabilitySnapshotBuilderTest {
         assertTrue(snapshot.contains("terminal_job_start"))
         assertTrue(snapshot.contains("task-1 · terminal · running · retryable"))
         assertTrue(snapshot.contains("output readable"))
+        assertTrue(snapshot.contains("Use tool_search to expose callable schemas"))
+        assertTrue(snapshot.contains("tools_list is catalog/debug only"))
+        assertFalse(snapshot.contains("Use tools_list for exact tool metadata"))
         assertTrue(snapshot.contains("truncated=false"))
     }
 

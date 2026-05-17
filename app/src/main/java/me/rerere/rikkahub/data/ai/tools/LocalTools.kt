@@ -30,6 +30,7 @@ import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
+import me.rerere.rikkahub.data.agent.tools.ToolExposureState
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
@@ -891,7 +892,7 @@ class LocalTools(
 
     fun createToolsListTool(registry: ToolRegistry) = Tool(
         name = "tools_list",
-        description = "List AmberAgent tools currently available in this run, including category, approval policy, permission needs, and optional schema.",
+        description = "Debug/catalog view of AmberAgent's full tool catalog. In lazy mode, hidden tools listed here are not callable until exposed by tool_search.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -931,6 +932,9 @@ class LocalTools(
             val payload = buildJsonObject {
                 put("enabled_count", tools.size)
                 put("include_disabled_supported", false)
+                put("catalog_mode", "debug")
+                put("callability_note", "This is a full catalog/debug view. In lazy tool mode, hidden tools listed here are not callable until tool_search exposes their schemas.")
+                put("next_action", "To call a non-resident tool from this list, call tool_search with query set to the exact tool name, then call it on the next model step.")
                 if (includeDisabled) {
                     put("note", "Disabled tool enumeration is not available in stage1 because tools are generated from the current agent configuration.")
                 }
@@ -948,6 +952,7 @@ class LocalTools(
                                     put("category", metadata.category)
                                     put("description", tool?.description.orEmpty().take(240))
                                     put("enabled", true)
+                                    put("resident", ToolExposureState.isResidentTool(metadata.name, metadata.category))
                                     put("mutates", metadata.mutates)
                                     put("sensitive_read", metadata.sensitiveRead)
                                     put("needs_approval", metadata.needsApproval)

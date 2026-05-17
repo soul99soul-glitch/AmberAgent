@@ -48,7 +48,7 @@ class AgentCapabilitySnapshotBuilder(
             $boundarySummary
 
             Skills and workflows:
-            Use tools_list for exact tool metadata. OfficePro, Skills, MCP, Sub Agent, Model Council and Cron are visible only when their tools appear above.
+            Use tool_search to expose callable schemas for hidden tools. tools_list is catalog/debug only and does not make hidden tools callable. OfficePro, Skills, MCP, Sub Agent, Model Council and Cron are visible only when their tools appear above.
 
             Background tasks:
             $taskSummary

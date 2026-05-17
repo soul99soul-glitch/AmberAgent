@@ -42,6 +42,21 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
+    fun missingToolExplainsToolSearchRecovery() {
+        val decision = resolver.resolve(
+            toolDef = null,
+            tool = toolCall("screen_screenshot"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+
+        assertEquals(PermissionDecisionAction.DENY, decision.action)
+        assertEquals("tool_lookup", decision.source)
+        assertTrue(decision.reason.contains("tool_search"))
+        assertTrue(decision.reason.contains("screen_screenshot"))
+    }
+
+    @Test
     fun subAgentCanUseHighRiskAutoApprovalWhenExplicitlyEnabled() {
         val decision = resolver.resolve(
             toolDef = approvalTool("http_request"),
