@@ -77,8 +77,17 @@ class LocalTools(
 
     val askUserTool by lazy { createAskUserTool() }
 
-    fun toolsListTool(registry: ToolRegistry): Tool =
-        createToolsListTool(registry, permissionBroker)
+    /**
+     * Registry-introspection tools — the pair (`tools_list`, `tool_policy_explain`)
+     * that lets the model enumerate or probe the runtime tool catalog. Built per
+     * call because each `getTools(...)` invocation produces a fresh registry; the
+     * pair is returned together because ChatService always wires them in the same
+     * place and they share the same registry argument.
+     */
+    fun registryIntrospectionTools(registry: ToolRegistry): List<Tool> = listOf(
+        createToolsListTool(registry, permissionBroker),
+        createToolPolicyExplainTool(registry),
+    )
 
     private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker) }
 

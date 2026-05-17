@@ -69,7 +69,6 @@ import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagementTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
-import me.rerere.rikkahub.data.ai.tools.createToolPolicyExplainTool
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
@@ -1991,8 +1990,7 @@ class ChatService(
         }
         val baseRegistry = ToolRegistry.from(rawTools)
         val baseTools = baseRegistry.tools() +
-            localTools.toolsListTool(baseRegistry) +
-            createToolPolicyExplainTool(baseRegistry)
+            localTools.registryIntrospectionTools(baseRegistry)
         val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
             rawTools + SubAgentTools(
                 subAgentManager = subAgentManager,
@@ -2012,8 +2010,7 @@ class ChatService(
         }
         val registry = ToolRegistry.from(finalRawTools)
         val tools = registry.tools() +
-            localTools.toolsListTool(registry) +
-            createToolPolicyExplainTool(registry)
+            localTools.registryIntrospectionTools(registry)
         return tools.scopedToConversation(conversationId)
     }
 
