@@ -940,41 +940,7 @@ class LocalTools(
         )
     }
 
-    private val runPlanUpdateTool by lazy {
-        Tool(
-            name = "run_plan_update",
-            description = "Update the current long-task step summary for Agent UI, preview surfaces, and live status. Use concise user-visible step names.",
-            parameters = {
-                InputSchema.Obj(
-                    properties = buildJsonObject {
-                        put("steps", buildJsonObject {
-                            put("type", "array")
-                            put("description", "Ordered task steps")
-                            put("items", buildJsonObject { put("type", "string") })
-                        })
-                        put("current_step_index", buildJsonObject {
-                            put("type", "integer")
-                            put("description", "0-based current step index")
-                        })
-                        put("status", buildJsonObject {
-                            put("type", "string")
-                            put("description", "planning, running, waiting, completed, failed, or cancelled")
-                        })
-                    },
-                    required = listOf("steps", "status")
-                )
-            },
-            execute = { input ->
-                val payload = buildJsonObject {
-                    put("status", input.jsonObject["status"] ?: JsonPrimitive("running"))
-                    put("current_step_index", input.jsonObject["current_step_index"] ?: JsonPrimitive(0))
-                    put("steps", input.jsonObject["steps"] ?: buildJsonArray {})
-                    put("note", "Plan state was accepted by the tool layer. UI live rendering is stage1 and uses the normal tool timeline.")
-                }
-                listOf(UIMessagePart.Text(payload.toString()))
-            }
-        )
-    }
+    private val runPlanUpdateTool by lazy { createRunPlanUpdateTool() }
 
     /**
      * Build a fresh `generate_image` tool bound to [conversationId]. Each
