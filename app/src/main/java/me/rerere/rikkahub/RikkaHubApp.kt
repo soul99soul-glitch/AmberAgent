@@ -40,6 +40,7 @@ import me.rerere.rikkahub.di.memoryModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.webMountModule
 import me.rerere.rikkahub.di.viewModelModule
+import me.rerere.rikkahub.di.workspaceModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
@@ -74,7 +75,7 @@ class RikkaHubApp : Application() {
             androidLogger()
             androidContext(this@RikkaHubApp)
             workManagerFactory()
-            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, viewModelModule, dataSourceModule, repositoryModule)
+            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
 
