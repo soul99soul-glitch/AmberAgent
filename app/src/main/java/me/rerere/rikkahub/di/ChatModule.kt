@@ -2,6 +2,7 @@ package me.rerere.rikkahub.di
 
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.PendingMessageStore
+import me.rerere.rikkahub.service.UserInputPreprocessor
 import me.rerere.rikkahub.service.orchestrator.BranchMessageOrchestrator
 import me.rerere.rikkahub.service.orchestrator.RegenerateMessageOrchestrator
 import me.rerere.rikkahub.service.orchestrator.SendMessageOrchestrator
@@ -24,6 +25,8 @@ val chatModule = module {
             json = get(),
         )
     }
+
+    single { UserInputPreprocessor(settingsStore = get()) }
 
     single {
         ChatService(
@@ -52,6 +55,7 @@ val chatModule = module {
             sessionAccessGrantStore = get(),
             memoryExtractor = get(),
             pendingMessageStore = get(),
+            userInputPreprocessor = get(),
         )
     }
 

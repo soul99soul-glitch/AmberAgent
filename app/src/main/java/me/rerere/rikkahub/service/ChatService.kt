@@ -111,8 +111,6 @@ import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
@@ -204,6 +202,7 @@ class ChatService(
     private val sessionAccessGrantStore: SessionAccessGrantStore,
     private val memoryExtractor: MemoryExtractor,
     private val pendingMessageStore: PendingMessageStore,
+    private val userInputPreprocessor: UserInputPreprocessor,
 ) {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -557,7 +556,7 @@ class ChatService(
         if (content.isEmptyInputMessage()) return
 
         val session = getOrCreateSession(conversationId)
-        val processedContent = preprocessUserInputParts(content)
+        val processedContent = userInputPreprocessor.process(content)
         val pendingMessage = PendingUserMessage(
             id = Uuid.random().toString(),
             parts = processedContent,
@@ -810,24 +809,6 @@ class ChatService(
         }
     }
 
-    private fun preprocessUserInputParts(parts: List<UIMessagePart>): List<UIMessagePart> {
-        val assistant = settingsStore.settingsFlow.value.getCurrentAssistant()
-        return parts.map { part ->
-            when (part) {
-                is UIMessagePart.Text -> {
-                    part.copy(
-                        text = part.text.replaceRegexes(
-                            assistant = assistant,
-                            scope = AssistantAffectScope.USER,
-                            visual = false
-                        )
-                    )
-                }
-
-                else -> part
-            }
-        }
-    }
 
     // ---- 重新生成消息 ----
 
@@ -1749,7 +1730,7 @@ class ChatService(
         parts: List<UIMessagePart>
     ) {
         if (parts.isEmptyInputMessage()) return
-        val processedParts = preprocessUserInputParts(parts)
+        val processedParts = userInputPreprocessor.process(parts)
 
         val currentConversation = ensureFullConversationLoaded(conversationId)
         var edited = false
