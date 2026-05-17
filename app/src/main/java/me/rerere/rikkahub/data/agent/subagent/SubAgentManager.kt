@@ -316,7 +316,7 @@ class SubAgentManager(
             buildJsonObject {
                 put("status", SubAgentRunStatus.INTERRUPTED.name.lowercase())
                 put("run_id", runId)
-                put("transcript_path", transcript.absolutePath)
+                put("transcript_available", true)
                 put("error", "Subagent run is no longer active in memory.")
             }
         } else {
@@ -405,11 +405,9 @@ internal fun subAgentRunToPayload(
     put("subagent_id", run.definition.id)
     put("subagent_name", run.definition.name)
     put("dynamic", run.definition.dynamic)
-    put("transcript_path", run.transcriptPath)
+    put("task_objective", run.task.objective.take(1_000))
     put("started_at_ms", run.startedAtMs)
     put("updated_at_ms", run.updatedAtMs)
-    put("definition", json.encodeToString(run.definition))
-    put("task", json.encodeToString(run.task))
     run.task.sessionGrantId.takeIf { it.isNotBlank() }?.let { put("session_grant_id", it) }
     run.result?.let { put("result", json.encodeToString(it)) }
     if (run.displayText.isNotBlank()) {

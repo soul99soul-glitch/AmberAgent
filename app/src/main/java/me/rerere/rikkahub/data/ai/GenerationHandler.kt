@@ -172,7 +172,11 @@ class GenerationHandler(
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
-            val hasResumableTools = messages.lastOrNull()?.getTools()?.any { it.canResumeExecution } == true
+            val pendingTools = messages.lastOrNull()?.getTools()?.filter {
+                it.canResumeExecution
+            } ?: emptyList()
+            toolExposure.exposeToolNames(pendingTools.map { it.toolName })
+            val hasResumableTools = pendingTools.isNotEmpty()
             val directWidgetRequested =
                 GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(settings.agentRuntime.generativeUi, messages)
             val toolsInternal = buildList {
@@ -195,11 +199,6 @@ class GenerationHandler(
             } else {
                 null
             }
-
-            // Check if we have tool calls ready to continue after user interaction.
-            val pendingTools = messages.lastOrNull()?.getTools()?.filter {
-                it.canResumeExecution
-            } ?: emptyList()
 
             val toolsToProcess: List<UIMessagePart.Tool>
 

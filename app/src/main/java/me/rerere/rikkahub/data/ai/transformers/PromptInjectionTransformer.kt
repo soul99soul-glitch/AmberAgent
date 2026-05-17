@@ -148,18 +148,28 @@ internal fun applyInjections(
         val afterContent = byPosition[InjectionPosition.AFTER_SYSTEM_PROMPT]
             ?.joinToString("\n") { it.content } ?: ""
 
-        val combinedContent = buildString {
-            if (beforeContent.isNotEmpty()) {
-                append(beforeContent)
-            }
-            if (afterContent.isNotEmpty()) {
-                if (isNotEmpty()) appendLine()
-                append(afterContent)
-            }
-        }
-
-        if (combinedContent.isNotEmpty()) {
-            result.add(0, UIMessage.system(combinedContent))
+        if (beforeContent.isNotEmpty() || afterContent.isNotEmpty()) {
+            result.add(
+                0,
+                UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = buildList {
+                        if (beforeContent.isNotEmpty()) {
+                            add(
+                                UIMessagePart.Text(
+                                    text = beforeContent,
+                                    metadata = buildJsonObject {
+                                        put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED)
+                                    }
+                                )
+                            )
+                        }
+                        if (afterContent.isNotEmpty()) {
+                            add(UIMessagePart.Text(if (beforeContent.isNotEmpty()) "\n$afterContent" else afterContent))
+                        }
+                    }
+                )
+            )
         }
     }
 

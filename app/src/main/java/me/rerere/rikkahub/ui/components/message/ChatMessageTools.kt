@@ -2574,8 +2574,12 @@ private suspend fun extractSubAgentDisplayTextFromTranscript(
             val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
                 ?: return@firstNotNullOfOrNull null
             runCatching {
-                ((JsonInstant.parseToJsonElement(outputText) as? JsonObject)?.get("transcript_path")
-                    as? JsonPrimitive)?.contentOrNull
+                val parsed = JsonInstant.parseToJsonElement(outputText) as? JsonObject
+                    ?: return@runCatching null
+                val explicitPath = (parsed["transcript_path"] as? JsonPrimitive)?.contentOrNull
+                explicitPath ?: (parsed["run_id"] as? JsonPrimitive)?.contentOrNull
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { runId -> File(runRoot, "$runId.jsonl").absolutePath }
             }.getOrNull()
         } ?: return@withContext ""
 

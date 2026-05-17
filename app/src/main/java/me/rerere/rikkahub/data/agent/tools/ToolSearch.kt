@@ -217,13 +217,19 @@ class ToolExposureState private constructor(
     fun toolsForStep(): List<Tool> =
         if (!lazyMode) allTools else allTools.filter { it.name in exposedNames }
 
-    fun observeExecutedTools(executedTools: List<UIMessagePart.Tool>) {
+    fun exposeToolNames(names: Iterable<String>) {
         if (!lazyMode) return
-        executedTools
-            .filter { it.toolName == TOOL_SEARCH_TOOL_NAME }
-            .flatMap { it.expandedToolNames() }
+        names
             .filter { it in toolsByName }
             .forEach { exposedNames += it }
+    }
+
+    fun observeExecutedTools(executedTools: List<UIMessagePart.Tool>) {
+        if (!lazyMode) return
+        val expandedNames = executedTools
+            .filter { it.toolName == TOOL_SEARCH_TOOL_NAME }
+            .flatMap { it.expandedToolNames() }
+        exposeToolNames(expandedNames)
     }
 
     companion object {

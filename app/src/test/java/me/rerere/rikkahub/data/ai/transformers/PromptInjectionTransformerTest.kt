@@ -358,6 +358,31 @@ class PromptInjectionTransformerTest {
         assertEquals(MessageRole.SYSTEM, result[0].role)
         assertEquals("New system content", getMessageText(result[0]))
     }
+
+    @Test
+    fun `before system prompt injection without existing system should disable system prompt cache`() {
+        val injectionId = Uuid.random()
+        val injection = createModeInjection(
+            id = injectionId,
+            position = InjectionPosition.BEFORE_SYSTEM_PROMPT,
+            content = "Injected before"
+        )
+
+        val result = transformMessages(
+            messages = listOf(UIMessage.user("Hello")),
+            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            modeInjections = listOf(injection),
+            lorebooks = emptyList()
+        )
+
+        val parts = result[0].parts.filterIsInstance<UIMessagePart.Text>()
+        assertEquals(MessageRole.SYSTEM, result[0].role)
+        assertEquals("Injected before", parts.single().text)
+        assertEquals(
+            SYSTEM_PROMPT_CACHE_DISABLED,
+            parts.single().metadata!![SYSTEM_PROMPT_CACHE_CONTROL_METADATA]!!.jsonPrimitive.content
+        )
+    }
     // endregion
 
     // region TOP_OF_CHAT tests

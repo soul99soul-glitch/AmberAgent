@@ -19,7 +19,11 @@ class SubAgentPayloadTest {
 
         assertEquals("completed", payload["status"]?.jsonPrimitive?.contentOrNull)
         assertEquals("Full human transcript".length, payload["display_text_chars"]?.jsonPrimitive?.int)
+        assertEquals("Review a small change.", payload["task_objective"]?.jsonPrimitive?.contentOrNull)
         assertFalse(payload.containsKey("display_text"))
+        assertFalse(payload.containsKey("definition"))
+        assertFalse(payload.containsKey("task"))
+        assertFalse(payload.containsKey("transcript_path"))
         assertTrue(payload.containsKey("result"))
     }
 

@@ -87,15 +87,16 @@ internal class SubAgentReportCapture {
 
     private fun JsonElement.toSubAgentResult(): SubAgentResult {
         val obj = runCatching { jsonObject }.getOrElse { JsonObject(emptyMap()) }
+        val error = obj.string("error").bounded(ERROR_MAX_CHARS)
         return SubAgentResult(
-            status = SubAgentRunStatus.COMPLETED,
+            status = if (error.isNotBlank()) SubAgentRunStatus.FAILED else SubAgentRunStatus.COMPLETED,
             summary = obj.string("summary").bounded(SUMMARY_MAX_CHARS),
             findings = obj.stringList("findings"),
             evidence = obj.stringList("evidence"),
             risks = obj.stringList("risks"),
             confidence = obj.string("confidence").bounded(CONFIDENCE_MAX_CHARS),
             recommendedNextSteps = obj.stringList("recommended_next_steps"),
-            error = obj.string("error").bounded(ERROR_MAX_CHARS),
+            error = error,
         )
     }
 

@@ -57,6 +57,7 @@ class SubAgentReportToolTest {
         )
 
         assertEquals("blocked by missing file", capture.latest?.error)
+        assertEquals(SubAgentRunStatus.FAILED, capture.latest?.status)
     }
 
     @Test

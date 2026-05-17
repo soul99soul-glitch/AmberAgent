@@ -114,6 +114,21 @@ class ToolSearchTest {
         assertTrue("hidden_tool_7" in exposure.toolsForStep().map { it.name })
     }
 
+    @Test
+    fun exposureCanRestorePendingHiddenToolForApprovalResume() {
+        val hiddenTools = (0 until 45).map { tool("hidden_tool_$it", "Hidden capability $it") }
+        val registry = ToolRegistry.from(hiddenTools + tool("file_read", "Read workspace file."))
+        val searchTool = createToolSearchTool(registry)
+        val exposure = ToolExposureState.from(hiddenTools + tool("file_read", "Read workspace file.") + searchTool)
+
+        assertTrue(exposure.enabled)
+        assertFalse("hidden_tool_7" in exposure.toolsForStep().map { it.name })
+
+        exposure.exposeToolNames(listOf("hidden_tool_7"))
+
+        assertTrue("hidden_tool_7" in exposure.toolsForStep().map { it.name })
+    }
+
     private fun tool(
         name: String,
         description: String = "test tool",

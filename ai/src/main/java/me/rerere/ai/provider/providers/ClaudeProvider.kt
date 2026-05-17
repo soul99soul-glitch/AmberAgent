@@ -305,7 +305,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 val explicitCacheIndex = systemTextParts.indexOfLast { part ->
                     part.metadata?.get(SYSTEM_PROMPT_CACHE_CONTROL_METADATA)?.jsonPrimitive?.contentOrNull == SYSTEM_PROMPT_CACHE_EPHEMERAL
                 }
-                val cacheIndex = explicitCacheIndex.takeIf { it >= 0 } ?: systemTextParts.lastIndex
+                val cacheIndex = explicitCacheIndex.takeIf { it >= 0 }
                 put("system", buildJsonArray {
                     systemTextParts.forEachIndexed { index, part ->
                         add(buildJsonObject {

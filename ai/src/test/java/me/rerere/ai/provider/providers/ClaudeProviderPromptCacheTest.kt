@@ -97,7 +97,7 @@ class ClaudeProviderPromptCacheTest {
     }
 
     @Test
-    fun `promptCaching=true should add cache_control to last system block and last tool`() {
+    fun `promptCaching=true should not cache unmarked system block but should cache last tool`() {
         val providerSetting = ProviderSetting.Claude(promptCaching = true)
         val messages = listOf(
             UIMessage.system("system prompt"),
@@ -110,10 +110,9 @@ class ClaudeProviderPromptCacheTest {
 
         val request = buildRequest(providerSetting, messages, params)
 
-        // system should have cache_control
+        // system should only be cached when a static block is explicitly marked
         val system = request["system"]!!.jsonArray
-        val systemCacheControl = system.last().jsonObject["cache_control"]!!.jsonObject
-        assertEquals("ephemeral", systemCacheControl["type"]!!.jsonPrimitive.content)
+        assertNull(system.last().jsonObject["cache_control"])
 
         // tools should have cache_control
         val tools = request["tools"]!!.jsonArray
