@@ -1990,7 +1990,7 @@ class ChatService(
         }
         val baseRegistry = ToolRegistry.from(rawTools)
         val baseTools = baseRegistry.tools() +
-            localTools.createToolsListTool(baseRegistry) +
+            localTools.toolsListTool(baseRegistry) +
             localTools.createToolPolicyExplainTool(baseRegistry)
         val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
             rawTools + SubAgentTools(
@@ -2011,7 +2011,7 @@ class ChatService(
         }
         val registry = ToolRegistry.from(finalRawTools)
         val tools = registry.tools() +
-            localTools.createToolsListTool(registry) +
+            localTools.toolsListTool(registry) +
             localTools.createToolPolicyExplainTool(registry)
         return tools.scopedToConversation(conversationId)
     }
