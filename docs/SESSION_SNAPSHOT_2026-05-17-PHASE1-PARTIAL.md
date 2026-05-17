@@ -23,7 +23,7 @@
 | ~~**M1.3.3 ContextPlanner audit**~~ | ✅ **已 audit** | `ConversationContextPlanner` (pure fns) + `ConversationContextEngine` (493 行, prepareContext 等) 已在 main 完整实现，蓝图意图自然达成，无须 refactor |
 | **M1.3.4 StreamingPipeline** | 未做 | 涉及 streaming 状态机，风险中 |
 | **M1.3.5 ToolApprovalCoordinator** | 未做 | 蓝图标 HIGH 风险，最后做 |
-| **M1.4 Tools 4 god files split** | 未做 | 4 个文件每个 800-1600 行，单纯按 tool 名拆需要逐个搬运和 import 调整，工作量~1 周 |
+| **M1.4 Tools 4 god files split** | ✅ **demo 完成** | 在 LocalTools.kt (1336 行) 上抽出 5 个 stateless tool 到 sibling 文件作为示范：createTimeTool / createClipboardTool / createAskUserTool / createRunPlanUpdateTool / createPermissionsStatusTool。每个独立 commit + 独立 sub-agent review APPROVE。LocalTools.kt 现 1093 行 (-243, -18%)。模板成熟，其它 stateless tool 可继续按此模板增量抽。SystemAccessTools / FeishuOfficeTools / WebMountPrimitiveTools 三个 god 文件未动 |
 | ~~**M1.5 完整（5 子模块）**~~ | ✅ **完成（8 模块）** | 8 个独立子模块都做了（chat / memory / iCloud / webMount / agentRuntime / agentInfra / board / workspace），共 99 single + 1 VM 移出。AppModule 现 64 行，只剩 app-level cross-cutting infra |
 | **M1.5 ModelCouncilManager 拆分** | 未做 | 1150 行 god，需要先理解 council 运行时再切 |
 | **M1.6 Repository decoupling** | 未做 | 蓝图原定 MED 风险，影响面大 |
