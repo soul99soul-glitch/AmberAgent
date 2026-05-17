@@ -28,6 +28,15 @@ fun String.asBuildConfigString(): String =
 val xiaomiXmsAppId = projectProperty("xiaomiXmsAppId", "XIAOMI_XMS_APP_ID")
 val baseApplicationId = "me.rerere.amberagent"
 
+// Build types that share the notion UI theme contract — must each call
+// `applyNotionLikeUi(...)` in the `buildTypes {}` block below. See the
+// afterEvaluate parity check at file end for why.
+val notionLikeBuildTypes = setOf("notion", "refactortest")
+
+// Populated by `applyNotionLikeUi(...)` invocations; compared against
+// `notionLikeBuildTypes` after configuration.
+val notionLikeApplied = mutableSetOf<String>()
+
 fun googleOAuthConfigured(packageName: String): Boolean = runCatching {
     val configFile = file("google-services.json")
     if (!configFile.exists()) return@runCatching false
@@ -114,6 +123,30 @@ android {
         }
     }
 
+    // Notion-like buildTypes share the same UI theme contract (notion-tuned
+    // palette + typography + container shapes — see Theme.kt:159, Color.kt
+    // and SettingDisplayPage.kt). Any buildType that should LOOK like notion
+    // MUST call this helper to populate UI-critical BuildConfig flags.
+    //
+    // The helper records each invocation into [notionLikeApplied]. After
+    // configuration, the parity check below (afterEvaluate at file scope)
+    // compares that set against [notionLikeBuildTypes] (the declared
+    // source-of-truth set) and fails the build if any buildType is missing
+    // a call or if any buildType called the helper without being declared.
+    // (Lesson from commit 45a3da4b — refactortest originally hand-wrote
+    // NOTION_LIKE=false and tipped over visually on device 3B164901CEF00000.)
+    val applyNotionLikeUi: com.android.build.api.dsl.ApplicationBuildType.(String) -> Unit = { packageSuffix ->
+        notionLikeApplied.add(name)
+        applicationIdSuffix = packageSuffix
+        buildConfigField("String", "VERSION_NAME", "\"${defaultConfig.versionName}\"")
+        buildConfigField("String", "VERSION_CODE", "\"${defaultConfig.versionCode}\"")
+        buildConfigField("Boolean", "NOTION_LIKE", "true")
+        buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
+        buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+        buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId$packageSuffix").toString())
+        manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
@@ -144,14 +177,7 @@ android {
         create("notion") {
             initWith(getByName("debug"))
             matchingFallbacks.add("debug")
-            applicationIdSuffix = ".notion"
-            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
-            buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
-            buildConfigField("Boolean", "NOTION_LIKE", "true")
-            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
-            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
-            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.notion").toString())
-            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
+            applyNotionLikeUi(".notion")
         }
         create("refactortest") {
             // Dedicated buildType for sanity-installing the refactor/p1-godclass
@@ -159,20 +185,12 @@ android {
             // applicationId → Android treats them as two separate apps;
             // separate data dir, no preference / Room DB collision.
             //
-            // NOTION_LIKE = true mirrors the notion buildType — this isn't a
-            // feature flag, it's the UI theme switch (notion-tuned palette +
-            // typography + container shapes vs. default Material You / dynamic
-            // color). Sanity tests should compare same UI, only different code.
+            // Calls applyNotionLikeUi() so UI parity with notion is by
+            // construction — flipping any UI-critical flag here in isolation
+            // would diverge the visual surface and break sanity testing.
             initWith(getByName("debug"))
             matchingFallbacks.add("debug")
-            applicationIdSuffix = ".refactortest"
-            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
-            buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
-            buildConfigField("Boolean", "NOTION_LIKE", "true")
-            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
-            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
-            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.refactortest").toString())
-            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
+            applyNotionLikeUi(".refactortest")
         }
         create("baseline") {
             initWith(getByName("release"))
@@ -190,6 +208,7 @@ android {
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -227,6 +246,39 @@ android {
         compilerOptions.optIn.add("kotlin.uuid.ExperimentalUuidApi")
         compilerOptions.optIn.add("kotlin.time.ExperimentalTime")
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BuildConfig parity check — keeps notion-like buildTypes visually identical.
+//
+// `notion` is the canonical buildType driving the visible UI (notion-tuned
+// palette + typography + container shapes). Any sanity / dogfood variant
+// that should LOOK like notion must call `applyNotionLikeUi(...)` in the
+// `buildTypes { }` block above. The helper sets NOTION_LIKE=true (and the
+// rest of the UI-critical flags) and records the call in [notionLikeApplied].
+//
+// After configuration, this afterEvaluate compares [notionLikeApplied]
+// (who actually called the helper) against [notionLikeBuildTypes] (who is
+// declared to be notion-like). Any mismatch fails the build at configure
+// time — before any APK can ship.
+//
+// Lesson from commit 45a3da4b — `refactortest` originally hand-wrote
+// `NOTION_LIKE = "false"` and tipped over visually on device 3B164901CEF00000.
+// ---------------------------------------------------------------------------
+afterEvaluate {
+    val missing = notionLikeBuildTypes - notionLikeApplied
+    check(missing.isEmpty()) {
+        "These buildTypes are declared notion-like but did NOT call applyNotionLikeUi(): $missing.\n" +
+            "    → Open app/build.gradle.kts, find the buildType {} block for each,\n" +
+            "      and call applyNotionLikeUi(\".<suffix>\") so UI-critical flags get set.\n" +
+            "    → Or, if the buildType should not actually be notion-like, remove it from notionLikeBuildTypes."
+    }
+    val unexpected = notionLikeApplied - notionLikeBuildTypes
+    check(unexpected.isEmpty()) {
+        "These buildTypes called applyNotionLikeUi() but are NOT in notionLikeBuildTypes: $unexpected.\n" +
+            "    → Either remove the call (the buildType shouldn't look like notion),\n" +
+            "      or add each name to the notionLikeBuildTypes set so the contract is documented."
     }
 }
 
