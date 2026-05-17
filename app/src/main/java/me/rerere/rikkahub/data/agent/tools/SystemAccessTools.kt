@@ -40,11 +40,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
@@ -54,7 +51,6 @@ import me.rerere.rikkahub.R
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
-import kotlin.math.min
 import kotlin.coroutines.resume
 
 class SystemAccessTools(
@@ -63,6 +59,8 @@ class SystemAccessTools(
     private val activityStore: AgentToolActivityStore,
     private val workspaceManager: WorkspaceManager,
 ) {
+    private val deps = SystemAccessDeps(activityStore, permissionBroker)
+
     fun getTools(): List<Tool> = listOf(
         contactsSearchTool,
         contactsWriteTool,
@@ -104,7 +102,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("contacts_search", "搜索通讯录", "contacts_read", input) {
+            deps.trackSystemTool("contacts_search", "搜索通讯录", "contacts_read", input) {
                 textJson {
                     put("contacts", queryContacts(input.string("query").orEmpty(), input.limit(default = 20, max = 50)))
                 }
@@ -126,7 +124,7 @@ class SystemAccessTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            trackSystemTool("contacts_write", "写入联系人", "contacts_write", input.safePreview()) {
+            deps.trackSystemTool("contacts_write", "写入联系人", "contacts_write", input.safePreview()) {
                 val name = input.requiredString("name")
                 val phone = input.string("phone").orEmpty()
                 val email = input.string("email").orEmpty()
@@ -152,7 +150,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("sms_list", "读取短信列表", "sms_read", input.safePreview()) {
+            deps.trackSystemTool("sms_list", "读取短信列表", "sms_read", input.safePreview()) {
                 textJson {
                     put("messages", querySms(input, previewOnly = true))
                 }
@@ -171,7 +169,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("sms_read", "读取短信内容", "sms_read", input.safePreview()) {
+            deps.trackSystemTool("sms_read", "读取短信内容", "sms_read", input.safePreview()) {
                 textJson {
                     put("messages", querySms(input, previewOnly = false))
                 }
@@ -192,7 +190,7 @@ class SystemAccessTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            trackSystemTool("sms_send", "发送短信", "sms_send", input.safePreview()) {
+            deps.trackSystemTool("sms_send", "发送短信", "sms_send", input.safePreview()) {
                 val phoneNumber = input.requiredString("phone_number")
                 val message = input.requiredString("message")
                 val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -216,7 +214,7 @@ class SystemAccessTools(
         description = "Read coarse phone/SIM state after READ_PHONE_STATE or READ_PHONE_NUMBERS is granted.",
         parameters = { obj() },
         execute = { input ->
-            trackSystemTool("device_phone_state", "读取电话状态", "phone_state", input) {
+            deps.trackSystemTool("device_phone_state", "读取电话状态", "phone_state", input) {
                 val telephonyManager = context.getSystemService(TelephonyManager::class.java)
                 textJson {
                     put("phone_type", telephonyManager?.phoneType ?: TelephonyManager.PHONE_TYPE_NONE)
@@ -239,7 +237,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("call_log_list", "读取通话记录", "call_log_read", input.safePreview()) {
+            deps.trackSystemTool("call_log_list", "读取通话记录", "call_log_read", input.safePreview()) {
                 textJson {
                     put("calls", queryCallLogs(input.limit(default = 20, max = 50), input.long("since_epoch_ms")))
                 }
@@ -262,7 +260,7 @@ class SystemAccessTools(
         execute = { input ->
             val direct = input.boolean("direct_call") ?: false
             val capability = if (direct) "call_phone" else "apps"
-            trackSystemTool("call_phone", "拨打电话", capability, input.safePreview()) {
+            deps.trackSystemTool("call_phone", "拨打电话", capability, input.safePreview()) {
                 val phoneNumber = input.requiredString("phone_number")
                 val action = if (direct) Intent.ACTION_CALL else Intent.ACTION_DIAL
                 context.startActivity(Intent(action, Uri.parse("tel:$phoneNumber")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -286,7 +284,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("calendar_list", "读取日历事件", "calendar_read", input.safePreview()) {
+            deps.trackSystemTool("calendar_list", "读取日历事件", "calendar_read", input.safePreview()) {
                 textJson {
                     put("events", queryCalendarEvents(input))
                 }
@@ -312,7 +310,7 @@ class SystemAccessTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            trackSystemTool("calendar_create", "创建日历事件", "calendar_write", input.safePreview()) {
+            deps.trackSystemTool("calendar_create", "创建日历事件", "calendar_write", input.safePreview()) {
                 val eventId = createCalendarEvent(input)
                 textJson {
                     put("success", true)
@@ -347,7 +345,7 @@ class SystemAccessTools(
                     reason = "搜索媒体库",
                 )
             }
-            trackSystemTool("media_search", "搜索媒体库", capabilities.first(), input.safePreview()) {
+            deps.trackSystemTool("media_search", "搜索媒体库", capabilities.first(), input.safePreview()) {
                 textJson {
                     put("media", queryMedia(type = type, query = input.string("query").orEmpty(), limit = input.limit(default = 30, max = 100)))
                 }
@@ -360,7 +358,7 @@ class SystemAccessTools(
         description = "Return the latest available device location from LocationManager after location permission is granted.",
         parameters = { obj() },
         execute = { input ->
-            trackSystemTool("location_current", "读取当前位置", "location_current", input) {
+            deps.trackSystemTool("location_current", "读取当前位置", "location_current", input) {
                 val location = currentOrLatestLocation()
                 textJson {
                     if (location == null) {
@@ -390,7 +388,7 @@ class SystemAccessTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            trackSystemTool("audio_record_once", "录制音频", "audio_record", input.safePreview()) {
+            deps.trackSystemTool("audio_record_once", "录制音频", "audio_record", input.safePreview()) {
                 val file = recordAudioOnce(input.limit("duration_ms", default = 5_000, max = 30_000).toLong())
                 textJson {
                     put("artifact_type", "audio")
@@ -410,7 +408,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("notification_list", "读取通知", "notification_access", input) {
+            deps.trackSystemTool("notification_list", "读取通知", "notification_access", input) {
                 textJson {
                     put("notifications", queryNotifications(input.limit(default = 30, max = 80)))
                 }
@@ -428,7 +426,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("usage_stats_list", "读取应用使用情况", "usage_access", input.safePreview()) {
+            deps.trackSystemTool("usage_stats_list", "读取应用使用情况", "usage_access", input.safePreview()) {
                 textJson {
                     put("usage_stats", queryUsageStats(input.long("since_epoch_ms"), input.limit(default = 30, max = 100)))
                 }
@@ -446,7 +444,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("apps_list", "列出应用", "apps", input.safePreview()) {
+            deps.trackSystemTool("apps_list", "列出应用", "apps", input.safePreview()) {
                 textJson {
                     put("apps", queryLaunchableApps(input.string("query").orEmpty(), input.limit(default = 80, max = 200)))
                 }
@@ -465,7 +463,7 @@ class SystemAccessTools(
         },
         needsApproval = true,
         execute = { input ->
-            trackSystemTool("app_open", "打开应用", "apps", input) {
+            deps.trackSystemTool("app_open", "打开应用", "apps", input) {
                 val packageName = input.requiredString("package_name")
                 val intent = context.packageManager.getLaunchIntentForPackage(packageName)
                     ?: error("No launch intent for package: $packageName")
@@ -490,7 +488,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("apps_installed_list", "读取全量应用列表", "installed_apps_full_access", input.safePreview()) {
+            deps.trackSystemTool("apps_installed_list", "读取全量应用列表", "installed_apps_full_access", input.safePreview()) {
                 textJson {
                     put(
                         "apps",
@@ -518,7 +516,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("app_info", "读取应用信息", "apps", input) {
+            deps.trackSystemTool("app_info", "读取应用信息", "apps", input) {
                 textJson {
                     put("app", packageInfoJson(input.requiredString("package_name"), input.boolean("include_permissions") ?: false))
                 }
@@ -531,7 +529,7 @@ class SystemAccessTools(
         description = "Read device battery level, charging state, and power-save mode.",
         parameters = { obj() },
         execute = { input ->
-            trackSystemTool("battery_status", "读取电池状态", "apps", input) {
+            deps.trackSystemTool("battery_status", "读取电池状态", "apps", input) {
                 textJson { put("battery", batteryStatusJson()) }
             }
         }
@@ -542,7 +540,7 @@ class SystemAccessTools(
         description = "Read coarse connectivity status, transport type, and VPN/roaming hints.",
         parameters = { obj() },
         execute = { input ->
-            trackSystemTool("network_status", "读取网络状态", "apps", input) {
+            deps.trackSystemTool("network_status", "读取网络状态", "apps", input) {
                 textJson { put("network", networkStatusJson()) }
             }
         }
@@ -553,7 +551,7 @@ class SystemAccessTools(
         description = "Read Wi-Fi enabled state and redacted current SSID/IP if available. Does not scan nearby Wi-Fi.",
         parameters = { obj() },
         execute = { input ->
-            trackSystemTool("wifi_status", "读取 Wi-Fi 状态", "apps", input) {
+            deps.trackSystemTool("wifi_status", "读取 Wi-Fi 状态", "apps", input) {
                 textJson { put("wifi", wifiStatusJson()) }
             }
         }
@@ -564,7 +562,7 @@ class SystemAccessTools(
         description = "Read device brand, model, Android version, ABI, and screen metrics.",
         parameters = { obj() },
         execute = { input ->
-            trackSystemTool("device_info", "读取设备信息", "apps", input) {
+            deps.trackSystemTool("device_info", "读取设备信息", "apps", input) {
                 textJson { put("device", deviceInfoJson()) }
             }
         }
@@ -593,7 +591,7 @@ class SystemAccessTools(
         },
         needsApproval = true,
         execute = { input ->
-            trackSystemTool("settings_open", "打开系统设置", "apps", input) {
+            deps.trackSystemTool("settings_open", "打开系统设置", "apps", input) {
                 val intent = settingsIntent(input.requiredString("target"))
                 context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 textJson {
@@ -616,7 +614,7 @@ class SystemAccessTools(
         },
         needsApproval = true,
         execute = { input ->
-            trackSystemTool("intent_open", "打开 Intent", "apps", input.safePreview()) {
+            deps.trackSystemTool("intent_open", "打开 Intent", "apps", input.safePreview()) {
                 val intent = whitelistedIntent(input.requiredString("action"), input.string("data_uri"))
                 context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 textJson {
@@ -640,7 +638,7 @@ class SystemAccessTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            trackSystemTool("share_text", "分享文本", "apps", input.safePreview()) {
+            deps.trackSystemTool("share_text", "分享文本", "apps", input.safePreview()) {
                 val intent = Intent(Intent.ACTION_SEND)
                     .setType("text/plain")
                     .putExtra(Intent.EXTRA_TEXT, input.requiredString("text"))
@@ -668,7 +666,7 @@ class SystemAccessTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            trackSystemTool("share_file", "分享文件", "apps", input.safePreview()) {
+            deps.trackSystemTool("share_file", "分享文件", "apps", input.safePreview()) {
                 val path = input.requiredString("path")
                 val file = cacheWorkspaceFileForSharing(path)
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -699,7 +697,7 @@ class SystemAccessTools(
             )
         },
         execute = { input ->
-            trackSystemTool("notification_post", "发布通知", "apps", input.safePreview()) {
+            deps.trackSystemTool("notification_post", "发布通知", "apps", input.safePreview()) {
                 val notificationManager = context.getSystemService(NotificationManager::class.java)
                 val notification = NotificationCompat.Builder(context, CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID)
                     .setSmallIcon(R.drawable.small_icon)
@@ -714,34 +712,6 @@ class SystemAccessTools(
             }
         }
     )
-
-    private suspend fun trackSystemTool(
-        toolName: String,
-        title: String,
-        capabilityId: String,
-        input: JsonElement,
-        block: suspend () -> List<UIMessagePart>,
-    ): List<UIMessagePart> {
-        permissionBroker.ensureGranted(
-            capabilityId = capabilityId,
-            toolName = toolName,
-            reason = title,
-        )
-        val toolCallId = activityStore.startTool(
-            toolName = toolName,
-            title = title,
-            inputPreview = input.toString(),
-            runtime = "Android system access",
-        )
-        return try {
-            val result = block()
-            activityStore.complete(toolCallId, result.previewText())
-            result
-        } catch (error: Throwable) {
-            activityStore.fail(toolCallId, error)
-            throw error
-        }
-    }
 
     private fun queryContacts(query: String, limit: Int) = buildJsonArray {
         val seen = mutableSetOf<Long>()
@@ -1362,80 +1332,8 @@ class SystemAccessTools(
         return value.take(2) + "***" + value.takeLast(1)
     }
 
-    private fun obj(vararg properties: Pair<String, JsonElement>, required: List<String>? = null) =
-        InputSchema.Obj(
-            properties = buildJsonObject {
-                properties.forEach { (name, schema) -> put(name, schema) }
-            },
-            required = required
-        )
-
-    private fun stringProp(description: String) = buildJsonObject {
-        put("type", "string")
-        put("description", description)
-    }
-
-    private fun booleanProp(description: String) = buildJsonObject {
-        put("type", "boolean")
-        put("description", description)
-    }
-
-    private fun integerProp(description: String) = buildJsonObject {
-        put("type", "integer")
-        put("description", description)
-    }
-
-    private fun enumProp(description: String, values: List<String>) = buildJsonObject {
-        put("type", "string")
-        put("description", description)
-        put("enum", buildJsonArray { values.forEach(::add) })
-    }
-
-    private fun JsonElement.limit(name: String = "limit", default: Int, max: Int): Int =
-        min(int(name) ?: default, max).coerceAtLeast(1)
-
     private fun JsonElement.timeMillis(isoName: String, epochName: String): Long {
         string(isoName)?.takeIf { it.isNotBlank() }?.let { return Instant.parse(it).toEpochMilli() }
         return long(epochName) ?: error("$isoName or $epochName is required")
-    }
-
-    private fun JsonElement.safePreview(): JsonElement = buildJsonObject {
-        jsonObject.forEach { (key, value) ->
-            when (key) {
-                "message", "body", "description" -> put("${key}_chars", value.toString().length)
-                "phone_number", "phone", "sender" -> put("${key}_masked", maskPhone(value.toString().trim('"')))
-                "email" -> put("email_masked", maskEmail(value.toString().trim('"')))
-                else -> put(key, value)
-            }
-        }
-    }
-
-    private fun List<UIMessagePart>.previewText(): String =
-        joinToString("\n") { part ->
-            when (part) {
-                is UIMessagePart.Text -> part.text
-                else -> part.toString()
-            }
-        }.takeLast(1_600)
-
-    private fun maskPhone(value: String): String {
-        val digits = value.filter { it.isDigit() }
-        if (digits.length <= 4) return value.take(2) + "***"
-        val prefix = digits.take(3)
-        val suffix = digits.takeLast(4)
-        return "$prefix****$suffix"
-    }
-
-    private fun maskEmail(value: String): String {
-        val parts = value.split("@", limit = 2)
-        if (parts.size != 2) return value.take(2) + "***"
-        val name = parts[0]
-        val domain = parts[1]
-        val maskedName = when {
-            name.isEmpty() -> "***"
-            name.length == 1 -> "${name.first()}***"
-            else -> "${name.first()}***${name.last()}"
-        }
-        return "$maskedName@$domain"
     }
 }
