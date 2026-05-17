@@ -1,34 +1,23 @@
 package me.rerere.rikkahub.data.agent.tools
 
-import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.UiModeManager
-import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
-import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.location.Location
-import android.location.LocationManager
-import android.media.MediaRecorder
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.BatteryManager
-import android.os.CancellationSignal
 import android.os.PowerManager
-import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -37,12 +26,10 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
 import java.io.File
-import kotlin.coroutines.resume
 
 class SystemAccessTools(
     private val context: Context,
@@ -97,119 +84,11 @@ class SystemAccessTools(
     private val calendarListTool by lazy { createCalendarListTool(context, deps) }
     private val calendarCreateTool by lazy { createCalendarCreateTool(context, deps) }
 
-    private val mediaSearchTool = Tool(
-        name = "media_search",
-        description = "Search Android MediaStore images, videos, or audio after the matching media permission is granted.",
-        parameters = {
-            obj(
-                "type" to enumProp("Media type.", listOf("images", "video", "audio", "all")),
-                "query" to stringProp("Optional file name filter."),
-                "limit" to integerProp("Maximum media entries. Defaults to 30."),
-            )
-        },
-        execute = { input ->
-            val type = input.string("type") ?: "all"
-            val capabilities = when (type) {
-                "images" -> listOf("media_images")
-                "video" -> listOf("media_video")
-                "audio" -> listOf("media_audio")
-                else -> listOf("media_images", "media_video", "media_audio")
-            }
-            capabilities.drop(1).forEach { capability ->
-                permissionBroker.ensureGranted(
-                    capabilityId = capability,
-                    toolName = "media_search",
-                    reason = "搜索媒体库",
-                )
-            }
-            deps.trackSystemTool("media_search", "搜索媒体库", capabilities.first(), input.safePreview()) {
-                textJson {
-                    put("media", queryMedia(type = type, query = input.string("query").orEmpty(), limit = input.limit(default = 30, max = 100)))
-                }
-            }
-        }
-    )
-
-    private val locationCurrentTool = Tool(
-        name = "location_current",
-        description = "Return the latest available device location from LocationManager after location permission is granted.",
-        parameters = { obj() },
-        execute = { input ->
-            deps.trackSystemTool("location_current", "读取当前位置", "location_current", input) {
-                val location = currentOrLatestLocation()
-                textJson {
-                    if (location == null) {
-                        put("available", false)
-                        put("reason", "No recent location is available. Enable location providers or open a maps app once, then retry.")
-                    } else {
-                        put("available", true)
-                        put("provider", location.provider.orEmpty())
-                        put("latitude", location.latitude)
-                        put("longitude", location.longitude)
-                        put("accuracy_meters", location.accuracy.toDouble())
-                        put("time_epoch_ms", location.time)
-                    }
-                }
-            }
-        }
-    )
-
-    private val audioRecordOnceTool = Tool(
-        name = "audio_record_once",
-        description = "Record a short microphone clip to app-private storage. Requires RECORD_AUDIO and explicit approval.",
-        parameters = {
-            obj(
-                "duration_ms" to integerProp("Recording duration in milliseconds. Defaults to 5000, max 30000."),
-            )
-        },
-        needsApproval = true,
-        allowsAutoApproval = false,
-        execute = { input ->
-            deps.trackSystemTool("audio_record_once", "录制音频", "audio_record", input.safePreview()) {
-                val file = recordAudioOnce(input.limit("duration_ms", default = 5_000, max = 30_000).toLong())
-                textJson {
-                    put("artifact_type", "audio")
-                    put("path", file.absolutePath)
-                    put("size_bytes", file.length())
-                }
-            }
-        }
-    )
-
-    private val notificationListTool = Tool(
-        name = "notification_list",
-        description = "List active notification summaries after Notification Access is enabled.",
-        parameters = {
-            obj(
-                "limit" to integerProp("Maximum notifications. Defaults to 30."),
-            )
-        },
-        execute = { input ->
-            deps.trackSystemTool("notification_list", "读取通知", "notification_access", input) {
-                textJson {
-                    put("notifications", queryNotifications(input.limit(default = 30, max = 80)))
-                }
-            }
-        }
-    )
-
-    private val usageStatsListTool = Tool(
-        name = "usage_stats_list",
-        description = "List recent app usage stats after Usage Access is enabled.",
-        parameters = {
-            obj(
-                "since_epoch_ms" to integerProp("Start Unix epoch millis. Defaults to 24 hours ago."),
-                "limit" to integerProp("Maximum apps. Defaults to 30."),
-            )
-        },
-        execute = { input ->
-            deps.trackSystemTool("usage_stats_list", "读取应用使用情况", "usage_access", input.safePreview()) {
-                textJson {
-                    put("usage_stats", queryUsageStats(input.long("since_epoch_ms"), input.limit(default = 30, max = 100)))
-                }
-            }
-        }
-    )
+    private val mediaSearchTool by lazy { createMediaSearchTool(context, deps) }
+    private val locationCurrentTool by lazy { createLocationCurrentTool(context, deps) }
+    private val audioRecordOnceTool by lazy { createAudioRecordOnceTool(context, deps) }
+    private val notificationListTool by lazy { createNotificationListTool(deps) }
+    private val usageStatsListTool by lazy { createUsageStatsListTool(context, deps) }
 
     private val appsListTool = Tool(
         name = "apps_list",
@@ -490,149 +369,6 @@ class SystemAccessTools(
         }
     )
 
-    private fun queryMedia(type: String, query: String, limit: Int) = buildJsonArray {
-        val targets = when (type) {
-            "images" -> listOf("image" to MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-            "video" -> listOf("video" to MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-            "audio" -> listOf("audio" to MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
-            else -> listOf(
-                "image" to MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                "video" to MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                "audio" to MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            )
-        }
-        var count = 0
-        for ((kind, uri) in targets) {
-            if (count >= limit) break
-            context.contentResolver.query(
-                uri,
-                arrayOf(
-                    MediaStore.MediaColumns._ID,
-                    MediaStore.MediaColumns.DISPLAY_NAME,
-                    MediaStore.MediaColumns.MIME_TYPE,
-                    MediaStore.MediaColumns.SIZE,
-                    MediaStore.MediaColumns.DATE_MODIFIED,
-                ),
-                query.takeIf { it.isNotBlank() }?.let { "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?" },
-                query.takeIf { it.isNotBlank() }?.let { arrayOf("%$it%") },
-                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
-            )?.use { cursor ->
-                val idIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                val mimeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
-                val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-                val modifiedIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
-                while (cursor.moveToNext() && count < limit) {
-                    val id = cursor.getLong(idIndex)
-                    add(buildJsonObject {
-                        put("type", kind)
-                        put("uri", ContentUris.withAppendedId(uri, id).toString())
-                        put("name", cursor.getString(nameIndex).orEmpty())
-                        put("mime_type", cursor.getString(mimeIndex).orEmpty())
-                        put("size_bytes", cursor.getLong(sizeIndex))
-                        put("date_modified_seconds", cursor.getLong(modifiedIndex))
-                    })
-                    count++
-                }
-            }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun currentOrLatestLocation(): Location? {
-        val locationManager = context.getSystemService(LocationManager::class.java) ?: return null
-        latestLocation(locationManager)
-            ?.takeIf { System.currentTimeMillis() - it.time < 5L * 60L * 1000L }
-            ?.let { return it }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            for (provider in locationManager.getProviders(true)) {
-                val current = withTimeoutOrNull(5_000L) {
-                    suspendCancellableCoroutine { continuation ->
-                        val cancellationSignal = CancellationSignal()
-                        continuation.invokeOnCancellation { cancellationSignal.cancel() }
-                        locationManager.getCurrentLocation(
-                            provider,
-                            cancellationSignal,
-                            context.mainExecutor
-                        ) { location ->
-                            if (continuation.isActive) {
-                                continuation.resume(location)
-                            }
-                        }
-                    }
-                }
-                if (current != null) return current
-            }
-        }
-
-        return latestLocation(locationManager)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun latestLocation(locationManager: LocationManager): Location? {
-        return locationManager.getProviders(true)
-            .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
-            .maxWithOrNull(compareBy<Location> { it.time }.thenByDescending { -it.accuracy })
-    }
-
-    private suspend fun recordAudioOnce(durationMillis: Long): File {
-        val outputDir = File(context.filesDir, "agent-artifacts/audio").apply { mkdirs() }
-        val output = File(outputDir, "recording-${System.currentTimeMillis()}.m4a")
-        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(context)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaRecorder()
-        }
-        try {
-            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            recorder.setOutputFile(output.absolutePath)
-            recorder.prepare()
-            recorder.start()
-            delay(durationMillis)
-            recorder.stop()
-        } finally {
-            recorder.release()
-        }
-        return output
-    }
-
-    private fun queryNotifications(limit: Int) = buildJsonArray {
-        AmberNotificationListenerService.getActiveNotificationsSnapshot()
-            .take(limit)
-            .forEach { sbn ->
-                val extras = sbn.notification.extras
-                add(buildJsonObject {
-                    put("package_name", sbn.packageName)
-                    put("posted_at_epoch_ms", sbn.postTime)
-                    put("title", extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString().orEmpty())
-                    put("text", extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString().orEmpty().take(240))
-                })
-            }
-    }
-
-    private fun queryUsageStats(since: Long?, limit: Int) = buildJsonArray {
-        val usageStatsManager = context.getSystemService(UsageStatsManager::class.java)
-            ?: error("UsageStatsManager is unavailable")
-        val end = System.currentTimeMillis()
-        val start = since ?: (end - 24L * 60L * 60L * 1000L)
-        usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
-            .filter { it.lastTimeUsed > 0 }
-            .sortedByDescending { it.lastTimeUsed }
-            .take(limit)
-            .forEach { usage ->
-                add(buildJsonObject {
-                    put("package_name", usage.packageName)
-                    put("label", appLabel(usage.packageName))
-                    put("last_time_used_epoch_ms", usage.lastTimeUsed)
-                    put("total_time_foreground_ms", usage.totalTimeInForeground)
-                })
-            }
-    }
-
     private fun queryLaunchableApps(query: String, limit: Int) = buildJsonArray {
         val pm = context.packageManager
         val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -806,14 +542,6 @@ class SystemAccessTools(
         android.webkit.MimeTypeMap.getSingleton()
             .getMimeTypeFromExtension(extension.lowercase())
             ?: "application/octet-stream"
-
-    private fun appLabel(packageName: String): String {
-        val pm = context.packageManager
-        return runCatching {
-            @Suppress("DEPRECATION")
-            pm.getApplicationInfo(packageName, 0).loadLabel(pm).toString()
-        }.getOrDefault("")
-    }
 
     private fun redactMiddle(value: String): String {
         if (value.length <= 3) return "***"
