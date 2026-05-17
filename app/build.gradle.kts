@@ -153,6 +153,22 @@ android {
             buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.notion").toString())
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
+        create("refactortest") {
+            // Dedicated buildType for sanity-installing the refactor/p1-godclass
+            // branch alongside the user's regular notion install. Different
+            // applicationId → Android treats them as two separate apps;
+            // separate data dir, no preference / Room DB collision.
+            initWith(getByName("debug"))
+            matchingFallbacks.add("debug")
+            applicationIdSuffix = ".refactortest"
+            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
+            buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
+            buildConfigField("Boolean", "NOTION_LIKE", "false")
+            buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
+            buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
+            buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.refactortest").toString())
+            manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
+        }
         create("baseline") {
             initWith(getByName("release"))
             matchingFallbacks.add("release")
