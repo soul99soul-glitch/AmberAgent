@@ -19,7 +19,7 @@
 
 | Milestone | 状态 | 原因 |
 |---|---|---|
-| **M1.3.2 MessageTransformPipeline** | 未做 | ChatService 内部拆分，单次会话预算不够 |
+| ~~**M1.3.2 MessageTransformPipeline**~~ | ✅ **完成** | 抽出 `UserInputPreprocessor` 到 service 层独立类，建立 pipeline 命名 seam（当前只一个 regex 步骤，未来 mention/slash 扩展进来不再触动 ChatService）|
 | ~~**M1.3.3 ContextPlanner audit**~~ | ✅ **已 audit** | `ConversationContextPlanner` (pure fns) + `ConversationContextEngine` (493 行, prepareContext 等) 已在 main 完整实现，蓝图意图自然达成，无须 refactor |
 | **M1.3.4 StreamingPipeline** | 未做 | 涉及 streaming 状态机，风险中 |
 | **M1.3.5 ToolApprovalCoordinator** | 未做 | 蓝图标 HIGH 风险，最后做 |
