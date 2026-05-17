@@ -47,7 +47,7 @@ import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -290,7 +290,7 @@ private fun AppSearchSettings(
 
 @Composable
 private fun BuiltInSearchSetting(model: Model) {
-    val settingsStore = koinInject<SettingsStore>()
+    val settingsStore = koinInject<SettingsAggregator>()
     val scope = rememberCoroutineScope()
     Card {
         Row(

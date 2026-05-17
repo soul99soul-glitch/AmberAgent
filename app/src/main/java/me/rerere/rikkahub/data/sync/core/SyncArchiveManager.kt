@@ -23,7 +23,7 @@ import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.files.FileFolders
@@ -38,7 +38,7 @@ import java.util.zip.ZipOutputStream
 
 class SyncArchiveManager(
     private val context: Context,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val database: AppDatabase,
     private val messageFtsManager: MessageFtsManager,
     private val filesManager: FilesManager,

@@ -1,0 +1,53 @@
+package me.rerere.rikkahub.data.datastore.prefs
+
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.IOException
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
+import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.toMutableStateFlow
+
+data class AgentPrefsData(
+    val agentRuntime: AgentRuntimeSetting = AgentRuntimeSetting(),
+)
+
+class AgentPrefs(
+    private val dataStore: DataStore<Preferences>,
+    scope: AppScope,
+) {
+    val flow: StateFlow<AgentPrefsData> = dataStore.data
+        .catch { e ->
+            if (e is IOException) emit(emptyPreferences()) else throw e
+        }
+        .map { readFrom(it) }
+        .distinctUntilChanged()
+        .toMutableStateFlow(scope, AgentPrefsData())
+
+    suspend fun update(transform: (AgentPrefsData) -> AgentPrefsData) {
+        dataStore.edit { p ->
+            val current = readFrom(p)
+            val next = transform(current)
+            if (next == current) return@edit
+            writeTo(p, next)
+        }
+    }
+
+    private fun readFrom(p: Preferences): AgentPrefsData = AgentPrefsData(
+        agentRuntime = p[PreferencesKeys.AGENT_RUNTIME]?.let {
+            JsonInstant.decodeFromString<AgentRuntimeSetting>(it)
+        } ?: AgentRuntimeSetting(),
+    )
+
+    private fun writeTo(p: MutablePreferences, data: AgentPrefsData) {
+        p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(data.agentRuntime)
+    }
+}

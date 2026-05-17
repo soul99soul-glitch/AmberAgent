@@ -8,7 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.time.Duration
 import java.time.LocalTime
 import java.time.ZonedDateTime
@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 
 class MemoryDreamScheduler(
     context: Context,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
 ) {
     private val workManager = WorkManager.getInstance(context)
 

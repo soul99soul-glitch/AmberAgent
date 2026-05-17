@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
@@ -21,7 +21,7 @@ import java.time.ZoneId
 
 class ChatDrawerVM(
     private val context: Application,
-    settingsStore: SettingsStore,
+    settingsStore: SettingsAggregator,
     conversationRepo: ConversationRepository,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {

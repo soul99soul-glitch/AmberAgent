@@ -25,17 +25,26 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.common.android.appTempFolder
+import me.rerere.rikkahub.di.agentInfraModule
+import me.rerere.rikkahub.di.agentRuntimeModule
 import me.rerere.rikkahub.di.appModule
+import me.rerere.rikkahub.di.boardModule
+import me.rerere.rikkahub.di.chatModule
 import me.rerere.rikkahub.di.dataSourceModule
+import me.rerere.rikkahub.di.iCloudModule
+import me.rerere.rikkahub.di.memoryModule
 import me.rerere.rikkahub.di.repositoryModule
+import me.rerere.rikkahub.di.webMountModule
 import me.rerere.rikkahub.di.viewModelModule
+import me.rerere.rikkahub.di.workspaceModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
@@ -66,7 +75,7 @@ class RikkaHubApp : Application() {
             androidLogger()
             androidContext(this@RikkaHubApp)
             workManagerFactory()
-            modules(appModule, viewModelModule, dataSourceModule, repositoryModule)
+            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
 
@@ -136,10 +145,13 @@ class RikkaHubApp : Application() {
     private fun incrementLaunchCount() {
         get<AppScope>().launch {
             runCatching {
-                val store = get<SettingsStore>()
-                val current = store.settingsFlowRaw.first()
+                val store = get<SettingsAggregator>()
+                // [M1.1.8d-3-fix] filterNot { init } 等价于 SettingsStore.settingsFlowRaw.first()
+                // 的冷流挂起语义；Aggregator 的 settingsFlow 是 MutableStateFlow(dummy()) ，
+                // 不过滤会立刻拿到 dummy 然后 update() 被 dummy guard 拒绝（launchCount 永 0）。
+                val current = store.settingsFlow.filterNot { it.init }.first()
                 store.update(current.copy(launchCount = current.launchCount + 1))
-                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlowRaw.first().launchCount}")
+                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlow.filterNot { it.init }.first().launchCount}")
             }.onFailure {
                 Log.e(TAG, "incrementLaunchCount failed", it)
             }
@@ -179,7 +191,7 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 delay(500)
-                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
                 if (settings.webServerEnabled) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         ContextCompat.checkSelfPermission(
@@ -216,7 +228,7 @@ class RikkaHubApp : Application() {
     private fun syncMemoryDreamTasks() {
         get<AppScope>().launch(Dispatchers.IO) {
             val scheduler = get<MemoryDreamScheduler>()
-            val settingsStore = get<SettingsStore>()
+            val settingsStore = get<SettingsAggregator>()
             settingsStore.settingsFlow
                 .map { it.agentRuntime.memoryWorker }
                 .distinctUntilChanged()
@@ -232,7 +244,7 @@ class RikkaHubApp : Application() {
 
     private fun startBoardNotificationCollector() {
         get<AppScope>().launch(Dispatchers.IO) {
-            val settingsStore = get<SettingsStore>()
+            val settingsStore = get<SettingsAggregator>()
             val collector = get<NotificationSignalCollector>()
             settingsStore.settingsFlow
                 .map { it.agentRuntime.todayBoard.enabled }
@@ -255,7 +267,7 @@ class RikkaHubApp : Application() {
      */
     private fun syncTodayBoardScheduler() {
         get<AppScope>().launch(Dispatchers.IO) {
-            val settingsStore = get<SettingsStore>()
+            val settingsStore = get<SettingsAggregator>()
             val scheduler = get<BoardScheduler>()
             settingsStore.settingsFlow
                 .map { it.agentRuntime.todayBoard }
@@ -274,7 +286,7 @@ class RikkaHubApp : Application() {
                     if (event != Lifecycle.Event.ON_START) return
                     get<AppScope>().launch(Dispatchers.IO) {
                         runCatching {
-                            val board = get<SettingsStore>().settingsFlow.value.agentRuntime.todayBoard
+                            val board = get<SettingsAggregator>().settingsFlow.value.agentRuntime.todayBoard
                             if (!board.enabled) return@runCatching
                             // FOREGROUND_ONLY users explicitly chose no background work —
                             // respect that even for app-start compensation.

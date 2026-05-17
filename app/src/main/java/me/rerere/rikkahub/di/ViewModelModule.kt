@@ -37,6 +37,9 @@ val viewModelModule = module {
             filesManager = get(),
             favoriteRepository = get(),
             contextRepository = get(),
+            sendMessageOrchestrator = get(),
+            regenerateMessageOrchestrator = get(),
+            branchMessageOrchestrator = get(),
         )
     }
     viewModelOf(::ChatDrawerVM)

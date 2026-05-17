@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanSource
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
@@ -26,7 +26,7 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import java.io.File
 
 class SettingAgentMemoryVM(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val memoryRepository: MemoryRepository,
     private val memoryDreamPlanner: MemoryDreamPlanner,
     private val memoryDreamApplier: MemoryDreamApplier,

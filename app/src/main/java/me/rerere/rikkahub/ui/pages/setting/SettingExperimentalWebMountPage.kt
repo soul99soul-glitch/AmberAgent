@@ -101,7 +101,7 @@ fun SettingExperimentalWebMountPage(
     userSiteRegistry: UserSiteRegistry = koinInject(),
     cookieProvider: WebMountCookieProvider = koinInject(),
     profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry = koinInject(),
-    settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore = koinInject(),
+    settingsStore: me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val sites by userSiteRegistry.sites.collectAsStateWithLifecycle()
@@ -1059,7 +1059,7 @@ private fun iconForIconKey(iconKey: String?) = when (iconKey) {
  * the site.
  */
 private suspend fun installWebMountSlashCommand(
-    settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore,
+    settingsStore: me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator,
 ): Boolean {
     val current = settingsStore.settingsFlow.value
     val existing = current.quickMessages.firstOrNull { it.title.equals("webmount", ignoreCase = true) }

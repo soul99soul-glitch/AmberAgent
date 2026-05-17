@@ -3,12 +3,14 @@ package me.rerere.rikkahub.data.agent.board.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.agent.BoardAgent
 import me.rerere.rikkahub.data.agent.board.agent.BoardRunResult
 import me.rerere.rikkahub.data.agent.board.agent.DailyReviewAgent
 import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.time.LocalDate
@@ -32,7 +34,7 @@ class BoardWorker(
 ) : CoroutineWorker(appContext, params), KoinComponent {
 
     override suspend fun doWork(): Result {
-        val settings = get<SettingsStore>().settingsFlow.value
+        val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
         val board = settings.agentRuntime.todayBoard
         if (!board.enabled) return Result.success()
 

@@ -20,7 +20,15 @@ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
+import me.rerere.rikkahub.data.datastore.prefs.AssistantPrefs
+import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
+import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
+import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
+import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
+import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
@@ -51,7 +59,45 @@ import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
     single {
-        SettingsStore(context = get(), scope = get())
+        UIPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        SearchPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        AgentPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        ProviderPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        ChatPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        ExtensionPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        AssistantPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        SettingsAggregator(
+            dataStore = get<Context>().settingsStore,
+            uiPrefs = get(),
+            searchPrefs = get(),
+            agentPrefs = get(),
+            providerPrefs = get(),
+            chatPrefs = get(),
+            extensionPrefs = get(),
+            assistantPrefs = get(),
+            scope = get(),
+        )
     }
 
     single {

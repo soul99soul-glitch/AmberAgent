@@ -15,7 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import me.rerere.tts.model.PlaybackState
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getSelectedTTSProvider
 import me.rerere.rikkahub.utils.stripMarkdown
 import me.rerere.tts.model.TTSResponse
@@ -35,7 +35,7 @@ private const val TAG = "TTS"
 @Composable
 fun rememberCustomTtsState(): CustomTtsState {
     val context = LocalContext.current
-    val settingsStore = koinInject<SettingsStore>()
+    val settingsStore = koinInject<SettingsAggregator>()
     val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
 
     // Remember the CustomTtsState instance across recompositions
@@ -117,7 +117,7 @@ interface CustomTtsState {
  */
 private class CustomTtsStateImpl(
     private val context: Context,
-    private val settingsStore: SettingsStore
+    private val settingsStore: SettingsAggregator
 ) : CustomTtsState, KoinComponent {
 
     private val ttsManager by inject<TTSManager>()

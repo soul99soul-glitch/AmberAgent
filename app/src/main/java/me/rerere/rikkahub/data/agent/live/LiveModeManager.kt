@@ -20,13 +20,13 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 
 class LiveModeManager(
     private val context: Context,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val appScope: AppScope,
 ) {

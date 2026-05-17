@@ -7,13 +7,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
 
 class PreferenceStoreV3Migration : DataMigration<Preferences> {
     override suspend fun shouldMigrate(currentData: Preferences): Boolean {
-        val version = currentData[SettingsStore.VERSION]
+        val version = currentData[PreferencesKeys.VERSION]
         return version == null || version < 3
     }
 
@@ -21,12 +21,12 @@ class PreferenceStoreV3Migration : DataMigration<Preferences> {
         val prefs = currentData.toMutablePreferences()
 
         val (migratedAssistants, extractedQuickMessages) =
-            migrateAssistantsQuickMessages(prefs[SettingsStore.ASSISTANTS] ?: "[]")
+            migrateAssistantsQuickMessages(prefs[PreferencesKeys.ASSISTANTS] ?: "[]")
 
-        prefs[SettingsStore.ASSISTANTS] = migratedAssistants
+        prefs[PreferencesKeys.ASSISTANTS] = migratedAssistants
 
         // 合并已有的全局快捷消息（防止重复）
-        val existingQuickMessages = prefs[SettingsStore.QUICK_MESSAGES]?.let { json ->
+        val existingQuickMessages = prefs[PreferencesKeys.QUICK_MESSAGES]?.let { json ->
             runCatching<JsonArray> {
                 JsonInstant.parseToJsonElement(json).jsonArray
             }.getOrElse { JsonArray(emptyList()) }
@@ -43,8 +43,8 @@ class PreferenceStoreV3Migration : DataMigration<Preferences> {
             }
         )
 
-        prefs[SettingsStore.QUICK_MESSAGES] = JsonInstant.encodeToString(merged)
-        prefs[SettingsStore.VERSION] = 3
+        prefs[PreferencesKeys.QUICK_MESSAGES] = JsonInstant.encodeToString(merged)
+        prefs[PreferencesKeys.VERSION] = 3
 
         return prefs.toPreferences()
     }

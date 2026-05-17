@@ -23,7 +23,7 @@ import me.rerere.rikkahub.data.agent.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.task.running
 import me.rerere.rikkahub.data.agent.task.toQueueState
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.io.BufferedWriter
 import java.io.File
 import java.io.OutputStreamWriter
@@ -42,7 +42,7 @@ class TerminalRuntime(
     private val workspaceManager: WorkspaceManager,
     private val alpineRuntimeInstaller: AlpineRuntimeInstaller,
     private val activityStore: AgentToolActivityStore,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val agentTaskStore: AgentTaskStore,
 ) {
     private val jobs = ConcurrentHashMap<String, TerminalJob>()

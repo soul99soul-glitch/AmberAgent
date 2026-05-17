@@ -18,14 +18,14 @@ import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
 import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class FeishuOfficeEnhancementManager(
     private val context: Context,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val permissionBroker: AgentPermissionBroker,
     private val workspaceManager: WorkspaceManager,
     private val appScope: AppScope,

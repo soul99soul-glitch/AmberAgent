@@ -14,14 +14,14 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.io.File
 
 private const val EXTERNAL_READ_DEFAULT_MAX_CHARS = 65_536
 private const val EXTERNAL_READ_HARD_MAX_CHARS = 262_144
 
 class ExternalFileTools(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val permissionBroker: AgentPermissionBroker,
     private val activityStore: AgentToolActivityStore,
 ) {

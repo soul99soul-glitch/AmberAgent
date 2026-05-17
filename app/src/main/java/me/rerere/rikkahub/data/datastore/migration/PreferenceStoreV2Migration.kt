@@ -6,24 +6,24 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 
 class PreferenceStoreV2Migration : DataMigration<Preferences> {
     override suspend fun shouldMigrate(currentData: Preferences): Boolean {
-        val version = currentData[SettingsStore.VERSION]
+        val version = currentData[PreferencesKeys.VERSION]
         return version == null || version < 2
     }
 
     override suspend fun migrate(currentData: Preferences): Preferences {
         val prefs = currentData.toMutablePreferences()
 
-        prefs[SettingsStore.ASSISTANTS] = prefs[SettingsStore.ASSISTANTS]?.let { json ->
+        prefs[PreferencesKeys.ASSISTANTS] = prefs[PreferencesKeys.ASSISTANTS]?.let { json ->
             migrateAssistantsJson(json)
         } ?: "[]"
 
-        prefs[SettingsStore.VERSION] = 2
+        prefs[PreferencesKeys.VERSION] = 2
         return prefs.toPreferences()
     }
 

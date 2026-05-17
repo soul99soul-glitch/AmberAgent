@@ -16,7 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
 import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
 import me.rerere.rikkahub.data.db.entity.DocChangeLogEntity
@@ -46,7 +46,7 @@ class DocRadar(
     private val subscriptionDao: DocSubscriptionDAO,
     private val changeLogDao: DocChangeLogDAO,
     private val mcpManager: McpManager,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val notifier: FeishuChangeNotifier,
 ) {
     private val workManager = WorkManager.getInstance(context)

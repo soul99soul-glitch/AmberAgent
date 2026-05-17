@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
@@ -29,7 +29,7 @@ data class AppStats(
 class StatsVM(
     private val conversationDAO: ConversationDAO,
     private val messageStatsDAO: MessageStatsDAO,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
 ) : ViewModel() {
 
     private val _stats = MutableStateFlow(AppStats())

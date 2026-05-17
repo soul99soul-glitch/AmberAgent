@@ -9,7 +9,7 @@ import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.sync.s3.S3Client
@@ -28,7 +28,7 @@ import java.util.zip.ZipOutputStream
 private const val TAG = "S3Sync"
 
 class S3Sync(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val json: Json,
     private val context: Context,
     private val httpClient: HttpClient,

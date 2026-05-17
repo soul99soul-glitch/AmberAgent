@@ -10,7 +10,7 @@ import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_HARD_MUTE_WEIGHT
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 class BoardViewModel(
     private val boardRepository: BoardRepository,
-    private val settingsStore: SettingsStore,
+    private val settingsStore: SettingsAggregator,
     private val scheduler: BoardScheduler,
     private val appScope: AppScope,
 ) : ViewModel() {

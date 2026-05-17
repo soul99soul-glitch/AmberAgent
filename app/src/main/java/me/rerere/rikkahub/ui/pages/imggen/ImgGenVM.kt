@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import me.rerere.ai.ui.ImageAspectRatio
-import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.files.FilesManager
@@ -51,7 +51,7 @@ private fun GenMediaEntity.toGeneratedImage(filesManager: FilesManager): Generat
 
 class ImgGenVM(
     context: Application,
-    val settingsStore: SettingsStore,
+    val settingsStore: SettingsAggregator,
     val genMediaRepository: GenMediaRepository,
     private val filesManager: FilesManager,
     private val imageGenerationRepository: ImageGenerationRepository,
