@@ -2,7 +2,7 @@
 
 > **用途**：Claude Code 跨会话续工作的"外置记忆"。每次开新会话先读本文件 + `SESSION_SNAPSHOT_*.md` 系列恢复上下文。本文件是**滚动更新**的活文档；session snapshot 是某次会话冻结的快照。
 
-**Last updated**: 2026-05-17 (会话 #3 结束)
+**Last updated**: 2026-05-17 (会话 #3 close-out — 装机 sanity + Codex review)
 
 ---
 
@@ -38,16 +38,17 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 - **Stack**: Kotlin + Jetpack Compose + Koin DI + Room + DataStore + KSP
 - **Build types**: notion (debug 派生，应用 ID `.notion`), release, baseline
 - **Phase 1 目标**: god class / god file 拆分，建立 service / DI 分层 seam，为 Phase 2/3 (namespace 重命名、UI 拆、Rust 栈升级) 做准备
-- **设备**: c9a8a837（断连中，需用户接上才能装机验）
+- **设备**: 3B164901CEF00000（接上完成 navigation sanity；之前的 c9a8a837 已不用）
 
 ---
 
 ## 2. 当前分支位置
 
 - **Branch**: `refactor/p1-godclass`
-- **HEAD**: 见 `git log --oneline -1`
+- **HEAD**: 见 `git log --oneline -1`（会话 #3 close-out 时 = `125f0cc7`，可能已推进）
 - **Base**: 从 `4a6cbffb` (main "merge: integrate AmberAgent 2.0 feature line") 分叉
-- **远端未 push**（github-private 还在 `f4326b6b`，建议下次 push 一次留备份）
+- **远端**：`github-private/refactor/p1-godclass`，会话 #3 期间多次 push，session close-out 推进到 `125f0cc7`
+- **`main` 远端**：`f4d03954`（未动 — 验证用 `git ls-remote github-private refs/heads/main`）
 - **Backup tag**: `backup/refactor-p1-godclass-pre-rebase-2026-05-17`
 
 ---
@@ -92,7 +93,7 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 | `app/.../data/datastore/PreferencesStore.kt` | 555 | 从 1127（-50%），class SettingsStore 已删，extension fns + Settings data class 保留 |
 | `app/.../service/ChatService.kt` | ~2250 | 仍是最大单文件，M1.3 剩余 sub-step 主要面对它 |
 | `app/.../data/agent/modelcouncil/ModelCouncilManager.kt` | 961 | 从 1150（-16%），2 Runner 已抽 |
-| **`app/.../data/ai/tools/LocalTools.kt`** | **180** | **会话 #3：1093→180（-83%），低于 god 阈值，已完成**；剩 ctor + 14 lazy delegators + getTools 分发器 |
+| **`app/.../data/ai/tools/LocalTools.kt`** | **189** | **会话 #3：1093→189（-83%），低于 god 阈值，已完成**；剩 ctor + 14 lazy delegators + registryIntrospectionTools + getTools 分发器 |
 | **`app/.../data/ai/tools/LocalToolOption.kt`** | **86** | **会话 #3 新建**：14 variant sealed class 独立文件 |
 | **`app/.../data/ai/tools/*Tool.kt`** | 多 sibling | **会话 #2-#3 累计**：TimeTool / ClipboardTool / AskUserTool / RunPlanUpdateTool / PermissionsStatusTool / ToolsListTool / ToolPolicyExplainTool / TtsTool / JavascriptTool / WebViewTools (7 fn + 4 helper) / ImageGenTool |
 | `app/.../data/agent/tools/SystemAccessTools.kt` | 1441 | 未动 — **下次目标候选 #1**（Android 系统访问 / cursor lifecycle 敏感 / 需装机 sanity）|
@@ -139,20 +140,72 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 
 ---
 
-## 8. 装机 sanity（待跑）
+## 8. 装机 sanity（已部分完成，session #3）
 
-设备 c9a8a837 当前断连。接上后跑：
+### 8.1 新增 `refactortest` buildType（commit `03b16455` + fix `45a3da4b`）
+
+为了让 refactor/p1-godclass 分支能跟你正在用的 `me.rerere.amberagent.notion` **共存**装机，加了 4 个 buildType：
+
+| buildType | applicationId | 派生 | 用途 |
+|---|---|---|---|
+| `release` | `me.rerere.amberagent` | — | 正式发布 |
+| `debug` | `me.rerere.amberagent.debug` | — | 默认 debug |
+| `notion` | `me.rerere.amberagent.notion` | debug | 用户主用 |
+| **`refactortest`** | **`me.rerere.amberagent.refactortest`** | **debug** | **refactor 分支 sanity 装机** |
+| `baseline` | `me.rerere.amberagent.debug` | release(-) | benchmark |
+
+构建 + 装机：
 ```bash
-# (在 worktree 内)
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-export PATH=$JAVA_HOME/bin:$PATH
+export PATH=$JAVA_HOME/bin:$PATH:$HOME/Library/Android/sdk/platform-tools
 export ANDROID_HOME=$HOME/Library/Android/sdk
-./gradlew :app:installNotion --no-daemon
-# 然后 adb -s c9a8a837 logcat 看 5 分钟:
-# 关键 marker: I RikkaHubApp: incrementLaunchCount: NNN (不是 0)
-#             无 W SettingsAggregator: Cannot update dummy settings 
-#             BoardWorker / MemoryDreamWorker 起来正常
+./gradlew :app:assembleRefactortest --no-daemon
+adb -s <device-id> install -r app/build/outputs/apk/refactortest/app-universal-refactortest.apk
 ```
+
+### 8.2 ⚠️ google-services.json 是本地文件（每台机器各自维护）
+
+`app/.gitignore` 第 3 行排除了 `app/google-services.json`，所以新 buildType 在**其他机器上 build 会失败**（`processRefactortestGoogleServices FAILED: No matching client found for package name 'me.rerere.amberagent.refactortest'`）。
+
+**修法**：把当前机器上 `app/google-services.json` 里 notion 那条 client entry 复制一份，把 `package_name` 改成 `me.rerere.amberagent.refactortest`，`mobilesdk_app_id` 改成 `1:1234567890:android:amberagentrefactortest`。`api_key` 留 `local-debug` 即可（项目用占位 Firebase，没真后端）。
+
+### 8.3 ⚠️ NOTION_LIKE 是 UI 主题开关，不是 feature flag（教训）
+
+session #3 第一版 `refactortest` 把 `NOTION_LIKE` 写成 `false`，装机后 UI 全坏（字号大一号、背景土黄、按钮颜色错、动态颜色设置项出现）。读 `Theme.kt:159` / `Color.kt:178/195/203` / `SettingDisplayPage.kt:179` 任一处都能秒发现这是主题切换开关，但当时凭"refactortest 不是 notion 变体"的假设直接写了 false。
+
+**铁律**：新 buildType 复用 notion 的视觉时，**所有** UI-critical BuildConfig flag 必须跟 notion 一致。`NOTION_LIKE`、`XIAOMI_XMS_BUILD_TYPE_DEBUG` 等都属此类。Codex 已建议加 Gradle assertion 或 unit test 强制 parity，未来一定加。
+
+### 8.4 设备 3B164901CEF00000 上的 navigation sanity（已过）
+
+session #3 close-out 时跑过的 sanity 项（设备 `3B164901CEF00000`，refactortest variant，PID 18614）：
+
+| 验证项 | 结果 |
+|---|---|
+| Application onCreate | ✅ `I RikkaHubApp: incrementLaunchCount: 1` |
+| ChatService 生命周期 | ✅ 4 次 createSession/removeSession 完美配对 |
+| `Cannot update dummy settings` 警告 | ✅ **零出现**（filterNot guard 工作）|
+| FATAL EXCEPTION | ✅ 零 |
+| Koin DI 注入 | ✅ 7 个 Pref Module + 8 个 sub-module 全 init 正常 |
+| Provider 设置页 | ✅ 5+ providers 启用状态 + 模型数对 |
+| Search 服务页 | ✅ 6 个 source 启用状态对 |
+| Memory 设置页 | ✅ agents.md + 核心 0/短期 0/长期 0/候选 0 显示对 |
+| Display 设置页 + NOTION_LIKE | ✅ 动态颜色项已隐藏（fix `45a3da4b` 后）|
+| OpenAI Provider Detail | ✅ 鉴权方式/API Key/Base URL/Path/Response API toggle 全对 |
+| WorkManager 周期 worker | ✅ 23 min 内跑了 6 次 job |
+
+### 8.5 还没跑的 sanity（Codex 建议补，merge 前必做）
+
+- **真发 1-2 条聊天消息** — exercise Orchestrator → ChatService → 流式 → 渲染。需 API key。
+- **Settings 写路径持久化** — toggle → force-stop → 重启 → 验证 DataStore 持久化。**session #3 因屏幕息屏被 auto-mode 拦中断，待补**。
+- **真实 tool path 调用** — 至少跑 `tools_list`、`tool_policy_explain`、`eval_javascript`、一个 WebView open/read、`generate_image` 两条路径（配置/未配置 image-gen model）。Codex 列的具体 tool surface。
+
+### 8.6 单测重跑（merge 前必做）
+
+`:app:testDebugUnitTest` 上次跑还是 session #1 末。session #3 累计 12+ commit 后该再跑确认 baseline 失败数稳定在 6（见 §7）。
+
+---
+
+## 8.7 versionCode 自动 bump 提醒（保留旧条目）
 
 如果设备装的是 v361+，可能要先 bump `app/build.gradle.kts` 的 versionCode（注意：某种 auto-bump 机制会在 build 时往这文件写值，commit 前 `git checkout -- app/build.gradle.kts` 还原）。
 
@@ -183,19 +236,30 @@ Claude Code 个人记忆（不在 repo 内）：
 
 按风险递增 + 收益递减排：
 
-1. **装机 sanity** — 设备 c9a8a837 接上后必跑（验证近 14 commits 没把 logcat 弄炸 / 任何启动慢动作 / SettingsAggregator dummy 警告复发）
-2. ~~**M1.4 LocalTools 收尾**~~ ✅ **完成（会话 #3）** — LocalTools.kt 1093→180
-3. **M1.4 SystemAccessTools 拆分** — 1441 行，含 27 个 Tool + 大量 ContentResolver helper。建议把纯数据查询 helper（queryContacts/querySms/queryCallLogs/queryCalendarEvents/queryMedia/maskPhone/maskEmail）剥到 sibling 文件 `SystemAccessQueries.kt`，让主类只保留 tool 注册 + execute 编排。**装机 sanity 是前提**（cursor 错就漏游标）
-4. **M1.4 FeishuOfficeTools 拆分** — 1107 行，Feishu API 集成，状态较少，按 tool 簇分组 sibling 文件
-5. **M1.4 WebMountPrimitiveTools 拆分** — 1604 行，WebMount JS eval gating + 状态机，难度最高
-6. **M1.3.4 StreamingPipeline** — 写 characterization test 先固化 streaming 行为，再拆（半天 - 1 天）
-7. **M1.3.5 ToolApprovalCoordinator** — HIGH 风险，最后做
-8. **M1.6 Repository decoupling** — 每 repo 只依赖 DAO + 网络
-9. **Phase 1 acceptance**：确认所有 god class / god file 都 < 500 行、Phase 1 完结
+1. ~~**M1.4 LocalTools 收尾**~~ ✅ **完成（会话 #3）** — LocalTools.kt 1093→189
+2. ~~**装机 sanity navigation**~~ ✅ **完成（会话 #3，设备 3B164901CEF00000）** — Application/ChatService/Worker/7 Pref 页面全过
+3. **补 sanity gap（merge 前必做）**：
+   - 真发 1-2 条聊天消息（验证 Orchestrator → ChatService → 流式 → 渲染）
+   - Settings 写路径持久化测试（toggle → 重启 → 验持久化）
+   - 跑实际 tool path：tools_list / tool_policy_explain / eval_javascript / WebView / image gen 两条路径
+   - `:app:testDebugUnitTest` 重跑确认 baseline 失败数仍 6
+4. **Tier B polish（Codex 建议）**：
+   - BuildConfig parity assertion（Gradle helper / unit test 强制 notion ↔ refactortest UI-critical flag 一致，防 NOTION_LIKE 复发）
+   - tools_list / tool_policy_explain / WebView helper payload characterization 单测
+5. **M1.4 SystemAccessTools 拆分** — 1441 行，含 27 个 Tool + 大量 ContentResolver helper。建议把纯数据查询 helper（queryContacts/querySms/queryCallLogs/queryCalendarEvents/queryMedia/maskPhone/maskEmail）剥到 sibling 文件 `SystemAccessQueries.kt`，让主类只保留 tool 注册 + execute 编排。**装机 sanity 是前提**（cursor 错就漏游标）
+6. **M1.4 FeishuOfficeTools 拆分** — 1107 行，Feishu API 集成，状态较少，按 tool 簇分组 sibling 文件
+7. **M1.4 WebMountPrimitiveTools 拆分** — 1604 行，WebMount JS eval gating + 状态机，难度最高
+8. **M1.3.4 StreamingPipeline** — 写 characterization test 先固化 streaming 行为，再拆（半天 - 1 天）
+9. **M1.3.5 ToolApprovalCoordinator** — HIGH 风险，最后做
+10. **M1.6 Repository decoupling** — 每 repo 只依赖 DAO + 网络
+11. **Phase 1 acceptance**：确认所有 god class / god file 都 < 500 行、Phase 1 完结
+12. **合 main**：完成 #3 + #4 后可考虑。建议方式 = plain merge（保留 70+ commit milestone 颗粒度）或分批合（M1.1.8e+M1.5 先，M1.4 后）— 风险分散最优。
 
 ---
 
 ## 11. 会话 #3 完整 commit 链（2026-05-17）
+
+### 11.1 LocalTools 抽取链（mid-session）
 
 | commit | 内容 |
 |---|---|
@@ -207,9 +271,22 @@ Claude Code 个人记忆（不在 repo 内）：
 | `476f3fa9` | M1.4 — extract createImageGenTool(conversationId, settingsStore, repo) from LocalTools |
 | `81fd2065` | chore(p1): drop 4 dead imports in LocalTools.kt left behind by earlier extractions |
 | `e49b697d` | refactor(p1): move LocalToolOption sealed class to its own file |
-| (本 commit) | docs(p1): update CLAUDE_STATUS for session #3 |
+| `2e8560fd` | docs(p1): update CLAUDE_STATUS for session #3 — LocalTools fully refactored |
 
-**Total**: 8 refactor commits + 1 docs (≥ 9 commits)。全部 sub-agent reviewed APPROVE。
-**LocalTools.kt 净减**: 1093 → 180 lines (-913, -83%)。
-**编译**: `:app:compileDebugKotlin --rerun-tasks` 全 pass。
-**远端备份**: `github-private/refactor/p1-godclass` 推进到 `e49b697d`。`main` 未动。
+### 11.2 装机 sanity + Codex review polish（late session）
+
+| commit | 内容 |
+|---|---|
+| `03b16455` | build(p1): add refactortest buildType for sanity-installing alongside notion |
+| `45a3da4b` | fix(build): refactortest must set NOTION_LIKE=true, mirroring notion (UI theme switch, not feature flag — lesson learned) |
+| `125f0cc7` | refactor(p1): bundle registry-introspection tools into LocalTools.registryIntrospectionTools(registry) (Codex Tier-A) |
+| (本 commit) | docs(p1): session #3 close-out — sanity status + Codex review action items |
+
+### 11.3 数字
+
+- **Total**: 10 refactor + 3 docs + 2 build = 12+ commits。每个 refactor commit sub-agent reviewed APPROVE，hygiene 2 个合并 review APPROVE。
+- **LocalTools.kt 净减**: 1093 → 189 lines (-904, -83%)。
+- **编译**: `:app:compileDebugKotlin --rerun-tasks` + `:app:assembleRefactortest` 全 pass。
+- **装机**: device `3B164901CEF00000` 装了 refactortest variant，navigation sanity 全过，与 notion 包共存且视觉一致。
+- **远端备份**: `github-private/refactor/p1-godclass` 推进到本 commit。`main` 未动（`f4d03954`）。
+- **Codex review**: P2 buildType 不可复现（已记录在 §8.2 + §10）、P3 doc 过时（本 commit 修了）；无行为级 blocker；提了 registryIntrospectionTools 收整建议（已实现 `125f0cc7`）+ BuildConfig parity assertion 建议（已记录到 §10 Tier B）。
