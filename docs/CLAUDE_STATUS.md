@@ -2,7 +2,7 @@
 
 > **用途**：Claude Code 跨会话续工作的"外置记忆"。每次开新会话先读本文件 + `SESSION_SNAPSHOT_*.md` 系列恢复上下文。本文件是**滚动更新**的活文档；session snapshot 是某次会话冻结的快照。
 
-**Last updated**: 2026-05-17 (会话 #2 结束)
+**Last updated**: 2026-05-17 (会话 #3 结束)
 
 ---
 
@@ -69,6 +69,7 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 | M1.7 | tts 评估 — 结论不拆（无 god class） | `e7dbf8ce` + `991a4c15` |
 | Worker fix | MemoryDreamWorker + BoardWorker 加 `.filterNot { it.init }.first()` guard | `e7dbf8ce` |
 | M1.4 demo | LocalTools 抽 5 个 stateless tool 到 sibling（template 成熟） | `e8bb7e6b` 系列 |
+| **M1.4 LocalTools 收尾** | **会话 #3** 抽完 LocalTools.kt 剩余所有 tool + helper：tools_list / tool_policy_explain / TTS / JavaScript / 7 个 webview tools + 4 helpers / generate_image，及 LocalToolOption sealed class 移文件、2 轮 dead-import 清理 | `648d5498` → `e49b697d`（8 commits）|
 | M1.8 | acceptance snapshot 文档 | `61ea87a9` 等 |
 
 ### ❌ 真正剩余 follow-up
@@ -77,7 +78,8 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 |---|---|---|
 | **M1.3.4** StreamingPipeline — 整合 MessageStreamAccumulator + 流式状态机 | 2-4h | **高**（需 characterization test 先固化行为） |
 | **M1.3.5** ToolApprovalCoordinator — tool approval 流程拆出 | 2-3h | **高**（蓝图标 HIGH） |
-| **M1.4 剩余** LocalTools 中带 WebView/QuickJS/TTS deps 的 tools + SystemAccessTools (1441 行) + FeishuOfficeTools (1107 行) + WebMountPrimitiveTools (1604 行) | 2-3 天 | 中（机械工作但量大） |
+| ~~**M1.4 LocalTools 剩余**~~ | ✅ **完成（会话 #3）** | LocalTools.kt 1093→180 (-83%)；7 webview + javascript + tts + tools_list + tool_policy_explain + generate_image + LocalToolOption 全部抽完 |
+| **M1.4 其它 god files** SystemAccessTools (1441 行 / Android 系统访问 / cursor lifecycle 敏感) + FeishuOfficeTools (1107 行 / Feishu API) + WebMountPrimitiveTools (1604 行 / 状态机 + JS eval gating) | 2-3 天 | 中-高（非纯逻辑 tool，需装机 sanity 验证）|
 | **M1.6** Repository decoupling — 每 repo 只依赖 DAO + 网络 | 1-2 天 | 中 |
 
 ---
@@ -90,10 +92,12 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 | `app/.../data/datastore/PreferencesStore.kt` | 555 | 从 1127（-50%），class SettingsStore 已删，extension fns + Settings data class 保留 |
 | `app/.../service/ChatService.kt` | ~2250 | 仍是最大单文件，M1.3 剩余 sub-step 主要面对它 |
 | `app/.../data/agent/modelcouncil/ModelCouncilManager.kt` | 961 | 从 1150（-16%），2 Runner 已抽 |
-| `app/.../data/ai/tools/LocalTools.kt` | 1093 | 从 1336（-18%），5 stateless tool 已抽 |
-| `app/.../data/agent/tools/SystemAccessTools.kt` | 1441 | 未动 |
-| `app/.../data/agent/tools/FeishuOfficeTools.kt` | 1107 | 未动 |
-| `app/.../data/agent/webmount/tools/WebMountPrimitiveTools.kt` | 1604 | 未动 |
+| **`app/.../data/ai/tools/LocalTools.kt`** | **180** | **会话 #3：1093→180（-83%），低于 god 阈值，已完成**；剩 ctor + 14 lazy delegators + getTools 分发器 |
+| **`app/.../data/ai/tools/LocalToolOption.kt`** | **86** | **会话 #3 新建**：14 variant sealed class 独立文件 |
+| **`app/.../data/ai/tools/*Tool.kt`** | 多 sibling | **会话 #2-#3 累计**：TimeTool / ClipboardTool / AskUserTool / RunPlanUpdateTool / PermissionsStatusTool / ToolsListTool / ToolPolicyExplainTool / TtsTool / JavascriptTool / WebViewTools (7 fn + 4 helper) / ImageGenTool |
+| `app/.../data/agent/tools/SystemAccessTools.kt` | 1441 | 未动 — **下次目标候选 #1**（Android 系统访问 / cursor lifecycle 敏感 / 需装机 sanity）|
+| `app/.../data/agent/tools/FeishuOfficeTools.kt` | 1107 | 未动 — **下次目标候选 #2**（Feishu API 集成）|
+| `app/.../data/agent/webmount/tools/WebMountPrimitiveTools.kt` | 1604 | 未动 — **下次目标候选 #3**（状态机 + JS eval gating）|
 
 ---
 
@@ -179,10 +183,33 @@ Claude Code 个人记忆（不在 repo 内）：
 
 按风险递增 + 收益递减排：
 
-1. **装机 sanity + push remote** — 兜底必做（15 min）
-2. **M1.4 继续抽** LocalTools 中剩余 stateless tool（每个 1 commit + 1 review），增量推进直到 LocalTools.kt < 500 行
-3. **M1.3.4 StreamingPipeline** — 写 characterization test 先固化 streaming 行为，再拆（半天 - 1 天）
-4. **M1.3.5 ToolApprovalCoordinator** — HIGH 风险，最后做
-5. **SystemAccessTools / FeishuOfficeTools / WebMountPrimitiveTools** 分别按 LocalTools 同模板拆
-6. **M1.6 Repository decoupling** — 每 repo 只依赖 DAO + 网络
-7. **Phase 1 acceptance**：确认所有 god class / god file 都 < 500 行、Phase 1 完结
+1. **装机 sanity** — 设备 c9a8a837 接上后必跑（验证近 14 commits 没把 logcat 弄炸 / 任何启动慢动作 / SettingsAggregator dummy 警告复发）
+2. ~~**M1.4 LocalTools 收尾**~~ ✅ **完成（会话 #3）** — LocalTools.kt 1093→180
+3. **M1.4 SystemAccessTools 拆分** — 1441 行，含 27 个 Tool + 大量 ContentResolver helper。建议把纯数据查询 helper（queryContacts/querySms/queryCallLogs/queryCalendarEvents/queryMedia/maskPhone/maskEmail）剥到 sibling 文件 `SystemAccessQueries.kt`，让主类只保留 tool 注册 + execute 编排。**装机 sanity 是前提**（cursor 错就漏游标）
+4. **M1.4 FeishuOfficeTools 拆分** — 1107 行，Feishu API 集成，状态较少，按 tool 簇分组 sibling 文件
+5. **M1.4 WebMountPrimitiveTools 拆分** — 1604 行，WebMount JS eval gating + 状态机，难度最高
+6. **M1.3.4 StreamingPipeline** — 写 characterization test 先固化 streaming 行为，再拆（半天 - 1 天）
+7. **M1.3.5 ToolApprovalCoordinator** — HIGH 风险，最后做
+8. **M1.6 Repository decoupling** — 每 repo 只依赖 DAO + 网络
+9. **Phase 1 acceptance**：确认所有 god class / god file 都 < 500 行、Phase 1 完结
+
+---
+
+## 11. 会话 #3 完整 commit 链（2026-05-17）
+
+| commit | 内容 |
+|---|---|
+| `648d5498` | M1.4 — extract createToolsListTool(registry, permissionBroker) from LocalTools |
+| `234fe1e0` | M1.4 — extract createToolPolicyExplainTool(registry) from LocalTools |
+| `45fa9d0e` | M1.4 — extract createTtsTool(eventBus) from LocalTools |
+| `52a7265d` | M1.4 — extract createJavascriptTool() from LocalTools |
+| `f19b96b3` | M1.4 — extract 7 webview_* tools + 4 helpers to WebViewTools.kt |
+| `476f3fa9` | M1.4 — extract createImageGenTool(conversationId, settingsStore, repo) from LocalTools |
+| `81fd2065` | chore(p1): drop 4 dead imports in LocalTools.kt left behind by earlier extractions |
+| `e49b697d` | refactor(p1): move LocalToolOption sealed class to its own file |
+| (本 commit) | docs(p1): update CLAUDE_STATUS for session #3 |
+
+**Total**: 8 refactor commits + 1 docs (≥ 9 commits)。全部 sub-agent reviewed APPROVE。
+**LocalTools.kt 净减**: 1093 → 180 lines (-913, -83%)。
+**编译**: `:app:compileDebugKotlin --rerun-tasks` 全 pass。
+**远端备份**: `github-private/refactor/p1-godclass` 推进到 `e49b697d`。`main` 未动。
