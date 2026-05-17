@@ -158,12 +158,17 @@ android {
             // branch alongside the user's regular notion install. Different
             // applicationId → Android treats them as two separate apps;
             // separate data dir, no preference / Room DB collision.
+            //
+            // NOTION_LIKE = true mirrors the notion buildType — this isn't a
+            // feature flag, it's the UI theme switch (notion-tuned palette +
+            // typography + container shapes vs. default Material You / dynamic
+            // color). Sanity tests should compare same UI, only different code.
             initWith(getByName("debug"))
             matchingFallbacks.add("debug")
             applicationIdSuffix = ".refactortest"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
-            buildConfigField("Boolean", "NOTION_LIKE", "false")
+            buildConfigField("Boolean", "NOTION_LIKE", "true")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.refactortest").toString())
