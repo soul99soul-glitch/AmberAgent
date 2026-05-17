@@ -34,6 +34,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_19_20
 import me.rerere.rikkahub.data.db.migrations.Migration_20_21
 import me.rerere.rikkahub.data.db.migrations.Migration_21_22
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
+import me.rerere.rikkahub.data.db.migrations.Migration_25_26
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
@@ -68,6 +69,7 @@ val dataSourceModule = module {
                 Migration_20_21,
                 Migration_21_22,
                 Migration_22_23,
+                Migration_25_26,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -152,6 +154,10 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().messageNodeDao()
+    }
+
+    single {
+        get<AppDatabase>().messageStatsDao()
     }
 
     single {

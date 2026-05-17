@@ -46,7 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -65,7 +66,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
 
-    val conversations by vm.conversations.collectAsStateWithLifecycle()
+    val conversations = vm.conversations.collectAsLazyPagingItems()
 
     Scaffold(
         topBar = {
@@ -107,7 +108,11 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(conversations, key = { it.id }) { conversation ->
+            items(
+                count = conversations.itemCount,
+                key = conversations.itemKey { it.id },
+            ) { index ->
+                val conversation = conversations[index] ?: return@items
                 SwipeableConversationItem(
                     conversation = conversation,
                     onClick = {

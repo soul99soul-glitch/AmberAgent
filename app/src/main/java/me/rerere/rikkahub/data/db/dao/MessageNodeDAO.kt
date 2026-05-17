@@ -28,6 +28,32 @@ interface MessageNodeDAO {
         offset: Int
     ): List<MessageNodeEntity>
 
+    @Query(
+        "SELECT * FROM message_node WHERE conversation_id = :conversationId " +
+            "AND node_index BETWEEN :startIndex AND :endIndex ORDER BY node_index ASC"
+    )
+    suspend fun getNodesOfConversationRange(
+        conversationId: String,
+        startIndex: Int,
+        endIndex: Int
+    ): List<MessageNodeEntity>
+
+    @Query("SELECT node_index FROM message_node WHERE conversation_id = :conversationId AND id = :nodeId LIMIT 1")
+    suspend fun getNodeIndex(
+        conversationId: String,
+        nodeId: String
+    ): Int?
+
+    @Query(
+        "SELECT id FROM message_node WHERE conversation_id = :conversationId " +
+            "AND node_index BETWEEN :startIndex AND :endIndex"
+    )
+    suspend fun getNodeIdsOfConversationRange(
+        conversationId: String,
+        startIndex: Int,
+        endIndex: Int
+    ): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(nodes: List<MessageNodeEntity>)
 
@@ -40,6 +66,16 @@ interface MessageNodeDAO {
     @Query("DELETE FROM message_node WHERE conversation_id = :conversationId")
     suspend fun deleteByConversation(conversationId: String)
 
+    @Query(
+        "DELETE FROM message_node WHERE conversation_id = :conversationId " +
+            "AND node_index BETWEEN :startIndex AND :endIndex"
+    )
+    suspend fun deleteByConversationRange(
+        conversationId: String,
+        startIndex: Int,
+        endIndex: Int
+    )
+
     @Query("DELETE FROM message_node WHERE id = :nodeId")
     suspend fun deleteById(nodeId: String)
 
@@ -49,6 +85,9 @@ interface MessageNodeDAO {
 
     @RawQuery
     suspend fun getMessageCountPerDayRaw(query: SupportSQLiteQuery): List<MessageDayCount>
+
+    @RawQuery
+    suspend fun findNodeIdContainingMessageRaw(query: SupportSQLiteQuery): MessageNodeId?
 }
 
 data class MessageTokenStats(
@@ -59,6 +98,22 @@ data class MessageTokenStats(
 )
 
 data class MessageDayCount(val day: String, val count: Int)
+
+data class MessageNodeId(val id: String)
+
+suspend fun MessageNodeDAO.findNodeIdContainingMessage(
+    conversationId: String,
+    messageId: String,
+): String? = findNodeIdContainingMessageRaw(
+    SimpleSQLiteQuery(
+        "SELECT mn.id AS id " +
+            "FROM message_node mn, json_each(mn.messages) j " +
+            "WHERE mn.conversation_id = ? " +
+            "AND json_extract(j.value, '$.id') = ? " +
+            "LIMIT 1",
+        arrayOf(conversationId, messageId)
+    )
+)?.id
 
 // SQLite json_each() 展开 messages JSON 数组，json_extract() 提取 Token 字段并聚合
 private val TOKEN_STATS_SQL = SimpleSQLiteQuery(

@@ -3,9 +3,10 @@ package me.rerere.rikkahub.ui.pages.history
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.Flow
+import androidx.paging.cachedIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -26,11 +27,16 @@ class HistoryVM(
         .map { it.getCurrentAssistant() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val conversations = assistant.flatMapLatest { assistant ->
-        conversationRepo.getConversationsOfAssistant(assistant?.id ?: Uuid.random())
-    }.catch {
-        Log.e(TAG, "Error: ${it.message}")
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val conversations = settingsStore.settingsFlow
+        .map { it.getCurrentAssistant().id }
+        .distinctUntilChanged()
+        .flatMapLatest { assistantId ->
+            conversationRepo.getConversationsOfAssistantPaging(assistantId)
+        }
+        .catch {
+            Log.e(TAG, "Error: ${it.message}")
+        }
+        .cachedIn(viewModelScope)
 
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
@@ -50,9 +56,6 @@ class HistoryVM(
             conversationRepo.togglePinStatus(conversationId)
         }
     }
-
-    fun getPinnedConversations(): Flow<List<Conversation>> =
-        conversationRepo.getPinnedConversations()
 
     fun restoreConversation(conversation: Conversation) {
         viewModelScope.launch {

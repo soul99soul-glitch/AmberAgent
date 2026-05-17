@@ -791,8 +791,12 @@ private fun ContextUsageIndicator(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    val currentMessages = conversation.currentMessages
-    val contextFingerprint = ContextFootprintEstimator.inputFingerprint(currentMessages)
+    val currentMessages = remember(conversation.messageNodes) {
+        conversation.currentMessages
+    }
+    val contextFingerprint = remember(currentMessages) {
+        ContextFootprintEstimator.inputFingerprint(currentMessages)
+    }
     // 2026-05-15: estimator now consumes active compacts so the ring reflects
     // the POST-substitution footprint (summary + recent messages), not the
     // raw timeline. Without this, every successful compaction would leave the
@@ -1361,8 +1365,7 @@ private fun SandboxPeekBar(
 ) {
     Row(
         modifier = modifier
-            .fillMaxWidth()
-            .animateContentSize(),
+            .fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -2146,8 +2149,8 @@ private fun scheduleThumbnailCaptures(
     context: android.content.Context,
     loadId: String,
 ) {
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 800L, force = true)
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 3_000L, force = true)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 800L)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 5_000L)
 }
 
 private fun captureWebViewThumbnail(
@@ -2158,9 +2161,9 @@ private fun captureWebViewThumbnail(
     delayMillis: Long = 500L,
     force: Boolean = false,
 ) {
-    if (!store.shouldCaptureThumbnail(loadId, webView.url, force = force)) return
     webView.postDelayed({
         runCatching {
+            if (!store.shouldCaptureThumbnail(loadId, webView.url, force = force)) return@runCatching
             val width = webView.width
             val height = webView.height
             if (width <= 0 || height <= 0) return@runCatching

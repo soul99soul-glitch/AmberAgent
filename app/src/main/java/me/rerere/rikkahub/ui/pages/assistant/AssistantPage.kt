@@ -62,7 +62,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANTS_IDS
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -85,6 +85,7 @@ import androidx.compose.foundation.lazy.items as lazyItems
 @Composable
 fun AssistantPage(vm: AssistantVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val memoryCounts by vm.memoryCounts.collectAsStateWithLifecycle()
     val createState = useEditState<Assistant> {
         vm.addAssistant(it)
     }
@@ -198,13 +199,16 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                         state = reorderableState,
                         key = assistant.id,
                     ) { isDragging ->
-                        val memories by vm.getMemories(assistant).collectAsStateWithLifecycle(
-                            initialValue = emptyList(),
-                        )
                         AssistantItem(
                             assistant = assistant,
                             settings = settings,
-                            memories = memories,
+                            memoryCount = memoryCounts[
+                                if (assistant.useGlobalMemory) {
+                                    MemoryRepository.GLOBAL_MEMORY_ID
+                                } else {
+                                    assistant.id.toString()
+                                }
+                            ] ?: 0,
                             onEdit = {
                                 navController.navigate(Screen.AssistantDetail(id = assistant.id.toString()))
                             },
@@ -393,7 +397,7 @@ private fun AssistantItem(
     assistant: Assistant,
     settings: Settings,
     modifier: Modifier = Modifier,
-    memories: List<AssistantMemory>,
+    memoryCount: Int,
     onEdit: () -> Unit,
     onShowActions: () -> Unit,
 ) {
@@ -437,7 +441,7 @@ private fun AssistantItem(
                 ) {
                     if (assistant.enableMemory) {
                         Tag(type = TagType.SUCCESS) {
-                            Text(stringResource(R.string.assistant_page_memory_count, memories.size))
+                            Text(stringResource(R.string.assistant_page_memory_count, memoryCount))
                         }
                     }
 

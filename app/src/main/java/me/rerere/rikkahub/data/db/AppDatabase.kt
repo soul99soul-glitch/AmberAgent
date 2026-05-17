@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDreamPlanDAO
 import me.rerere.rikkahub.data.db.dao.MemoryEventDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
 import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
@@ -49,7 +50,9 @@ import me.rerere.rikkahub.data.db.entity.MemoryCandidateEntity
 import me.rerere.rikkahub.data.db.entity.MemoryDreamPlanEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEventEntity
+import me.rerere.rikkahub.data.db.entity.MessageDayStatEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.MessageNodeStatEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
@@ -78,8 +81,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         DailyReviewEntity::class,
         DocSubscriptionEntity::class,
         DocChangeLogEntity::class,
+        MessageNodeStatEntity::class,
+        MessageDayStatEntity::class,
     ],
-    version = 25,
+    version = 26,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -116,6 +121,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun genMediaDao(): GenMediaDAO
 
     abstract fun messageNodeDao(): MessageNodeDAO
+
+    abstract fun messageStatsDao(): MessageStatsDAO
 
     abstract fun managedFileDao(): ManagedFileDAO
 

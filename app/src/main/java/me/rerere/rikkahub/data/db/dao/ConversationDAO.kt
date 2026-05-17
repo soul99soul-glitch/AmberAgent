@@ -30,6 +30,12 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
     suspend fun getRecentConversations(limit: Int): List<ConversationEntity>
 
+    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
+    suspend fun getRecentConversationSummariesOfAssistant(assistantId: String, limit: Int): List<LightConversationEntity>
+
+    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
+    suspend fun getRecentConversationSummaries(limit: Int): List<LightConversationEntity>
+
     @Query("SELECT * FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversations(searchText: String): Flow<List<ConversationEntity>>
 
@@ -50,6 +56,9 @@ interface ConversationDAO {
 
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     suspend fun getConversationById(id: String): ConversationEntity?
+
+    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity WHERE id = :id")
+    suspend fun getConversationSummaryById(id: String): LightConversationEntity?
 
     @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id)")
     suspend fun existsById(id: String): Boolean

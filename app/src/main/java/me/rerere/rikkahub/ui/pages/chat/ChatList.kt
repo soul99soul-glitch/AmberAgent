@@ -146,7 +146,6 @@ import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItemContent
 import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems
-import me.rerere.rikkahub.ui.components.message.chatMessageVirtualizationPrewarmTexts
 import me.rerere.rikkahub.ui.components.richtext.prewarmMarkdownContent
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
@@ -156,6 +155,7 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
@@ -165,6 +165,7 @@ private const val TAG = "ChatList"
 // after root cause identified.
 private const val SCROLL_TAG = "ChatScroll"
 private const val LoadingIndicatorKey = "LoadingIndicator"
+private const val HistoryLoadingItemKey = "timeline-history-loading"
 private const val ScrollBottomKey = "ScrollBottomKey"
 private const val SendTransitionEnterMillis = 150
 private const val SendTransitionExitMillis = 100
@@ -178,6 +179,19 @@ private val SentUserMessageSlideDistance = 18.dp
 // can update at ~30Hz; per-tick Regex compile is a measurable frame-rate hit
 // on mid-tier devices.
 private val COMPACT_SUMMARY_WHITESPACE_RE = Regex("\\s+")
+
+private data class TimelineHistoryLoadSignal(
+    val historyVisible: Boolean,
+    val initialized: Boolean,
+    val fullyLoaded: Boolean,
+    val prefetching: Boolean,
+    val loadedNodeCount: Int,
+)
+
+private data class TimelineScrollAnchor(
+    val key: Any,
+    val offset: Int,
+)
 
 @Composable
 private fun SentUserMessageEnter(
@@ -643,6 +657,7 @@ fun ChatList(
     onOpenQueue: () -> Unit = {},
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -696,6 +711,7 @@ fun ChatList(
                 onOpenQueue = onOpenQueue,
                 onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
+                onLoadOlderTimeline = onLoadOlderTimeline,
             )
         }
     }
@@ -737,10 +753,13 @@ private fun ChatListNormal(
     onOpenQueue: () -> Unit = {},
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val activeGeneration = loading || pendingUserMessages.isNotEmpty()
     val activeGenerationState by rememberUpdatedState(activeGeneration)
+    val timelineLoadStateState by rememberUpdatedState(timelineLoadState)
+    val loadOlderTimelineState by rememberUpdatedState(onLoadOlderTimeline)
     var isRecentScroll by remember { mutableStateOf(false) }
     var followMode by remember(conversation.id) { mutableStateOf(TimelineFollowMode.Idle) }
     var programmaticScrollInProgress by remember(conversation.id) { mutableStateOf(false) }
@@ -1159,31 +1178,38 @@ private fun ChatListNormal(
         }
     }
 
-    LaunchedEffect(
-        conversation.id,
-        conversation.messageNodes,
-        loading,
-        chatAssistant,
-        showAssistantBubble,
-    ) {
-        val contents = conversation.messageNodes
-            .flatMapIndexed { index, node ->
-                node.chatMessageVirtualizationPrewarmTexts(
-                    assistant = chatAssistant,
-                    showAssistantBubble = showAssistantBubble,
-                    loading = loading,
-                    lastMessage = index == conversation.messageNodes.lastIndex,
-                )
-            }
-            .distinct()
-        if (contents.isNotEmpty()) {
-            withContext(Dispatchers.Default) {
-                contents.forEach { content ->
-                    prewarmMarkdownContent(content)
+    LaunchedEffect(conversation.id, state) {
+        snapshotFlow {
+            val loadState = timelineLoadStateState
+            val visibleItems = state.layoutInfo.visibleItemsInfo
+            TimelineHistoryLoadSignal(
+                historyVisible = visibleItems.any { it.key == HistoryLoadingItemKey },
+                initialized = loadState.initialized,
+                fullyLoaded = loadState.isFullyLoaded,
+                prefetching = loadState.prefetchingOlder,
+                loadedNodeCount = loadState.loadedNodeCount,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { signal ->
+                if (!signal.initialized || signal.fullyLoaded || signal.prefetching || !signal.historyVisible) {
+                    return@collect
+                }
+                val anchor = state.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key != HistoryLoadingItemKey }
+                    ?.let { TimelineScrollAnchor(key = it.key, offset = it.offset) }
+                loadOlderTimelineState()
+                withFrameNanos { }
+                anchor?.let { previous ->
+                    val current = state.layoutInfo.visibleItemsInfo
+                        .firstOrNull { it.key == previous.key }
+                        ?: return@let
+                    val delta = current.offset - previous.offset
+                    if (abs(delta) > 1) {
+                        state.scrollBy(delta.toFloat())
+                    }
                 }
             }
-            markdownVirtualizationEpoch += 1
-        }
     }
 
     LaunchedEffect(
@@ -1208,6 +1234,9 @@ private fun ChatListNormal(
                     contents.distinct().forEach { content ->
                         prewarmMarkdownContent(content)
                     }
+                }
+                if (contents.isNotEmpty()) {
+                    markdownVirtualizationEpoch += 1
                 }
             }
     }
@@ -1307,7 +1336,7 @@ private fun ChatListNormal(
         ) {
             if (!timelineLoadState.isFullyLoaded) {
                 item(
-                    key = "timeline-history-loading",
+                    key = HistoryLoadingItemKey,
                     contentType = "history-loading",
                 ) {
                     TimelineHistoryLoadingIndicator(

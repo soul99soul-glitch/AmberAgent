@@ -306,6 +306,10 @@ class ChatVM(
         chatService.ensureConversationTimelineLoaded(_conversationId)
     }
 
+    suspend fun loadOlderTimelinePage() {
+        chatService.loadOlderTimelinePage(_conversationId)
+    }
+
     fun updateTitle(title: String) {
         viewModelScope.launch {
             val updatedConversation = conversation.value.copy(title = title)

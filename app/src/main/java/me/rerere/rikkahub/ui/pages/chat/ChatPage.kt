@@ -797,6 +797,9 @@ private fun ChatPageContent(
                         }
                     }
                 },
+                onLoadOlderTimeline = {
+                    vm.loadOlderTimelinePage()
+                },
             )
         }
 

@@ -293,85 +293,98 @@ private fun SettingProviderConfigPage(
     var internalProvider by remember(provider) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .imePadding(),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ProviderConfigure(
-            provider = internalProvider,
-            // Async outcomes (Codex OAuth login, listModels refresh) commit straight to the
-            // top-level settings — without this, the user has to remember to hit Save before
-            // switching to the Models tab, and we end up with "Codex login succeeded but Models
-            // tab shows empty" reports.
-            onCommit = { committed ->
-                internalProvider = committed  // keep local in sync so the UI doesn't snap back
-                onEdit(committed)
-            },
-            onEdit = {
-                internalProvider = it
-            },
-        )
-
-        if (internalProvider is ProviderSetting.OpenAI) {
-            SettingProviderBalanceOption(
+        item(key = "provider_config") {
+            ProviderConfigure(
                 provider = internalProvider,
-                balanceOption = internalProvider.balanceOption,
-                onEdit = { internalProvider = internalProvider.copyProvider(balanceOption = it) }
+                // Async outcomes (Codex OAuth login, listModels refresh) commit straight to the
+                // top-level settings — without this, the user has to remember to hit Save before
+                // switching to the Models tab, and we end up with "Codex login succeeded but Models
+                // tab shows empty" reports.
+                onCommit = { committed ->
+                    internalProvider = committed  // keep local in sync so the UI doesn't snap back
+                    onEdit(committed)
+                },
+                onEdit = {
+                    internalProvider = it
+                },
             )
-            ProviderBalanceText(providerSetting = provider, style = MaterialTheme.typography.labelSmall)
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ProviderConnectionTester(
-                internalProvider = internalProvider,
-            )
-
-            Spacer(Modifier.weight(1f))
-
-            IconButton(
-                onClick = {
-                    showDeleteDialog = true
-                },
-            ) {
-                Icon(HugeIcons.Delete01, null)
-            }
-
-            IconButton(
-                onClick = {
-                    internalProvider = internalProvider.resetBaseUrlToDefault()
-                },
-                enabled = !internalProvider.isUsingDefaultBaseUrl(),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Refresh03,
-                    contentDescription = stringResource(R.string.setting_model_page_reset_to_default)
+        if (internalProvider is ProviderSetting.OpenAI) {
+            item(key = "provider_balance") {
+                SettingProviderBalanceOption(
+                    provider = internalProvider,
+                    balanceOption = internalProvider.balanceOption,
+                    onEdit = { internalProvider = internalProvider.copyProvider(balanceOption = it) }
                 )
             }
+            item(key = "provider_balance_text") {
+                ProviderBalanceText(providerSetting = internalProvider, style = MaterialTheme.typography.labelSmall)
+            }
+        }
 
-            Button(
-                onClick = {
-                    onEdit(internalProvider)
-                }
+        item(key = "provider_actions") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(stringResource(R.string.setting_provider_page_save))
+                ProviderConnectionTester(
+                    internalProvider = internalProvider,
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                IconButton(
+                    onClick = {
+                        showDeleteDialog = true
+                    },
+                ) {
+                    Icon(HugeIcons.Delete01, null)
+                }
+
+                IconButton(
+                    onClick = {
+                        internalProvider = internalProvider.resetBaseUrlToDefault()
+                    },
+                    enabled = !internalProvider.isUsingDefaultBaseUrl(),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Refresh03,
+                        contentDescription = stringResource(R.string.setting_model_page_reset_to_default)
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        onEdit(internalProvider)
+                    }
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_save))
+                }
             }
         }
 
         // 硅基流动图标
-        if (provider is ProviderSetting.OpenAI && provider.baseUrl.contains("siliconflow.cn")) {
-            SiliconFlowPowerByIcon(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(vertical = 16.dp)
-            )
+        val siliconFlowProvider = internalProvider as? ProviderSetting.OpenAI
+        if (siliconFlowProvider?.baseUrl?.contains("siliconflow.cn") == true) {
+            item(key = "siliconflow_powered_by") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    SiliconFlowPowerByIcon()
+                }
+            }
         }
     }
 
@@ -421,7 +434,8 @@ private fun ModelList(
     onUpdateProvider: (ProviderSetting) -> Unit
 ) {
     val providerManager = koinInject<ProviderManager>()
-    val modelList by produceState(emptyList(), providerSetting) {
+    val requestKey = remember(providerSetting) { providerSetting.modelListRequestKey() }
+    val modelList by produceState(emptyList(), requestKey) {
         runCatching {
             println("loading models...")
             value = providerManager.getProviderByType(providerSetting)
@@ -543,6 +557,46 @@ private fun ModelList(
         }
     }
 }
+
+private fun ProviderSetting.modelListRequestKey(): ProviderModelListRequestKey {
+    return when (this) {
+        is ProviderSetting.OpenAI -> ProviderModelListRequestKey(
+            type = "openai",
+            id = id.toString(),
+            credentialsHash = apiKey.hashCode(),
+            baseUrl = baseUrl,
+            authMode = authMode.name,
+            extra = "$chatCompletionsPath|$useResponseApi|${brand.name}",
+        )
+
+        is ProviderSetting.Google -> ProviderModelListRequestKey(
+            type = "google",
+            id = id.toString(),
+            credentialsHash = "$apiKey|$privateKey".hashCode(),
+            baseUrl = baseUrl,
+            authMode = authMode.name,
+            extra = "$vertexAI|$useServiceAccount|$serviceAccountEmail|$location|$projectId",
+        )
+
+        is ProviderSetting.Claude -> ProviderModelListRequestKey(
+            type = "claude",
+            id = id.toString(),
+            credentialsHash = apiKey.hashCode(),
+            baseUrl = baseUrl,
+            authMode = "",
+            extra = promptCaching.toString(),
+        )
+    }
+}
+
+private data class ProviderModelListRequestKey(
+    val type: String,
+    val id: String,
+    val credentialsHash: Int,
+    val baseUrl: String,
+    val authMode: String,
+    val extra: String,
+)
 
 @Composable
 private fun ModelSettingsForm(

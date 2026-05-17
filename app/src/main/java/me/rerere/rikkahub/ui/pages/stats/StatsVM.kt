@@ -9,9 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
-import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
-import me.rerere.rikkahub.data.db.dao.getMessageCountPerDay
-import me.rerere.rikkahub.data.db.dao.getTokenStats
+import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -30,7 +28,7 @@ data class AppStats(
 
 class StatsVM(
     private val conversationDAO: ConversationDAO,
-    private val messageNodeDAO: MessageNodeDAO,
+    private val messageStatsDAO: MessageStatsDAO,
     private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
@@ -54,7 +52,7 @@ class StatsVM(
 
         // 基于用户消息的 createdAt 统计每日活跃消息数，SQLite 侧 GROUP BY，返回 ≤371 行
         val conversationsPerDay = withContext(Dispatchers.IO) {
-            messageNodeDAO
+            messageStatsDAO
                 .getMessageCountPerDay(startDate)
                 .mapNotNull { entry ->
                     runCatching { LocalDate.parse(entry.day) to entry.count }.getOrNull()
@@ -64,8 +62,7 @@ class StatsVM(
 
         val totalConversations = conversationDAO.countAll()
 
-        // json_each() + json_extract() 在 SQLite 侧聚合，不再加载完整 JSON 到 Kotlin
-        val tokenStats = messageNodeDAO.getTokenStats()
+        val tokenStats = messageStatsDAO.getTokenStats()
 
         val launchCount = settingsStore.settingsFlow.value.launchCount
 

@@ -184,6 +184,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 items(mcpConfigs, key = { it.id }) { mcpConfig ->
                     McpServerItem(
                         item = mcpConfig,
+                        status = status[mcpConfig.id] ?: McpStatus.Idle,
                         onEdit = {
                             editState.open(mcpConfig)
                         },
@@ -237,12 +238,11 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
 @Composable
 private fun McpServerItem(
     item: McpServerConfig,
+    status: McpStatus,
     modifier: Modifier = Modifier,
     onDelete: () -> Unit,
     onEdit: (McpServerConfig) -> Unit,
 ) {
-    val mcpManager = koinInject<McpManager>()
-    val status by mcpManager.getStatus(item).collectAsStateWithLifecycle(McpStatus.Idle)
     val dismissBoxState = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
     val workspace = workspaceColors()
