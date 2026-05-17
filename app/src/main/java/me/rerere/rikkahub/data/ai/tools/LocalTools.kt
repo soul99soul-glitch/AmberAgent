@@ -1,8 +1,6 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import android.content.Context
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -32,73 +30,6 @@ import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
 import kotlin.uuid.Uuid
-
-@Serializable
-sealed class LocalToolOption {
-    @Serializable
-    @SerialName("javascript_engine")
-    data object JavascriptEngine : LocalToolOption()
-
-    @Serializable
-    @SerialName("time_info")
-    data object TimeInfo : LocalToolOption()
-
-    @Serializable
-    @SerialName("clipboard")
-    data object Clipboard : LocalToolOption()
-
-    @Serializable
-    @SerialName("tts")
-    data object Tts : LocalToolOption()
-
-    @Serializable
-    @SerialName("ask_user")
-    data object AskUser : LocalToolOption()
-
-    @Serializable
-    @SerialName("workspace_files")
-    data object WorkspaceFiles : LocalToolOption()
-
-    @Serializable
-    @SerialName("terminal")
-    data object Terminal : LocalToolOption()
-
-    @Serializable
-    @SerialName("screen_automation")
-    data object ScreenAutomation : LocalToolOption()
-
-    @Serializable
-    @SerialName("system_access")
-    data object SystemAccess : LocalToolOption()
-
-    @Serializable
-    @SerialName("webview")
-    data object WebView : LocalToolOption()
-
-    @Serializable
-    @SerialName("icloud_drive")
-    data object ICloudDrive : LocalToolOption()
-
-    @Serializable
-    @SerialName("webmount")
-    data object WebMount : LocalToolOption()
-
-    /**
-     * Secondary toggle that enables [WebMountPrimitiveTools.evalTool] (`wm_eval`)
-     * in addition to the safe primitives gated by [WebMount]. Default OFF.
-     *
-     * `wm_eval` runs arbitrary JavaScript inside a logged-in WebView origin —
-     * it can read cookies / sessionStorage / localStorage, perform same-origin
-     * fetches with credentials, and mutate the page. The framework routes it
-     * through Tool.mandatoryApproval, so ordinary auto-approval cannot run it;
-     * only the explicit high-risk auto-approval setting may bypass the prompt.
-     * The conservative default is to keep the tool entirely out of the agent's
-     * catalog unless the user opts in here.
-     */
-    @Serializable
-    @SerialName("webmount_eval")
-    data object WebMountEval : LocalToolOption()
-}
 
 class LocalTools(
     private val context: Context,
