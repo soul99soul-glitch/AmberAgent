@@ -4,8 +4,6 @@ import android.content.Intent
 import android.os.Trace
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -305,35 +303,8 @@ fun ChatMessage(
 private fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
     if (enabled) animateContentSize() else this
 
-/**
- * Height-change animation specifically for the streaming-tail assistant container
- * (and ONLY there — single layer, never stacked).
- *
- * Spec evolution:
- *   v1.8.3: `tween(140ms, FastOutSlowInEasing)` — got us "smooth on each chunk",
- *           but tween restarts from velocity=0 every flush. User reported the
- *           result as 顿挫感 — each chunk was a discrete "start → decelerate →
- *           stop" unit, four to five of them per second stacking up.
- *   v1.8.9: `spring(NoBouncy, StiffnessMediumLow)`. When the next chunk arrives
- *           mid-animation, spring PRESERVES the current velocity and smoothly
- *           redirects the height toward the new target. Five consecutive chunks
- *           feel like one continuous follow rather than five discrete jumps.
- *           NoBouncy damping kills the Material default overshoot wobble.
- *           StiffnessMediumLow is loose enough that the bubble visibly "trails"
- *           the latest content — the user reads this as natural scroll-up
- *           rather than as a snap.
- *
- * Why single-layer matters: nested spring animations stack their velocity
- * contributions and produce the "floating" jank we hit in 1.8.0 (the original
- * 4-5 layer bug). One spring per assistant message is the correct dosage.
- */
-private fun Modifier.streamingContentSize(enabled: Boolean): Modifier =
-    if (enabled) animateContentSize(
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow,
-        ),
-    ) else this
+@Suppress("UNUSED_PARAMETER")
+private fun Modifier.streamingContentSize(enabled: Boolean): Modifier = this
 
 @Composable
 private fun rememberChatMessageTextStyle(): androidx.compose.ui.text.TextStyle {
@@ -1417,15 +1388,15 @@ private fun MessagePartsBlock(
                                     // note above for why this is "is the trailing block" rather
                                     // than "is the last Text block".
                                     val isStreamingText = loading && blockIdx == lastBlockIdx
+                                    val assistantDisplayText = part.text.replaceRegexes(
+                                        assistant = assistant,
+                                        scope = AssistantAffectScope.ASSISTANT,
+                                        visual = true,
+                                    )
                                     if (settings.displaySetting.showAssistantBubble) {
-                                        // 2026-05-14: dropped the original Modifier.animateContentSizeIf(loading)
-                                        // because it was nested 4-5 layers deep with default spring,
-                                        // and each 200ms accumulator flush kicked off a new spring that
-                                        // never had time to settle. Re-introduced as a SINGLE layer with
-                                        // a fast tween (140ms < 200ms flush interval) so the bubble
-                                        // grows smoothly when new tokens arrive. Without this, the
-                                        // bubble snaps to its new height on every flush — which user
-                                        // perceives as "上抬时没有丝滑的动画".
+                                        // Streaming text height animation is intentionally disabled:
+                                        // assistant markdown should grow by natural layout only, without
+                                        // a restarted spring/tween on every accumulator flush.
                                         Surface(
                                             modifier = Modifier
                                                 .widthIn(max = 640.dp)
@@ -1439,11 +1410,7 @@ private fun MessagePartsBlock(
                                         ) {
                                             Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
                                                 AssistantMarkdownBlockOrWidgets(
-                                                    content = part.text.replaceRegexes(
-                                                        assistant = assistant,
-                                                        scope = AssistantAffectScope.ASSISTANT,
-                                                        visual = true,
-                                                    ),
+                                                    content = assistantDisplayText,
                                                     streaming = isStreamingText,
                                                     onClickCitation = handleClickCitation,
                                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
@@ -1451,22 +1418,13 @@ private fun MessagePartsBlock(
                                             }
                                         }
                                     } else {
-                                        // 2026-05-14: paired with the with-bubble branch above.
-                                        // Single-layer streamingContentSize on the outermost wrapper
-                                        // gives smooth height transitions on each 200ms flush without
-                                        // the nested-spring jank of the original code. Without this
-                                        // the markdown column snaps to its new height when new
-                                        // paragraphs arrive.
+                                        // Keep the no-bubble streaming path animation-free as well.
                                         AssistantMarkdownBlockOrWidgets(
-                                            content = part.text.replaceRegexes(
-                                                assistant = assistant,
-                                                scope = AssistantAffectScope.ASSISTANT,
-                                                visual = true,
-                                            ),
+                                            content = assistantDisplayText,
+                                            modifier = Modifier.streamingContentSize(isStreamingText),
                                             onClickCitation = handleClickCitation,
                                             streaming = isStreamingText,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                            modifier = Modifier.streamingContentSize(isStreamingText),
                                         )
                                     }
                                 }
