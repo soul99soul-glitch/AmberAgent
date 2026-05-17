@@ -31,10 +31,6 @@ import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
-import me.rerere.rikkahub.utils.readClipboardText
-import me.rerere.rikkahub.utils.writeClipboardText
-import java.time.ZonedDateTime
-import java.time.format.TextStyle
 import kotlin.uuid.Uuid
 
 @Serializable
