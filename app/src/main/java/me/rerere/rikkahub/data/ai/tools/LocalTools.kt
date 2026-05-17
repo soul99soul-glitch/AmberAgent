@@ -1,13 +1,9 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import android.content.Context
-import com.whl.quickjs.wrapper.QuickJSContext
-import com.whl.quickjs.wrapper.QuickJSObject
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -134,68 +130,7 @@ class LocalTools(
     private val settingsStore: SettingsAggregator,
     private val imageGenerationRepository: ImageGenerationRepository,
 ) {
-    val javascriptTool by lazy {
-        Tool(
-            name = "eval_javascript",
-            description = """
-                Execute JavaScript code using QuickJS engine (ES2020).
-                The result is the value of the last expression in the code.
-                For calculations with decimals, use toFixed() to control precision.
-                Console output (log/info/warn/error) is captured and returned in 'logs' field.
-                No DOM or Node.js APIs available.
-                Do not use this tool to create SVG, HTML, charts, diagrams, or generative UI widgets; write those directly in the assistant response.
-                Example: '1 + 2' returns 3; 'const x = 5; x * 2' returns 10.
-            """.trimIndent().replace("\n", " "),
-            parameters = {
-                InputSchema.Obj(
-                    properties = buildJsonObject {
-                        put("code", buildJsonObject {
-                            put("type", "string")
-                            put("description", "The JavaScript code to execute")
-                        })
-                    },
-                    required = listOf("code")
-                )
-            },
-            execute = {
-                val logs = arrayListOf<String>()
-                val context = QuickJSContext.create()
-                context.setConsole(object : QuickJSContext.Console {
-                    override fun log(info: String?) {
-                        logs.add("[LOG] $info")
-                    }
-
-                    override fun info(info: String?) {
-                        logs.add("[INFO] $info")
-                    }
-
-                    override fun warn(info: String?) {
-                        logs.add("[WARN] $info")
-                    }
-
-                    override fun error(info: String?) {
-                        logs.add("[ERROR] $info")
-                    }
-                })
-                val code = it.jsonObject["code"]?.jsonPrimitive?.contentOrNull
-                val result = context.evaluate(code)
-                val payload = buildJsonObject {
-                    if (logs.isNotEmpty()) {
-                        put("logs", JsonPrimitive(logs.joinToString("\n")))
-                    }
-                    put(
-                        key = "result",
-                        element = when (result) {
-                            null -> JsonNull
-                            is QuickJSObject -> JsonPrimitive(result.stringify())
-                            else -> JsonPrimitive(result.toString())
-                        }
-                    )
-                }
-                listOf(UIMessagePart.Text(payload.toString()))
-            }
-        )
-    }
+    val javascriptTool by lazy { createJavascriptTool() }
 
     val timeTool by lazy { createTimeTool() }
 
