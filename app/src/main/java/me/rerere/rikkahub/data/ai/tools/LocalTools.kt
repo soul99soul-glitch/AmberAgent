@@ -40,7 +40,6 @@ import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
 import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
-import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.readClipboardText
 import me.rerere.rikkahub.utils.writeClipboardText
 import java.net.URLEncoder
@@ -737,54 +736,6 @@ class LocalTools(
 
     fun toolsListTool(registry: ToolRegistry): Tool =
         createToolsListTool(registry, permissionBroker)
-
-    fun createToolPolicyExplainTool(registry: ToolRegistry) = Tool(
-        name = "tool_policy_explain",
-        description = "Explain how AmberAgent would evaluate one tool invocation without executing it.",
-        parameters = {
-            InputSchema.Obj(
-                properties = buildJsonObject {
-                    put("tool_name", buildJsonObject {
-                        put("type", "string")
-                        put("description", "Tool name to evaluate.")
-                    })
-                    put("input", buildJsonObject {
-                        put("type", "string")
-                        put("description", "Optional JSON string input for dynamic policy evaluation.")
-                    })
-                },
-                required = listOf("tool_name")
-            )
-        },
-        execute = { input ->
-            val toolName = input.jsonObject["tool_name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val rawInput = input.jsonObject["input"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val toolInput = runCatching {
-                JsonInstant.parseToJsonElement(rawInput.ifBlank { "{}" })
-            }.getOrNull()
-            val policy = registry.evaluateInvocation(toolName, toolInput)
-            val payload = buildJsonObject {
-                put("status", if (policy == null) "not_found" else "ok")
-                put("tool_name", toolName)
-                policy?.let {
-                    put("category", it.category)
-                    put("risk", it.risk.name.lowercase())
-                    put("mutates", it.mutates)
-                    put("needs_approval", it.needsApproval)
-                    put("allows_auto_approval", it.autoApprovable)
-                    put("concurrency_safe", it.concurrencySafe)
-                    it.parallelGroup?.let { group -> put("parallel_group", group) }
-                    it.requiresForegroundAppPackage?.let { pkg -> put("requires_foreground_app_package", pkg) }
-                    put("speculative_eligible", it.speculativeEligible)
-                    it.speculativeBlockReason?.let { reason -> put("speculative_block_reason", reason) }
-                    put("output_budget_chars", it.outputBudgetChars)
-                    put("hard_blocked", it.hardBlocked)
-                    it.reason?.let { reason -> put("reason", reason) }
-                }
-            }
-            listOf(UIMessagePart.Text(payload.toString()))
-        }
-    )
 
     private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker) }
 
