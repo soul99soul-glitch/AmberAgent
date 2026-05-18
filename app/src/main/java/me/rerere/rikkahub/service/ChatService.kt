@@ -13,7 +13,6 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,6 +94,7 @@ import me.rerere.rikkahub.data.agent.tools.ConversationHistoryTools
 import me.rerere.rikkahub.data.agent.tools.ModelCouncilTools
 import me.rerere.rikkahub.data.agent.tools.SubAgentTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
+import me.rerere.rikkahub.data.agent.tools.createToolSearchTool
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
@@ -128,7 +128,6 @@ private const val TAG = "ChatService"
 private const val GENERATION_CHECKPOINT_INTERVAL_MS = 10_000L
 private const val INITIAL_TIMELINE_NODE_COUNT = 80
 private const val TIMELINE_PREFETCH_BATCH_SIZE = 40
-private const val TIMELINE_PREFETCH_DELAY_MS = 32L
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
 private val TOOL_APPROVAL_CONTINUATION_WORDS = setOf(
@@ -209,7 +208,6 @@ class ChatService(
     private val _sessionsVersion = MutableStateFlow(0L)
     private val trustedRunToolNames = ConcurrentHashMap<Uuid, Set<String>>()
     private val generationCheckpointAt = ConcurrentHashMap<Uuid, Long>()
-    private val timelinePrefetchJobs = ConcurrentHashMap<Uuid, Job>()
     private val timelineLoadMutexes = ConcurrentHashMap<Uuid, Mutex>()
 
     // 错误状态
@@ -287,7 +285,6 @@ class ChatService(
             return
         }
         if (sessions.remove(conversationId, session)) {
-            timelinePrefetchJobs.remove(conversationId)?.cancel()
             timelineLoadMutexes.remove(conversationId)
             session.cleanup()
             _sessionsVersion.value++
@@ -429,7 +426,6 @@ class ChatService(
                 )
             )
             settingsStore.updateAssistant(window.conversation.assistantId)
-            startTimelineHistoryPrefetch(conversationId)
         } else {
             // 新建对话, 并添加预设消息
             val currentSettings = settingsStore.settingsFlow.filterNot { it.init }.first()
@@ -463,39 +459,33 @@ class ChatService(
         }
     }
 
-    private fun startTimelineHistoryPrefetch(conversationId: Uuid) {
-        val session = sessions[conversationId] ?: return
-        if (session.timelineLoadState.value.isFullyLoaded) return
-        if (timelinePrefetchJobs[conversationId]?.isActive == true) return
-
-        timelinePrefetchJobs[conversationId] = appScope.launch(Dispatchers.IO) {
-            try {
-                while (loadOlderTimelineBatch(conversationId, TIMELINE_PREFETCH_BATCH_SIZE)) {
-                    delay(TIMELINE_PREFETCH_DELAY_MS)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "timeline prefetch failed for $conversationId", e)
-                sessions[conversationId]?.let { currentSession ->
-                    currentSession.setTimelineLoadState(
-                        currentSession.timelineLoadState.value.copy(prefetchingOlder = false)
-                    )
-                }
-            } finally {
-                timelinePrefetchJobs.remove(conversationId)
-            }
-        }
-    }
-
     private suspend fun ensureFullConversationLoaded(conversationId: Uuid): Conversation {
         val session = getOrCreateSession(conversationId)
-        if (session.timelineLoadState.value.isFullyLoaded) {
+        val loadState = session.timelineLoadState.value
+        if (!loadState.initialized) {
+            val fullConversation = conversationRepo.getConversationById(conversationId)
+            if (fullConversation != null) {
+                updateConversation(conversationId, fullConversation)
+                session.setTimelineLoadState(
+                    ConversationTimelineLoadState(
+                        initialized = true,
+                        totalNodeCount = fullConversation.messageNodes.size,
+                        loadedNodeCount = fullConversation.messageNodes.size,
+                        oldestLoadedIndex = 0,
+                        isFullyLoaded = true,
+                        prefetchingOlder = false,
+                    )
+                )
+                return fullConversation
+            }
+            initializeConversation(conversationId)
+            return session.state.value
+        }
+        if (loadState.isFullyLoaded && loadState.oldestLoadedIndex == 0) {
             return session.state.value
         }
 
-        timelinePrefetchJobs.remove(conversationId)?.cancel()
-        while (!session.timelineLoadState.value.isFullyLoaded) {
+        while (!session.timelineLoadState.value.isFullyLoaded || session.timelineLoadState.value.oldestLoadedIndex > 0) {
             val loaded = loadOlderTimelineBatch(conversationId, TIMELINE_PREFETCH_BATCH_SIZE)
             if (!loaded) break
         }
@@ -506,12 +496,20 @@ class ChatService(
         return ensureFullConversationLoaded(conversationId)
     }
 
+    suspend fun loadOlderTimelinePage(conversationId: Uuid): Boolean {
+        return loadOlderTimelineBatch(conversationId, TIMELINE_PREFETCH_BATCH_SIZE)
+    }
+
     private suspend fun loadOlderTimelineBatch(conversationId: Uuid, batchSize: Int): Boolean {
         val mutex = timelineLoadMutexes.computeIfAbsent(conversationId) { Mutex() }
         return mutex.withLock {
             val session = sessions[conversationId] ?: return@withLock false
             val loadState = session.timelineLoadState.value
-            if (!loadState.initialized || loadState.isFullyLoaded || loadState.oldestLoadedIndex <= 0) {
+            if (!loadState.initialized) {
+                session.setTimelineLoadState(loadState.copy(prefetchingOlder = false))
+                return@withLock false
+            }
+            if (loadState.oldestLoadedIndex <= 0) {
                 session.setTimelineLoadState(loadState.copy(prefetchingOlder = false, isFullyLoaded = true))
                 return@withLock false
             }
@@ -761,6 +759,9 @@ class ChatService(
         message: PendingUserMessage,
     ) {
         val session = getOrCreateSession(conversationId)
+        if (!session.timelineLoadState.value.initialized) {
+            initializeConversation(conversationId)
+        }
         val currentConversation = session.state.value
         val newConversation = currentConversation.copy(
             messageNodes = currentConversation.messageNodes + UIMessage(
@@ -768,7 +769,8 @@ class ChatService(
                 parts = message.parts,
             ).toMessageNode(),
         )
-        saveConversation(conversationId, newConversation)
+        updateConversation(conversationId, newConversation)
+        persistConversationWindow(conversationId, newConversation, indexFts = true)
     }
 
     private suspend fun drainPendingUserMessagesInline(conversationId: Uuid) {
@@ -998,13 +1000,15 @@ class ChatService(
         } else {
             model.displayName
         }
-        ensureFullConversationLoaded(conversationId)
-
         runCatching {
-            val initialConversation = getConversationFlow(conversationId).value
+            val initialConversation = ensureFullConversationLoaded(conversationId)
 
             // reset suggestions
-            updateConversation(conversationId, initialConversation.copy(chatSuggestions = emptyList()))
+            updateConversation(
+                conversationId,
+                getConversationFlow(conversationId).value.copy(chatSuggestions = emptyList()),
+                checkDeletedFiles = false,
+            )
 
             // memory tool
             if (!model.abilities.contains(ModelAbility.TOOL)) {
@@ -1018,8 +1022,15 @@ class ChatService(
             }
 
             // check invalid messages
-            checkInvalidMessages(conversationId)
-            val conversation = getConversationFlow(conversationId).value
+            val conversation = sanitizeInvalidMessages(initialConversation)
+            if (conversation != initialConversation) {
+                conversationRepo.updateConversation(conversation)
+                updateConversation(
+                    conversationId,
+                    sanitizeInvalidMessages(getConversationFlow(conversationId).value),
+                    checkDeletedFiles = false,
+                )
+            }
 
             // start generating
             val session = getOrCreateSession(conversationId)
@@ -1175,7 +1186,7 @@ class ChatService(
             Logging.log(TAG, it.stackTraceToString())
         }.onSuccess {
             val finalConversation = getConversationFlow(conversationId).value
-            saveConversation(conversationId, finalConversation)
+            persistConversationWindow(conversationId, finalConversation, indexFts = true)
             cleanupRunResourcesIfDone(conversationId, finalConversation)
 
             launchWithConversationReference(conversationId) {
@@ -1186,7 +1197,9 @@ class ChatService(
             }
             if (!finalConversation.hasPendingOrUnexecutedTools()) {
                 appScope.launch(Dispatchers.IO) {
-                    memoryExtractor.extractAfterConversation(finalConversation)
+                    memoryExtractor.extractAfterConversation(
+                        loadFullConversationForGeneration(conversationId)
+                    )
                 }
             }
         }
@@ -1218,6 +1231,23 @@ class ChatService(
 
     private fun checkInvalidMessages(conversationId: Uuid) {
         val conversation = getConversationFlow(conversationId).value
+        updateConversation(conversationId, sanitizeInvalidMessages(conversation))
+    }
+
+    private suspend fun loadFullConversationForGeneration(conversationId: Uuid): Conversation {
+        val windowConversation = getConversationFlow(conversationId).value
+        val loadState = getOrCreateSession(conversationId).timelineLoadState.value
+        if (loadState.isFullyLoaded) {
+            return windowConversation
+        }
+        val fullConversation = conversationRepo.getConversationById(conversationId) ?: return windowConversation
+        return mergeConversationWindowIntoFull(
+            fullConversation = fullConversation,
+            windowConversation = windowConversation,
+        )
+    }
+
+    private fun sanitizeInvalidMessages(conversation: Conversation): Conversation {
         var messagesNodes = conversation.messageNodes
 
         // 移除无效 tool (未执行的 Tool)
@@ -1261,7 +1291,7 @@ class ChatService(
         // 移除无效消息
         messagesNodes = messagesNodes.filter { it.messages.isNotEmpty() }
 
-        updateConversation(conversationId, conversation.copy(messageNodes = messagesNodes))
+        return conversation.copy(messageNodes = messagesNodes)
     }
 
     private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
@@ -1313,13 +1343,17 @@ class ChatService(
                 ),
             )
 
-            // 生成完，conversation可能不是最新了，因此需要重新获取
-            conversationRepo.getConversationById(conversation.id)?.let {
-                saveConversation(
-                    conversationId,
-                    it.copy(title = result.choices[0].message?.toText()?.trim() ?: "")
-                )
-            }
+            val title = result.choices[0].message?.toText()?.trim().orEmpty()
+            val updatedConversation = getConversationFlow(conversationId).value.copy(
+                title = title,
+                updateAt = Instant.now(),
+            )
+            updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+            conversationRepo.updateConversationMetadata(
+                conversationId = conversationId,
+                title = title,
+                updateAt = updatedConversation.updateAt,
+            )
         }.onFailure {
             it.printStackTrace()
             addError(it, conversationId, title = context.getString(R.string.error_title_generate_title))
@@ -1363,16 +1397,15 @@ class ChatService(
                 result.choices[0].message?.toText()?.split("\n")?.map { it.trim() }
                     ?.filter { it.isNotBlank() } ?: emptyList()
 
-            val latestConversation = conversationRepo.getConversationById(conversationId)
-                ?: sessions[conversationId]?.state?.value
-                ?: conversation
-            saveConversation(
-                conversationId,
-                latestConversation.copy(
-                    chatSuggestions = suggestions.take(
-                        10
-                    )
-                )
+            val updatedConversation = (sessions[conversationId]?.state?.value ?: conversation).copy(
+                chatSuggestions = suggestions.take(10),
+                updateAt = Instant.now(),
+            )
+            updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+            conversationRepo.updateConversationMetadata(
+                conversationId = conversationId,
+                chatSuggestions = updatedConversation.chatSuggestions,
+                updateAt = updatedConversation.updateAt,
             )
         }.onFailure {
             it.printStackTrace()
@@ -1554,16 +1587,39 @@ class ChatService(
         if (!force && now - last < GENERATION_CHECKPOINT_INTERVAL_MS) return
         generationCheckpointAt[conversationId] = now
         runCatching {
-            val exists = conversationRepo.existsConversationById(conversation.id)
-            if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) return@runCatching
-            if (exists) {
-                conversationRepo.updateConversation(conversation)
-            } else {
-                conversationRepo.insertConversation(conversation)
-            }
+            persistConversationWindow(
+                conversationId = conversationId,
+                conversation = conversation,
+                indexFts = force,
+            )
         }.onFailure { error ->
             Log.w(TAG, "checkpointConversation failed for $conversationId", error)
         }
+    }
+
+    private suspend fun persistConversationWindow(
+        conversationId: Uuid,
+        conversation: Conversation,
+        indexFts: Boolean,
+    ) {
+        val exists = conversationRepo.existsConversationById(conversation.id)
+        if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
+            return
+        }
+        if (!exists) {
+            conversationRepo.insertConversation(conversation)
+            return
+        }
+        val loadState = getOrCreateSession(conversationId).timelineLoadState.value
+        if (!loadState.initialized) {
+            saveConversation(conversationId, conversation)
+            return
+        }
+        conversationRepo.upsertConversationWindow(
+            conversation = conversation,
+            firstNodeIndex = loadState.oldestLoadedIndex,
+            indexFts = indexFts,
+        )
     }
 
     private fun getPendingIntent(context: Context, conversationId: Uuid): PendingIntent {
@@ -1592,6 +1648,22 @@ class ChatService(
             checkFilesDelete(conversation, session.state.value)
         }
         session.state.value = conversation
+        val loadState = session.timelineLoadState.value
+        if (loadState.initialized) {
+            val loadedNodeCount = conversation.messageNodes.size
+            val totalNodeCount = if (loadState.isFullyLoaded) {
+                loadedNodeCount
+            } else {
+                maxOf(loadState.totalNodeCount, loadState.oldestLoadedIndex + loadedNodeCount)
+            }
+            session.setTimelineLoadState(
+                loadState.copy(
+                    loadedNodeCount = loadedNodeCount,
+                    totalNodeCount = totalNodeCount,
+                    isFullyLoaded = loadState.isFullyLoaded && loadState.oldestLoadedIndex == 0,
+                )
+            )
+        }
     }
 
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {
@@ -1617,7 +1689,8 @@ class ChatService(
             return // 新会话且为空时不保存
         }
 
-        val updatedConversation = if (exists && !getOrCreateSession(conversationId).timelineLoadState.value.isFullyLoaded) {
+        val loadState = getOrCreateSession(conversationId).timelineLoadState.value
+        val updatedConversation = if (exists && (!loadState.initialized || !loadState.isFullyLoaded || loadState.oldestLoadedIndex > 0)) {
             mergeConversationWindowIntoFull(
                 fullConversation = ensureFullConversationLoaded(conversationId),
                 windowConversation = conversation,
@@ -2010,6 +2083,7 @@ class ChatService(
         }
         val registry = ToolRegistry.from(finalRawTools)
         val tools = registry.tools() +
+            createToolSearchTool(registry) +
             localTools.registryIntrospectionTools(registry)
         return tools.scopedToConversation(conversationId)
     }

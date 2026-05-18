@@ -52,7 +52,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.highlight.HighlightText
@@ -476,26 +475,8 @@ class HighlightCodeVisualTransformation(
     val darkMode: Boolean
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val annotatedString = try {
-            val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
-            if (text.text.isEmpty()) {
-                AnnotatedString("")
-            } else {
-                runBlocking {
-                    val tokens = highlighter.highlight(text.text, language)
-                    buildAnnotatedString {
-                        tokens.forEach { token ->
-                            buildHighlightText(token, colorPalette)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            AnnotatedString(text.text)
-        }
-
         return TransformedText(
-            text = annotatedString,
+            text = text,
             offsetMapping = OffsetMapping.Identity
         )
     }

@@ -236,7 +236,11 @@ class TerminalRuntime(
         finishJob(job, status, exitCode, errMsg.ifBlank { null })
     }
 
-    fun probeTermuxRuntime(): TermuxRuntimeStatus {
+    suspend fun probeTermuxRuntime(): TermuxRuntimeStatus = withContext(Dispatchers.IO) {
+        probeTermuxRuntimeNow()
+    }
+
+    private fun probeTermuxRuntimeNow(): TermuxRuntimeStatus {
         val pm = context.packageManager
         val installed = runCatching {
             pm.getPackageInfo(TERMUX_PACKAGE_NAME, 0)
@@ -517,7 +521,7 @@ class TerminalRuntime(
     }
 
     private fun startTermuxJob(job: TerminalJob) {
-        val status = probeTermuxRuntime()
+        val status = probeTermuxRuntimeNow()
         if (!status.ready) {
             appendJobOutput(job, "${status.message}\n")
             finishJob(job, TerminalJobStatus.FAILED, null, status.message)

@@ -10,6 +10,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
+internal const val MAX_SUB_AGENT_CONTEXT_CHARS = 6_000
+
 object SubAgentValidator {
     private val genericNameParts = listOf(
         "general", "helper", "all-purpose", "allpurpose", "fullstack", "universal", "万能", "通用", "全能", "全栈"
@@ -49,6 +51,12 @@ object SubAgentValidator {
         require(task.outputFormat.isNotBlank()) { "task.output_format is required" }
         require(task.toolsAndSources.isNotBlank()) { "task.tools_and_sources is required" }
         require(task.boundaries.isNotBlank()) { "task.boundaries is required" }
+        require(task.context.length <= MAX_SUB_AGENT_CONTEXT_CHARS) {
+            "task.context is too large (${task.context.length} chars); keep it under $MAX_SUB_AGENT_CONTEXT_CHARS chars and pass only the minimum evidence needed."
+        }
+        require(!task.context.looksLikeBulkToolDump()) {
+            "task.context must not include raw tool result dumps; summarize the relevant evidence and let the subagent re-read allowed sources."
+        }
     }
 
     fun resolveDefinition(
@@ -265,5 +273,23 @@ object SubAgentValidator {
     private fun String.hasReportCue(): Boolean {
         val lower = lowercase()
         return listOf("report", "output", "return", "summary", "输出", "返回", "报告", "摘要").any { lower.contains(it) }
+    }
+
+    private fun String.looksLikeBulkToolDump(): Boolean {
+        if (isBlank()) return false
+        val lower = lowercase()
+        val markerCount = listOf(
+            "\"tool_call_id\"",
+            "\"toolcallid\"",
+            "\"tool_name\"",
+            "\"toolname\"",
+            "<tool_result",
+            "uimessagepart.tool",
+        ).count { marker -> lower.contains(marker) }
+        return markerCount >= 2 || (
+            length > 1_500 &&
+                lower.contains("tool_result") &&
+                lower.contains("output")
+            )
     }
 }

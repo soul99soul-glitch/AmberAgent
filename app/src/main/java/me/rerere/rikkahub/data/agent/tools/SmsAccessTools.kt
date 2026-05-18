@@ -16,7 +16,7 @@ internal fun createSmsListTool(context: Context, deps: SystemAccessDeps): Tool =
     parameters = {
         obj(
             "box" to enumProp("SMS box to read.", listOf("all", "inbox", "sent")),
-            "sender" to stringProp("Optional sender address filter."),
+            "sender" to accessStringProp("Optional sender address filter."),
             "since_epoch_ms" to integerProp("Only include SMS after this Unix epoch millis."),
             "limit" to integerProp("Maximum messages. Defaults to 20."),
         )
@@ -35,8 +35,8 @@ internal fun createSmsReadTool(context: Context, deps: SystemAccessDeps): Tool =
     description = "Read SMS content by message_id or thread_id after READ_SMS is granted.",
     parameters = {
         obj(
-            "message_id" to stringProp("SMS message _id."),
-            "thread_id" to stringProp("SMS thread_id."),
+            "message_id" to accessStringProp("SMS message _id."),
+            "thread_id" to accessStringProp("SMS thread_id."),
             "limit" to integerProp("Maximum messages when reading a thread. Defaults to 20."),
         )
     },
@@ -54,8 +54,8 @@ internal fun createSmsSendTool(context: Context, deps: SystemAccessDeps): Tool =
     description = "Send an SMS from this device. Requires SEND_SMS and explicit approval.",
     parameters = {
         obj(
-            "phone_number" to stringProp("Recipient phone number."),
-            "message" to stringProp("SMS body."),
+            "phone_number" to accessStringProp("Recipient phone number."),
+            "message" to accessStringProp("SMS body."),
             required = listOf("phone_number", "message")
         )
     },

@@ -12,6 +12,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import java.io.File
+import java.util.PriorityQueue
+
+private const val RECENT_FILE_LIMIT = 80
+private val SKIPPED_RECENT_DIRS = setOf(
+    ".git",
+    ".gradle",
+    ".idea",
+    ".next",
+    "build",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+)
 
 data class WorkspaceFileItem(
     val path: String,
@@ -110,21 +124,31 @@ class WorkspaceFileVM(
     private suspend fun buildRecent(): List<WorkspaceFileItem> = withContext(Dispatchers.IO) {
         val root = mirrorDir
         if (!root.exists() || !root.isDirectory) return@withContext emptyList()
+        val recent = PriorityQueue<WorkspaceFileItem>(compareBy { it.lastModified })
         root.walkTopDown()
-            .filter { it.isFile && !it.name.startsWith(".") }
-            .map { file ->
-                WorkspaceFileItem(
-                    path = file.relativeTo(root).invariantSeparatorsPath,
-                    name = file.name,
-                    sizeBytes = file.length(),
-                    lastModified = file.lastModified(),
-                    extension = file.extension.lowercase(),
-                    isDirectory = false,
+            .onEnter { dir -> dir == root || shouldEnterRecentDirectory(dir) }
+            .forEach { file ->
+                if (!file.isFile || file.name.startsWith(".")) return@forEach
+                recent.offer(
+                    WorkspaceFileItem(
+                        path = file.relativeTo(root).invariantSeparatorsPath,
+                        name = file.name,
+                        sizeBytes = file.length(),
+                        lastModified = file.lastModified(),
+                        extension = file.extension.lowercase(),
+                        isDirectory = false,
+                    )
                 )
+                if (recent.size > RECENT_FILE_LIMIT) {
+                    recent.poll()
+                }
             }
-            .sortedByDescending { it.lastModified }
-            .take(80)
-            .toList()
+        recent.toList().sortedByDescending { it.lastModified }
+    }
+
+    private fun shouldEnterRecentDirectory(dir: File): Boolean {
+        val name = dir.name
+        return !name.startsWith(".") && name !in SKIPPED_RECENT_DIRS
     }
 
     private suspend fun listDir(relativePath: String): List<WorkspaceFileItem> = withContext(Dispatchers.IO) {

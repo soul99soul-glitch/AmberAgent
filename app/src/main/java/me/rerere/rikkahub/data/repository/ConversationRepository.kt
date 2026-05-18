@@ -10,14 +10,19 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
+import me.rerere.rikkahub.data.db.dao.findNodeIdContainingMessage
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
+import me.rerere.rikkahub.data.db.entity.MessageDayStatEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.MessageNodeStatEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -28,6 +33,7 @@ import kotlin.uuid.Uuid
 class ConversationRepository(
     private val conversationDAO: ConversationDAO,
     private val messageNodeDAO: MessageNodeDAO,
+    private val messageStatsDAO: MessageStatsDAO,
     private val favoriteDAO: FavoriteDAO,
     private val database: AppDatabase,
     private val filesManager: FilesManager,
@@ -53,6 +59,18 @@ class ConversationRepository(
             val nodes = loadMessageNodes(entity.id)
             conversationEntityToConversation(entity, nodes)
         }
+    }
+
+    suspend fun getRecentConversationSummaries(assistantId: Uuid, limit: Int = 10): List<Conversation> {
+        return conversationDAO.getRecentConversationSummariesOfAssistant(
+            assistantId = assistantId.toString(),
+            limit = limit
+        ).map(::conversationSummaryToConversation)
+    }
+
+    suspend fun getRecentConversationSummaries(limit: Int = 10): List<Conversation> {
+        return conversationDAO.getRecentConversationSummaries(limit)
+            .map(::conversationSummaryToConversation)
     }
 
     fun getConversationsOfAssistant(assistantId: Uuid): Flow<List<Conversation>> {
@@ -205,6 +223,11 @@ class ConversationRepository(
         } else null
     }
 
+    suspend fun getConversationSummaryById(uuid: Uuid): Conversation? {
+        return conversationDAO.getConversationSummaryById(uuid.toString())
+            ?.let(::conversationSummaryToConversation)
+    }
+
     suspend fun getConversationTailById(uuid: Uuid, limit: Int): ConversationWindow? {
         val entity = conversationDAO.getConversationById(uuid.toString()) ?: return null
         val total = messageNodeDAO.countNodesOfConversation(entity.id)
@@ -231,6 +254,50 @@ class ConversationRepository(
             conversationId = conversationId.toString(),
             offset = offset.coerceAtLeast(0),
             limit = limit.coerceAtLeast(0),
+        )
+    }
+
+    suspend fun getConversationNodeRange(
+        conversationId: Uuid,
+        startIndex: Int,
+        endIndex: Int,
+    ): List<MessageNode> {
+        if (endIndex < startIndex) return emptyList()
+        val entities = messageNodeDAO.getNodesOfConversationRange(
+            conversationId = conversationId.toString(),
+            startIndex = startIndex.coerceAtLeast(0),
+            endIndex = endIndex.coerceAtLeast(0),
+        )
+        return decodeMessageNodeEntities(entities)
+    }
+
+    suspend fun getConversationNodeIndex(
+        conversationId: Uuid,
+        nodeId: String,
+    ): Int? {
+        return messageNodeDAO.getNodeIndex(
+            conversationId = conversationId.toString(),
+            nodeId = nodeId,
+        )
+    }
+
+    suspend fun findNodeIdForMessage(
+        conversationId: Uuid,
+        messageId: String,
+    ): String? {
+        return messageFtsManager.findNodeIdForMessage(
+            conversationId = conversationId.toString(),
+            messageId = messageId,
+        )
+    }
+
+    suspend fun findNodeIdContainingMessage(
+        conversationId: Uuid,
+        messageId: String,
+    ): String? {
+        return messageNodeDAO.findNodeIdContainingMessage(
+            conversationId = conversationId.toString(),
+            messageId = messageId,
         )
     }
 
@@ -262,6 +329,72 @@ class ConversationRepository(
             saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
         }
         messageFtsManager.indexConversation(conversation)
+    }
+
+    suspend fun upsertConversationWindow(
+        conversation: Conversation,
+        firstNodeIndex: Int,
+        indexFts: Boolean,
+    ) {
+        val conversationId = conversation.id.toString()
+        val startIndex = firstNodeIndex.coerceAtLeast(0)
+        val endIndex = startIndex + conversation.messageNodes.size - 1
+        val overwrittenNodeIds = database.withTransaction {
+            conversationDAO.update(
+                conversationToConversationEntity(conversation)
+            )
+            val oldNodeIds = if (endIndex >= startIndex) {
+                messageNodeDAO.getNodeIdsOfConversationRange(
+                    conversationId = conversationId,
+                    startIndex = startIndex,
+                    endIndex = endIndex,
+                )
+            } else {
+                emptyList()
+            }
+            if (endIndex >= startIndex) {
+                messageNodeDAO.deleteByConversationRange(
+                    conversationId = conversationId,
+                    startIndex = startIndex,
+                    endIndex = endIndex,
+                )
+            }
+            saveMessageNodes(
+                conversationId = conversationId,
+                nodes = conversation.messageNodes,
+                firstNodeIndex = startIndex,
+            )
+            oldNodeIds
+        }
+        if (indexFts) {
+            if (overwrittenNodeIds.isNotEmpty()) {
+                messageFtsManager.deleteNodeIds(overwrittenNodeIds)
+            }
+            messageFtsManager.indexConversationNodes(conversation)
+        }
+    }
+
+    suspend fun updateConversationMetadata(
+        conversationId: Uuid,
+        title: String? = null,
+        chatSuggestions: List<String>? = null,
+        updateAt: Instant = Instant.now(),
+    ) {
+        val entity = conversationDAO.getConversationById(conversationId.toString()) ?: return
+        val updatedTitle = title ?: entity.title
+        conversationDAO.update(
+            entity.copy(
+                title = updatedTitle,
+                chatSuggestions = chatSuggestions?.let { JsonInstant.encodeToString(it) }
+                    ?: entity.chatSuggestions,
+                updateAt = updateAt.toEpochMilli(),
+            )
+        )
+        messageFtsManager.updateConversationMetadata(
+            conversationId = conversationId.toString(),
+            title = updatedTitle,
+            updateAt = updateAt,
+        )
     }
 
     suspend fun deleteConversation(conversation: Conversation) {
@@ -431,17 +564,71 @@ class ConversationRepository(
         }
     }
 
-    private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>) {
+    private fun decodeMessageNodeEntities(entities: List<MessageNodeEntity>): List<MessageNode> {
+        return entities.mapNotNull { entity ->
+            runCatching {
+                MessageNode(
+                    id = Uuid.parse(entity.id),
+                    messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages),
+                    selectIndex = entity.selectIndex,
+                )
+            }.getOrNull()
+        }
+    }
+
+    private suspend fun saveMessageNodes(
+        conversationId: String,
+        nodes: List<MessageNode>,
+        firstNodeIndex: Int = 0,
+    ) {
         val entities = nodes.mapIndexed { index, node ->
             MessageNodeEntity(
                 id = node.id.toString(),
                 conversationId = conversationId,
-                nodeIndex = index,
+                nodeIndex = firstNodeIndex + index,
                 messages = JsonInstant.encodeToString(node.messages),
                 selectIndex = node.selectIndex
             )
         }
         messageNodeDAO.insertAll(entities)
+        messageStatsDAO.insertNodeStats(
+            nodes.map { node ->
+                node.toNodeStat(
+                    conversationId = conversationId,
+                )
+            }
+        )
+        messageStatsDAO.insertDayStats(
+            nodes.flatMap { node ->
+                node.toDayStats()
+            }
+        )
+    }
+
+    private fun MessageNode.toNodeStat(conversationId: String): MessageNodeStatEntity {
+        return MessageNodeStatEntity(
+            nodeId = id.toString(),
+            conversationId = conversationId,
+            totalMessages = messages.size,
+            promptTokens = messages.sumOf { it.usage?.promptTokens?.toLong() ?: 0L },
+            completionTokens = messages.sumOf { it.usage?.completionTokens?.toLong() ?: 0L },
+            cachedTokens = messages.sumOf { it.usage?.cachedTokens?.toLong() ?: 0L },
+        )
+    }
+
+    private fun MessageNode.toDayStats(): List<MessageDayStatEntity> {
+        return messages
+            .asSequence()
+            .filter { it.role == MessageRole.USER }
+            .groupingBy { it.createdAt.date.toString() }
+            .eachCount()
+            .map { (day, count) ->
+                MessageDayStatEntity(
+                    nodeId = id.toString(),
+                    day = day,
+                    count = count,
+                )
+            }
     }
 }
 

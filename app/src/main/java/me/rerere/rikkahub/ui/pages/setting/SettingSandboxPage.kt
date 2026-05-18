@@ -23,10 +23,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -50,6 +53,7 @@ import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
+import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
@@ -64,10 +68,13 @@ fun SettingSandboxPage(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val workspaceState by workspaceManager.state.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
     val workspaceSavedToast = stringResource(R.string.setting_files_page_workspace_saved)
     val workspaceClearedToast = stringResource(R.string.setting_files_page_workspace_cleared)
-    val installStatus by produceState<InstallStatus?>(initialValue = null) {
-        value = alpineRuntimeInstaller.ensureInstalled()
+    var installStatus by remember { mutableStateOf<InstallStatus?>(null) }
+    var installingRuntime by remember { mutableStateOf(false) }
+    LaunchedEffect(alpineRuntimeInstaller) {
+        installStatus = alpineRuntimeInstaller.getInstallStatus()
     }
     var termuxProbeKey by remember { mutableIntStateOf(0) }
     val termuxStatus by produceState<TermuxRuntimeStatus?>(initialValue = null, termuxProbeKey) {
@@ -167,7 +174,25 @@ fun SettingSandboxPage(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    RuntimeStatusBlock(installStatus = installStatus)
+                    RuntimeStatusBlock(
+                        installStatus = installStatus,
+                        installing = installingRuntime,
+                        onRefresh = {
+                            scope.launch {
+                                installStatus = alpineRuntimeInstaller.getInstallStatus()
+                            }
+                        },
+                        onInstallOrRepair = {
+                            scope.launch {
+                                installingRuntime = true
+                                try {
+                                    installStatus = alpineRuntimeInstaller.installOrRepair()
+                                } finally {
+                                    installingRuntime = false
+                                }
+                            }
+                        },
+                    )
                     CardGroup {
                         item(
                         leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
@@ -292,14 +317,16 @@ fun SettingSandboxPage(
 }
 
 /**
- * Read-only status block above the operational items in the Runtime section. Used to
- * surface "is the runtime healthy?" without dressing it up as a tappable row — the
- * previous implementation styled this as a ListItem which read as clickable but did
- * nothing on tap. Errors get a subtle errorContainer tint so the user notices them
- * even though there's no action wired up here yet (manual retry is via reinstall).
+ * Lightweight status block above the operational items in the Runtime section. Entering
+ * the page only checks file state; the expensive asset copy/repair path is button-driven.
  */
 @Composable
-private fun RuntimeStatusBlock(installStatus: InstallStatus?) {
+private fun RuntimeStatusBlock(
+    installStatus: InstallStatus?,
+    installing: Boolean,
+    onRefresh: () -> Unit,
+    onInstallOrRepair: () -> Unit,
+) {
     val isFailed = installStatus?.success == false
     val text = installStatus?.let { status ->
         if (status.success) {
@@ -317,15 +344,41 @@ private fun RuntimeStatusBlock(installStatus: InstallStatus?) {
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (isFailed) {
-                MaterialTheme.colorScheme.onErrorContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+        Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-        )
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isFailed) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedButton(
+                    onClick = onRefresh,
+                    enabled = !installing,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text("重新检查", maxLines = 1)
+                }
+                Button(
+                    onClick = onInstallOrRepair,
+                    enabled = !installing,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = if (installing) "安装中…" else "安装/修复 runtime",
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
     }
 }

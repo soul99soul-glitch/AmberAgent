@@ -21,6 +21,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
 import me.rerere.ai.core.Tool
 import me.rerere.ai.core.merge
 import me.rerere.ai.provider.CustomBody
@@ -49,6 +51,7 @@ import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
+import me.rerere.rikkahub.data.agent.tools.ToolExposureState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -164,11 +167,16 @@ class GenerationHandler(
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
+        val toolExposure = ToolExposureState.from(tools)
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
-            val hasResumableTools = messages.lastOrNull()?.getTools()?.any { it.canResumeExecution } == true
+            val pendingTools = messages.lastOrNull()?.getTools()?.filter {
+                it.canResumeExecution
+            } ?: emptyList()
+            toolExposure.exposeToolNames(pendingTools.map { it.toolName })
+            val hasResumableTools = pendingTools.isNotEmpty()
             val directWidgetRequested =
                 GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(settings.agentRuntime.generativeUi, messages)
             val toolsInternal = buildList {
@@ -177,7 +185,7 @@ class GenerationHandler(
                     if (directWidgetRequested && !hasResumableTools) {
                         emptyList()
                     } else {
-                        tools
+                        toolExposure.toolsForStep()
                     }
                 )
             }
@@ -191,11 +199,6 @@ class GenerationHandler(
             } else {
                 null
             }
-
-            // Check if we have tool calls ready to continue after user interaction.
-            val pendingTools = messages.lastOrNull()?.getTools()?.filter {
-                it.canResumeExecution
-            } ?: emptyList()
 
             val toolsToProcess: List<UIMessagePart.Tool>
 
@@ -339,6 +342,7 @@ class GenerationHandler(
                 // No results to add (all tools were pending)
                 break
             }
+            toolExposure.observeExecutedTools(executedTools)
 
             // Update last message with executed tools (NOT create TOOL message)
             val lastMessage = messages.last()
@@ -388,47 +392,15 @@ class GenerationHandler(
     ) {
         val sessionDefaults = settings.resolveSessionDefaults(assistant, model)
         val memoryContextPrompt = memoryRecallStore.buildPrompt(settings, messages)
-        val system = buildString {
-            append(buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown))
-
-            // 如果助手有系统提示，则添加到消息中
-            if (assistant.systemPrompt.isNotBlank()) {
-                if (isNotBlank()) appendLine()
-                append(assistant.systemPrompt)
-            }
-
-            if (memoryContextPrompt.isNotBlank()) {
-                appendLine()
-                append(memoryContextPrompt)
-            }
-            buildGenerativeUiPrompt(settings.agentRuntime.generativeUi, model).takeIf { it.isNotBlank() }?.let { prompt ->
-                appendLine()
-                append(prompt)
-            }
-            // Inform the planner whether generate_image is actually in the
-            // tool catalog for this turn — the AMBIGUOUS / IMAGE_GEN prompts
-            // tailor themselves accordingly (e.g. tell the user to configure
-            // an image-gen model if the route requires one but none is wired).
-            val hasImageGenTool = tools.any { it.name == "generate_image" }
-            GenerativeUiPlanner.buildPrompt(
-                setting = settings.agentRuntime.generativeUi,
-                messages = messages,
-                hasImageGenTool = hasImageGenTool,
-            ).takeIf { it.isNotBlank() }?.let { prompt ->
-                appendLine()
-                append(prompt)
-            }
-            if (settings.agentRuntime.enableRecentChatsReference) {
-                appendLine()
-                append(buildRecentChatsPrompt(conversationRepo))
-            }
-
-            // 工具prompt
-            tools.forEach { tool ->
-                appendLine()
-                append(tool.systemPrompt(model, messages))
-            }
-        }
+        val systemParts = buildSystemPromptParts(
+            settings = settings,
+            assistant = assistant,
+            model = model,
+            messages = messages,
+            tools = tools,
+            memoryContextPrompt = memoryContextPrompt,
+        )
+        val system = systemParts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text }
         val preparedContext = conversationContextEngine.prepareContext(
             conversation = conversation,
             settings = settings,
@@ -440,7 +412,7 @@ class GenerationHandler(
         )
         suspend fun prepareInternalMessages(forceImageToText: Boolean = false): List<UIMessage> =
             buildList {
-                if (system.isNotBlank()) add(UIMessage.system(prompt = system))
+                if (systemParts.isNotEmpty()) add(UIMessage(role = MessageRole.SYSTEM, parts = systemParts))
                 addAll(preparedContext.messages)
             }.transforms(
                 transformers = transformers,
@@ -652,6 +624,66 @@ class GenerationHandler(
                     }
                 }
                 onUpdateMessages(messages)
+            }
+        }
+    }
+
+    private suspend fun buildSystemPromptParts(
+        settings: Settings,
+        assistant: Assistant,
+        model: Model,
+        messages: List<UIMessage>,
+        tools: List<Tool>,
+        memoryContextPrompt: String,
+    ): List<UIMessagePart> {
+        val staticPrompt = listOf(
+            buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown),
+            assistant.systemPrompt,
+        ).filter { it.isNotBlank() }.joinToString("\n\n")
+
+        val dynamicPrompt = buildList {
+            if (memoryContextPrompt.isNotBlank()) add(memoryContextPrompt)
+            buildGenerativeUiPrompt(settings.agentRuntime.generativeUi, model).takeIf { it.isNotBlank() }?.let(::add)
+            val hasImageGenTool = tools.any { it.name == "generate_image" }
+            GenerativeUiPlanner.buildPrompt(
+                setting = settings.agentRuntime.generativeUi,
+                messages = messages,
+                hasImageGenTool = hasImageGenTool,
+            ).takeIf { it.isNotBlank() }?.let(::add)
+            if (settings.agentRuntime.enableRecentChatsReference) add(buildRecentChatsPrompt(conversationRepo))
+        }.joinToString("\n\n")
+
+        val toolPrompt = tools.mapNotNull { tool ->
+            tool.systemPrompt(model, messages).takeIf { it.isNotBlank() }
+        }.joinToString("\n\n")
+
+        return buildList {
+            if (staticPrompt.isNotBlank()) {
+                add(
+                    UIMessagePart.Text(
+                        text = staticPrompt,
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                            put("system_prompt_block", "static")
+                        },
+                    )
+                )
+            }
+            if (dynamicPrompt.isNotBlank()) {
+                add(
+                    UIMessagePart.Text(
+                        text = dynamicPrompt,
+                        metadata = buildJsonObject { put("system_prompt_block", "dynamic") },
+                    )
+                )
+            }
+            if (toolPrompt.isNotBlank()) {
+                add(
+                    UIMessagePart.Text(
+                        text = toolPrompt,
+                        metadata = buildJsonObject { put("system_prompt_block", "tool_prompts") },
+                    )
+                )
             }
         }
     }

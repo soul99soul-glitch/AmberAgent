@@ -14,7 +14,7 @@ internal fun createMediaSearchTool(context: Context, deps: SystemAccessDeps): To
     parameters = {
         obj(
             "type" to enumProp("Media type.", listOf("images", "video", "audio", "all")),
-            "query" to stringProp("Optional file name filter."),
+            "query" to accessStringProp("Optional file name filter."),
             "limit" to integerProp("Maximum media entries. Defaults to 30."),
         )
     },

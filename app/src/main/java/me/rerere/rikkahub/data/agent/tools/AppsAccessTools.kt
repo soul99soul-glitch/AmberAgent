@@ -17,7 +17,7 @@ internal fun createAppsListTool(context: Context, deps: SystemAccessDeps): Tool 
     description = "List launchable apps visible to AmberAgent without requesting QUERY_ALL_PACKAGES.",
     parameters = {
         obj(
-            "query" to stringProp("Optional app label or package filter."),
+            "query" to accessStringProp("Optional app label or package filter."),
             "limit" to integerProp("Maximum apps. Defaults to 80."),
         )
     },
@@ -35,7 +35,7 @@ internal fun createAppOpenTool(context: Context, deps: SystemAccessDeps): Tool =
     description = "Open an installed launchable app by package name.",
     parameters = {
         obj(
-            "package_name" to stringProp("Android package name to launch."),
+            "package_name" to accessStringProp("Android package name to launch."),
             required = listOf("package_name")
         )
     },
@@ -59,7 +59,7 @@ internal fun createAppsInstalledListTool(context: Context, deps: SystemAccessDep
     description = "List installed packages visible to AmberAgent. Debug/advanced experiment path; QUERY_ALL_PACKAGES may be restricted by Google Play policy.",
     parameters = {
         obj(
-            "query" to stringProp("Optional app label or package filter."),
+            "query" to accessStringProp("Optional app label or package filter."),
             "include_system" to booleanProp("Include system apps. Defaults to false."),
             "include_permissions" to booleanProp("Include declared permissions. Defaults to false."),
             "limit" to integerProp("Maximum packages. Defaults to 200."),
@@ -89,7 +89,7 @@ internal fun createAppInfoTool(context: Context, deps: SystemAccessDeps): Tool =
     description = "Return label, version, launchability, install source, and optional declared permissions for a package.",
     parameters = {
         obj(
-            "package_name" to stringProp("Android package name."),
+            "package_name" to accessStringProp("Android package name."),
             "include_permissions" to booleanProp("Include declared permissions. Defaults to false."),
             required = listOf("package_name")
         )

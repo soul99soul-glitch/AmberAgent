@@ -236,6 +236,31 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun taskSpecRejectsOversizedContext() {
+        val input = taskInputWithContext("x".repeat(MAX_SUB_AGENT_CONTEXT_CHARS + 1))
+
+        val error = runCatching { SubAgentValidator.parseTask(input) }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("task.context is too large"))
+    }
+
+    @Test
+    fun taskSpecRejectsRawToolResultDumpContext() {
+        val input = taskInputWithContext(
+            """
+            {"tool_call_id":"call_1","tool_name":"file_read","output":"very long raw result"}
+            <tool_result>raw output</tool_result>
+            """.trimIndent()
+        )
+
+        val error = runCatching { SubAgentValidator.parseTask(input) }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error!!.message!!.contains("raw tool result dumps"))
+    }
+
+    @Test
     fun dynamicRoleRejectsUnavailableExplicitTool() {
         val input = inputWithCustomSubagent(
             toolAllowlist = listOf("file_read", "terminal_execute"),
@@ -318,6 +343,16 @@ class SubAgentValidatorTest {
             put("output_format", "Findings with evidence")
             put("tools_and_sources", "Use the listed tools only")
             put("boundaries", "Do not edit files")
+        })
+    }
+
+    private fun taskInputWithContext(context: String) = buildJsonObject {
+        put("task", buildJsonObject {
+            put("objective", "Review one issue")
+            put("output_format", "Findings with evidence")
+            put("tools_and_sources", "Use file_read only")
+            put("boundaries", "Do not edit files")
+            put("context", context)
         })
     }
 }

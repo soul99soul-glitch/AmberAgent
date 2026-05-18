@@ -25,6 +25,9 @@ interface MemoryDAO {
     @Query("SELECT * FROM memoryentity")
     fun getAllMemoriesFlow(): Flow<List<MemoryEntity>>
 
+    @Query("SELECT assistant_id AS assistantId, COUNT(*) AS count FROM memoryentity GROUP BY assistant_id")
+    fun getMemoryCountsFlow(): Flow<List<MemoryCount>>
+
     @Query("SELECT * FROM memoryentity")
     suspend fun getAllMemories(): List<MemoryEntity>
 
@@ -46,3 +49,8 @@ interface MemoryDAO {
     @Query("DELETE FROM memoryentity WHERE assistant_id = :assistantId")
     suspend fun deleteMemoriesOfAssistant(assistantId: String)
 }
+
+data class MemoryCount(
+    val assistantId: String,
+    val count: Int,
+)

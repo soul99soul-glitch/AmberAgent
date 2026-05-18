@@ -59,6 +59,9 @@ class WebViewOperationStore {
     private var lastReadableCaptureAtMillis: Long = 0L
     private var lastThumbnailCaptureKey: String = ""
     private var lastThumbnailCaptureAtMillis: Long = 0L
+    private var thumbnailCaptureLoadId: String = ""
+    private var thumbnailCaptureCount: Int = 0
+    private var lastLoadingPublishAtMillis: Long = 0L
 
     fun open(url: String, toolCallId: String = ""): String {
         val now = System.currentTimeMillis()
@@ -115,13 +118,20 @@ class WebViewOperationStore {
         force: Boolean = false,
     ): Boolean {
         if (url.isNullOrBlank()) return false
-        if (force) return true
+        if (thumbnailCaptureLoadId != loadId) {
+            thumbnailCaptureLoadId = loadId
+            thumbnailCaptureCount = 0
+            lastThumbnailCaptureKey = ""
+            lastThumbnailCaptureAtMillis = 0L
+        }
+        if (thumbnailCaptureCount >= MAX_THUMBNAIL_CAPTURES_PER_LOAD) return false
         val key = "$loadId|$url"
-        if (key == lastThumbnailCaptureKey && now - lastThumbnailCaptureAtMillis < THUMBNAIL_CAPTURE_INTERVAL_MS) {
+        if (!force && key == lastThumbnailCaptureKey && now - lastThumbnailCaptureAtMillis < THUMBNAIL_CAPTURE_INTERVAL_MS) {
             return false
         }
         lastThumbnailCaptureKey = key
         lastThumbnailCaptureAtMillis = now
+        thumbnailCaptureCount += 1
         return true
     }
 
@@ -145,6 +155,16 @@ class WebViewOperationStore {
                 nextProgress <= 1 -> WebViewLoadStatus.LOADING
                 else -> WebViewLoadStatus.LOADING
             }
+            val urlChanged = resolvedUrl.normalizedPreviewUrl() != current.displayUrl.normalizedPreviewUrl()
+            val shouldPublish = urlChanged ||
+                nextStatus != current.status ||
+                nextProgress <= 1 ||
+                nextProgress >= 100 ||
+                now - lastLoadingPublishAtMillis >= LOADING_PROGRESS_PUBLISH_INTERVAL_MS
+            if (!shouldPublish) {
+                return@update current
+            }
+            lastLoadingPublishAtMillis = now
             current.copy(
                 url = resolvedUrl,
                 committedUrl = resolvedUrl,
@@ -178,6 +198,15 @@ class WebViewOperationStore {
                 current.status == WebViewLoadStatus.REQUESTED -> WebViewLoadStatus.LOADING
                 else -> current.status
             }
+            if (
+                resolvedUrl == current.displayUrl &&
+                title.orEmpty().take(MAX_TITLE_CHARS) == current.title &&
+                nextStatus == current.status &&
+                nextReadableText == current.readableText &&
+                nextLinks == current.links
+            ) {
+                return@update current
+            }
             current.copy(
                 url = resolvedUrl,
                 committedUrl = resolvedUrl,
@@ -196,6 +225,7 @@ class WebViewOperationStore {
         _state.update { current ->
             if (current.loadId != loadId) return@update current
             val nextStatus = if (current.hasReadableContent) WebViewLoadStatus.READY else current.status
+            if (nextStatus == current.status) return@update current
             current.copy(status = nextStatus, updatedAtEpochMillis = System.currentTimeMillis())
         }
     }
@@ -238,6 +268,7 @@ class WebViewOperationStore {
         if (url.isNullOrBlank() || !thumbnailPath.isValidThumbnailFile()) return
         _state.update { current ->
             if (current.loadId != loadId) return@update current
+            if (thumbnailPath == current.thumbnailPath) return@update current
             val resolvedUrl = url.takeIf { it.isNotBlank() } ?: current.displayUrl
             current.copy(
                 url = resolvedUrl,
@@ -259,7 +290,9 @@ class WebViewOperationStore {
         private const val MAX_READABLE_TEXT_CHARS = 40_000
         private const val MAX_LINKS = 40
         private const val READABLE_CAPTURE_INTERVAL_MS = 2_500L
+        private const val LOADING_PROGRESS_PUBLISH_INTERVAL_MS = 5_000L
         private const val THUMBNAIL_CAPTURE_INTERVAL_MS = 4_000L
+        private const val MAX_THUMBNAIL_CAPTURES_PER_LOAD = 2
         private const val STALLED_AFTER_MS = 12_000L
     }
 }

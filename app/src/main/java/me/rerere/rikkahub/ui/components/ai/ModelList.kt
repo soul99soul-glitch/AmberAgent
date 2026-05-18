@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -89,9 +88,9 @@ import me.rerere.hugeicons.stroke.Text
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
@@ -123,7 +122,10 @@ fun ModelSelector(
     var popup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val visibleProviders = providers
-    val model = visibleProviders.findModelById(modelId ?: Uuid.random())
+    val modelIndex = remember(visibleProviders, type) {
+        visibleProviders.buildModelProviderIndex(type)
+    }
+    val model = modelId?.let { modelIndex[it]?.model }
 
     if (!onlyIcon) {
         if (compact) {
@@ -303,6 +305,22 @@ private fun List<Model>.prioritizeInputModality(modality: Modality?): List<Model
         sortedWith(compareByDescending<Model> { modality in it.inputModalities }.thenBy { it.displayName })
     }
 
+private data class ModelWithProvider(
+    val model: Model,
+    val provider: ProviderSetting,
+)
+
+private fun List<ProviderSetting>.buildModelProviderIndex(modelType: ModelType): Map<Uuid, ModelWithProvider> =
+    buildMap {
+        this@buildModelProviderIndex.fastForEach { provider ->
+            provider.models.fastForEach { model ->
+                if (model.type == modelType && !provider.isHiddenCodexOAuthModel(model)) {
+                    putIfAbsent(model.id, ModelWithProvider(model, provider))
+                }
+            }
+        }
+    }
+
 @Composable
 private fun ColumnScope.ModelList(
     currentModel: Uuid? = null,
@@ -317,12 +335,15 @@ private fun ColumnScope.ModelList(
     val settings = settingsStore.settingsFlow
         .collectAsStateWithLifecycle()
 
-    val favoriteModels = settings.value.favoriteModels.mapNotNull { modelId ->
-        val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
-        if (model.type != modelType) return@mapNotNull null
-        val provider = model.findProvider(providers = providers, checkOverwrite = false) ?: return@mapNotNull null
-        if (provider.isCodexOAuthProvider() && model.isCodexOAuthReviewModel()) return@mapNotNull null
-        model to provider
+    val modelIndex = remember(providers, modelType) {
+        providers.buildModelProviderIndex(modelType)
+    }
+    val favoriteModels = remember(settings.value.favoriteModels, modelIndex) {
+        settings.value.favoriteModels.mapNotNull { modelId ->
+            val entry = modelIndex[modelId] ?: return@mapNotNull null
+            if (entry.provider.isCodexOAuthProvider() && entry.model.isCodexOAuthReviewModel()) return@mapNotNull null
+            entry.model to entry.provider
+        }
     }
 
     var searchKeywords by remember { mutableStateOf("") }
@@ -335,13 +356,11 @@ private fun ColumnScope.ModelList(
         }
     }
 
-    val searchFilteredModelsByProvider = remember(providers, modelType, preferredInputModality, searchKeywords) {
-        providers.associate { provider ->
-            provider.id to provider.models.fastFilter {
-                it.type == modelType &&
-                    !provider.isHiddenCodexOAuthModel(it) &&
-                    it.displayName.contains(searchKeywords, true)
-            }.prioritizeInputModality(preferredInputModality)
+    val searchFilteredModelsByProvider = remember(typeFilteredModelsByProvider, searchKeywords) {
+        typeFilteredModelsByProvider.mapValues { (_, models) ->
+            models.fastFilter {
+                it.displayName.contains(searchKeywords, ignoreCase = true)
+            }
         }
     }
 
@@ -486,7 +505,7 @@ private fun ColumnScope.ModelList(
         }
 
         if (favoriteModels.isNotEmpty()) {
-            stickyHeader {
+            item(key = "favorite-header") {
                 Text(
                     text = stringResource(R.string.model_list_favorite),
                     style = MaterialTheme.typography.labelMedium,
@@ -555,7 +574,7 @@ private fun ColumnScope.ModelList(
         }
 
         providers.fastForEach { providerSetting ->
-            stickyHeader(key = "header:${providerSetting.id}") {
+            item(key = "header:${providerSetting.id}") {
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 8.dp)
@@ -564,14 +583,6 @@ private fun ColumnScope.ModelList(
                 ) {
                     Text(
                         text = providerSetting.name,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    ProviderBalanceText(
-                        providerSetting = providerSetting,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )

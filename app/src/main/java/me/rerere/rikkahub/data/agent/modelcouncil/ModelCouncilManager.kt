@@ -59,6 +59,7 @@ interface ModelCouncilTextRunner {
         systemPrompt: String,
         userPrompt: String,
         outputBudgetChars: Int,
+        reasoningLevel: ReasoningLevel? = null,
         temperature: Float? = null,
         onChunk: (String) -> Unit = {},
     ): ModelCouncilTextResult
@@ -472,6 +473,7 @@ class ModelCouncilManager(
                     systemPrompt = "你是 AmberAgent 的 Model Council 裁判。只综合证据，不引入未给出的事实。",
                     userPrompt = prompt,
                     outputBudgetChars = setting.outputBudgetChars,
+                    reasoningLevel = ReasoningLevel.OFF,
                     temperature = null,
                     onChunk = { running -> synthFlow?.value = running },
                 )
@@ -518,6 +520,7 @@ class ModelCouncilManager(
             systemPrompt = systemPrompt,
             userPrompt = userPrompt,
             outputBudgetChars = seat.outputBudgetChars,
+            reasoningLevel = seat.reasoningLevel ?: ReasoningLevel.OFF,
             temperature = seat.temperature,
             onChunk = onChunk,
         )

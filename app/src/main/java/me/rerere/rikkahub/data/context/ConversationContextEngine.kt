@@ -12,6 +12,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -110,16 +112,41 @@ class ConversationContextEngine(
         promptOverheadTokens: Int = 0,
     ): PreparedContext {
         val policy = settings.agentRuntime.contextCompaction.toCompactPolicy()
+        val editResult = if (policy.enabled) {
+            PreparedContextEditor.edit(
+                messages = messages,
+                keepRecentMessages = (policy.keepRecentTurns * 2).coerceAtLeast(4),
+            )
+        } else {
+            val estimate = ConversationContextPlanner.estimateTokens(messages)
+            PreparedContextEditResult(
+                messages = messages,
+                trace = ContextPreparationTrace(
+                    originalTokenEstimate = estimate,
+                    finalTokenEstimate = estimate,
+                    steps = emptyList(),
+                )
+            )
+        }
+        val effectiveMessages = editResult.messages
+        val effectiveConversation = conversation?.withEffectiveMessages(effectiveMessages)
         if (conversation == null || !policy.enabled) {
-            val limited = messages.limitContext(contextMessageSize)
-            return PreparedContext(limited, ConversationContextPlanner.estimateTokens(limited), false, emptyList())
+            val limited = effectiveMessages.limitContext(contextMessageSize)
+            val estimate = ConversationContextPlanner.estimateTokens(limited)
+            return PreparedContext(
+                messages = limited,
+                tokenEstimate = estimate,
+                compressionApplied = false,
+                summaryIds = emptyList(),
+                trace = editResult.trace.copy(finalTokenEstimate = estimate),
+            )
         }
 
         val compacts = contextRepository.getCompacts(conversation.id)
         val toolPromptEstimate = tools.sumOf { it.name.length + it.description.length } / 4
         val overheadEstimate = toolPromptEstimate + promptOverheadTokens.coerceAtLeast(0)
         val plan = ConversationContextPlanner.planCompaction(
-            nodes = conversation.messageNodes,
+            nodes = effectiveConversation?.messageNodes ?: conversation.messageNodes,
             activeCompacts = compacts,
             policy = policy,
             modelContextWindowTokens = model.contextWindowTokens,
@@ -158,13 +185,26 @@ class ConversationContextEngine(
         }
 
         var latestCompacts = contextRepository.getCompacts(conversation.id)
+        val traceSteps = editResult.trace.steps.toMutableList()
+        val beforeCompactEstimate = ConversationContextPlanner.estimateTokens(effectiveMessages) + overheadEstimate
         var preparedMessages = prepareMessagesWithCompacts(
-            messages = messages,
+            messages = effectiveMessages,
             activeCompacts = latestCompacts,
             policy = policy,
             contextMessageSize = contextMessageSize,
             tools = tools,
         )
+        val afterCompactEstimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+        if (latestCompacts.any { it.status == "completed" }) {
+            traceSteps += ContextPreparationStepTrace(
+                stage = "compact",
+                reason = "completed compact summaries replaced covered source messages",
+                beforeTokens = beforeCompactEstimate,
+                afterTokens = afterCompactEstimate,
+                savedTokens = (beforeCompactEstimate - afterCompactEstimate).coerceAtLeast(0),
+                changedMessages = latestCompacts.count { it.status == "completed" },
+            )
+        }
         val contextWindow = ConversationContextPlanner.estimateContextWindow(model.contextWindowTokens)
         val softTotalBudget = (contextWindow * policy.forceRatio).toInt().coerceAtLeast(4_000)
         val targetMessageBudget = (softTotalBudget - overheadEstimate)
@@ -191,27 +231,50 @@ class ConversationContextEngine(
                 )
             }
             latestCompacts = contextRepository.getCompacts(conversation.id)
+            val beforeFitCompactEstimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
             preparedMessages = prepareMessagesWithCompacts(
-                messages = messages,
+                messages = effectiveMessages,
                 activeCompacts = latestCompacts,
                 policy = fitPolicy,
                 contextMessageSize = contextMessageSize,
                 tools = tools,
             )
             estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+            traceSteps += ContextPreparationStepTrace(
+                stage = "compact",
+                reason = "forced compaction to fit model window",
+                beforeTokens = beforeFitCompactEstimate,
+                afterTokens = estimate,
+                savedTokens = (beforeFitCompactEstimate - estimate).coerceAtLeast(0),
+                changedMessages = latestCompacts.count { it.status == "completed" },
+            )
         }
         if (estimate > (contextWindow * policy.forceRatio).toInt()) {
+            val beforeFitEstimate = estimate
             preparedMessages = ConversationContextPlanner.fitMessagesToTokenBudget(
                 messages = preparedMessages,
                 maxTokens = targetMessageBudget,
             )
             estimate = ConversationContextPlanner.estimateTokens(preparedMessages) + overheadEstimate
+            traceSteps += ContextPreparationStepTrace(
+                stage = "fit",
+                reason = "prepared context still exceeded force ratio after editing/compaction",
+                beforeTokens = beforeFitEstimate,
+                afterTokens = estimate,
+                savedTokens = (beforeFitEstimate - estimate).coerceAtLeast(0),
+                changedMessages = 0,
+            )
         }
         return PreparedContext(
             messages = preparedMessages,
             tokenEstimate = estimate,
             compressionApplied = latestCompacts.any { it.status == "completed" },
             summaryIds = latestCompacts.filter { it.status == "completed" }.map { it.id },
+            trace = ContextPreparationTrace(
+                originalTokenEstimate = editResult.trace.originalTokenEstimate,
+                finalTokenEstimate = estimate,
+                steps = traceSteps,
+            ),
         )
     }
 
@@ -356,7 +419,7 @@ class ConversationContextEngine(
                 val summary = accumulated.toString().trim()
                     .takeIf { it.isNotEmpty() }
                     ?: error("Failed to generate compact summary")
-                val normalizedSummary = normalizeSummaryJson(summary)
+                val normalizedSummary = normalizeSummaryJson(summary, plan.sourceMessageIds)
                 val now = System.currentTimeMillis()
                 val compact = ConversationCompact(
                     id = Uuid.random().toString(),
@@ -440,10 +503,9 @@ class ConversationContextEngine(
         // saw raw JSON tokens scrolling (`"goals": [...], "facts": [...]`)
         // instead of human-readable summary. The preamble is naturally
         // emitted as the FIRST tokens of the stream, so it lands in the
-        // marker before any JSON shows up. normalizeSummaryJson already
-        // tolerates leading prose (it uses cleaned.indexOf('{') to locate
-        // the JSON object), so this doesn't break the persisted summary
-        // parse path.
+        // marker before any JSON shows up. normalizeSummaryJson tolerates
+        // leading prose and now safely wraps legacy/plain-text summaries
+        // from older custom prompts, so this doesn't break persistence.
         val structuredInstructions = """
             First, write ONE concise sentence (max 100 chars) in the user's language summarising what this conversation segment covered. This sentence is shown live to the user while the summary streams in.
             Then on a new line, return only valid JSON with these keys:
@@ -461,7 +523,7 @@ class ConversationContextEngine(
         )
     }
 
-    private fun normalizeSummaryJson(summary: String): String {
+    private fun normalizeSummaryJson(summary: String, sourceMessageIds: List<String>): String {
         val candidate = summary.trim()
             .removePrefix("```json")
             .removePrefix("```")
@@ -472,7 +534,8 @@ class ConversationContextEngine(
                 val end = cleaned.lastIndexOf('}')
                 if (start >= 0 && end > start) cleaned.substring(start, end + 1) else cleaned
             }
-        val jsonObject = json.parseToJsonElement(candidate).jsonObject
+        val parsed = runCatching { json.parseToJsonElement(candidate).jsonObject }.getOrNull()
+            ?: return fallbackPlainTextSummaryJson(summary, sourceMessageIds)
         val required = listOf(
             "goals",
             "facts",
@@ -484,10 +547,57 @@ class ConversationContextEngine(
             "timeline",
             "source_message_ids",
         )
-        val missing = required.filterNot { it in jsonObject }
+        val missing = required.filterNot { it in parsed }
         require(missing.isEmpty()) {
             "Compact summary JSON missing fields: ${missing.joinToString(", ")}"
         }
         return candidate
+    }
+
+    private fun fallbackPlainTextSummaryJson(summary: String, sourceMessageIds: List<String>): String {
+        val cleaned = summary
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .take(12_000)
+        val fallback = buildJsonObject {
+            put("goals", buildJsonArray {})
+            put("facts", buildJsonArray {
+                add(cleaned.ifBlank { "Conversation segment was compressed, but the model returned an unstructured summary." })
+            })
+            put("decisions", buildJsonArray {})
+            put("open_tasks", buildJsonArray {})
+            put("failed_attempts", buildJsonArray {})
+            put("tool_results", buildJsonArray {})
+            put("entities", buildJsonArray {})
+            put("timeline", buildJsonArray {})
+            put("source_message_ids", buildJsonArray {
+                sourceMessageIds.forEach { add(it) }
+            })
+        }
+        return fallback.toString()
+    }
+
+    private fun Conversation.withEffectiveMessages(effectiveMessages: List<UIMessage>): Conversation {
+        val byId = effectiveMessages.associateBy { it.id }
+        return copy(
+            messageNodes = messageNodes.map { node ->
+                val edited = byId[node.currentMessage.id] ?: return@map node
+                if (edited == node.currentMessage) {
+                    node
+                } else {
+                    node.copy(
+                        messages = node.messages.map { message ->
+                            if (message.id == edited.id) edited else message
+                        }
+                    )
+                }
+            }
+        )
     }
 }

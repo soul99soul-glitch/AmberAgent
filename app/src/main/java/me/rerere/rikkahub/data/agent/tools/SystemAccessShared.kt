@@ -78,7 +78,7 @@ internal fun obj(vararg properties: Pair<String, JsonElement>, required: List<St
         required = required
     )
 
-internal fun stringProp(description: String) = buildJsonObject {
+internal fun accessStringProp(description: String) = buildJsonObject {
     put("type", "string")
     put("description", description)
 }

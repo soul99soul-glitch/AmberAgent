@@ -1,16 +1,23 @@
 package me.rerere.ai.provider.providers
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
+import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -90,7 +97,7 @@ class ClaudeProviderPromptCacheTest {
     }
 
     @Test
-    fun `promptCaching=true should add cache_control to last system block and last tool`() {
+    fun `promptCaching=true should not cache unmarked system block but should cache last tool`() {
         val providerSetting = ProviderSetting.Claude(promptCaching = true)
         val messages = listOf(
             UIMessage.system("system prompt"),
@@ -103,15 +110,85 @@ class ClaudeProviderPromptCacheTest {
 
         val request = buildRequest(providerSetting, messages, params)
 
-        // system should have cache_control
+        // system should only be cached when a static block is explicitly marked
         val system = request["system"]!!.jsonArray
-        val systemCacheControl = system.last().jsonObject["cache_control"]!!.jsonObject
-        assertEquals("ephemeral", systemCacheControl["type"]!!.jsonPrimitive.content)
+        assertNull(system.last().jsonObject["cache_control"])
 
         // tools should have cache_control
         val tools = request["tools"]!!.jsonArray
         val toolsCacheControl = tools.last().jsonObject["cache_control"]!!.jsonObject
         assertEquals("ephemeral", toolsCacheControl["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `promptCaching=true should honor explicit system cache marker`() {
+        val providerSetting = ProviderSetting.Claude(promptCaching = true)
+        val messages = listOf(
+            UIMessage(
+                role = MessageRole.SYSTEM,
+                parts = listOf(
+                    UIMessagePart.Text(
+                        text = "static prompt",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                        },
+                    ),
+                    UIMessagePart.Text("dynamic reminder"),
+                    UIMessagePart.Text("tool schema prompt"),
+                ),
+            ),
+            UIMessage.user("hello")
+        )
+        val params = TextGenerationParams(
+            model = Model(modelId = "claude-test", abilities = emptyList()),
+            tools = emptyList()
+        )
+
+        val request = buildRequest(providerSetting, messages, params)
+        val system = request["system"]!!.jsonArray
+
+        assertEquals("static prompt", system[0].jsonObject["text"]!!.jsonPrimitive.content)
+        val staticCacheControl = system[0].jsonObject["cache_control"]!!.jsonObject
+        assertEquals("ephemeral", staticCacheControl["type"]!!.jsonPrimitive.content)
+        assertNull(system[1].jsonObject["cache_control"])
+        assertNull(system[2].jsonObject["cache_control"])
+    }
+
+    @Test
+    fun `promptCaching=true should disable system cache when disabled marker exists`() {
+        val providerSetting = ProviderSetting.Claude(promptCaching = true)
+        val messages = listOf(
+            UIMessage(
+                role = MessageRole.SYSTEM,
+                parts = listOf(
+                    UIMessagePart.Text(
+                        text = "before injection",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED)
+                        },
+                    ),
+                    UIMessagePart.Text(
+                        text = "static prompt",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                        },
+                    ),
+                    UIMessagePart.Text("dynamic reminder"),
+                ),
+            ),
+            UIMessage.user("hello")
+        )
+        val params = TextGenerationParams(
+            model = Model(modelId = "claude-test", abilities = emptyList()),
+            tools = emptyList()
+        )
+
+        val request = buildRequest(providerSetting, messages, params)
+        val system = request["system"]!!.jsonArray
+
+        system.forEach { part ->
+            assertNull(part.jsonObject["cache_control"])
+        }
     }
 
     @Test

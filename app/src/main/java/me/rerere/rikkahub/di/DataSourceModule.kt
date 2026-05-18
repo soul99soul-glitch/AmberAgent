@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
 import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -42,6 +43,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_19_20
 import me.rerere.rikkahub.data.db.migrations.Migration_20_21
 import me.rerere.rikkahub.data.db.migrations.Migration_21_22
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
+import me.rerere.rikkahub.data.db.migrations.Migration_25_26
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
@@ -100,6 +102,14 @@ val dataSourceModule = module {
     }
 
     single {
+        SettingsProviderRescue(
+            context = get(),
+            settingsStore = get(),
+            json = get(),
+        )
+    }
+
+    single {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
@@ -114,6 +124,7 @@ val dataSourceModule = module {
                 Migration_20_21,
                 Migration_21_22,
                 Migration_22_23,
+                Migration_25_26,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -198,6 +209,10 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().messageNodeDao()
+    }
+
+    single {
+        get<AppDatabase>().messageStatsDao()
     }
 
     single {

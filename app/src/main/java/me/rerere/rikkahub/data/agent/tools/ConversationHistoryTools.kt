@@ -54,9 +54,9 @@ class ConversationHistoryTools(
             val current = currentConversationProvider()
             val sessions = if (query.isBlank()) {
                 if (scope == "all") {
-                    conversationRepo.getRecentConversations(limit)
+                    conversationRepo.getRecentConversationSummaries(limit)
                 } else {
-                    conversationRepo.getRecentConversations(current.assistantId, limit)
+                    conversationRepo.getRecentConversationSummaries(current.assistantId, limit)
                 }
             } else {
                 val flow = if (scope == "all") {
@@ -66,12 +66,13 @@ class ConversationHistoryTools(
                 }
                 flow.first().take(limit)
             }
+            val sessionSummaries = sessions.map { it.toSessionSummary() }
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("status", "ok")
                 put("scope", scope)
                 put("query", query)
                 put("sessions", buildJsonArray {
-                    sessions.forEach { add(it.toSessionSummary()) }
+                    sessionSummaries.forEach { add(it) }
                 })
             }.toString()))
         }
@@ -101,10 +102,7 @@ class ConversationHistoryTools(
             for (hit in conversationRepo.searchMessages(query)) {
                 if (sessionIds.isNotEmpty() && hit.conversationId !in sessionIds) continue
                 if (scope != "all") {
-                    val hitConversation = runCatching {
-                        conversationRepo.getConversationById(Uuid.parse(hit.conversationId))
-                    }.getOrNull()
-                    if (hitConversation?.assistantId != currentAssistantId) continue
+                    if (hit.assistantId != currentAssistantId.toString()) continue
                 }
                 hits += hit
                 if (hits.size >= limit) break
@@ -157,14 +155,16 @@ class ConversationHistoryTools(
                 return@execute listOf(UIMessagePart.Text(errorPayload("grant_denied", grantValidation.reason).toString()))
             }
             val maxChars = (grantValidation as GrantCheck.Allowed).maxChars
-            val conversation = loadConversation(sessionId)
+            val conversation = loadConversationSummary(sessionId)
                 ?: return@execute listOf(UIMessagePart.Text(errorPayload("not_found", "Unknown session_id: $sessionId").toString()))
-            val messages = conversation.messageNodes.flatMap { it.messages }.take(maxMessages)
+            val conversationUuid = Uuid.parse(sessionId)
+            val messages = loadMessagesFromStart(conversationUuid, maxMessages)
             val transcript = buildTranscript(messages, includeTools, maxChars)
+            val sessionSummary = conversation.toSessionSummary()
             if (grantId.isNotBlank()) grantStore.recordUse(grantId, transcript.length)
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("status", "ok")
-                put("session", conversation.toSessionSummary())
+                put("session", sessionSummary)
                 put("message_count", messages.size)
                 put("max_chars", maxChars)
                 put("truncated", transcript.length >= maxChars)
@@ -203,13 +203,24 @@ class ConversationHistoryTools(
                 return@execute listOf(UIMessagePart.Text(errorPayload("grant_denied", grantValidation.reason).toString()))
             }
             val maxChars = (grantValidation as GrantCheck.Allowed).maxChars
-            val conversation = loadConversation(sessionId)
+            val conversation = loadConversationSummary(sessionId)
                 ?: return@execute listOf(UIMessagePart.Text(errorPayload("not_found", "Unknown session_id: $sessionId").toString()))
-            val indexed = conversation.messageNodes.flatMapIndexed { nodeIndex, node ->
+            val conversationUuid = Uuid.parse(sessionId)
+            val sourceNodeId = resolveSourceNodeId(conversationUuid, sourceId)
+                ?: return@execute listOf(UIMessagePart.Text(errorPayload("not_found", "source_id not found in session.").toString()))
+            val sourceNodeIndex = conversationRepo.getConversationNodeIndex(conversationUuid, sourceNodeId)
+                ?: return@execute listOf(UIMessagePart.Text(errorPayload("not_found", "source node not found in session.").toString()))
+            val startNodeIndex = (sourceNodeIndex - radius).coerceAtLeast(0)
+            val nodes = conversationRepo.getConversationNodeRange(
+                conversationId = conversationUuid,
+                startIndex = startNodeIndex,
+                endIndex = sourceNodeIndex + radius,
+            )
+            val indexed = nodes.flatMapIndexed { localNodeIndex, node ->
                 node.messages.mapIndexed { messageIndex, message ->
                     IndexedHistoryMessage(
                         nodeId = node.id.toString(),
-                        nodeIndex = nodeIndex,
+                        nodeIndex = startNodeIndex + localNodeIndex,
                         messageIndex = messageIndex,
                         message = message,
                     )
@@ -224,10 +235,11 @@ class ConversationHistoryTools(
                 (matchIndex + radius + 1).coerceAtMost(indexed.size)
             )
             val transcript = buildTranscript(selected.map { it.message }, includeTools, maxChars)
+            val sessionSummary = conversation.toSessionSummary()
             if (grantId.isNotBlank()) grantStore.recordUse(grantId, transcript.length)
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("status", "ok")
-                put("session", conversation.toSessionSummary())
+                put("session", sessionSummary)
                 put("source_id", sourceId)
                 put("messages", buildJsonArray {
                     selected.forEach { item ->
@@ -254,8 +266,38 @@ class ConversationHistoryTools(
         }
     }
 
-    private suspend fun loadConversation(sessionId: String): Conversation? =
-        runCatching { conversationRepo.getConversationById(Uuid.parse(sessionId)) }.getOrNull()
+    private suspend fun loadConversationSummary(sessionId: String): Conversation? =
+        runCatching { conversationRepo.getConversationSummaryById(Uuid.parse(sessionId)) }.getOrNull()
+
+    private suspend fun loadMessagesFromStart(sessionId: Uuid, maxMessages: Int): List<UIMessage> {
+        val messages = mutableListOf<UIMessage>()
+        var nodeOffset = 0
+        val pageSize = 24
+        while (messages.size < maxMessages) {
+            val nodes = conversationRepo.getConversationNodePage(
+                conversationId = sessionId,
+                offset = nodeOffset,
+                limit = pageSize,
+            )
+            if (nodes.isEmpty()) break
+            for (node in nodes) {
+                for (message in node.messages) {
+                    messages += message
+                    if (messages.size >= maxMessages) break
+                }
+                if (messages.size >= maxMessages) break
+            }
+            nodeOffset += nodes.size
+        }
+        return messages
+    }
+
+    private suspend fun resolveSourceNodeId(sessionId: Uuid, sourceId: String): String? {
+        val directNodeIndex = conversationRepo.getConversationNodeIndex(sessionId, sourceId)
+        if (directNodeIndex != null) return sourceId
+        return conversationRepo.findNodeIdForMessage(sessionId, sourceId)
+            ?: conversationRepo.findNodeIdContainingMessage(sessionId, sourceId)
+    }
 
     private fun buildTranscript(messages: List<UIMessage>, includeTools: Boolean, maxChars: Int): String {
         val builder = StringBuilder()
@@ -300,14 +342,14 @@ class ConversationHistoryTools(
         return parts.joinToString("\n").trim()
     }
 
-    private fun Conversation.toSessionSummary() = buildJsonObject {
+    private suspend fun Conversation.toSessionSummary() = buildJsonObject {
         put("session_id", id.toString())
         put("assistant_id", assistantId.toString())
         put("title", title)
         put("created_at", createAt.toEpochMilli())
         put("updated_at", updateAt.toEpochMilli())
         put("updated_date", DATE_FORMATTER.format(updateAt.atZone(ZoneId.systemDefault())))
-        put("message_nodes", messageNodes.size)
+        put("message_nodes", conversationRepo.countConversationNodes(id))
         put("is_pinned", isPinned)
     }
 

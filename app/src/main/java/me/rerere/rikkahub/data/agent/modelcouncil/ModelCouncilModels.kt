@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.modelcouncil
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 // Bumped from 4 → 8 to fit the new "3 core seats + up to 5 lens" model.
@@ -47,6 +48,8 @@ data class ModelCouncilSeat(
     val systemPrompt: String = "",
     @SerialName("output_budget_chars")
     val outputBudgetChars: Int = DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS,
+    @SerialName("reasoning_level")
+    val reasoningLevel: ReasoningLevel? = null,
     val temperature: Float? = null,
     @SerialName("external_tool")
     val externalTool: String = "",

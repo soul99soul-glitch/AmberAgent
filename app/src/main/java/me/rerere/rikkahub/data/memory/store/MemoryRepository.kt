@@ -42,6 +42,11 @@ open class MemoryRepository(
             entities.map { it.toAssistantMemory() }
         }
 
+    fun getMemoryCountsFlow(): Flow<Map<String, Int>> =
+        memoryDAO.getMemoryCountsFlow().map { rows ->
+            rows.associate { it.assistantId to it.count }
+        }
+
     suspend fun getGlobalMemories(): List<AssistantMemory> =
         memoryDAO.getMemoriesOfAssistant(GLOBAL_MEMORY_ID).map { it.toAssistantMemory() }
 

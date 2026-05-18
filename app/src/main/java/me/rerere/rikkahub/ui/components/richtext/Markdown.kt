@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.os.Trace
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -482,17 +481,9 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
     /**
-     * When true, installs a [CharRevealController] for descendant
-     * [MarkdownNode] paragraphs to fade newly-arrived characters
-     * over a short window. Caller (typically the assistant chat
-     * pipeline) should pass `streaming = true` ONLY for the trailing
-     * segment that is currently receiving tokens — earlier
-     * already-finalized blocks should pass `false` so they render
-     * via the fast path (no per-frame re-build).
-     *
-     * History: between 2026-04 and 2026-05-16 this param was a no-op
-     * holding the placeholder for the deleted "灰尾" gradient. With
-     * Phase B the parameter is meaningful again.
+     * Streaming still uses the incremental/background parse cache. When true,
+     * only the trailing active block gets a [CharRevealController] so newly
+     * arrived text can fade in while finalized blocks stay on the fast path.
      */
     streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
@@ -594,7 +585,7 @@ fun MarkdownBlock(
                         children.lastOrNull()?.let { activeChild ->
                             key("active:${activeChild.type}:${activeChild.startOffset}") {
                                 CompositionLocalProvider(
-                                    LocalCharRevealController provides if (streaming) revealController else null,
+                                    LocalCharRevealController provides revealController,
                                 ) {
                                     MarkdownNode(
                                         node = activeChild,
@@ -607,7 +598,7 @@ fun MarkdownBlock(
                         }
                     } else {
                         children.fastForEachIndexed { index, child ->
-                            val childRevealController = if (streaming && index == children.lastIndex) {
+                            val childRevealController = if (index == children.lastIndex) {
                                 revealController
                             } else {
                                 null
@@ -1167,14 +1158,9 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
-    // B1 char-reveal: pull the active controller (or null when not
-    // streaming) and the base text color so the leaf path can wrap
-    // each codepoint in a SpanStyle whose alpha tracks the fade
-    // window. Reading controller?.nowNanos inside the remember key
-    // makes the AnnotatedString rebuild every frame while reveal is
-    // active — the deliberate per-frame work that delivers the
-    // smooth fade. When controller is null, key is stable and
-    // buildAnnotatedString runs once like before.
+    // Active streaming paragraphs deliberately rebuild only their AnnotatedString
+    // while reveal entries are alive. Finalized paragraphs have a null controller
+    // and stay keyed by content like the stable path.
     val revealController = LocalCharRevealController.current
     val baseColor = LocalContentColor.current
     val revealClock = revealController?.nowNanos ?: 0L

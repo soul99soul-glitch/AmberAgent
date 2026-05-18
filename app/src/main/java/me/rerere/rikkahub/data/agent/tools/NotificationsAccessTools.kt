@@ -34,8 +34,8 @@ internal fun createNotificationPostTool(context: Context, deps: SystemAccessDeps
     description = "Post an AmberAgent notification for a task reminder or status summary.",
     parameters = {
         obj(
-            "title" to stringProp("Notification title."),
-            "text" to stringProp("Notification text."),
+            "title" to accessStringProp("Notification title."),
+            "text" to accessStringProp("Notification text."),
             required = listOf("title", "text")
         )
     },

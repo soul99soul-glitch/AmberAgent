@@ -36,13 +36,13 @@ internal fun createCalendarCreateTool(context: Context, deps: SystemAccessDeps):
     description = "Create an Android calendar event. Requires WRITE_CALENDAR and explicit approval.",
     parameters = {
         obj(
-            "title" to stringProp("Event title."),
-            "start_time" to stringProp("ISO-8601 start time, for example 2026-05-03T10:00:00+08:00."),
-            "end_time" to stringProp("ISO-8601 end time."),
+            "title" to accessStringProp("Event title."),
+            "start_time" to accessStringProp("ISO-8601 start time, for example 2026-05-03T10:00:00+08:00."),
+            "end_time" to accessStringProp("ISO-8601 end time."),
             "start_epoch_ms" to integerProp("Start Unix epoch millis. Used if start_time is absent."),
             "end_epoch_ms" to integerProp("End Unix epoch millis. Used if end_time is absent."),
-            "description" to stringProp("Optional event description."),
-            "location" to stringProp("Optional event location."),
+            "description" to accessStringProp("Optional event description."),
+            "location" to accessStringProp("Optional event location."),
             required = listOf("title")
         )
     },

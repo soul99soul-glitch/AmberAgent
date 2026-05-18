@@ -5,6 +5,7 @@ import androidx.datastore.core.IOException
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -29,12 +30,14 @@ class UIPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    val flow: StateFlow<UIPrefsData> = dataStore.data
+    internal val rawFlow: Flow<UIPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+
+    val flow: StateFlow<UIPrefsData> = rawFlow
         .toMutableStateFlow(scope, UIPrefsData())
 
     suspend fun update(transform: (UIPrefsData) -> UIPrefsData) {

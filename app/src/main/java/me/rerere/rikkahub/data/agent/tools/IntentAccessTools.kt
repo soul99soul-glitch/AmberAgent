@@ -47,7 +47,7 @@ internal fun createIntentOpenTool(context: Context, deps: SystemAccessDeps): Too
     parameters = {
         obj(
             "action" to enumProp("Intent action.", listOf("view", "dial", "sendto", "web_search")),
-            "data_uri" to stringProp("Optional data URI. Only http/https/tel/mailto/smsto are allowed."),
+            "data_uri" to accessStringProp("Optional data URI. Only http/https/tel/mailto/smsto are allowed."),
             required = listOf("action")
         )
     },

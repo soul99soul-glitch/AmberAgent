@@ -69,7 +69,7 @@ class SubAgentTools(
                 } else {
                     appendLine("You can delegate bounded subtasks to specialist subagents. Each subagent runs depth-1, with its own tool allowlist (and possibly its own model). Use them when a task is complex, clearly bounded, and benefits from isolation, a different model, or parallel viewpoints. Simple linear tasks must stay in the main agent.")
                     appendLine()
-                    appendLine("To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait.")
+                    appendLine("To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait. The user can watch the subagent's live Markdown panel; subagent_wait/read returns a compact structured result for you to synthesize.")
                 }
                 appendLine()
                 subAgentManager.listBuiltIns().forEach { agent ->
@@ -200,7 +200,7 @@ class SubAgentTools(
 
     private fun readTool() = Tool(
         name = "subagent_read",
-        description = "Read subagent run status and result summary by run_id.",
+        description = "Read subagent run status and compact structured result by run_id.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {

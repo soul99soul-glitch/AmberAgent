@@ -14,8 +14,8 @@ internal fun createShareTextTool(context: Context, deps: SystemAccessDeps): Tool
     description = "Open Android share sheet with plain text. Requires approval because it sends data outside AmberAgent.",
     parameters = {
         obj(
-            "text" to stringProp("Text to share."),
-            "title" to stringProp("Optional chooser title."),
+            "text" to accessStringProp("Text to share."),
+            "title" to accessStringProp("Optional chooser title."),
             required = listOf("text")
         )
     },
@@ -46,8 +46,8 @@ internal fun createShareFileTool(
         "re-emit the artifact as a show-widget block in your reply (see widget guidance).",
     parameters = {
         obj(
-            "path" to stringProp("Workspace-relative file path."),
-            "title" to stringProp("Optional chooser title."),
+            "path" to accessStringProp("Workspace-relative file path."),
+            "title" to accessStringProp("Optional chooser title."),
             required = listOf("path")
         )
     },

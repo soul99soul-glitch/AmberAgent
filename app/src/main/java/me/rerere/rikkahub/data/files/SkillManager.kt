@@ -16,6 +16,9 @@ class SkillManager(
         private const val BUILTIN_SKILLS_ASSET_DIR = "builtin-skills"
     }
 
+    @Volatile
+    private var cachedSkills: List<SkillMetadata>? = null
+
     fun getSkillsDir(): File {
         val dir = context.filesDir.resolve(FileFolders.SKILLS)
         if (!dir.exists()) dir.mkdirs()
@@ -23,6 +26,7 @@ class SkillManager(
     }
 
     fun listSkills(): List<SkillMetadata> {
+        cachedSkills?.let { return it }
         val skillsDir = getSkillsDir()
         return skillsDir.listFiles()
             ?.filter { it.isDirectory }
@@ -31,7 +35,8 @@ class SkillManager(
                 if (!skillFile.exists()) return@mapNotNull null
                 parseSkillFile(skillFile, dir)
             }
-            ?: emptyList()
+            ?.also { cachedSkills = it }
+            ?: emptyList<SkillMetadata>().also { cachedSkills = it }
     }
 
     fun listSkillIssues(): List<SkillScanIssue> {
@@ -60,6 +65,7 @@ class SkillManager(
 
     suspend fun installBuiltinSkillsIfMissing() = withContext(Dispatchers.IO) {
         val builtinSkillNames = context.assets.list(BUILTIN_SKILLS_ASSET_DIR).orEmpty()
+        var installedAny = false
         builtinSkillNames.forEach { skillName ->
             val targetDir = resolveSkillDir(skillName) ?: return@forEach
             val marker = targetDir.resolve("SKILL.md")
@@ -71,11 +77,13 @@ class SkillManager(
                     assetPath = "$BUILTIN_SKILLS_ASSET_DIR/$skillName",
                     targetDir = targetDir,
                 )
+                installedAny = true
             }.onFailure { error ->
                 Log.w(TAG, "installBuiltinSkillsIfMissing: Failed to install $skillName", error)
                 targetDir.deleteRecursively()
             }
         }
+        if (installedAny) invalidateSkillCache()
     }
 
     fun readSkillBody(skillName: String): String? {
@@ -95,6 +103,7 @@ class SkillManager(
         skillDir.mkdirs()
         val skillFile = skillDir.resolve("SKILL.md")
         skillFile.writeText(SkillFrontmatterParser.ensureDescription(content, name))
+        invalidateSkillCache()
         return parseSkillFile(skillFile, skillDir)
     }
 
@@ -102,6 +111,7 @@ class SkillManager(
         val skillDir = resolveSkillDir(name) ?: return@withContext false
         val deleted = skillDir.deleteRecursively()
         if (deleted) {
+            invalidateSkillCache()
             settingsStore.update { settings ->
                 settings.copy(
                     assistants = settings.assistants.map { assistant ->
@@ -124,6 +134,7 @@ class SkillManager(
         val target = SkillPaths.resolveSkillFile(skillDir, relativePath) ?: return false
         target.parentFile?.mkdirs()
         target.writeText(content)
+        invalidateSkillCache()
         return true
     }
 
@@ -158,6 +169,7 @@ class SkillManager(
             }
 
             backupDir?.deleteRecursively()
+            invalidateSkillCache()
             return true
         } catch (e: Exception) {
             Log.w(TAG, "saveSkillFilesAtomically: Failed to save $skillName", e)
@@ -178,7 +190,9 @@ class SkillManager(
     fun deleteSkillFile(skillName: String, relativePath: String): Boolean {
         val skillDir = resolveSkillDir(skillName) ?: return false
         val target = SkillPaths.resolveSkillFile(skillDir, relativePath) ?: return false
-        return target.delete()
+        return target.delete().also { deleted ->
+            if (deleted) invalidateSkillCache()
+        }
     }
 
     fun resolveSkillFile(skillName: String, relativePath: String): File? {
@@ -205,7 +219,12 @@ class SkillManager(
                     Log.w(TAG, "repairMissingDescriptions: Failed to repair ${dir.name}", error)
                 }
             }
+        if (repaired > 0) invalidateSkillCache()
         return repaired
+    }
+
+    private fun invalidateSkillCache() {
+        cachedSkills = null
     }
 
     private fun resolveSkillDir(skillName: String): File? {

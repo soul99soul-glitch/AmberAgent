@@ -301,7 +301,7 @@ class ResponseAPI(
                 val parts = messages.first { it.role == MessageRole.SYSTEM }.parts
                 put(
                     "instructions",
-                    parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
+                    parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text })
             }
 
             // messages

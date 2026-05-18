@@ -187,7 +187,7 @@ private fun assembleSettings(
         dynamicColor = u.dynamicColor,
         themeId = u.themeId,
         // ... 各域字段
-        
+
         // 跨域 cleanup
         favoriteModels = c.favoriteModels.filter { it in allModelIds },
         searchEnabledServiceIds = s.searchEnabledServiceIds.filter { it in validSearchServiceIds },
@@ -274,7 +274,7 @@ class V3MigrationTest {
 特别要测的边界：
 - 初始化竞态（DataStore 第一次 emit）
 - 7 个 Prefs 并发 update（mutex 保护）
-- 同域去重（distinctBy） 
+- 同域去重（distinctBy）
 - 跨域 cleanup（filter not in valid set）
 
 ---

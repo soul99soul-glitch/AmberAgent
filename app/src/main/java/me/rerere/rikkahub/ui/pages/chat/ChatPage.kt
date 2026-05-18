@@ -444,10 +444,7 @@ private fun ChatPageContent(
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
     var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
-    var sendFollowRequest by remember(conversation.id) { mutableStateOf(0) }
     var suggestionFillPulseKey by remember(conversation.id) { mutableIntStateOf(0) }
-    var sentUserMessageAnimationKey by remember(conversation.id) { mutableIntStateOf(0) }
-    var sentUserMessageAnimationBaselineId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val hazeState = rememberHazeState()
     val activityStore: AgentToolActivityStore = koinInject()
@@ -495,22 +492,6 @@ private fun ChatPageContent(
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
     val pendingQueueCount = pendingUserMessages.size
-
-    LaunchedEffect(
-        sendFollowRequest,
-        conversation.messageNodes.size,
-        pendingUserMessages.size,
-        loadingJob != null,
-    ) {
-        if (sendFollowRequest <= 0) return@LaunchedEffect
-        withFrameNanos { }
-        withFrameNanos { }
-        val lastIndex = chatListState.layoutInfo.totalItemsCount - 1
-        if (lastIndex >= 0) {
-            chatListState.scrollToItem(lastIndex)
-        }
-        sendFollowRequest = 0
-    }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -590,19 +571,11 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             val parts = inputState.getContents()
-                            if (!parts.isEmptyInputMessage()) {
-                                sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
-                                sentUserMessageAnimationKey += 1
-                            }
                             vm.handleMessageSend(
                                 content = parts,
                                 queueMode = queueMode,
                             )
-                            if (shouldFollowAfterSend) {
-                                sendFollowRequest += 1
-                            }
                         }
                         inputState.clearInput()
                     },
@@ -613,20 +586,12 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             val parts = inputState.getContents()
-                            if (!parts.isEmptyInputMessage()) {
-                                sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
-                                sentUserMessageAnimationKey += 1
-                            }
                             vm.handleMessageSend(
                                 content = parts,
                                 answer = loadingJob != null && queueMode == PendingUserMessageMode.STEER,
                                 queueMode = queueMode,
                             )
-                            if (shouldFollowAfterSend) {
-                                sendFollowRequest += 1
-                            }
                         }
                         inputState.clearInput()
                     },
@@ -668,8 +633,6 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
-                sentUserMessageAnimationKey = sentUserMessageAnimationKey,
-                sentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId,
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
@@ -730,17 +693,11 @@ private fun ChatPageContent(
                         if (currentChatModel == null) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             inputState.editingMessage = null
-                            sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
-                            sentUserMessageAnimationKey += 1
                             vm.handleMessageSend(
                                 content = listOf(UIMessagePart.Text(text)),
                                 queueMode = PendingUserMessageMode.FOLLOWUP,
                             )
-                            if (shouldFollowAfterSend) {
-                                sendFollowRequest += 1
-                            }
                             inputState.clearInput()
                         }
                     }
@@ -783,19 +740,16 @@ private fun ChatPageContent(
                         if (currentChatModel == null) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                         } else {
-                            val shouldFollowAfterSend = setting.displaySetting.enableAutoScroll
                             inputState.editingMessage = null
-                            sentUserMessageAnimationBaselineId = conversation.currentMessages.lastOrNull()?.id
-                            sentUserMessageAnimationKey += 1
                             vm.handleMessageSend(
                                 content = listOf(UIMessagePart.Text(text)),
                                 queueMode = PendingUserMessageMode.FOLLOWUP,
                             )
-                            if (shouldFollowAfterSend) {
-                                sendFollowRequest += 1
-                            }
                         }
                     }
+                },
+                onLoadOlderTimeline = {
+                    vm.loadOlderTimelinePage()
                 },
             )
         }

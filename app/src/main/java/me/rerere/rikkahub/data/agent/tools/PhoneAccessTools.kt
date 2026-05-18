@@ -51,7 +51,7 @@ internal fun createCallPhoneTool(context: Context, deps: SystemAccessDeps): Tool
     description = "Open the dialer by default. If direct_call=true, directly starts a phone call and requires CALL_PHONE plus explicit approval.",
     parameters = {
         obj(
-            "phone_number" to stringProp("Phone number to dial or call."),
+            "phone_number" to accessStringProp("Phone number to dial or call."),
             "direct_call" to booleanProp("Directly place the call. Defaults to false and opens the dialer instead."),
             required = listOf("phone_number")
         )

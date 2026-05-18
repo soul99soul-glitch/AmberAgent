@@ -79,8 +79,12 @@ internal fun ContextUsageIndicator(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    val currentMessages = conversation.currentMessages
-    val contextFingerprint = ContextFootprintEstimator.inputFingerprint(currentMessages)
+    val currentMessages = remember(conversation.messageNodes) {
+        conversation.currentMessages
+    }
+    val contextFingerprint = remember(currentMessages) {
+        ContextFootprintEstimator.inputFingerprint(currentMessages)
+    }
     // 2026-05-15: estimator now consumes active compacts so the ring reflects
     // the POST-substitution footprint (summary + recent messages), not the
     // raw timeline. Without this, every successful compaction would leave the

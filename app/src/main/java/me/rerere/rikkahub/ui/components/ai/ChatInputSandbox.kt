@@ -8,7 +8,6 @@ import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView as AndroidWebView
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -194,8 +193,8 @@ internal fun scheduleThumbnailCaptures(
     context: android.content.Context,
     loadId: String,
 ) {
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 800L, force = true)
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 3_000L, force = true)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 800L)
+    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 5_000L)
 }
 
 internal fun captureWebViewThumbnail(
@@ -206,9 +205,9 @@ internal fun captureWebViewThumbnail(
     delayMillis: Long = 500L,
     force: Boolean = false,
 ) {
-    if (!store.shouldCaptureThumbnail(loadId, webView.url, force = force)) return
     webView.postDelayed({
         runCatching {
+            if (!store.shouldCaptureThumbnail(loadId, webView.url, force = force)) return@runCatching
             val width = webView.width
             val height = webView.height
             if (width <= 0 || height <= 0) return@runCatching
@@ -421,8 +420,7 @@ internal fun SandboxPeekBar(
 ) {
     Row(
         modifier = modifier
-            .fillMaxWidth()
-            .animateContentSize(),
+            .fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

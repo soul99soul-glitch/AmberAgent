@@ -14,7 +14,7 @@ internal fun createContactsSearchTool(context: Context, deps: SystemAccessDeps):
     description = "Search Android contacts by name, phone, or email after READ_CONTACTS is granted. Phone numbers are masked by default.",
     parameters = {
         obj(
-            "query" to stringProp("Name, phone, or email keyword. Empty lists recent contacts."),
+            "query" to accessStringProp("Name, phone, or email keyword. Empty lists recent contacts."),
             "limit" to integerProp("Maximum contacts to return. Defaults to 20."),
         )
     },
@@ -32,9 +32,9 @@ internal fun createContactsWriteTool(context: Context, deps: SystemAccessDeps): 
     description = "Create a contact in Android Contacts. Requires WRITE_CONTACTS and explicit approval.",
     parameters = {
         obj(
-            "name" to stringProp("Contact display name."),
-            "phone" to stringProp("Optional phone number."),
-            "email" to stringProp("Optional email address."),
+            "name" to accessStringProp("Contact display name."),
+            "phone" to accessStringProp("Optional phone number."),
+            "email" to accessStringProp("Optional email address."),
             required = listOf("name")
         )
     },

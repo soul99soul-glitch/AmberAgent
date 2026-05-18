@@ -45,6 +45,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
@@ -109,6 +110,9 @@ class RikkaHubApp : Application() {
         // Reschedule persisted mobile cron tasks after app startup.
         rescheduleCronTasks()
 
+        // Repair provider settings if the prefs-split startup race persisted defaults.
+        rescueProviderSettingsIfNeeded()
+
         // Keep Daydream background review aligned with memory settings.
         syncMemoryDreamTasks()
 
@@ -150,11 +154,17 @@ class RikkaHubApp : Application() {
                 // 的冷流挂起语义；Aggregator 的 settingsFlow 是 MutableStateFlow(dummy()) ，
                 // 不过滤会立刻拿到 dummy 然后 update() 被 dummy guard 拒绝（launchCount 永 0）。
                 val current = store.settingsFlow.filterNot { it.init }.first()
-                store.update(current.copy(launchCount = current.launchCount + 1))
+                store.updateLaunchCount(current.launchCount + 1)
                 Log.i(TAG, "incrementLaunchCount: ${store.settingsFlow.filterNot { it.init }.first().launchCount}")
             }.onFailure {
                 Log.e(TAG, "incrementLaunchCount failed", it)
             }
+        }
+    }
+
+    private fun rescueProviderSettingsIfNeeded() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            get<SettingsProviderRescue>().rescueIfNeeded()
         }
     }
 

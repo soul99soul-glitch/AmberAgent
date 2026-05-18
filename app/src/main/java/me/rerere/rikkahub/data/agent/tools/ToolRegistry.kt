@@ -152,12 +152,22 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = readOnly
         }
 
-        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain" -> {
+        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list" -> {
             mutates = false
             risk = ToolRisk.Normal
             needsApproval = false
             autoApprovable = true
             concurrencySafe = true
+        }
+
+        "agent_prompt_config" -> {
+            val action = input.stringValue("action") ?: "get"
+            val readOnly = action == "get"
+            mutates = !readOnly
+            risk = if (readOnly) ToolRisk.Normal else ToolRisk.Sensitive
+            needsApproval = !readOnly
+            autoApprovable = readOnly || allowsAutoApproval
+            concurrencySafe = readOnly
         }
 
         "mcp_call_tool" -> {
@@ -324,10 +334,11 @@ internal fun Tool.category(): String = when {
         name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
         name in setOf("device_phone_state", "media_search", "location_current", "audio_record_once", "notification_list", "usage_stats_list", "battery_status", "network_status", "wifi_status", "device_info", "settings_open", "intent_open", "share_text", "share_file", "notification_post") -> "system"
     name.startsWith("memory_") -> "memory"
+    name == "agent_prompt_config" -> "prompt_config"
     name.startsWith("conversation_") || name.startsWith("session_") -> "context"
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
-    name == "tool_policy_explain" -> "utility"
+    name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
     name.startsWith("subagent_") -> "subagent"
     name.startsWith("model_council_") -> "model_council"
     name.startsWith("skill") || name == "use_skill" -> "skill"
@@ -347,6 +358,7 @@ private fun Tool.mutatesState(): Boolean {
         name == "mcp_call_tool" ||
         name == "officepro_make_report" ||
         name == "officepro_project_update" ||
+        name == "agent_prompt_config" ||
         name == "model_council_make_report" ||
         name in setOf("cron_task_create", "cron_task_update", "cron_task_delete") ||
         name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") ||
@@ -386,7 +398,7 @@ private fun Tool.risk(): ToolRisk = when {
 private fun Tool.concurrencySafe(): Boolean = when {
     name in setOf("terminal_install_packages", "terminal_job_stop", "terminal_execute", "terminal_job_start") -> false
     name.startsWith("cron_task_") && name != "cron_task_list" -> false
-    name.startsWith("agent_task_") || name in setOf("agent_runtime_status", "tool_policy_explain") -> true
+    name.startsWith("agent_task_") || name in setOf("agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list") -> true
     name.startsWith("subagent_") || name.startsWith("model_council_") -> false
     else -> !mutatesState()
 }

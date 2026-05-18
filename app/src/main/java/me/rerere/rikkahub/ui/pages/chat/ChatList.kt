@@ -36,7 +36,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -59,6 +58,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -124,7 +124,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
@@ -147,7 +146,6 @@ import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItemContent
 import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems
-import me.rerere.rikkahub.ui.components.message.chatMessageVirtualizationPrewarmTexts
 import me.rerere.rikkahub.ui.components.richtext.prewarmMarkdownContent
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
@@ -157,6 +155,8 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.utils.plus
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
@@ -165,9 +165,8 @@ private const val TAG = "ChatList"
 // after root cause identified.
 private const val SCROLL_TAG = "ChatScroll"
 private const val LoadingIndicatorKey = "LoadingIndicator"
+private const val HistoryLoadingItemKey = "timeline-history-loading"
 private const val ScrollBottomKey = "ScrollBottomKey"
-private const val SendTransitionEnterMillis = 150
-private const val SendTransitionExitMillis = 100
 private val TimelineHorizontalPadding = 16.dp
 private val SendTransitionSlideDistance = 8.dp
 
@@ -177,31 +176,18 @@ private val SendTransitionSlideDistance = 8.dp
 // on mid-tier devices.
 private val COMPACT_SUMMARY_WHITESPACE_RE = Regex("\\s+")
 
-@Composable
-private fun SentUserMessageEnter(
-    enabled: Boolean,
-    slidePx: Int,
-    content: @Composable () -> Unit,
-) {
-    if (!enabled) {
-        content()
-        return
-    }
-    val visibleState = remember {
-        MutableTransitionState(false).apply { targetState = true }
-    }
-    AnimatedVisibility(
-        visibleState = visibleState,
-        enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
-            slideInVertically(
-                animationSpec = tween(SendTransitionEnterMillis),
-                initialOffsetY = { slidePx },
-            ),
-        exit = fadeOut(animationSpec = tween(SendTransitionExitMillis)),
-    ) {
-        content()
-    }
-}
+private data class TimelineHistoryLoadSignal(
+    val historyVisible: Boolean,
+    val initialized: Boolean,
+    val fullyLoaded: Boolean,
+    val prefetching: Boolean,
+    val loadedNodeCount: Int,
+)
+
+private data class TimelineScrollAnchor(
+    val key: Any,
+    val offset: Int,
+)
 
 /**
  * Slice a ConversationCompact.summary to a ≤80-char one-line preview suitable
@@ -223,14 +209,6 @@ private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineMessageInnerSpacing = 4.dp
-private val AgentWorkingIndicatorHeightEstimate = 48.dp
-private val AgentWorkingIndicatorBottomOffset = 8.dp
-private val AgentWorkingIndicatorTailBuffer = 20.dp
-private val AgentWorkingIndicatorSuggestionOffset = 54.dp
-private val AgentWorkingIndicatorReserveHeight =
-    AgentWorkingIndicatorHeightEstimate + AgentWorkingIndicatorBottomOffset + AgentWorkingIndicatorTailBuffer
-private val AgentWorkingIndicatorSuggestionReserveHeight =
-    AgentWorkingIndicatorHeightEstimate + AgentWorkingIndicatorSuggestionOffset + AgentWorkingIndicatorTailBuffer
 private val TimelineSelectionToolbarOffset = 56.dp
 private const val MarkdownPrewarmBeforeItems = 4
 private const val MarkdownPrewarmAfterItems = 8
@@ -265,46 +243,6 @@ private enum class TimelineFollowMode {
     Idle,
     FollowingBottom,
     PausedForUser,
-}
-
-private fun Conversation.latestRenderToken(): String {
-    val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
-    val part = message.parts.lastOrNull()
-    return buildString {
-        append(messageNodes.size)
-        append(':')
-        append(message.id)
-        append(':')
-        append(message.parts.size)
-        append(':')
-        append(part?.compactRenderToken().orEmpty())
-    }
-}
-
-@Suppress("DEPRECATION")
-private fun UIMessagePart.compactRenderToken(): String = when (this) {
-    is UIMessagePart.Text -> "text:${text.length}:${text.takeLast(16)}"
-    is UIMessagePart.Reasoning -> "reasoning:${reasoning.length}:${finishedAt != null}"
-    is UIMessagePart.Tool -> {
-        val outputToken = output.lastOrNull()?.compactRenderToken().orEmpty()
-        "tool:$toolCallId:$toolName:$isExecuted:${approvalState.compactRenderToken()}:${output.size}:$outputToken"
-    }
-
-    is UIMessagePart.Image -> "image:${url.length}:${metadata.hashCode()}"
-    is UIMessagePart.Video -> "video:${url.length}:${metadata.hashCode()}"
-    is UIMessagePart.Audio -> "audio:${url.length}:${metadata.hashCode()}"
-    is UIMessagePart.Document -> "document:$fileName:${url.length}:${metadata.hashCode()}"
-    is UIMessagePart.Search -> "search"
-    is UIMessagePart.ToolCall -> "tool_call:$toolCallId:${arguments.length}:${approvalState.compactRenderToken()}"
-    is UIMessagePart.ToolResult -> "tool_result:$toolCallId:${content.hashCode()}"
-}
-
-private fun ToolApprovalState.compactRenderToken(): String = when (this) {
-    ToolApprovalState.Auto -> "auto"
-    ToolApprovalState.Pending -> "pending"
-    ToolApprovalState.Approved -> "approved"
-    is ToolApprovalState.Denied -> "denied:${reason.length}"
-    is ToolApprovalState.Answered -> "answered:${answer.length}"
 }
 
 private fun Modifier.dashedRoundedBorder(color: Color, radius: androidx.compose.ui.unit.Dp): Modifier {
@@ -365,35 +303,23 @@ private fun AgentWorkingIndicator(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    Surface(
+    Row(
         modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        color = workspace.paper,
-        contentColor = workspace.muted,
-        tonalElevation = 0.dp,
-        shadowElevation = 1.dp,
-        border = BorderStroke(1.dp, workspace.hairline),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            PigLoadingIndicator(
-                modifier = Modifier.size(24.dp)
+        PigLoadingIndicator(
+            modifier = Modifier.size(28.dp)
+        )
+        if (!processingStatus.isNullOrBlank()) {
+            Text(
+                text = processingStatus,
+                style = MaterialTheme.typography.labelMedium,
+                color = workspace.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 220.dp),
             )
-            AnimatedVisibility(
-                visible = processingStatus != null,
-            ) {
-                Text(
-                    text = processingStatus ?: "",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = workspace.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 220.dp),
-                )
-            }
         }
     }
 }
@@ -668,8 +594,6 @@ private fun PendingUserMessageBubble(
 fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
-    sentUserMessageAnimationKey: Int = 0,
-    sentUserMessageAnimationBaselineId: Uuid? = null,
     timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
@@ -701,6 +625,7 @@ fun ChatList(
     onOpenQueue: () -> Unit = {},
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -722,8 +647,6 @@ fun ChatList(
             ChatListNormal(
                 innerPadding = innerPadding,
                 conversation = conversation,
-                sentUserMessageAnimationKey = sentUserMessageAnimationKey,
-                sentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId,
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
@@ -754,6 +677,7 @@ fun ChatList(
                 onOpenQueue = onOpenQueue,
                 onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
+                onLoadOlderTimeline = onLoadOlderTimeline,
             )
         }
     }
@@ -763,8 +687,6 @@ fun ChatList(
 private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
-    sentUserMessageAnimationKey: Int,
-    sentUserMessageAnimationBaselineId: Uuid?,
     timelineLoadState: ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
@@ -795,13 +717,15 @@ private fun ChatListNormal(
     onOpenQueue: () -> Unit = {},
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val activeGeneration = loading || pendingUserMessages.isNotEmpty()
     val activeGenerationState by rememberUpdatedState(activeGeneration)
+    val timelineLoadStateState by rememberUpdatedState(timelineLoadState)
+    val loadOlderTimelineState by rememberUpdatedState(onLoadOlderTimeline)
     var isRecentScroll by remember { mutableStateOf(false) }
     var followMode by remember(conversation.id) { mutableStateOf(TimelineFollowMode.Idle) }
-    var autoFollowResumeToken by remember(conversation.id) { mutableIntStateOf(0) }
     var programmaticScrollInProgress by remember(conversation.id) { mutableStateOf(false) }
     var programmaticScrollToken by remember(conversation.id) { mutableIntStateOf(0) }
     var imeProgrammaticScrollToken by remember(conversation.id) { mutableStateOf<Int?>(null) }
@@ -823,23 +747,14 @@ private fun ChatListNormal(
     val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
         conversation.actionSuggestionTexts()
     }
-    var retainedSuggestions by remember(conversation.id) { mutableStateOf(emptyList<String>()) }
-    val showSuggestions = actionSuggestions.isNotEmpty() && !captureProgress
-    val suggestionsVisibility = remember(conversation.id) { MutableTransitionState(false) }
-    suggestionsVisibility.targetState = showSuggestions
-
-    LaunchedEffect(actionSuggestions) {
-        if (actionSuggestions.isNotEmpty()) {
-            retainedSuggestions = actionSuggestions
-        }
-    }
-    LaunchedEffect(showSuggestions, actionSuggestions) {
-        if (!showSuggestions && retainedSuggestions.isNotEmpty()) {
-            delay(SendTransitionExitMillis.toLong())
-            if (actionSuggestions.isEmpty()) {
-                retainedSuggestions = emptyList()
-            }
-        }
+    val visibleSuggestions = if (
+        actionSuggestions.isNotEmpty() &&
+        !activeGeneration &&
+        !captureProgress
+    ) {
+        actionSuggestions
+    } else {
+        emptyList()
     }
 
     // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
@@ -855,7 +770,7 @@ private fun ChatListNormal(
             "[$event] follow=$followMode prog=$programmaticScrollInProgress " +
                 "token=$programmaticScrollToken activeGen=$activeGenerationState " +
                 "scrollInProgress=${state.isScrollInProgress} " +
-                "canScrollFwd=${state.canScrollForward} resumeToken=$autoFollowResumeToken" +
+                "canScrollFwd=${state.canScrollForward}" +
                 if (extra.isNotEmpty()) " | $extra" else ""
         )
     }
@@ -891,89 +806,24 @@ private fun ChatListNormal(
 
     fun enterIdleFollowMode() {
         followMode = TimelineFollowMode.Idle
-        autoFollowResumeToken += 1
         logScroll("enterIdleFollowMode")
     }
 
     fun resumeBottomFollow() {
         followMode = TimelineFollowMode.FollowingBottom
-        autoFollowResumeToken += 1
         logScroll("resumeBottomFollow")
     }
 
-    fun pauseAutoFollowTemporarily(
-        mode: TimelineFollowMode,
-        scheduleIdleReturn: Boolean,
-    ) {
+    fun pauseAutoFollowTemporarily(mode: TimelineFollowMode) {
         followMode = mode
-        if (scheduleIdleReturn) {
-            autoFollowResumeToken += 1
-        }
-        logScroll("pauseAutoFollowTemporarily", "mode=$mode scheduleIdle=$scheduleIdleReturn")
+        logScroll("pauseAutoFollowTemporarily", "mode=$mode")
     }
 
-    suspend fun scrollToTimelineBottom() {
-        val token = beginProgrammaticScroll()
-        logScroll("scrollToTimelineBottom.enter", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
-        try {
-            // B3 (smooth-streaming-rendering-guide §10 lerp): one
-            // synchronous scroll step per call instead of an animateScrollBy
-            // tween. Rationale:
-            //
-            //  - No in-flight animation means nothing to cancel when
-            //    LE_chunk fires again on the next accumulator flush.
-            //    The historical 80ms LinearEasing tween (and the
-            //    spring(StiffnessMediumLow) before it that wedged
-            //    isScrollInProgress=true for ~1s) both relied on
-            //    cancel-on-restart; that race surface is now gone.
-            //
-            //  - scrollBy(value) wraps `state.scroll(MutatePriority
-            //    .Default) { snapToBy(value) }` — the snap itself is
-            //    immediate, but the surrounding scroll() mutator
-            //    still flips isScrollInProgress true→false within a
-            //    single frame. There is NO in-flight animation to
-            //    cancel-restart, but LE_scrollProgress will still
-            //    fire on each call. M0.3's followMode==PausedForUser
-            //    guard at the LE_scrollProgress.else branch is the
-            //    reason this doesn't misclassify our programmatic
-            //    scroll as "user stopped scrolling mid-list" — do
-            //    not remove that guard thinking it's dead code.
-            //
-            //  - Scroll by the actual measured distance to the bottom
-            //    sentinel whenever it is visible. This keeps bursty providers
-            //    (DeepSeek after a long reasoning phase, for example) from
-            //    growing the tail by more than our old fixed 35%-viewport step
-            //    and silently falling behind while followMode still says
-            //    FollowingBottom.
-            //
-            //  - If the sentinel has already fallen out of the viewport, the
-            //    distance is unknowable from LazyListLayoutInfo. In that one
-            //    case snap to the sentinel item; following-bottom is an explicit
-            //    "stick to tail" mode, so restoring the invariant is preferable
-            //    to waiting for more chunks that may never come.
-            val totalItems = state.layoutInfo.totalItemsCount
-            if (totalItems > 0) {
-                val distancePx = state.distanceToTimelineBottomPx()
-                when {
-                    distancePx == null -> {
-                        state.scrollToItem(totalItems - 1)
-                        logScroll(
-                            "scrollToTimelineBottom.afterSnapToTail",
-                            "token=$token isAtBottom=${state.isAtTimelineBottom(0)}"
-                        )
-                    }
-                    distancePx > 0 -> {
-                        state.scrollBy(distancePx.toFloat())
-                        logScroll(
-                            "scrollToTimelineBottom.afterScroll",
-                            "token=$token distancePx=$distancePx isAtBottom=${state.isAtTimelineBottom(0)}"
-                        )
-                    }
-                }
-            }
-        } finally {
-            logScroll("scrollToTimelineBottom.exit", "token=$token isAtBottom=${state.isAtTimelineBottom(0)}")
-            endProgrammaticScroll(token)
+    fun requestTimelineBottom(reason: String) {
+        val totalItems = state.layoutInfo.totalItemsCount
+        if (totalItems > 0) {
+            state.requestScrollToItem(totalItems - 1)
+            logScroll("requestTimelineBottom", "$reason totalItems=$totalItems")
         }
     }
 
@@ -1001,6 +851,14 @@ private fun ChatListNormal(
         onDispose {
             activity?.volumeKeyListeners?.remove(listener)
         }
+    }
+
+    fun List<LazyListItemInfo>.isBottomAnchorVisible(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
+        val lastPos = lastItem.offset + lastItem.size
+        val inputPos = state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt()
+        return lastPos <= inputPos - 8
     }
 
     // 聊天选择
@@ -1050,7 +908,6 @@ private fun ChatListNormal(
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
-    val showPinnedAgentWorkingIndicator = loading && followMode == TimelineFollowMode.FollowingBottom
     val chatAssistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
@@ -1104,8 +961,18 @@ private fun ChatListNormal(
             "LE_init",
             "enableAutoScroll=${settings.displaySetting.enableAutoScroll} convId=${conversation.id}"
         )
-        if (!settings.displaySetting.enableAutoScroll || !activeGeneration) {
-            logScroll("LE_init.branch", "→ enterIdleFollowMode (autoScrollOff or generationOff)")
+        if (!settings.displaySetting.enableAutoScroll) {
+            logScroll("LE_init.branch", "→ enterIdleFollowMode (autoScrollOff)")
+            enterIdleFollowMode()
+        } else if (!activeGeneration) {
+            if (
+                followMode == TimelineFollowMode.FollowingBottom &&
+                !userScrollInTimeline &&
+                !state.isScrollInProgress
+            ) {
+                requestTimelineBottom("generationEnded")
+            }
+            logScroll("LE_init.branch", "→ enterIdleFollowMode (generationOff)")
             enterIdleFollowMode()
         } else if (
             followMode == TimelineFollowMode.Idle &&
@@ -1128,63 +995,6 @@ private fun ChatListNormal(
     }
 
     val latestMessage = conversation.currentMessages.lastOrNull()
-    var pendingSentUserMessageAnimationKey by remember(conversation.id) { mutableIntStateOf(0) }
-    var pendingSentUserMessageAnimationBaselineId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
-    var sentUserMessageAnimationId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
-    val immediateSentUserMessageAnimationId = remember(
-        conversation.id,
-        sentUserMessageAnimationKey,
-        sentUserMessageAnimationBaselineId,
-        latestMessage?.id,
-        latestMessage?.role,
-    ) {
-        if (
-            sentUserMessageAnimationKey > 0 &&
-            latestMessage?.role == MessageRole.USER &&
-            latestMessage.id != sentUserMessageAnimationBaselineId
-        ) {
-            latestMessage.id
-        } else {
-            null
-        }
-    }
-    val activeSentUserMessageAnimationId = sentUserMessageAnimationId ?: immediateSentUserMessageAnimationId
-    LaunchedEffect(
-        conversation.id,
-        sentUserMessageAnimationKey,
-        sentUserMessageAnimationBaselineId,
-    ) {
-        if (sentUserMessageAnimationKey > 0) {
-            pendingSentUserMessageAnimationKey = sentUserMessageAnimationKey
-            pendingSentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId
-        }
-    }
-    LaunchedEffect(immediateSentUserMessageAnimationId) {
-        val immediateId = immediateSentUserMessageAnimationId ?: return@LaunchedEffect
-        sentUserMessageAnimationId = immediateId
-        pendingSentUserMessageAnimationKey = 0
-    }
-    LaunchedEffect(
-        conversation.id,
-        pendingSentUserMessageAnimationKey,
-        latestMessage?.id,
-    ) {
-        if (
-            pendingSentUserMessageAnimationKey > 0 &&
-            latestMessage?.role == MessageRole.USER &&
-            latestMessage.id != pendingSentUserMessageAnimationBaselineId
-        ) {
-            sentUserMessageAnimationId = latestMessage.id
-            pendingSentUserMessageAnimationKey = 0
-        }
-    }
-    LaunchedEffect(sentUserMessageAnimationId) {
-        val animatedId = sentUserMessageAnimationId ?: return@LaunchedEffect
-        delay(SendTransitionEnterMillis.toLong() + SendTransitionExitMillis.toLong())
-        if (sentUserMessageAnimationId == animatedId) {
-            sentUserMessageAnimationId = null
-        }
-    }
 
     LaunchedEffect(conversation.id, latestMessage?.id, activeGeneration) {
         logScroll(
@@ -1205,10 +1015,9 @@ private fun ChatListNormal(
         logScroll("LE_scrollProgress", "isScrollInProgress=${state.isScrollInProgress}")
         if (state.isScrollInProgress) {
             // 2026-05-14: gate isRecentScroll on `!programmaticScrollInProgress`.
-            // Previously this was unconditional, which meant the streaming-time
-            // animateScrollToItem (in scrollToTimelineBottom, fired by the
-            // latestRenderToken LaunchedEffect on every accumulator flush) kept
-            // re-arming "the user just scrolled" state. MessageJumper's
+            // Previously this was unconditional, which meant programmatic
+            // bottom-follow scrolls during streaming kept re-arming "the user
+            // just scrolled" state. MessageJumper's
             // visibility = `isRecentScroll && !isScrollInProgress` then flipped
             // true→false→true on every chunk's scroll lifecycle, causing the
             // jumper card to slide in/out repeatedly — user reported it as
@@ -1218,10 +1027,7 @@ private fun ChatListNormal(
                 isRecentScroll = true
             }
             if (activeGenerationState && userScrollInTimeline && !programmaticScrollInProgress) {
-                pauseAutoFollowTemporarily(
-                    mode = TimelineFollowMode.PausedForUser,
-                    scheduleIdleReturn = true,
-                )
+                pauseAutoFollowTemporarily(TimelineFollowMode.PausedForUser)
             }
         } else {
             // 2026-05-16 M0.3 fix: gate on followMode == PausedForUser to
@@ -1257,10 +1063,7 @@ private fun ChatListNormal(
                     resumeBottomFollow()
                 } else {
                     logScroll("LE_scrollProgress.stop", "→ keep PausedForUser (not at bottom)")
-                    pauseAutoFollowTemporarily(
-                        mode = TimelineFollowMode.PausedForUser,
-                        scheduleIdleReturn = true,
-                    )
+                    pauseAutoFollowTemporarily(TimelineFollowMode.PausedForUser)
                 }
             } else {
                 logScroll(
@@ -1273,64 +1076,38 @@ private fun ChatListNormal(
         }
     }
 
-    LaunchedEffect(
-        autoFollowResumeToken,
-        activeGeneration,
-        settings.displaySetting.enableAutoScroll,
-    ) {
-        logScroll("LE_30sResume", "enter")
-        if (
-            activeGeneration &&
-            settings.displaySetting.enableAutoScroll &&
-            followMode != TimelineFollowMode.Idle &&
-            followMode != TimelineFollowMode.FollowingBottom
-        ) {
-            val token = autoFollowResumeToken
-            // Was 8s, but users complained that tapping the screen barely pauses follow before
-            // it yanks back to bottom. Give them 30s of breathing room before auto-resuming;
-            // they can still re-arm follow manually by scrolling to the bottom.
-            delay(30_000)
-            logScroll("LE_30sResume.afterDelay", "tokenStillValid=${token == autoFollowResumeToken}")
-            if (
-                token == autoFollowResumeToken &&
-                activeGenerationState &&
-                followMode != TimelineFollowMode.Idle &&
-                followMode != TimelineFollowMode.FollowingBottom &&
-                !state.isScrollInProgress &&
-                state.isAtTimelineBottom(bottomFollowBufferPx)
-            ) {
-                logScroll("LE_30sResume.fired", "→ resumeBottomFollow + scrollToTimelineBottom")
-                resumeBottomFollow()
-                scrollToTimelineBottom()
-            }
+    LaunchedEffect(conversation.id, state) {
+        snapshotFlow {
+            val loadState = timelineLoadStateState
+            val visibleItems = state.layoutInfo.visibleItemsInfo
+            TimelineHistoryLoadSignal(
+                historyVisible = visibleItems.any { it.key == HistoryLoadingItemKey },
+                initialized = loadState.initialized,
+                fullyLoaded = loadState.isFullyLoaded,
+                prefetching = loadState.prefetchingOlder,
+                loadedNodeCount = loadState.loadedNodeCount,
+            )
         }
-    }
-
-    LaunchedEffect(
-        conversation.id,
-        conversation.messageNodes,
-        loading,
-        chatAssistant,
-        showAssistantBubble,
-    ) {
-        val contents = conversation.messageNodes
-            .flatMapIndexed { index, node ->
-                node.chatMessageVirtualizationPrewarmTexts(
-                    assistant = chatAssistant,
-                    showAssistantBubble = showAssistantBubble,
-                    loading = loading,
-                    lastMessage = index == conversation.messageNodes.lastIndex,
-                )
-            }
-            .distinct()
-        if (contents.isNotEmpty()) {
-            withContext(Dispatchers.Default) {
-                contents.forEach { content ->
-                    prewarmMarkdownContent(content)
+            .distinctUntilChanged()
+            .collect { signal ->
+                if (!signal.initialized || signal.fullyLoaded || signal.prefetching || !signal.historyVisible) {
+                    return@collect
+                }
+                val anchor = state.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key != HistoryLoadingItemKey }
+                    ?.let { TimelineScrollAnchor(key = it.key, offset = it.offset) }
+                loadOlderTimelineState()
+                withFrameNanos { }
+                anchor?.let { previous ->
+                    val current = state.layoutInfo.visibleItemsInfo
+                        .firstOrNull { it.key == previous.key }
+                        ?: return@let
+                    val delta = current.offset - previous.offset
+                    if (abs(delta) > 1) {
+                        state.scrollBy(delta.toFloat())
+                    }
                 }
             }
-            markdownVirtualizationEpoch += 1
-        }
     }
 
     LaunchedEffect(
@@ -1355,6 +1132,9 @@ private fun ChatListNormal(
                     contents.distinct().forEach { content ->
                         prewarmMarkdownContent(content)
                     }
+                }
+                if (contents.isNotEmpty()) {
+                    markdownVirtualizationEpoch += 1
                 }
             }
     }
@@ -1384,56 +1164,21 @@ private fun ChatListNormal(
             .background(workspace.canvas),
     ) {
         if (settings.displaySetting.enableAutoScroll) {
-            // 2026-05-15: simplified from 1.8.10's snapshotFlow + rememberUpdatedState
-            // + sample(60ms) trio back to a direct LaunchedEffect keyed on the
-            // freshly-computed render token.
-            //
-            // 1.8.10 (d1a7ab17) added rememberUpdatedState wrappers around the params
-            // read inside snapshotFlow so the flow would re-emit on each streaming
-            // chunk. Mechanically valid for the standard "snapshotFlow read tracking"
-            // contract, but on-device follow-bottom still didn't catch. Multiple
-            // possible failure modes there — ChatViewModel emit cadence, snapshot
-            // tracking on a value-typed Conversation, sample()-induced skips when
-            // scroll-in-progress eats every alternate sample — and the diagnostic
-            // surface was wide.
-            //
-            // Trust Compose recomposition as the trigger instead. `latestRenderToken`
-            // is recomputed at every recompose (params and conversation are read
-            // directly). When ANY of (conversation contents, processingStatus,
-            // pendingUserMessages count, loading) changes such that the outer
-            // ChatListNormal recomposes, latestRenderToken usually differs → key
-            // changes → LaunchedEffect restarts → if we're following + idle, scroll.
-            //
-            // What this gives up: no 60ms coalesce, so streaming chunks queue at
-            // LazyListState.scroll{}'s mutex on tight bursts. Each scroll is
-            // tween(80ms); MessageStreamAccumulator now flushes at 16ms (one Compose
-            // frame) so a burst is real — but a new LaunchedEffect launch cancels
-            // the in-flight scroll cleanly, and LinearEasing has no velocity to
-            // preserve so the cancel doesn't show as a hitch. Net effect: the scroll
-            // continuously chases the latest tail with no perceptible discrete steps.
-            //
-            // What this gains: deterministic — one chunk in, one scroll out. No
-            // SnapshotState indirection, no FlowPreview API surface, no
-            // rememberUpdatedState chain to reason about.
-            val latestRenderToken = conversation.latestRenderToken()
-            LaunchedEffect(
-                latestRenderToken,
-                conversation.id,
-                processingStatus,
-                pendingUserMessages.size,
-                loading,
-            ) {
-                val willScroll = activeGenerationState &&
-                    followMode == TimelineFollowMode.FollowingBottom &&
-                    !state.isScrollInProgress
-                logScroll(
-                    "LE_chunk",
-                    "loading=$loading pendingUserMsgs=${pendingUserMessages.size} " +
-                        "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willScroll) "SCROLL" else "SKIP"}"
-                )
-                if (willScroll) {
-                    scrollToTimelineBottom()
-                }
+            LaunchedEffect(conversation.id, activeGeneration) {
+                if (!activeGeneration) return@LaunchedEffect
+                snapshotFlow { state.layoutInfo.visibleItemsInfo }
+                    .collect { visibleItemsInfo ->
+                        val willFollow = activeGenerationState &&
+                            followMode == TimelineFollowMode.FollowingBottom &&
+                            !userScrollInTimeline &&
+                            !state.isScrollInProgress
+                        if (willFollow) {
+                            requestTimelineBottom(
+                                "layoutFollow visibleItems=${visibleItemsInfo.size} " +
+                                    "bottomVisible=${visibleItemsInfo.isBottomAnchorVisible()}",
+                            )
+                        }
+                    }
             }
         }
 
@@ -1491,7 +1236,7 @@ private fun ChatListNormal(
         ) {
             if (!timelineLoadState.isFullyLoaded) {
                 item(
-                    key = "timeline-history-loading",
+                    key = HistoryLoadingItemKey,
                     contentType = "history-loading",
                 ) {
                     TimelineHistoryLoadingIndicator(
@@ -1516,20 +1261,12 @@ private fun ChatListNormal(
                     lastMessage = isLastMessage,
                 )
                 if (virtualItems == null) {
-                    val shouldAnimateSentUserMessage = node.currentMessage.id == activeSentUserMessageAnimationId
                     item(
                         key = node.id,
                         contentType = "message-${node.currentMessage.role}",
                     ) {
                         Column(
                             modifier = Modifier
-                                .then(
-                                    if (shouldAnimateSentUserMessage) {
-                                        Modifier.animateItem()
-                                    } else {
-                                        Modifier
-                                    }
-                                )
                                 .padding(bottom = TimelineItemSpacing)
                         ) {
                             val markers = compactMarkersByEndIndex[index - 1].orEmpty()
@@ -1554,24 +1291,20 @@ private fun ChatListNormal(
                             // would otherwise produce. Divider above is rendered
                             // separately (outside this modifier chain), so it remains
                             // fully opaque as the boundary marker.
-                            SentUserMessageEnter(
-                                enabled = shouldAnimateSentUserMessage,
-                                slidePx = sendTransitionSlidePx,
+                            ListSelectableItem(
+                                modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
+                                key = node.id,
+                                onSelectChange = {
+                                    if (!selectedItems.contains(node.id)) {
+                                        selectedItems.add(node.id)
+                                    } else {
+                                        selectedItems.remove(node.id)
+                                    }
+                                },
+                                selectedKeys = selectedItems,
+                                enabled = selecting,
                             ) {
-                                ListSelectableItem(
-                                    modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
-                                    key = node.id,
-                                    onSelectChange = {
-                                        if (!selectedItems.contains(node.id)) {
-                                            selectedItems.add(node.id)
-                                        } else {
-                                            selectedItems.remove(node.id)
-                                        }
-                                    },
-                                    selectedKeys = selectedItems,
-                                    enabled = selecting,
-                                ) {
-                                    val messageModel = remember(
+                                val messageModel = remember(
                                         node.currentMessage.modelId,
                                         node.currentMessage.role,
                                         isLoadingMessage,
@@ -1627,7 +1360,6 @@ private fun ChatListNormal(
                                 }
                             }
                         }
-                    }
                 } else {
                     virtualItems.forEachIndexed { virtualIndex, virtualItem ->
                         val isFirstVirtualItem = virtualIndex == 0
@@ -1787,35 +1519,10 @@ private fun ChatListNormal(
                     key = LoadingIndicatorKey,
                     contentType = "loading",
                 ) {
-                    if (showPinnedAgentWorkingIndicator) {
-                        Spacer(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(
-                                    if (showSuggestions) {
-                                        AgentWorkingIndicatorSuggestionReserveHeight
-                                    } else {
-                                        AgentWorkingIndicatorReserveHeight
-                                    }
-                                )
-                        )
-                    } else {
-                        Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
-                            val workingVisibility = remember {
-                                MutableTransitionState(false).apply { targetState = true }
-                            }
-                            AnimatedVisibility(
-                                visibleState = workingVisibility,
-                                enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
-                                    slideInVertically(
-                                        animationSpec = tween(SendTransitionEnterMillis),
-                                        initialOffsetY = { sendTransitionSlidePx },
-                                    ),
-                            ) {
-                                AgentWorkingIndicator(processingStatus = processingStatus)
-                            }
-                        }
-                    }
+                    AgentWorkingIndicator(
+                        processingStatus = processingStatus,
+                        modifier = Modifier.padding(8.dp),
+                    )
                 }
             }
 
@@ -1846,24 +1553,6 @@ private fun ChatListNormal(
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
             )
-
-            AnimatedVisibility(
-                visible = showPinnedAgentWorkingIndicator && !captureProgress,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(
-                        bottom = if (showSuggestions) {
-                            AgentWorkingIndicatorSuggestionOffset
-                        } else {
-                            AgentWorkingIndicatorBottomOffset
-                        }
-                    )
-                    .zIndex(6f),
-                enter = fadeIn(),
-                exit = fadeOut(),
-            ) {
-                AgentWorkingIndicator(processingStatus = processingStatus)
-            }
 
             // 完成选择
             AnimatedVisibility(
@@ -1952,28 +1641,17 @@ private fun ChatListNormal(
                 state = state
             )
 
-            // Suggestion
-            if (retainedSuggestions.isNotEmpty()) {
-                AnimatedVisibility(
-                    visibleState = suggestionsVisibility,
+            // Suggestion chips are intentionally instant here. They sit in the
+            // bottom overlay while the input panel has its own height animation;
+            // animating both during send makes the timeline feel like it is
+            // being tugged from two places.
+            if (visibleSuggestions.isNotEmpty()) {
+                ChatSuggestionsRow(
                     modifier = Modifier.align(Alignment.BottomCenter),
-                    enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
-                        slideInVertically(
-                            animationSpec = tween(SendTransitionEnterMillis),
-                            initialOffsetY = { sendTransitionSlidePx },
-                        ),
-                    exit = fadeOut(animationSpec = tween(SendTransitionExitMillis)) +
-                        slideOutVertically(
-                            animationSpec = tween(SendTransitionExitMillis),
-                            targetOffsetY = { sendTransitionSlidePx },
-                        ),
-                ) {
-                    ChatSuggestionsRow(
-                        suggestions = retainedSuggestions,
-                        onClickSuggestion = onClickSuggestion,
-                        onLongClickSuggestion = onLongClickSuggestion,
-                    )
-                }
+                    suggestions = visibleSuggestions,
+                    onClickSuggestion = onClickSuggestion,
+                    onLongClickSuggestion = onLongClickSuggestion,
+                )
             }
             }
         }
@@ -2022,15 +1700,6 @@ internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
     if (lastVisibleItem.index < totalItems - 1) return false
     val contentBottom = lastVisibleItem.offset + lastVisibleItem.size + layoutInfo.afterContentPadding
     return contentBottom <= layoutInfo.viewportEndOffset + bufferPx
-}
-
-private fun LazyListState.distanceToTimelineBottomPx(): Int? {
-    val totalItems = layoutInfo.totalItemsCount
-    if (totalItems == 0) return 0
-    val bottomItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == totalItems - 1 }
-        ?: return null
-    val contentBottom = bottomItem.offset + bottomItem.size + layoutInfo.afterContentPadding
-    return (contentBottom - layoutInfo.viewportEndOffset).coerceAtLeast(0)
 }
 
 private fun LazyListState.markdownPrewarmTexts(

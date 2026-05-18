@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.first
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.ImageAspectRatio
+import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -33,6 +34,7 @@ class ImageGenerationRepository(
     private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val filesManager: FilesManager,
+    private val promptConfigRepository: AgentPromptConfigRepository,
 ) {
     /**
      * Generate images and persist each to the **global gallery dir**.
@@ -104,9 +106,11 @@ class ImageGenerationRepository(
         val provider = model.findProvider(settings.providers)
             ?: error("Provider not found for model ${model.displayName}")
 
+        val effectivePrompt = promptConfigRepository.effectiveImagePrompt(prompt)
+
         val params = ImageGenerationParams(
             model = model,
-            prompt = prompt,
+            prompt = effectivePrompt,
             numOfImages = numOfImages,
             aspectRatio = aspectRatio,
             customHeaders = model.customHeaders,

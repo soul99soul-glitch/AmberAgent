@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.ui.components.workspace
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,19 +26,28 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Share01
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import java.io.File
 
 private const val MAX_MARKDOWN_RENDER_CHARS = 200_000
 private const val MAX_TEXT_PREVIEW_CHARS = 1_000_000
@@ -55,6 +68,8 @@ fun WorkspaceFilePreview(
     workspaceManager: WorkspaceManager,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var content by remember { mutableStateOf<PreviewContent?>(null) }
 
     LaunchedEffect(relativePath) {
@@ -100,6 +115,18 @@ fun WorkspaceFilePreview(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(relativePath.substringAfterLast('/'), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = {
+                            shareWorkspacePreviewFile(
+                                context = context,
+                                workspaceManager = workspaceManager,
+                                relativePath = relativePath,
+                                scope = scope,
+                            )
+                        },
+                    ) {
+                        Icon(HugeIcons.Share01, contentDescription = "分享")
+                    }
                     IconButton(onClick = onDismiss) { Icon(HugeIcons.Cancel01, contentDescription = "关闭") }
                 }
                 when (val c = content) {
@@ -132,5 +159,44 @@ fun WorkspaceFilePreview(
                 }
             }
         }
+    }
+}
+
+private fun shareWorkspacePreviewFile(
+    context: Context,
+    workspaceManager: WorkspaceManager,
+    relativePath: String,
+    scope: CoroutineScope,
+) {
+    scope.launch {
+        runCatching {
+            val staged = withContext(Dispatchers.IO) {
+                val bytes = workspaceManager.readBytes(relativePath)
+                val shareDir = File(context.cacheDir, "workspace-share").also { it.mkdirs() }
+                val fileName = relativePath.substringAfterLast('/').ifBlank { "workspace-file.md" }
+                val target = shareDir.resolve(fileName)
+                target.writeBytes(bytes)
+                target
+            }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", staged)
+            val mimeType = staged.extension.shareMimeType()
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = mimeType
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, staged.name)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "分享 ${staged.name}"))
+        }.onFailure { error ->
+            Toast.makeText(context, error.message ?: "无法打开分享面板", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+private fun String.shareMimeType(): String {
+    val ext = lowercase()
+    return when (ext) {
+        "md", "markdown", "txt", "log" -> "text/plain"
+        else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
     }
 }

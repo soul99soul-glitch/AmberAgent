@@ -84,9 +84,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -130,6 +132,7 @@ import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRunStatus
+import me.rerere.rikkahub.data.agent.subagent.readSubAgentDisplayTextFromTranscript
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -150,6 +153,7 @@ import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.utils.openUrl
 import org.koin.compose.koinInject
+import java.io.File
 
 private object ToolNames {
     const val MEMORY = "memory_tool"
@@ -1777,6 +1781,7 @@ private fun SubAgentRunSheet(
     onDismiss: () -> Unit,
 ) {
     val manager: SubAgentManager = koinInject()
+    val context = LocalContext.current
     val workspace = workspaceColors()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -1806,8 +1811,24 @@ private fun SubAgentRunSheet(
     // In that case create an empty fallback flow so collectAsState works.
     val liveFlow = remember(step.runId) { manager.liveTextFlow(step.runId) ?: MutableStateFlow("") }
     val liveText by liveFlow.collectAsState()
+    val snapshotRun = manager.snapshot(step.runId)
+    val snapshotText = snapshotRun?.displayText.orEmpty()
+    var transcriptText by remember(step.runId) { mutableStateOf("") }
     val finalText = extractFinalSubAgentText(step.tools)
-    val displayText = liveText.ifBlank { finalText }
+    LaunchedEffect(step.runId, parsedStatus, liveText, snapshotText) {
+        val mayBeStaleRunningAfterRestart = isRunning && snapshotRun == null
+        if ((!isRunning || mayBeStaleRunningAfterRestart) &&
+            liveText.isBlank() &&
+            snapshotText.isBlank() &&
+            transcriptText.isBlank()
+        ) {
+            transcriptText = extractSubAgentDisplayTextFromTranscript(
+                tools = step.tools,
+                runRoot = File(context.filesDir, "amberagent/subagents/runs"),
+            )
+        }
+    }
+    val displayText = liveText.ifBlank { snapshotText.ifBlank { transcriptText.ifBlank { finalText } } }
 
     val scrollState = rememberScrollState()
     var followBottom by remember(step.runId) { mutableStateOf(true) }
@@ -2543,6 +2564,27 @@ private fun extractFinalSubAgentText(tools: List<UIMessagePart.Tool>): String {
     }
     return ""
 }
+
+private suspend fun extractSubAgentDisplayTextFromTranscript(
+    tools: List<UIMessagePart.Tool>,
+    runRoot: File,
+): String =
+    withContext(Dispatchers.IO) {
+        val transcriptPath = tools.asReversed().firstNotNullOfOrNull { tool ->
+            val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+                ?: return@firstNotNullOfOrNull null
+            runCatching {
+                val parsed = JsonInstant.parseToJsonElement(outputText) as? JsonObject
+                    ?: return@runCatching null
+                val explicitPath = (parsed["transcript_path"] as? JsonPrimitive)?.contentOrNull
+                explicitPath ?: (parsed["run_id"] as? JsonPrimitive)?.contentOrNull
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { runId -> File(runRoot, "$runId.jsonl").absolutePath }
+            }.getOrNull()
+        } ?: return@withContext ""
+
+        readSubAgentDisplayTextFromTranscript(transcriptPath, runRoot)
+    }
 
 /**
  * Fix legacy council text where [UIMessage.toText] joined streaming deltas with "\n" separators,
