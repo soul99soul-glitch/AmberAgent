@@ -64,6 +64,7 @@ class WebMountPrimitiveTools(
     private val userSiteRegistry: UserSiteRegistry,
     private val oauthStore: WebMountOAuthTokenStore,
 ) {
+    private val deps = WebMountDeps(pool, activityStore)
 
     /**
      * Build a `applicable_profile` JSON object for the given URL, or null if
@@ -177,7 +178,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_open", "WebMount 打开", input.safeUrlPreview()) {
+            deps.track("wm_open", "WebMount 打开", input.safeUrlPreview()) {
                 val url = input.requiredString("url")
                 require(url.startsWith("http://") || url.startsWith("https://")) {
                     "wm_open only supports http(s) URLs"
@@ -252,7 +253,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_state", "WebMount 状态", input) {
+            deps.track("wm_state", "WebMount 状态", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId)
                     ?: error("session not found: $sessionId")
@@ -326,7 +327,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_extract", "WebMount 提取", input) {
+            deps.track("wm_extract", "WebMount 提取", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
@@ -373,7 +374,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_get", "WebMount 读取节点", input) {
+            deps.track("wm_get", "WebMount 读取节点", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
@@ -440,7 +441,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_signed_fetch", "WebMount 签名请求", input) {
+            deps.track("wm_signed_fetch", "WebMount 签名请求", input) {
                 val sessionId = input.requiredString("session_id")
                 val url = input.requiredString("url")
                 require(url.startsWith("http://") || url.startsWith("https://")) {
@@ -529,7 +530,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_wait", "WebMount 等待", input) {
+            deps.track("wm_wait", "WebMount 等待", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val until = input.string("until") ?: "selector"
@@ -578,7 +579,7 @@ class WebMountPrimitiveTools(
         },
         needsApproval = true,
         execute = { input ->
-            track("wm_click", "WebMount 点击", input) {
+            deps.track("wm_click", "WebMount 点击", input) {
                 val sessionId = input.requiredString("session_id")
                 val target = input.string("target")
                 val selector = input.string("selector")
@@ -625,7 +626,7 @@ class WebMountPrimitiveTools(
         },
         needsApproval = true,
         execute = { input ->
-            track("wm_type", "WebMount 输入", input) {
+            deps.track("wm_type", "WebMount 输入", input) {
                 val sessionId = input.requiredString("session_id")
                 val target = input.string("target")
                 val selector = input.string("selector")
@@ -677,7 +678,7 @@ class WebMountPrimitiveTools(
         allowsAutoApproval = false,
         mandatoryApproval = true,
         execute = { input ->
-            track("wm_eval", "WebMount JS 执行", input.safeEvalPreview()) {
+            deps.track("wm_eval", "WebMount JS 执行", input.safeEvalPreview()) {
                 val sessionId = input.requiredString("session_id")
                 val expression = input.requiredString("expression")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
@@ -721,7 +722,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_scroll", "WebMount 滚动", input) {
+            deps.track("wm_scroll", "WebMount 滚动", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val args = buildJsonObject {
@@ -771,7 +772,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_back", "WebMount 后退", input) {
+            deps.track("wm_back", "WebMount 后退", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val payload = handle.callBridge("back", buildJsonObject {}, timeoutMs = 3_000L)
@@ -795,7 +796,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_forward", "WebMount 前进", input) {
+            deps.track("wm_forward", "WebMount 前进", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val payload = handle.callBridge("forward", buildJsonObject {}, timeoutMs = 3_000L)
@@ -834,7 +835,7 @@ class WebMountPrimitiveTools(
         },
         needsApproval = true,
         execute = { input ->
-            track("wm_keys", "WebMount 键盘", input) {
+            deps.track("wm_keys", "WebMount 键盘", input) {
                 val sessionId = input.requiredString("session_id")
                 val key = input.requiredString("key")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
@@ -881,7 +882,7 @@ class WebMountPrimitiveTools(
         },
         needsApproval = true,
         execute = { input ->
-            track("wm_select", "WebMount 选择", input) {
+            deps.track("wm_select", "WebMount 选择", input) {
                 val sessionId = input.requiredString("session_id")
                 val target = input.string("target")
                 val selector = input.string("selector")
@@ -923,7 +924,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_find", "WebMount 查找", input) {
+            deps.track("wm_find", "WebMount 查找", input) {
                 val sessionId = input.requiredString("session_id")
                 val text = input.requiredString("text")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
@@ -953,7 +954,7 @@ class WebMountPrimitiveTools(
             InputSchema.Obj(properties = buildJsonObject {})
         },
         execute = { _ ->
-            track("wm_tab_list", "WebMount 列出会话", buildJsonObject {}) {
+            deps.track("wm_tab_list", "WebMount 列出会话", buildJsonObject {}) {
                 val sessions = pool.listSessions().map { handle ->
                     val ls = handle.loadState.value
                     buildJsonObject {
@@ -985,7 +986,7 @@ class WebMountPrimitiveTools(
             InputSchema.Obj(properties = buildJsonObject {})
         },
         execute = { _ ->
-            track("wm_tab_new", "WebMount 新建会话", buildJsonObject {}) {
+            deps.track("wm_tab_new", "WebMount 新建会话", buildJsonObject {}) {
                 val handle = pool.acquireNew()
                 val payload = buildJsonObject {
                     put("session_id", handle.sessionId)
@@ -1016,7 +1017,7 @@ class WebMountPrimitiveTools(
         // avoid training users to click "Approve" reflexively on a confirmation
         // that doesn't carry real risk. Reverses the M1.4 review over-correction.
         execute = { input ->
-            track("wm_tab_close", "WebMount 关闭会话", input) {
+            deps.track("wm_tab_close", "WebMount 关闭会话", input) {
                 val sessionId = input.requiredString("session_id")
                 val reason = input.string("reason") ?: "agent requested"
                 pool.release(sessionId, reason)
@@ -1054,7 +1055,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_screenshot", "WebMount 截图", input) {
+            deps.track("wm_screenshot", "WebMount 截图", input) {
                 val sessionId = input.requiredString("session_id")
                 val handle = pool.peek(sessionId) ?: error("session not found: $sessionId")
                 val fullPage = input.boolean("full_page") ?: false
@@ -1139,7 +1140,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_stations", "WebMount 站点列表", input) {
+            deps.track("wm_stations", "WebMount 站点列表", input) {
                 val authKindFilter = input.string("auth_kind_filter")?.lowercase()?.takeIf { it.isNotBlank() }
                 val rawStatusFilter = input.string("status_filter")?.lowercase()?.takeIf { it.isNotBlank() }
                 val validStatuses = me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus.entries
@@ -1296,7 +1297,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_site_add", "WebMount 新增网站", input) {
+            deps.track("wm_site_add", "WebMount 新增网站", input) {
                 val name = input.requiredString("name").trim()
                 require(name.isNotBlank()) { "name must not be blank" }
                 val url = input.requiredString("url").trim()
@@ -1356,7 +1357,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_site_remove", "WebMount 删除网站", input) {
+            deps.track("wm_site_remove", "WebMount 删除网站", input) {
                 val siteId = input.requiredString("site_id")
                 val site = userSiteRegistry.byId(siteId)
                 if (site == null) {
@@ -1449,7 +1450,7 @@ class WebMountPrimitiveTools(
             )
         },
         execute = { input ->
-            track("wm_profile_synthesize", "WebMount 生成站点 Profile", input) {
+            deps.track("wm_profile_synthesize", "WebMount 生成站点 Profile", input) {
                 val siteId = input.requiredString("site_id")
                 val userSite = userSiteRegistry.byId(siteId)
                     ?: error("No site with id '$siteId' is registered. Add it with wm_site_add first or pick an existing id from wm_stations.")
@@ -1543,29 +1544,6 @@ class WebMountPrimitiveTools(
 
     // ------------------------------------------------------------- helpers
 
-    private suspend fun track(
-        toolName: String,
-        title: String,
-        input: JsonElement,
-        block: suspend () -> List<UIMessagePart>,
-    ): List<UIMessagePart> {
-        val toolCallId = activityStore.startTool(
-            toolName = toolName,
-            title = title,
-            inputPreview = input.toString(),
-            runtime = "WebMount",
-            workspace = "/webmount",
-        )
-        return try {
-            val result = block()
-            activityStore.complete(toolCallId, result.previewText())
-            result
-        } catch (error: Throwable) {
-            activityStore.fail(toolCallId, error)
-            throw error
-        }
-    }
-
     private fun JsonElement.safeUrlPreview(): JsonObject =
         buildJsonObject {
             put("url", string("url").orEmpty())
@@ -1578,27 +1556,4 @@ class WebMountPrimitiveTools(
             put("session_id", string("session_id"))
             put("expression_chars", string("expression")?.length ?: 0)
         }
-
-    private fun List<UIMessagePart>.previewText(): String =
-        joinToString("\n") { part ->
-            when (part) {
-                is UIMessagePart.Text -> part.text
-                else -> part.toString()
-            }
-        }.takeLast(1_600)
-
-    private fun stringProp(description: String) = buildJsonObject {
-        put("type", "string")
-        put("description", description)
-    }
-
-    private fun booleanProp(description: String) = buildJsonObject {
-        put("type", "boolean")
-        put("description", description)
-    }
-
-    private fun integerProp(description: String) = buildJsonObject {
-        put("type", "integer")
-        put("description", description)
-    }
 }
