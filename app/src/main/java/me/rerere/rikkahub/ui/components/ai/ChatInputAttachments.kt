@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -467,7 +466,7 @@ internal fun useCropLauncher(
     val cropActivityLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
             cropOutputUri?.let { croppedUri ->
                 onCroppedImageReady(croppedUri)
             }
