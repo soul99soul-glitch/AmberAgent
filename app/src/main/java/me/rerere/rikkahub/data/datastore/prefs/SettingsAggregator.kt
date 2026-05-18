@@ -59,13 +59,13 @@ class SettingsAggregator(
 ) {
 
     private val _settingsFlow: MutableStateFlow<Settings> = combine(
-        uiPrefs.flow,
-        searchPrefs.flow,
-        agentPrefs.flow,
-        providerPrefs.flow,
-        chatPrefs.flow,
-        extensionPrefs.flow,
-        assistantPrefs.flow,
+        uiPrefs.rawFlow,
+        searchPrefs.rawFlow,
+        agentPrefs.rawFlow,
+        providerPrefs.rawFlow,
+        chatPrefs.rawFlow,
+        extensionPrefs.rawFlow,
+        assistantPrefs.rawFlow,
     ) { arr: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
         composeRawSettings(
@@ -184,6 +184,16 @@ class SettingsAggregator(
 
     suspend fun update(fn: (Settings) -> Settings) {
         update(fn(settingsFlow.value))
+    }
+
+    suspend fun updateLaunchCount(launchCount: Int) {
+        dataStore.edit { p ->
+            p[PreferencesKeys.LAUNCH_COUNT] = launchCount
+        }
+        val current = _settingsFlow.value
+        if (!current.init) {
+            _settingsFlow.value = current.copy(launchCount = launchCount)
+        }
     }
 
     suspend fun updateAssistant(assistantId: Uuid) {

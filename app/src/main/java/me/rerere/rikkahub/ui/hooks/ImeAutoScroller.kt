@@ -36,7 +36,12 @@ fun ImeLazyListAutoScroller(
                 imeHeight = 0
                 return@collect
             }
-            if (delta != 0 && shouldScrollState()) {
+            // Keep the latest message visible while the keyboard rises, but do
+            // not reverse-scroll during keyboard dismissal. On send, the input
+            // clears, the message inserts, and IME starts closing; applying the
+            // negative close delta here makes the freshly sent user bubble
+            // appear to "jump" once more after it has already settled.
+            if (delta > 0 && shouldScrollState()) {
                 onProgrammaticScrollStartState()
                 try {
                     lazyListState.scrollBy(delta.toFloat())

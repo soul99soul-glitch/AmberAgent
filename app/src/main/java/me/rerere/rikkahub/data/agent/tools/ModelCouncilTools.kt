@@ -237,7 +237,7 @@ class ModelCouncilTools(
 
     private fun plannedSeatsSchema() = buildJsonObject {
         put("type", "array")
-        put("description", "Topic-specific seats for seat_strategy=agent_planned. Use 3-5 seats for most councils. Each item should include name, role, system_prompt, optional runner_type/model_ref/external_tool/external_runtime/external_model, optional seat_id/output_budget_chars/temperature. Omit model_ref to auto-rotate through the configured council model pool. Omit temperature unless the user explicitly asks for a specific sampling/diversity setting.")
+        put("description", "Topic-specific seats for seat_strategy=agent_planned. Use 3-5 seats for most councils. Each item should include name, role, system_prompt, optional runner_type/model_ref/external_tool/external_runtime/external_model, optional seat_id/output_budget_chars/reasoning_level/temperature. Omit model_ref to auto-rotate through the configured council model pool. Omit reasoning_level and temperature unless the user explicitly asks for a specific depth or sampling behavior.")
         put("items", buildJsonObject {
             put("type", "object")
             put("properties", buildJsonObject {
@@ -251,6 +251,7 @@ class ModelCouncilTools(
                 put("external_runtime", enumProp("Optional terminal runtime for external_cli. Defaults to the Agent terminal runtime setting.", listOf("builtin_alpine", "android_shell", "termux_external")))
                 put("external_model", stringProp("Optional CLI model argument, passed to Gemini CLI as --model. Example: gemini-2.5-pro."))
                 put("output_budget_chars", integerProp("Optional per-seat output budget."))
+                put("reasoning_level", enumProp("Optional provider-model reasoning depth. Omit for AmberAgent's safe default. Use off/auto/low/medium/high/xhigh/max only when the user asks for depth/cost tuning or a model needs a provider default.", listOf("off", "auto", "low", "medium", "high", "xhigh", "max")))
                 put("temperature", numberProp("Optional provider-model sampling temperature, 0..2. Omit unless the user explicitly requests more diversity or a specific temperature. If a provider rejects it, AmberAgent retries that seat once without temperature."))
             })
             put("required", buildJsonArray {
@@ -279,7 +280,7 @@ class ModelCouncilTools(
 
     private fun explicitSeatsSchema() = buildJsonObject {
         put("type", "array")
-        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Provider-model seats need seat_id/name/role/model_id and may include system_prompt/output_budget_chars/temperature; external CLI seats use runner_type=external_cli and external_tool=gemini_cli. Omit temperature unless explicitly requested.")
+        put("description", "(Advanced) Fully explicit seat list. When provided, the 3 core seats are NOT auto-injected — you take full responsibility for the lineup. Provider-model seats need seat_id/name/role/model_id and may include system_prompt/output_budget_chars/reasoning_level/temperature; external CLI seats use runner_type=external_cli and external_tool=gemini_cli. Omit reasoning_level and temperature unless explicitly requested.")
         put("items", buildJsonObject {
             put("type", "object")
             put("properties", buildJsonObject {
@@ -293,6 +294,7 @@ class ModelCouncilTools(
                 put("external_runtime", enumProp("Optional terminal runtime for external_cli.", listOf("builtin_alpine", "android_shell", "termux_external")))
                 put("external_model", stringProp("Optional CLI model argument, passed to Gemini CLI as --model. Example: gemini-2.5-pro."))
                 put("output_budget_chars", integerProp("Optional per-seat output budget."))
+                put("reasoning_level", enumProp("Optional provider-model reasoning depth: off/auto/low/medium/high/xhigh/max.", listOf("off", "auto", "low", "medium", "high", "xhigh", "max")))
                 put("temperature", numberProp("Optional provider-model sampling temperature, 0..2. Omit unless explicitly requested."))
             })
             put("required", buildJsonArray {

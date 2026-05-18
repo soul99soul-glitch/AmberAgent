@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -46,12 +47,14 @@ class ChatPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    val flow: StateFlow<ChatPrefsData> = dataStore.data
+    internal val rawFlow: Flow<ChatPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+
+    val flow: StateFlow<ChatPrefsData> = rawFlow
         .toMutableStateFlow(scope, ChatPrefsData())
 
     suspend fun update(transform: (ChatPrefsData) -> ChatPrefsData) {

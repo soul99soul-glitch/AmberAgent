@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -35,12 +36,14 @@ class SearchPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    val flow: StateFlow<SearchPrefsData> = dataStore.data
+    internal val rawFlow: Flow<SearchPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+
+    val flow: StateFlow<SearchPrefsData> = rawFlow
         .toMutableStateFlow(scope, SearchPrefsData())
 
     suspend fun update(transform: (SearchPrefsData) -> SearchPrefsData) {

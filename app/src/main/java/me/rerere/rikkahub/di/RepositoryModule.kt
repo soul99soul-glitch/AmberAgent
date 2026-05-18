@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.di
 
 import me.rerere.rikkahub.data.agent.board.BoardRepository
+import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -34,10 +35,15 @@ val repositoryModule = module {
     }
 
     single {
+        AgentPromptConfigRepository(get())
+    }
+
+    single {
         ImageGenerationRepository(
             settingsStore = get(),
             providerManager = get(),
             filesManager = get(),
+            promptConfigRepository = get(),
         )
     }
 

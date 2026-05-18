@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -49,12 +50,14 @@ class ExtensionPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    val flow: StateFlow<ExtensionPrefsData> = dataStore.data
+    internal val rawFlow: Flow<ExtensionPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+
+    val flow: StateFlow<ExtensionPrefsData> = rawFlow
         .toMutableStateFlow(scope, ExtensionPrefsData())
 
     suspend fun update(transform: (ExtensionPrefsData) -> ExtensionPrefsData) {

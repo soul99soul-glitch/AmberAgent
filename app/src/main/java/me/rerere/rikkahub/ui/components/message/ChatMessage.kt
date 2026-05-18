@@ -216,20 +216,14 @@ fun ChatMessage(
             }
         }
 
-        val showActions = if (lastMessage) {
-            !loading
-        } else {
-            message.parts.isEmptyUIMessage().not()
+        val showActions = when {
+            message.role == MessageRole.USER -> message.parts.isEmptyUIMessage().not()
+            lastMessage -> !loading
+            else -> message.parts.isEmptyUIMessage().not()
         }
 
-        AnimatedVisibility(
-            visible = showActions,
-            enter = slideInVertically { it / 2 } + fadeIn(),
-            exit = slideOutVertically { it / 2 } + fadeOut()
-        ) {
-            Column(
-                modifier = Modifier.animateContentSizeIf(loading && lastMessage)
-            ) {
+        if (message.role == MessageRole.USER) {
+            if (showActions) {
                 ChatMessageActionButtons(
                     message = message,
                     onRegenerate = onRegenerate,
@@ -241,6 +235,28 @@ fun ChatMessage(
                     onTranslate = onTranslate,
                     onClearTranslation = onClearTranslation
                 )
+            }
+        } else {
+            AnimatedVisibility(
+                visible = showActions,
+                enter = slideInVertically { it / 2 } + fadeIn(),
+                exit = slideOutVertically { it / 2 } + fadeOut()
+            ) {
+                Column(
+                    modifier = Modifier.animateContentSizeIf(loading && lastMessage)
+                ) {
+                    ChatMessageActionButtons(
+                        message = message,
+                        onRegenerate = onRegenerate,
+                        node = node,
+                        onUpdate = onUpdate,
+                        onOpenActionSheet = {
+                            showActionsSheet = true
+                        },
+                        onTranslate = onTranslate,
+                        onClearTranslation = onClearTranslation
+                    )
+                }
             }
         }
 

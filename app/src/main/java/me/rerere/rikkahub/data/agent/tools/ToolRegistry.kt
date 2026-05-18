@@ -160,6 +160,16 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = true
         }
 
+        "agent_prompt_config" -> {
+            val action = input.stringValue("action") ?: "get"
+            val readOnly = action == "get"
+            mutates = !readOnly
+            risk = if (readOnly) ToolRisk.Normal else ToolRisk.Sensitive
+            needsApproval = !readOnly
+            autoApprovable = readOnly || allowsAutoApproval
+            concurrencySafe = readOnly
+        }
+
         "mcp_call_tool" -> {
             mutates = true
             risk = ToolRisk.Sensitive
@@ -324,6 +334,7 @@ internal fun Tool.category(): String = when {
         name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
         name in setOf("device_phone_state", "media_search", "location_current", "audio_record_once", "notification_list", "usage_stats_list", "battery_status", "network_status", "wifi_status", "device_info", "settings_open", "intent_open", "share_text", "share_file", "notification_post") -> "system"
     name.startsWith("memory_") -> "memory"
+    name == "agent_prompt_config" -> "prompt_config"
     name.startsWith("conversation_") || name.startsWith("session_") -> "context"
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
@@ -347,6 +358,7 @@ private fun Tool.mutatesState(): Boolean {
         name == "mcp_call_tool" ||
         name == "officepro_make_report" ||
         name == "officepro_project_update" ||
+        name == "agent_prompt_config" ||
         name == "model_council_make_report" ||
         name in setOf("cron_task_create", "cron_task_update", "cron_task_delete") ||
         name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") ||

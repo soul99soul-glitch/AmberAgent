@@ -194,8 +194,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): MessageChunk = withContext(Dispatchers.IO) {
-        val requestBody = buildCompletionRequestBody(messages, params)
         val isOAuth = isCodeAssistOAuthMode(providerSetting)
+        val requestBody = buildCompletionRequestBody(messages, params, isCodeAssistOAuth = isOAuth)
         val request = if (isOAuth) {
             val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
             geminiOAuthClient!!
@@ -268,12 +268,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<MessageChunk> = callbackFlow {
-        val requestBody = buildCompletionRequestBody(messages, params)
         // OAuth path: cloudcode-pa.googleapis.com/v1internal:streamGenerateContent. The
         // standard Gemini request body is wrapped in {model, project, request}; the
         // server's SSE chunks come back wrapped in {"response": {...standard chunk...}}.
         // Auth is `Authorization: Bearer <access_token>` instead of `x-goog-api-key`.
         val isOAuth = isCodeAssistOAuthMode(providerSetting)
+        val requestBody = buildCompletionRequestBody(messages, params, isCodeAssistOAuth = isOAuth)
         val request = if (isOAuth) {
             val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
             geminiOAuthClient!!
@@ -423,7 +423,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun buildCompletionRequestBody(
         messages: List<UIMessage>,
-        params: TextGenerationParams
+        params: TextGenerationParams,
+        isCodeAssistOAuth: Boolean,
     ): JsonObject = buildJsonObject {
         // System message if available
         val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
@@ -463,7 +464,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                         ReasoningLevel.OFF -> {
                             if (ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)) {
-                                put("thinkingLevel", "minimal")
+                                // cloudcode-pa / Gemini Code Assist OAuth currently rejects
+                                // `thinkingLevel=MINIMAL` for some 3.x preview models (notably
+                                // gemini-3.1-pro-preview). Treat OFF as "do not force a thinking
+                                // override" on that transport so lightweight tool/council calls
+                                // can still run instead of failing before the model sees the task.
+                                if (!isCodeAssistOAuth) {
+                                    put("thinkingLevel", "minimal")
+                                }
                             } else if (!isGeminiPro) {
                                 put("thinkingBudget", 0)
                                 put("includeThoughts", false)

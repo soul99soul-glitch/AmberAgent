@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -26,12 +27,14 @@ class ProviderPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    val flow: StateFlow<ProviderPrefsData> = dataStore.data
+    internal val rawFlow: Flow<ProviderPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+
+    val flow: StateFlow<ProviderPrefsData> = rawFlow
         .toMutableStateFlow(scope, ProviderPrefsData())
 
     suspend fun update(transform: (ProviderPrefsData) -> ProviderPrefsData) {

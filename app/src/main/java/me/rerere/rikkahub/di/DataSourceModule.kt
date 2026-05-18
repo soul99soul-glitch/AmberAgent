@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
 import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -97,6 +98,14 @@ val dataSourceModule = module {
             extensionPrefs = get(),
             assistantPrefs = get(),
             scope = get(),
+        )
+    }
+
+    single {
+        SettingsProviderRescue(
+            context = get(),
+            settingsStore = get(),
+            json = get(),
         )
     }
 

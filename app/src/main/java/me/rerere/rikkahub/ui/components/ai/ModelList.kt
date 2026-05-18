@@ -505,7 +505,7 @@ private fun ColumnScope.ModelList(
         }
 
         if (favoriteModels.isNotEmpty()) {
-            stickyHeader {
+            item(key = "favorite-header") {
                 Text(
                     text = stringResource(R.string.model_list_favorite),
                     style = MaterialTheme.typography.labelMedium,
@@ -574,7 +574,7 @@ private fun ColumnScope.ModelList(
         }
 
         providers.fastForEach { providerSetting ->
-            stickyHeader(key = "header:${providerSetting.id}") {
+            item(key = "header:${providerSetting.id}") {
                 Row(
                     modifier = Modifier
                         .padding(horizontal = 8.dp)

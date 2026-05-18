@@ -7,6 +7,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
@@ -138,6 +139,7 @@ object ModelCouncilValidator {
                 systemPrompt = seat.stringOrBlank("system_prompt").ifBlank { preset?.prompt.orEmpty() },
                 outputBudgetChars = (seat["output_budget_chars"]?.jsonPrimitive?.intOrNull
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
+                reasoningLevel = seat.optionalReasoningLevel("seats[$index].reasoning_level"),
                 temperature = seat.optionalTemperature("seats[$index].temperature"),
                 externalTool = seat.stringOrBlank("external_tool"),
                 externalRuntime = seat.stringOrBlank("external_runtime"),
@@ -278,6 +280,7 @@ object ModelCouncilValidator {
                     .take(MAX_PLANNED_SEAT_PROMPT_CHARS),
                 outputBudgetChars = (seat["output_budget_chars"]?.jsonPrimitive?.intOrNull
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
+                reasoningLevel = seat.optionalReasoningLevel("planned_seats[$index].reasoning_level"),
                 temperature = seat.optionalTemperature("planned_seats[$index].temperature"),
                 externalTool = seat.stringOrBlank("external_tool"),
                 externalRuntime = seat.stringOrBlank("external_runtime"),
@@ -307,6 +310,17 @@ object ModelCouncilValidator {
         val value = raw.toFloatOrNull() ?: error("$label is not a number: $raw")
         require(value in 0f..2f) { "$label must be between 0 and 2." }
         return value
+    }
+
+    private fun JsonObject.optionalReasoningLevel(label: String): ReasoningLevel? {
+        val raw = stringOrBlank("reasoning_level")
+            .ifBlank { stringOrBlank("reasoningLevel") }
+            .takeIf { it.isNotBlank() }
+            ?: return null
+        return ReasoningLevel.entries.firstOrNull { level ->
+            level.name.equals(raw, ignoreCase = true) ||
+                level.effort.equals(raw, ignoreCase = true)
+        } ?: error("$label must be one of ${ReasoningLevel.entries.joinToString { it.name.lowercase() }}; got: $raw")
     }
 
     private fun JsonObject.runnerType(): ModelCouncilSeatRunner {

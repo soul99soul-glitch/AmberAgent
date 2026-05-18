@@ -21,7 +21,7 @@ data class SubAgentRuntimeSetting(
     val timeoutMs: Long = DEFAULT_SUB_AGENT_TIMEOUT_MS,
     val maxTurns: Int = DEFAULT_SUB_AGENT_MAX_TURNS,
     val outputBudgetChars: Int = DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
-    /** Per built-in id user override: model / temperature / reasoning / budgets. */
+    /** Per built-in id user override: prompt / model / temperature / reasoning / budgets. */
     val overrides: Map<String, SubAgentOverride> = emptyMap(),
     /**
      * User-defined persistent custom roles (vs ephemeral [SubAgentDefinition.dynamic] from main agent).
@@ -68,6 +68,7 @@ enum class SubAgentToolProfile {
  */
 @Serializable
 data class SubAgentOverride(
+    val systemPrompt: String? = null,
     val modelId: Uuid? = null,
     val temperature: Float? = null,
     val reasoningLevel: ReasoningLevel? = null,
@@ -109,6 +110,7 @@ data class SubAgentDefinition(
 fun SubAgentDefinition.applyOverride(o: SubAgentOverride?): SubAgentDefinition {
     if (o == null) return this
     return copy(
+        systemPrompt = o.systemPrompt?.takeIf { it.isNotBlank() } ?: systemPrompt,
         modelId = o.modelId ?: modelId,
         temperature = o.temperature ?: temperature,
         reasoningLevel = o.reasoningLevel ?: reasoningLevel,

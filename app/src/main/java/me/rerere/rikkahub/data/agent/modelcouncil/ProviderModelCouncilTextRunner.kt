@@ -27,6 +27,7 @@ class ProviderModelCouncilTextRunner(
         systemPrompt: String,
         userPrompt: String,
         outputBudgetChars: Int,
+        reasoningLevel: ReasoningLevel?,
         temperature: Float?,
         onChunk: (String) -> Unit,
     ): ModelCouncilTextResult {
@@ -37,11 +38,11 @@ class ProviderModelCouncilTextRunner(
             add(UIMessage.system(systemPrompt))
             add(UIMessage.user(userPrompt))
         }
-        suspend fun streamWith(candidateTemperature: Float?): String {
+        suspend fun streamWith(candidateTemperature: Float?, reasoningLevel: ReasoningLevel): String {
             val params = TextGenerationParams(
                 model = model,
                 tools = emptyList(),
-                reasoningLevel = ReasoningLevel.OFF,
+                reasoningLevel = reasoningLevel,
                 customHeaders = model.customHeaders,
                 customBody = model.customBodies,
                 temperature = candidateTemperature,
@@ -65,21 +66,84 @@ class ProviderModelCouncilTextRunner(
             }
             return accumulated.toString().take(outputBudgetChars)
         }
-        return try {
-            ModelCouncilTextResult(streamWith(temperature))
-        } catch (error: Throwable) {
-            if (error is CancellationException || temperature == null || !error.isUnsupportedTemperatureError()) {
-                throw error
+        val requestedReasoning = reasoningLevel ?: ReasoningLevel.OFF
+        val label = listOf(provider.name, model.displayName.ifBlank { model.modelId })
+            .filter { it.isNotBlank() }
+            .joinToString(" / ")
+        val warnings = mutableListOf<String>()
+        suspend fun tryStream(candidateTemperature: Float?, candidateReasoning: ReasoningLevel): Result<String> =
+            runCatching { streamWith(candidateTemperature, candidateReasoning) }.also { result ->
+                result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             }
-            val label = listOf(provider.name, model.displayName.ifBlank { model.modelId })
-                .filter { it.isNotBlank() }
-                .joinToString(" / ")
-            ModelCouncilTextResult(
-                text = streamWith(null),
-                warnings = listOf("$label rejected temperature; retried once without temperature."),
+
+        val first = tryStream(temperature, requestedReasoning)
+        if (first.isSuccess) {
+            return ModelCouncilTextResult(first.getOrThrow())
+        }
+        val firstError = first.exceptionOrNull()!!
+        val candidates = buildList {
+            if (firstError.isUnsupportedReasoningConfigError() && requestedReasoning != ReasoningLevel.AUTO) {
+                add(temperature to ReasoningLevel.AUTO)
+            }
+            if (temperature != null && firstError.isUnsupportedTemperatureError()) {
+                add(null to requestedReasoning)
+            }
+            if (
+                temperature != null &&
+                requestedReasoning != ReasoningLevel.AUTO &&
+                (
+                    firstError.isUnsupportedReasoningConfigError() ||
+                        firstError.isUnsupportedTemperatureError()
+                    )
+            ) {
+                add(null to ReasoningLevel.AUTO)
+            }
+        }.distinct()
+
+        var lastError = firstError
+        candidates.forEach { (candidateTemperature, candidateReasoning) ->
+            val result = tryStream(candidateTemperature, candidateReasoning)
+            if (result.isSuccess) {
+                if (candidateReasoning != requestedReasoning) {
+                    warnings += "$label rejected reasoningLevel=${requestedReasoning.name.lowercase()}; retried with provider default reasoning."
+                }
+                if (candidateTemperature != temperature) {
+                    warnings += "$label rejected temperature; retried without temperature."
+                }
+                return ModelCouncilTextResult(
+                    text = result.getOrThrow(),
+                    warnings = warnings,
+                )
+            }
+            lastError = result.exceptionOrNull() ?: lastError
+        }
+        throw if (candidates.isNotEmpty()) {
+            IllegalStateException(
+                "$label rejected council generation parameters; fallback attempts failed: ${lastError.message ?: lastError::class.java.simpleName}",
+                lastError,
             )
+        } else {
+            firstError
         }
     }
+}
+
+private fun Throwable.isUnsupportedReasoningConfigError(): Boolean {
+    val message = generateSequence(this) { it.cause }
+        .mapNotNull { it.message }
+        .joinToString("\n")
+        .lowercase()
+    if (!listOf("thinking", "reasoning").any { message.contains(it) }) return false
+    return listOf(
+        "unsupported parameter",
+        "unsupported param",
+        "not supported",
+        "does not support",
+        "unsupported value",
+        "unknown parameter",
+        "unrecognized parameter",
+        "不支持",
+    ).any { marker -> message.contains(marker) }
 }
 
 private fun Throwable.isUnsupportedTemperatureError(): Boolean {

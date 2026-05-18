@@ -12,6 +12,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -417,7 +419,7 @@ class ConversationContextEngine(
                 val summary = accumulated.toString().trim()
                     .takeIf { it.isNotEmpty() }
                     ?: error("Failed to generate compact summary")
-                val normalizedSummary = normalizeSummaryJson(summary)
+                val normalizedSummary = normalizeSummaryJson(summary, plan.sourceMessageIds)
                 val now = System.currentTimeMillis()
                 val compact = ConversationCompact(
                     id = Uuid.random().toString(),
@@ -501,10 +503,9 @@ class ConversationContextEngine(
         // saw raw JSON tokens scrolling (`"goals": [...], "facts": [...]`)
         // instead of human-readable summary. The preamble is naturally
         // emitted as the FIRST tokens of the stream, so it lands in the
-        // marker before any JSON shows up. normalizeSummaryJson already
-        // tolerates leading prose (it uses cleaned.indexOf('{') to locate
-        // the JSON object), so this doesn't break the persisted summary
-        // parse path.
+        // marker before any JSON shows up. normalizeSummaryJson tolerates
+        // leading prose and now safely wraps legacy/plain-text summaries
+        // from older custom prompts, so this doesn't break persistence.
         val structuredInstructions = """
             First, write ONE concise sentence (max 100 chars) in the user's language summarising what this conversation segment covered. This sentence is shown live to the user while the summary streams in.
             Then on a new line, return only valid JSON with these keys:
@@ -522,7 +523,7 @@ class ConversationContextEngine(
         )
     }
 
-    private fun normalizeSummaryJson(summary: String): String {
+    private fun normalizeSummaryJson(summary: String, sourceMessageIds: List<String>): String {
         val candidate = summary.trim()
             .removePrefix("```json")
             .removePrefix("```")
@@ -533,7 +534,8 @@ class ConversationContextEngine(
                 val end = cleaned.lastIndexOf('}')
                 if (start >= 0 && end > start) cleaned.substring(start, end + 1) else cleaned
             }
-        val jsonObject = json.parseToJsonElement(candidate).jsonObject
+        val parsed = runCatching { json.parseToJsonElement(candidate).jsonObject }.getOrNull()
+            ?: return fallbackPlainTextSummaryJson(summary, sourceMessageIds)
         val required = listOf(
             "goals",
             "facts",
@@ -545,11 +547,40 @@ class ConversationContextEngine(
             "timeline",
             "source_message_ids",
         )
-        val missing = required.filterNot { it in jsonObject }
+        val missing = required.filterNot { it in parsed }
         require(missing.isEmpty()) {
             "Compact summary JSON missing fields: ${missing.joinToString(", ")}"
         }
         return candidate
+    }
+
+    private fun fallbackPlainTextSummaryJson(summary: String, sourceMessageIds: List<String>): String {
+        val cleaned = summary
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .take(12_000)
+        val fallback = buildJsonObject {
+            put("goals", buildJsonArray {})
+            put("facts", buildJsonArray {
+                add(cleaned.ifBlank { "Conversation segment was compressed, but the model returned an unstructured summary." })
+            })
+            put("decisions", buildJsonArray {})
+            put("open_tasks", buildJsonArray {})
+            put("failed_attempts", buildJsonArray {})
+            put("tool_results", buildJsonArray {})
+            put("entities", buildJsonArray {})
+            put("timeline", buildJsonArray {})
+            put("source_message_ids", buildJsonArray {
+                sourceMessageIds.forEach { add(it) }
+            })
+        }
+        return fallback.toString()
     }
 
     private fun Conversation.withEffectiveMessages(effectiveMessages: List<UIMessage>): Conversation {

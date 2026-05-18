@@ -167,12 +167,8 @@ private const val SCROLL_TAG = "ChatScroll"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val HistoryLoadingItemKey = "timeline-history-loading"
 private const val ScrollBottomKey = "ScrollBottomKey"
-private const val SendTransitionEnterMillis = 150
-private const val SendTransitionExitMillis = 100
-private const val SentUserMessageEnterMillis = 280
 private val TimelineHorizontalPadding = 16.dp
 private val SendTransitionSlideDistance = 8.dp
-private val SentUserMessageSlideDistance = 18.dp
 
 // 2026-05-15 (1.9.7): top-level Regex avoids recompiling the pattern on every
 // recomposition of ContextCompactInProgressMarker. The streaming summary flow
@@ -192,32 +188,6 @@ private data class TimelineScrollAnchor(
     val key: Any,
     val offset: Int,
 )
-
-@Composable
-private fun SentUserMessageEnter(
-    enabled: Boolean,
-    content: @Composable () -> Unit,
-) {
-    if (!enabled) {
-        content()
-        return
-    }
-    val visibleState = remember {
-        MutableTransitionState(false).apply { targetState = true }
-    }
-    val slidePx = with(LocalDensity.current) { SentUserMessageSlideDistance.roundToPx() }
-    AnimatedVisibility(
-        visibleState = visibleState,
-        enter = fadeIn(animationSpec = tween(SentUserMessageEnterMillis)) +
-            slideInVertically(
-                animationSpec = tween(SentUserMessageEnterMillis),
-                initialOffsetY = { slidePx },
-            ),
-        exit = fadeOut(animationSpec = tween(SendTransitionExitMillis)),
-    ) {
-        content()
-    }
-}
 
 /**
  * Slice a ConversationCompact.summary to a ≤80-char one-line preview suitable
@@ -624,8 +594,6 @@ private fun PendingUserMessageBubble(
 fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
-    sentUserMessageAnimationKey: Int = 0,
-    sentUserMessageAnimationBaselineId: Uuid? = null,
     timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
@@ -679,8 +647,6 @@ fun ChatList(
             ChatListNormal(
                 innerPadding = innerPadding,
                 conversation = conversation,
-                sentUserMessageAnimationKey = sentUserMessageAnimationKey,
-                sentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId,
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
@@ -721,8 +687,6 @@ fun ChatList(
 private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
-    sentUserMessageAnimationKey: Int,
-    sentUserMessageAnimationBaselineId: Uuid?,
     timelineLoadState: ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
@@ -783,23 +747,14 @@ private fun ChatListNormal(
     val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
         conversation.actionSuggestionTexts()
     }
-    var retainedSuggestions by remember(conversation.id) { mutableStateOf(emptyList<String>()) }
-    val showSuggestions = actionSuggestions.isNotEmpty() && !captureProgress
-    val suggestionsVisibility = remember(conversation.id) { MutableTransitionState(false) }
-    suggestionsVisibility.targetState = showSuggestions
-
-    LaunchedEffect(actionSuggestions) {
-        if (actionSuggestions.isNotEmpty()) {
-            retainedSuggestions = actionSuggestions
-        }
-    }
-    LaunchedEffect(showSuggestions, actionSuggestions) {
-        if (!showSuggestions && retainedSuggestions.isNotEmpty()) {
-            delay(SendTransitionExitMillis.toLong())
-            if (actionSuggestions.isEmpty()) {
-                retainedSuggestions = emptyList()
-            }
-        }
+    val visibleSuggestions = if (
+        actionSuggestions.isNotEmpty() &&
+        !activeGeneration &&
+        !captureProgress
+    ) {
+        actionSuggestions
+    } else {
+        emptyList()
     }
 
     // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
@@ -1040,63 +995,6 @@ private fun ChatListNormal(
     }
 
     val latestMessage = conversation.currentMessages.lastOrNull()
-    var pendingSentUserMessageAnimationKey by remember(conversation.id) { mutableIntStateOf(0) }
-    var pendingSentUserMessageAnimationBaselineId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
-    var sentUserMessageAnimationId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
-    val immediateSentUserMessageAnimationId = remember(
-        conversation.id,
-        sentUserMessageAnimationKey,
-        sentUserMessageAnimationBaselineId,
-        latestMessage?.id,
-        latestMessage?.role,
-    ) {
-        if (
-            sentUserMessageAnimationKey > 0 &&
-            latestMessage?.role == MessageRole.USER &&
-            latestMessage.id != sentUserMessageAnimationBaselineId
-        ) {
-            latestMessage.id
-        } else {
-            null
-        }
-    }
-    val activeSentUserMessageAnimationId = sentUserMessageAnimationId ?: immediateSentUserMessageAnimationId
-    LaunchedEffect(
-        conversation.id,
-        sentUserMessageAnimationKey,
-        sentUserMessageAnimationBaselineId,
-    ) {
-        if (sentUserMessageAnimationKey > 0) {
-            pendingSentUserMessageAnimationKey = sentUserMessageAnimationKey
-            pendingSentUserMessageAnimationBaselineId = sentUserMessageAnimationBaselineId
-        }
-    }
-    LaunchedEffect(immediateSentUserMessageAnimationId) {
-        val immediateId = immediateSentUserMessageAnimationId ?: return@LaunchedEffect
-        sentUserMessageAnimationId = immediateId
-        pendingSentUserMessageAnimationKey = 0
-    }
-    LaunchedEffect(
-        conversation.id,
-        pendingSentUserMessageAnimationKey,
-        latestMessage?.id,
-    ) {
-        if (
-            pendingSentUserMessageAnimationKey > 0 &&
-            latestMessage?.role == MessageRole.USER &&
-            latestMessage.id != pendingSentUserMessageAnimationBaselineId
-        ) {
-            sentUserMessageAnimationId = latestMessage.id
-            pendingSentUserMessageAnimationKey = 0
-        }
-    }
-    LaunchedEffect(sentUserMessageAnimationId) {
-        val animatedId = sentUserMessageAnimationId ?: return@LaunchedEffect
-        delay(SendTransitionEnterMillis.toLong() + SendTransitionExitMillis.toLong())
-        if (sentUserMessageAnimationId == animatedId) {
-            sentUserMessageAnimationId = null
-        }
-    }
 
     LaunchedEffect(conversation.id, latestMessage?.id, activeGeneration) {
         logScroll(
@@ -1273,10 +1171,12 @@ private fun ChatListNormal(
                         val willFollow = activeGenerationState &&
                             followMode == TimelineFollowMode.FollowingBottom &&
                             !userScrollInTimeline &&
-                            !state.isScrollInProgress &&
-                            visibleItemsInfo.isBottomAnchorVisible()
+                            !state.isScrollInProgress
                         if (willFollow) {
-                            requestTimelineBottom("layoutFollow")
+                            requestTimelineBottom(
+                                "layoutFollow visibleItems=${visibleItemsInfo.size} " +
+                                    "bottomVisible=${visibleItemsInfo.isBottomAnchorVisible()}",
+                            )
                         }
                     }
             }
@@ -1361,7 +1261,6 @@ private fun ChatListNormal(
                     lastMessage = isLastMessage,
                 )
                 if (virtualItems == null) {
-                    val shouldAnimateSentUserMessage = node.currentMessage.id == activeSentUserMessageAnimationId
                     item(
                         key = node.id,
                         contentType = "message-${node.currentMessage.role}",
@@ -1392,23 +1291,20 @@ private fun ChatListNormal(
                             // would otherwise produce. Divider above is rendered
                             // separately (outside this modifier chain), so it remains
                             // fully opaque as the boundary marker.
-                            SentUserMessageEnter(
-                                enabled = shouldAnimateSentUserMessage,
+                            ListSelectableItem(
+                                modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
+                                key = node.id,
+                                onSelectChange = {
+                                    if (!selectedItems.contains(node.id)) {
+                                        selectedItems.add(node.id)
+                                    } else {
+                                        selectedItems.remove(node.id)
+                                    }
+                                },
+                                selectedKeys = selectedItems,
+                                enabled = selecting,
                             ) {
-                                ListSelectableItem(
-                                    modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
-                                    key = node.id,
-                                    onSelectChange = {
-                                        if (!selectedItems.contains(node.id)) {
-                                            selectedItems.add(node.id)
-                                        } else {
-                                            selectedItems.remove(node.id)
-                                        }
-                                    },
-                                    selectedKeys = selectedItems,
-                                    enabled = selecting,
-                                ) {
-                                    val messageModel = remember(
+                                val messageModel = remember(
                                         node.currentMessage.modelId,
                                         node.currentMessage.role,
                                         isLoadingMessage,
@@ -1464,7 +1360,6 @@ private fun ChatListNormal(
                                 }
                             }
                         }
-                    }
                 } else {
                     virtualItems.forEachIndexed { virtualIndex, virtualItem ->
                         val isFirstVirtualItem = virtualIndex == 0
@@ -1746,28 +1641,17 @@ private fun ChatListNormal(
                 state = state
             )
 
-            // Suggestion
-            if (retainedSuggestions.isNotEmpty()) {
-                AnimatedVisibility(
-                    visibleState = suggestionsVisibility,
+            // Suggestion chips are intentionally instant here. They sit in the
+            // bottom overlay while the input panel has its own height animation;
+            // animating both during send makes the timeline feel like it is
+            // being tugged from two places.
+            if (visibleSuggestions.isNotEmpty()) {
+                ChatSuggestionsRow(
                     modifier = Modifier.align(Alignment.BottomCenter),
-                    enter = fadeIn(animationSpec = tween(SendTransitionEnterMillis)) +
-                        slideInVertically(
-                            animationSpec = tween(SendTransitionEnterMillis),
-                            initialOffsetY = { sendTransitionSlidePx },
-                        ),
-                    exit = fadeOut(animationSpec = tween(SendTransitionExitMillis)) +
-                        slideOutVertically(
-                            animationSpec = tween(SendTransitionExitMillis),
-                            targetOffsetY = { sendTransitionSlidePx },
-                        ),
-                ) {
-                    ChatSuggestionsRow(
-                        suggestions = retainedSuggestions,
-                        onClickSuggestion = onClickSuggestion,
-                        onLongClickSuggestion = onLongClickSuggestion,
-                    )
-                }
+                    suggestions = visibleSuggestions,
+                    onClickSuggestion = onClickSuggestion,
+                    onLongClickSuggestion = onLongClickSuggestion,
+                )
             }
             }
         }

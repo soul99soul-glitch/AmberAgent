@@ -84,6 +84,7 @@ import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
 import me.rerere.rikkahub.data.agent.office.radar.DocRadar
+import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_TIMEOUT_MS
@@ -181,6 +182,7 @@ fun SettingExperimentalPage() {
 @Composable
 fun SettingExperimentalSubAgentPage(
     vm: SettingVM = koinViewModel(),
+    promptConfigRepository: AgentPromptConfigRepository = koinInject(),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val subAgent = settings.agentRuntime.subAgent
@@ -197,15 +199,20 @@ fun SettingExperimentalSubAgentPage(
     val modeOptions = SubAgentMode.entries
     // null sentinel = "follow main assistant"; otherwise pick a specific reasoning level.
     val reasoningOptions: List<ReasoningLevel?> = listOf(null) + ReasoningLevel.entries
+    val scope = rememberCoroutineScope()
 
     fun update(block: (SubAgentRuntimeSetting) -> SubAgentRuntimeSetting) {
+        val nextSubAgent = block(subAgent)
         vm.updateSettings(
             settings.copy(
                 agentRuntime = settings.agentRuntime.copy(
-                    subAgent = block(subAgent)
+                    subAgent = nextSubAgent
                 )
             )
         )
+        scope.launch {
+            promptConfigRepository.writeSubAgentMarkdown(nextSubAgent)
+        }
     }
 
     fun mutateOverride(roleId: String, mutate: (SubAgentOverride) -> SubAgentOverride) {
@@ -484,6 +491,7 @@ private fun SubAgentBuiltInRow(
     val ws = workspaceColors()
     val effective = def.applyOverride(override)
     val effectiveModel = effective.modelId?.let { providers.findModelById(it) }
+    val hasPromptOverride = !override?.systemPrompt.isNullOrBlank()
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -522,7 +530,8 @@ private fun SubAgentBuiltInRow(
                             ?: stringResource(R.string.setting_subagent_value_inherit)
                         val reasoningLabel = (effective.reasoningLevel ?: ReasoningLevel.AUTO).name.lowercase()
                         Text(
-                            text = stringResource(R.string.setting_subagent_role_summary, modelLabel, reasoningLabel),
+                            text = stringResource(R.string.setting_subagent_role_summary, modelLabel, reasoningLabel) +
+                                if (hasPromptOverride) " · 提示词：自定义" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = ws.faint,
                         )
@@ -579,6 +588,41 @@ private fun SubAgentBuiltInRow(
                     }
                 }
                 Text(
+                    text = "角色提示词",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ws.faint,
+                )
+                OutlinedTextField(
+                    value = override?.systemPrompt ?: def.systemPrompt,
+                    onValueChange = { value ->
+                        val normalized = value.take(8_000)
+                        onMutateOverride {
+                            it.copy(
+                                systemPrompt = normalized
+                                    .takeIf { prompt -> prompt.isNotBlank() && prompt != def.systemPrompt }
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 5,
+                    maxLines = 10,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    placeholder = {
+                        Text(
+                            text = "描述这个 SubAgent 的身份、边界、可用工具和输出格式。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ws.faint,
+                        )
+                    },
+                    supportingText = {
+                        Text(
+                            text = "${(override?.systemPrompt ?: def.systemPrompt).length.coerceAtMost(8_000)} / 8000 · 留空会恢复默认提示词",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ws.faint,
+                        )
+                    },
+                )
+                Text(
                     text = stringResource(R.string.setting_subagent_role_routing),
                     style = MaterialTheme.typography.labelMedium,
                     color = ws.faint,
@@ -589,6 +633,13 @@ private fun SubAgentBuiltInRow(
                     color = ws.muted,
                 )
                 ExperimentActionRow {
+                    if (hasPromptOverride) {
+                        ExperimentActionButton(
+                            text = "恢复默认提示词",
+                            enabled = true,
+                            onClick = { onMutateOverride { it.copy(systemPrompt = null) } },
+                        )
+                    }
                     if (override != null) {
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_subagent_role_reset),
@@ -647,6 +698,7 @@ private fun SubAgentCustomRow(
 @Composable
 fun SettingExperimentalModelCouncilPage(
     vm: SettingVM = koinViewModel(),
+    promptConfigRepository: AgentPromptConfigRepository = koinInject(),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val council = settings.agentRuntime.modelCouncil
@@ -661,15 +713,20 @@ fun SettingExperimentalModelCouncilPage(
     val roundOptions = listOf(1, 2, 3, 4, 5)
     val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L, EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS)
     val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS)
+    val scope = rememberCoroutineScope()
 
     fun update(block: (ModelCouncilRuntimeSetting) -> ModelCouncilRuntimeSetting) {
+        val nextCouncil = block(council)
         vm.updateSettings(
             settings.copy(
                 agentRuntime = settings.agentRuntime.copy(
-                    modelCouncil = block(council)
+                    modelCouncil = nextCouncil
                 )
             )
         )
+        scope.launch {
+            promptConfigRepository.writeModelCouncilMarkdown(nextCouncil)
+        }
     }
 
     fun updateSeat(seatId: String, block: (ModelCouncilSeat) -> ModelCouncilSeat) {
@@ -918,6 +975,7 @@ private fun ModelCouncilSeatEditor(
 ) {
     val workspace = workspaceColors()
     val runnerOptions = listOf(ModelCouncilSeatRunner.PROVIDER_MODEL, ModelCouncilSeatRunner.EXTERNAL_CLI)
+    val reasoningOptions = listOf<ReasoningLevel?>(null) + ReasoningLevel.entries
     val runtimeOptions = listOf("", "builtin_alpine", "android_shell", "termux_external")
     val selectedRuntime = seat.externalRuntime.takeIf { it in runtimeOptions }.orEmpty()
     val firstChatModel = remember(settingsProviders) {
@@ -1041,6 +1099,15 @@ private fun ModelCouncilSeatEditor(
                         compact = true,
                         modifier = Modifier.fillMaxWidth(),
                         onSelect = { model -> onSeatChanged(seat.copy(modelId = model.id)) },
+                    )
+                }
+                ModelCouncilPropertyRow(label = "思考档位") {
+                    Select(
+                        options = reasoningOptions,
+                        selectedOption = seat.reasoningLevel,
+                        onOptionSelected = { level -> onSeatChanged(seat.copy(reasoningLevel = level)) },
+                        optionToString = { level -> level?.name?.lowercase() ?: "默认" },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             } else {

@@ -124,6 +124,7 @@ import com.yalantis.ucrop.UCropActivity
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.HazeMaterials
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -210,6 +211,8 @@ import java.util.Date
 import java.util.Locale
 import kotlin.uuid.Uuid
 
+private const val PostSendKeyboardHideDelayMillis = 96L
+
 enum class ExpandState {
     Collapsed, Files,
 }
@@ -269,11 +272,21 @@ fun ChatInput(
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    fun hideKeyboardAfterSend() {
+        coroutineScope.launch {
+            // Let the sent message, input clear, and bottom-follow layout commit
+            // before IME starts its own inset animation. Starting both in the
+            // same frame makes the keyboard close look low-FPS on real devices.
+            delay(PostSendKeyboardHideDelayMillis)
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+        }
+    }
 
     fun sendMessage() {
-        focusManager.clearFocus(force = true)
-        keyboardController?.hide()
         if (loading && state.isEmpty()) {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
             onCancelClick()
         } else {
             coroutineScope.launch {
@@ -288,15 +301,16 @@ fun ChatInput(
                     toaster.show(blockingIssue.message, type = ToastType.Error)
                 } else {
                     onSendClick(PendingUserMessageMode.FOLLOWUP)
+                    hideKeyboardAfterSend()
                 }
             }
         }
     }
 
     fun sendMessageWithoutAnswer() {
-        focusManager.clearFocus(force = true)
-        keyboardController?.hide()
         if (loading && state.isEmpty()) {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
             onCancelClick()
         } else {
             coroutineScope.launch {
@@ -311,6 +325,7 @@ fun ChatInput(
                     toaster.show(blockingIssue.message, type = ToastType.Error)
                 } else {
                     onLongSendClick(if (loading) PendingUserMessageMode.STEER else PendingUserMessageMode.FOLLOWUP)
+                    hideKeyboardAfterSend()
                 }
             }
         }

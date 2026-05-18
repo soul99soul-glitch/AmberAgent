@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
@@ -41,6 +42,7 @@ class LocalTools(
     private val userSiteRegistry: me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry,
     private val settingsStore: SettingsAggregator,
     private val imageGenerationRepository: ImageGenerationRepository,
+    private val promptConfigRepository: AgentPromptConfigRepository,
 ) {
     val javascriptTool by lazy { createJavascriptTool() }
 
@@ -83,6 +85,10 @@ class LocalTools(
     private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker) }
 
     private val runPlanUpdateTool by lazy { createRunPlanUpdateTool() }
+
+    private val agentPromptConfigTool by lazy {
+        createAgentPromptConfigTool(settingsStore, promptConfigRepository)
+    }
 
     private fun buildImageGenTool(conversationId: Uuid): Tool =
         createImageGenTool(conversationId, settingsStore, imageGenerationRepository)
@@ -165,6 +171,7 @@ class LocalTools(
         tools.add(permissionsStatusTool)
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
+        tools.add(agentPromptConfigTool)
 
         // generate_image auto-appears whenever the current assistant — or the
         // global setting — resolves to a real image-gen model. The tool needs

@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -32,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 import me.rerere.ai.core.ReasoningLevel
@@ -70,6 +73,10 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.resolveVisionRecognitionPrompt
+import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import me.rerere.rikkahub.data.agent.prompts.DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
+import me.rerere.rikkahub.data.agent.prompts.DEFAULT_IMAGE_PROMPT_INJECTION
+import me.rerere.rikkahub.data.agent.prompts.ImagePromptInjectionConfig
 import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
 import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
 import me.rerere.rikkahub.data.datastore.Settings
@@ -202,10 +209,18 @@ private fun DefaultImageGenerationModelSetting(
     settings: Settings,
     vm: SettingVM,
 ) {
+    var showPromptSheet by remember { mutableStateOf(false) }
     SettingModelRow(
         title = stringResource(R.string.setting_model_page_image_gen_model),
         description = stringResource(R.string.setting_model_page_image_gen_model_desc),
         icon = HugeIcons.MagicWand01,
+        trailing = {
+            WorkspaceTextButton(
+                text = "提示词",
+                onClick = { showPromptSheet = true },
+                tone = WorkspaceTone.Accent,
+            )
+        },
     ) {
         ModelPickerRow(
             description = null,
@@ -231,6 +246,160 @@ private fun DefaultImageGenerationModelSetting(
                 vm.updateSettings(settings.copy(imageGenerationModelId = it.id))
             },
         )
+    }
+    if (showPromptSheet) {
+        ImagePromptInjectionSheet(
+            onDismissRequest = { showPromptSheet = false },
+        )
+    }
+}
+
+@Composable
+private fun ImagePromptInjectionSheet(
+    promptConfigRepository: AgentPromptConfigRepository = koinInject(),
+    onDismissRequest: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val scope = rememberCoroutineScope()
+    val loaded by produceState<ImagePromptInjectionConfig?>(initialValue = null) {
+        value = promptConfigRepository.readImageConfig()
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = workspace.paper,
+        contentColor = workspace.ink,
+    ) {
+        val config = loaded
+        if (config == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("正在读取本地 Markdown 配置…", color = workspace.muted)
+            }
+            return@ModalBottomSheet
+        }
+        var enabled by remember(config) { mutableStateOf(config.enabled) }
+        var prompt by remember(config) { mutableStateOf(config.defaultPrompt) }
+        var negativePrompt by remember(config) { mutableStateOf(config.negativePrompt) }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "生图默认 Prompt 注入",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    text = "保存到 app 私有 agent_prompts/image-generation.md，主 agent 也能通过 agent_prompt_config 修改。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "启用默认注入",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = workspace.ink,
+                    )
+                    Text(
+                        text = "用于稳定画面倾向，不作为可见预设。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspace.muted,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = { enabled = it })
+            }
+            TextField(
+                value = prompt,
+                onValueChange = { prompt = it.take(4_000) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp),
+                minLines = 4,
+                maxLines = 8,
+                shape = RoundedCornerShape(10.dp),
+                label = { Text("默认倾向") },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = workspace.note,
+                    unfocusedContainerColor = workspace.note,
+                    focusedIndicatorColor = workspace.hairline,
+                    unfocusedIndicatorColor = workspace.hairline,
+                    focusedTextColor = workspace.ink,
+                    unfocusedTextColor = workspace.ink,
+                    focusedLabelColor = workspace.blue,
+                    unfocusedLabelColor = workspace.muted,
+                ),
+            )
+            TextField(
+                value = negativePrompt,
+                onValueChange = { negativePrompt = it.take(4_000) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp),
+                minLines = 4,
+                maxLines = 8,
+                shape = RoundedCornerShape(10.dp),
+                label = { Text("避免倾向") },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = workspace.note,
+                    unfocusedContainerColor = workspace.note,
+                    focusedIndicatorColor = workspace.hairline,
+                    unfocusedIndicatorColor = workspace.hairline,
+                    focusedTextColor = workspace.ink,
+                    unfocusedTextColor = workspace.ink,
+                    focusedLabelColor = workspace.blue,
+                    unfocusedLabelColor = workspace.muted,
+                ),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = {
+                        enabled = true
+                        prompt = DEFAULT_IMAGE_PROMPT_INJECTION
+                        negativePrompt = DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
+                    },
+                ) {
+                    Text(stringResource(R.string.setting_model_page_reset_to_default))
+                }
+                TextButton(onClick = onDismissRequest) {
+                    Text(stringResource(R.string.cancel))
+                }
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            promptConfigRepository.writeImageConfig(
+                                ImagePromptInjectionConfig(
+                                    enabled = enabled,
+                                    defaultPrompt = prompt,
+                                    negativePrompt = negativePrompt,
+                                )
+                            )
+                            onDismissRequest()
+                        }
+                    },
+                ) {
+                    Text("保存")
+                }
+            }
+        }
     }
 }
 
