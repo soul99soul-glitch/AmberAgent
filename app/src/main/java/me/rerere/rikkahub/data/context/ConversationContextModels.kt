@@ -67,6 +67,12 @@ data class CompactResult(
     val error: String? = null,
 )
 
+data class ActiveCompactBoundary(
+    val sourceStartIndex: Int,
+    val sourceEndIndex: Int,
+    val sourceMessageIds: List<String>,
+)
+
 data class ContextSearchResult(
     val source: String,
     val id: String,

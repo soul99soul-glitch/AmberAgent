@@ -12,10 +12,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
@@ -87,6 +84,9 @@ class ConversationContextEngine(
     private val _compactingConversations = MutableStateFlow<Set<String>>(emptySet())
     val compactingConversations: StateFlow<Set<String>> = _compactingConversations.asStateFlow()
 
+    private val _activeCompactBoundaries = MutableStateFlow<Map<String, ActiveCompactBoundary>>(emptyMap())
+    val activeCompactBoundaries: StateFlow<Map<String, ActiveCompactBoundary>> = _activeCompactBoundaries.asStateFlow()
+
     fun isCompacting(conversationId: Uuid): Boolean =
         conversationId.toString() in _compactingConversations.value
 
@@ -94,10 +94,9 @@ class ConversationContextEngine(
     // on each delta chunk while compactInternal streams the summary; cleared in
     // the finally block. UI (ContextCompactInProgressMarker) reads this and
     // renders the trailing 120 chars under the shimmer divider so the user
-    // can see the summary being generated in real time — same vibe as
-    // watching `npm install` print progress. Once compaction finishes the
-    // stream entry is cleared and the transient 8s "已自动压缩" marker
-    // takes over with the FINAL summary preview from
+    // can see the summary being generated in real time. Once compaction
+    // finishes the stream entry is cleared and the permanent boundary marker
+    // at sourceEndIndex takes over with the FINAL summary preview from
     // ConversationCompact.summary.
     private val _summaryStreamFlow = MutableStateFlow<Map<String, String>>(emptyMap())
     val summaryStreamFlow: StateFlow<Map<String, String>> = _summaryStreamFlow.asStateFlow()
@@ -321,6 +320,7 @@ class ConversationContextEngine(
             }
         } finally {
             _compactingConversations.update { it - conversationKey }
+            _activeCompactBoundaries.update { it - conversationKey }
             // Clear any leftover streaming text — UI swaps to the transient
             // "已自动压缩" marker which reads from ConversationCompact.summary
             // (final, persisted). Leaving a partial in _summaryStreamFlow
@@ -340,6 +340,7 @@ class ConversationContextEngine(
         force: Boolean,
     ): CompactResult {
         return runCatching {
+                val conversationKey = conversation.id.toString()
                 val compressionModel = model
                     ?: settings.resolveTaskChatModel(settings.compressModelId)
                     ?: error("No model available for compression")
@@ -368,6 +369,13 @@ class ConversationContextEngine(
                     )
                 }
 
+                _activeCompactBoundaries.update { map ->
+                    map + (conversationKey to ActiveCompactBoundary(
+                        sourceStartIndex = plan.sourceStartIndex,
+                        sourceEndIndex = plan.sourceEndIndex,
+                        sourceMessageIds = plan.sourceMessageIds,
+                    ))
+                }
                 val nodes = conversation.messageNodes.subList(plan.sourceStartIndex, plan.sourceEndIndex + 1)
                 val contentToCompress = ConversationContextPlanner.buildCompressionInput(nodes.map { it.currentMessage })
                 val prompt = buildCompressionPrompt(
@@ -386,7 +394,6 @@ class ConversationContextEngine(
                 // (potentially KB-sized) string and triggering ChatList
                 // recomposition. 33ms ceiling = ≤30 fps update rate, plenty for
                 // smooth rolling text and bounded allocation.
-                val conversationKey = conversation.id.toString()
                 val accumulated = StringBuilder()
                 var lastFlushAt = 0L
                 providerHandler.streamText(
@@ -417,24 +424,16 @@ class ConversationContextEngine(
                     map + (conversationKey to accumulated.toString())
                 }
                 val summary = accumulated.toString().trim()
-                // 2026-05-18 (post-review): reasoning-mode models (DeepSeek-R1,
-                // Claude extended thinking, o1-class) routinely emit only
-                // UIMessagePart.Reasoning parts during compaction streaming;
-                // the collector above filters to Text only, so accumulated
-                // ends up empty. Previously this threw and surfaced as
-                // status=failed with NO compact persisted — same UX dead-end
-                // as the missing-required-fields case fix #2 addressed.
-                // Persist a skeleton compact via fallbackPlainTextSummaryJson
-                // so the "———已自动压缩———" divider still appears and the
-                // conversation isn't silently stuck at high context pressure.
-                val normalizedSummary = if (summary.isEmpty()) {
+                val normalizedSummary = CompactSummaryNormalizer.normalizeOrNull(
+                    json = json,
+                    summary = summary,
+                    sourceMessageIds = plan.sourceMessageIds,
+                ) ?: run {
                     Log.w(
                         TAG,
-                        "compact stream produced no Text parts (reasoning-only response?); persisting skeleton compact"
+                        "compact stream produced no Text parts; refusing to persist an empty completed compact"
                     )
-                    fallbackPlainTextSummaryJson("", plan.sourceMessageIds)
-                } else {
-                    normalizeSummaryJson(summary, plan.sourceMessageIds)
+                    error("Compact summary contained no text content")
                 }
                 val now = System.currentTimeMillis()
                 val compact = ConversationCompact(
@@ -508,16 +507,20 @@ class ConversationContextEngine(
             conversation = conversation,
             activeCompacts = compacts,
         )
+        val rawPressureRatio = plan.estimatedTokens.toFloat() / plan.contextWindowTokens.toFloat()
+        val effectivePressureRatio = effectiveTokens.toFloat() / plan.contextWindowTokens.toFloat()
         return buildJsonObject {
             put("enabled", policy.enabled)
             put("notify_only", policy.notifyOnly)
             put("estimated_tokens", effectiveTokens)
             put("raw_tokens", plan.estimatedTokens)
             put("context_window_tokens", plan.contextWindowTokens)
-            put("pressure_ratio", effectiveTokens.toFloat() / plan.contextWindowTokens.toFloat())
+            put("pressure_ratio", effectivePressureRatio)
+            put("raw_pressure_ratio", rawPressureRatio)
             put("summary_count", compacts.count { it.status == "completed" })
             put("latest_status", compacts.lastOrNull()?.status ?: "none")
-            put("next_action", plan.reason)
+            put("next_action", effectiveContextNextAction(policy, effectiveTokens, plan.contextWindowTokens))
+            put("raw_next_action", plan.reason)
         }
     }
 
@@ -554,120 +557,6 @@ class ConversationContextEngine(
         )
     }
 
-    private fun normalizeSummaryJson(summary: String, sourceMessageIds: List<String>): String {
-        val trimmed = summary.trim()
-            .removePrefix("```json")
-            .removePrefix("```")
-            .removeSuffix("```")
-            .trim()
-        val start = trimmed.indexOf('{')
-        val end = trimmed.lastIndexOf('}')
-        val candidate = if (start >= 0 && end > start) trimmed.substring(start, end + 1) else trimmed
-        val parsed = runCatching { json.parseToJsonElement(candidate).jsonObject }.getOrNull()
-            ?: return fallbackPlainTextSummaryJson(summary, sourceMessageIds)
-        val required = listOf(
-            "goals",
-            "facts",
-            "decisions",
-            "open_tasks",
-            "failed_attempts",
-            "tool_results",
-            "entities",
-            "timeline",
-            "source_message_ids",
-        )
-        val missing = required.filterNot { it in parsed }
-        // 2026-05-18: previously a missing required field threw via require(),
-        // which runCatching in compactInternal turned into status=failed → NO
-        // ConversationCompact entity persisted → no "———已自动压缩———" divider,
-        // no greyed-out source range, even though the streaming UI just
-        // finished running. Less-instructable models routinely skip one or
-        // two of the 9 required keys (e.g. "tool_results" when there were no
-        // tools in the segment). Patching missing keys with empty arrays
-        // preserves what the model DID give us AND keeps the divider/grey
-        // UX functioning — partial signal beats vanished compact.
-        // source_message_ids needs the planner-supplied list, not an empty
-        // array, since prepareMessages relies on it for substitution.
-        val normalizedJson = if (missing.isEmpty()) {
-            candidate
-        } else {
-            Log.w(
-                TAG,
-                "Compact summary JSON missing fields, patching: ${missing.joinToString(", ")}"
-            )
-            val patched = buildJsonObject {
-                parsed.forEach { (k, v) -> put(k, v) }
-                missing.forEach { key ->
-                    if (key == "source_message_ids") {
-                        put(key, buildJsonArray { sourceMessageIds.forEach { add(it) } })
-                    } else {
-                        put(key, buildJsonArray { })
-                    }
-                }
-            }
-            patched.toString()
-        }
-        // 2026-05-18: preserve the prose preamble (text before first `{`) so the
-        // permanent ContextCompactMarker's summaryPreview can render a
-        // human-readable line under the divider. Earlier behaviour stored
-        // ONLY the JSON body, so summaryPreviewOf(compact) always returned
-        // null and the divider had no subtitle even though buildCompressionPrompt
-        // explicitly asks the model for a leading sentence. Strip code fences
-        // and any "[Summary…]" markdown headings the model occasionally emits,
-        // collapse whitespace to one line, cap at 240 chars so we don't bloat
-        // the system message budget materially.
-        val preamble = if (start > 0) trimmed.substring(0, start).trim() else ""
-        // 2026-05-18 (post-review): scrub fences / headings via .replace()
-        // rather than removePrefix() so they get stripped anywhere in the
-        // preamble, not only at its very start. Earlier removePrefix-only
-        // version persisted a leaked "```json" when the model emitted the
-        // fence on a separate line AFTER the prose ("Summary.\n```json\n{..."),
-        // which showed up in the permanent marker's subtitle. Mirrors the
-        // streaming-side ContextCompactInProgressMarker scrub for parity.
-        val cleanedPreamble = preamble
-            .replace("```json", " ")
-            .replace("```", " ")
-            .replace("[Summary of previous conversation]", " ")
-            .replace("[Summary]", " ")
-            .lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .joinToString(" ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .take(240)
-        return if (cleanedPreamble.isNotEmpty()) "$cleanedPreamble\n$normalizedJson" else normalizedJson
-    }
-
-    private fun fallbackPlainTextSummaryJson(summary: String, sourceMessageIds: List<String>): String {
-        val cleaned = summary
-            .removePrefix("```json")
-            .removePrefix("```")
-            .removeSuffix("```")
-            .trim()
-            .lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .joinToString("\n")
-            .take(12_000)
-        val fallback = buildJsonObject {
-            put("goals", buildJsonArray {})
-            put("facts", buildJsonArray {
-                add(cleaned.ifBlank { "Conversation segment was compressed, but the model returned an unstructured summary." })
-            })
-            put("decisions", buildJsonArray {})
-            put("open_tasks", buildJsonArray {})
-            put("failed_attempts", buildJsonArray {})
-            put("tool_results", buildJsonArray {})
-            put("entities", buildJsonArray {})
-            put("timeline", buildJsonArray {})
-            put("source_message_ids", buildJsonArray {
-                sourceMessageIds.forEach { add(it) }
-            })
-        }
-        return fallback.toString()
-    }
-
     private fun Conversation.withEffectiveMessages(effectiveMessages: List<UIMessage>): Conversation {
         val byId = effectiveMessages.associateBy { it.id }
         return copy(
@@ -684,5 +573,19 @@ class ConversationContextEngine(
                 }
             }
         )
+    }
+}
+
+internal fun effectiveContextNextAction(
+    policy: CompactPolicy,
+    effectiveTokens: Int,
+    contextWindowTokens: Int,
+): String {
+    if (!policy.enabled) return "disabled"
+    val ratio = effectiveTokens.toFloat() / contextWindowTokens.coerceAtLeast(1).toFloat()
+    return when {
+        ratio >= policy.forceRatio -> "force_threshold"
+        ratio >= policy.precompactRatio -> "precompact_threshold"
+        else -> "below_threshold"
     }
 }

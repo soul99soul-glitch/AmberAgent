@@ -277,7 +277,7 @@
   <string name="chat_page_compress_target_tokens">目标Token大小</string>
   <string name="chat_page_compress_warning">上下文会整理成可回查摘要，原始消息仍保留在本对话中。</string>
   <string name="chat_page_compressing">正在压缩...</string>
-  <string name="chat_context_auto_compacted">上下文已自动压缩</string>
+  <string name="chat_context_auto_compacted">上下文已压缩</string>
   <string name="chat_context_auto_compacting">正在自动压缩</string>
   <string name="chat_context_auto_compacting_subtitle">正在生成上下文摘要…</string>
   <string name="chat_page_delete">删除</string>

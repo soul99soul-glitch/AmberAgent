@@ -127,6 +127,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -623,6 +624,7 @@ fun ChatList(
     timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
+    activeCompactBoundary: ActiveCompactBoundary? = null,
     isCompacting: Boolean = false,
     streamingSummary: String = "",
     state: LazyListState,
@@ -676,6 +678,7 @@ fun ChatList(
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
+                activeCompactBoundary = activeCompactBoundary,
                 isCompacting = isCompacting,
                 streamingSummary = streamingSummary,
                 state = state,
@@ -716,6 +719,7 @@ private fun ChatListNormal(
     timelineLoadState: ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
+    activeCompactBoundary: ActiveCompactBoundary?,
     isCompacting: Boolean,
     streamingSummary: String,
     state: LazyListState,
@@ -900,6 +904,24 @@ private fun ChatListNormal(
             }
             .groupBy(keySelector = { it.first }, valueTransform = { it.second })
     }
+    val activeCompactVisibleEndIndex = remember(
+        activeCompactBoundary,
+        timelineLoadState.oldestLoadedIndex,
+        isCompacting,
+    ) {
+        activeCompactBoundary
+            ?.takeIf { isCompacting }
+            ?.sourceEndIndex
+            ?.minus(timelineLoadState.oldestLoadedIndex)
+            ?.takeIf { it >= 0 }
+    }
+    val activeCompactCoveredMessageIds = remember(activeCompactBoundary, isCompacting) {
+        if (isCompacting) {
+            activeCompactBoundary?.sourceMessageIds.orEmpty().toSet()
+        } else {
+            emptySet()
+        }
+    }
 
     // Set of message ids covered by an already-completed compact. ChatMessage
     // container alpha is dimmed for these so the user can VISUALLY tell that
@@ -909,28 +931,24 @@ private fun ChatListNormal(
     // updateConversation() that re-emits a new messageNodes List reference per
     // 33ms chunk does NOT cause this Set to be rebuilt. Per-node containment
     // is checked inline at render time (O(1) HashSet lookup).
-    val coveredMessageIds = remember(contextCompacts) {
-        contextCompacts
+    val coveredMessageIds = remember(contextCompacts, activeCompactCoveredMessageIds) {
+        val completedIds = contextCompacts
             .filter { it.status == "completed" }
             .flatMap { it.sourceMessageIds }
             .toSet()
+        if (activeCompactCoveredMessageIds.isEmpty()) {
+            completedIds
+        } else {
+            completedIds + activeCompactCoveredMessageIds
+        }
     }
 
-    // 2026-05-15 (1.9.9): user clarified the expected UX — "应该只有一段
-    // '———已自动压缩———' 作为分割线，上面是灰色的历史内容，下面是历史内容的摘要".
-    // Single source of truth = the permanent ContextCompactMarker injected at
-    // each compact's sourceEndIndex via compactMarkersByEndIndex below. That
-    // marker now carries the summary preview (1.9.8 change), so users see
-    // exactly one "———已自动压缩———" line, divider above is pre-compacted
-    // (dimmed via coveredMessageIds), divider below is the summary + active
-    // context.
-    //
-    // The shimmer-while-compacting marker is still rendered at the LazyColumn
-    // bottom while `isCompacting` is true (visual feedback that work is in
-    // progress), but it vanishes the moment compactConversation returns and
-    // the permanent marker takes over at the correct historical position.
-    // The previous transient-bottom-marker-with-8s-timeout was an extra
-    // moving piece I added trying to cover both reading positions — removed.
+    // 2026-05-18: active compaction is rendered at the same real boundary as
+    // completed compaction: sourceEndIndex. That gives the intended transition:
+    // "正在自动压缩" at the boundary while the summary streams, then
+    // "上下文已压缩" with the final human-readable summary at that exact spot.
+    // We deliberately do not render a fake bottom marker; otherwise the UI lies
+    // about which messages were removed from model context.
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
@@ -1308,6 +1326,12 @@ private fun ChatListNormal(
                                     summaryPreview = summaryPreviewOf(compact),
                                 )
                             }
+                            if (activeCompactVisibleEndIndex == index - 1) {
+                                ContextCompactInProgressMarker(
+                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                    streamingText = streamingSummary,
+                                )
+                            }
                             // 2026-05-15 (1.9.5): pass alpha modifier directly to
                             // ListSelectableItem instead of wrapping in a Box. Compose's
                             // Modifier.alpha(1f) is a no-op (returns Modifier as-is, no
@@ -1418,6 +1442,12 @@ private fun ChatListNormal(
                                             summaryPreview = summaryPreviewOf(compact),
                                         )
                                     }
+                                    if (activeCompactVisibleEndIndex == index - 1) {
+                                        ContextCompactInProgressMarker(
+                                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                            streamingText = streamingSummary,
+                                        )
+                                    }
                                 }
                                 // See non-virtual branch comment above — alpha is passed to
                                 // TimelineSelectableMessageItem.modifier so the active-message
@@ -1497,6 +1527,30 @@ private fun ChatListNormal(
                 }
             }
 
+            val trailingCompactMarkers = compactMarkersByEndIndex[conversation.messageNodes.lastIndex].orEmpty()
+            trailingCompactMarkers.forEach { compact ->
+                item(
+                    key = "compact-boundary-tail-${compact.id}",
+                    contentType = "compact-boundary-tail",
+                ) {
+                    ContextCompactMarker(
+                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                        summaryPreview = summaryPreviewOf(compact),
+                    )
+                }
+            }
+            if (activeCompactVisibleEndIndex == conversation.messageNodes.lastIndex) {
+                item(
+                    key = "compact-boundary-active-tail-${conversation.id}",
+                    contentType = "compact-boundary-active-tail",
+                ) {
+                    ContextCompactInProgressMarker(
+                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                        streamingText = streamingSummary,
+                    )
+                }
+            }
+
             itemsIndexed(
                 items = pendingUserMessages,
                 key = { _, item -> "pending-${item.id}" },
@@ -1511,42 +1565,6 @@ private fun ChatListNormal(
                     )
                 }
             }
-
-            // Codex-style "auto-compacting" divider. Lives between
-            // pending-user-messages and the loading indicator so users see the
-            // sequence:
-            //   [my message]
-            //   → [shimmer "正在自动压缩"]
-            //   → (compact done) [solid "已自动压缩"] (8s)
-            //   → [AI thinking]
-            //
-            // The transient finished marker at this position is in ADDITION to
-            // the permanent ContextCompactMarker that gets inserted at the
-            // historical sourceEndIndex (compactMarkersByEndIndex above) — that
-            // one stays in the timeline as the boundary between compacted and
-            // active context; this transient one is feedback at the user's
-            // current viewport position.
-            if (isCompacting) {
-                item(
-                    key = "compact-in-progress",
-                    contentType = "compact-in-progress",
-                ) {
-                    ContextCompactInProgressMarker(
-                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        streamingText = streamingSummary,
-                    )
-                }
-            }
-            // 1.9.9: removed the post-compact transient bottom marker. The
-            // permanent marker at sourceEndIndex (rendered in
-            // compactMarkersByEndIndex above) is the single visible boundary;
-            // its built-in summaryPreview displays the prose summary right
-            // below the divider, exactly matching the user's mental model:
-            //   [pre-compacted msg]   (dimmed)
-            //   [pre-compacted msg]   (dimmed)
-            //   ─── 已自动压缩 ───
-            //   "summary preview ..."
-            //   [active msg]
 
             if (loading) {
                 item(

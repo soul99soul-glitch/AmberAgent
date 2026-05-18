@@ -83,6 +83,7 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
@@ -132,6 +133,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val timelineLoadState by vm.timelineLoadState.collectAsStateWithLifecycle()
     val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
+    val activeCompactBoundary by vm.activeCompactBoundary.collectAsStateWithLifecycle()
     val isCompacting by vm.isCompacting.collectAsStateWithLifecycle()
     val streamingSummary by vm.streamingSummary.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
@@ -321,6 +323,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     timelineLoadState = timelineLoadState,
                     pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
+                    activeCompactBoundary = activeCompactBoundary,
                     isCompacting = isCompacting,
                     streamingSummary = streamingSummary,
                     drawerState = drawerState,
@@ -364,6 +367,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     timelineLoadState = timelineLoadState,
                     pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
+                    activeCompactBoundary = activeCompactBoundary,
                     isCompacting = isCompacting,
                     streamingSummary = streamingSummary,
                     drawerState = drawerState,
@@ -425,6 +429,7 @@ private fun ChatPageContent(
     timelineLoadState: me.rerere.rikkahub.service.ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
+    activeCompactBoundary: ActiveCompactBoundary?,
     isCompacting: Boolean,
     streamingSummary: String,
     drawerState: DrawerState,
@@ -636,6 +641,7 @@ private fun ChatPageContent(
                 timelineLoadState = timelineLoadState,
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
+                activeCompactBoundary = activeCompactBoundary,
                 isCompacting = isCompacting,
                 streamingSummary = streamingSummary,
                 state = chatListState,

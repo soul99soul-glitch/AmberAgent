@@ -362,6 +362,11 @@ class ChatService(
         return contextEngine.summaryStreamFlow.map { it[key].orEmpty() }
     }
 
+    fun getActiveCompactBoundaryFlow(conversationId: Uuid): Flow<me.rerere.rikkahub.data.context.ActiveCompactBoundary?> {
+        val key = conversationId.toString()
+        return contextEngine.activeCompactBoundaries.map { it[key] }
+    }
+
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
         if (getOrCreateSession(conversationId).cancelPendingUserMessage(messageId)) {
             pendingMessageStore.recordEvent(conversationId, event = "cancel", messageId = messageId)

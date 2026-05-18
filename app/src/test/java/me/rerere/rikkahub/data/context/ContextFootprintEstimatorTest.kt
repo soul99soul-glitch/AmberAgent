@@ -5,12 +5,13 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContextFootprintEstimatorTest {
     @Test
-    fun reasoningDoesNotCountAsInputFootprint() {
+    fun reasoningCountsAsInputFootprint() {
         val base = ContextFootprintEstimator.estimateMessages(
             listOf(UIMessage.assistant("visible"))
         )
@@ -26,11 +27,11 @@ class ContextFootprintEstimatorTest {
             )
         )
 
-        assertEquals(base, withReasoning)
+        assertTrue("reasoning footprint should be counted", withReasoning > base)
     }
 
     @Test
-    fun toolOutputIsCapped() {
+    fun toolOutputContributesToFootprint() {
         val estimate = ContextFootprintEstimator.estimateMessages(
             listOf(
                 UIMessage(
@@ -47,11 +48,11 @@ class ContextFootprintEstimatorTest {
             )
         )
 
-        assertTrue("tool footprint should stay capped, got $estimate", estimate < 3_000)
+        assertTrue("tool footprint should include large output, got $estimate", estimate > 20_000)
     }
 
     @Test
-    fun fingerprintIgnoresUsageAndReasoningGrowth() {
+    fun fingerprintIgnoresUsageButTracksReasoningGrowth() {
         val base = UIMessage.assistant("done")
         val withUsage = base.copy(usage = TokenUsage(promptTokens = 1234, completionTokens = 56))
         val withShortReasoning = base.copy(parts = base.parts + UIMessagePart.Reasoning("thinking"))
@@ -61,7 +62,7 @@ class ContextFootprintEstimatorTest {
             ContextFootprintEstimator.inputFingerprint(listOf(base)),
             ContextFootprintEstimator.inputFingerprint(listOf(withUsage))
         )
-        assertEquals(
+        assertNotEquals(
             ContextFootprintEstimator.inputFingerprint(listOf(withShortReasoning)),
             ContextFootprintEstimator.inputFingerprint(listOf(withLongReasoning))
         )
