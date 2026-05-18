@@ -5,7 +5,6 @@ import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.SlidersHorizontal
 import me.rerere.hugeicons.stroke.Share01
@@ -36,7 +35,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -110,11 +108,9 @@ import me.rerere.rikkahub.ui.components.ai.ModelAbilityTag
 import me.rerere.rikkahub.ui.components.ai.ModelModalityTag
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.ModelTypeTag
-import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ShareSheet
-import me.rerere.rikkahub.ui.components.ui.SiliconFlowPowerByIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
@@ -124,10 +120,6 @@ import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
-import me.rerere.rikkahub.ui.pages.setting.components.ProviderConnectionTester
-import me.rerere.rikkahub.ui.pages.setting.components.SettingProviderBalanceOption
-import me.rerere.rikkahub.ui.pages.setting.components.isUsingDefaultBaseUrl
-import me.rerere.rikkahub.ui.pages.setting.components.resetBaseUrlToDefault
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.plus
@@ -282,139 +274,6 @@ private fun Int.formatContextWindowInput(): String = when {
     this % 1_000_000 == 0 -> "${this / 1_000_000}M"
     this % 1_000 == 0 -> "${this / 1_000}K"
     else -> toString()
-}
-
-@Composable
-private fun SettingProviderConfigPage(
-    provider: ProviderSetting,
-    onEdit: (ProviderSetting) -> Unit,
-    onDelete: () -> Unit
-) {
-    var internalProvider by remember(provider) { mutableStateOf(provider) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item(key = "provider_config") {
-            ProviderConfigure(
-                provider = internalProvider,
-                // Async outcomes (Codex OAuth login, listModels refresh) commit straight to the
-                // top-level settings — without this, the user has to remember to hit Save before
-                // switching to the Models tab, and we end up with "Codex login succeeded but Models
-                // tab shows empty" reports.
-                onCommit = { committed ->
-                    internalProvider = committed  // keep local in sync so the UI doesn't snap back
-                    onEdit(committed)
-                },
-                onEdit = {
-                    internalProvider = it
-                },
-            )
-        }
-
-        if (internalProvider is ProviderSetting.OpenAI) {
-            item(key = "provider_balance") {
-                SettingProviderBalanceOption(
-                    provider = internalProvider,
-                    balanceOption = internalProvider.balanceOption,
-                    onEdit = { internalProvider = internalProvider.copyProvider(balanceOption = it) }
-                )
-            }
-            item(key = "provider_balance_text") {
-                ProviderBalanceText(providerSetting = internalProvider, style = MaterialTheme.typography.labelSmall)
-            }
-        }
-
-        item(key = "provider_actions") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ProviderConnectionTester(
-                    internalProvider = internalProvider,
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                IconButton(
-                    onClick = {
-                        showDeleteDialog = true
-                    },
-                ) {
-                    Icon(HugeIcons.Delete01, null)
-                }
-
-                IconButton(
-                    onClick = {
-                        internalProvider = internalProvider.resetBaseUrlToDefault()
-                    },
-                    enabled = !internalProvider.isUsingDefaultBaseUrl(),
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Refresh03,
-                        contentDescription = stringResource(R.string.setting_model_page_reset_to_default)
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        onEdit(internalProvider)
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_save))
-                }
-            }
-        }
-
-        // 硅基流动图标
-        val siliconFlowProvider = internalProvider as? ProviderSetting.OpenAI
-        if (siliconFlowProvider?.baseUrl?.contains("siliconflow.cn") == true) {
-            item(key = "siliconflow_powered_by") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    SiliconFlowPowerByIcon()
-                }
-            }
-        }
-    }
-
-    // Delete confirmation dialog
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = {
-                Text(stringResource(R.string.confirm_delete))
-            },
-            text = {
-                Text(stringResource(R.string.setting_provider_page_delete_dialog_text))
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDelete()
-                    }
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
-            }
-        )
-    }
 }
 
 @Composable
