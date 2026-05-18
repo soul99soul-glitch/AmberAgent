@@ -427,13 +427,39 @@ private fun ContextCompactInProgressMarker(
         // + leading ellipsis once it overflows. When stream hasn't produced
         // any prose yet (cold start, slow first token), fall back to the
         // generic subtitle so the marker isn't a void of whitespace.
+        //
+        // 2026-05-18: cut at first `{` (JSON object start) AND scrub any
+        // ```json / ``` / [Summary…] markers from inside the prose — DeepSeek
+        // and several smaller models routinely emit a code fence between
+        // the preamble sentence and the JSON, which without scrubbing
+        // turned the live display into a stream of "```json" gibberish.
+        // Cheap String.replace beats a Regex compile per frame; the
+        // markers are short and case-stable.
         val proseOnly = remember(streamingText) {
             val cutIndex = streamingText.indexOf('{')
-            val raw = if (cutIndex >= 0) streamingText.substring(0, cutIndex) else streamingText
-            COMPACT_SUMMARY_WHITESPACE_RE.replace(raw, " ").trim()
+            val rawPreamble = if (cutIndex >= 0) {
+                streamingText.substring(0, cutIndex)
+            } else {
+                streamingText
+            }
+            val scrubbed = rawPreamble
+                .replace("```json", " ")
+                .replace("```", " ")
+                .replace("[Summary of previous conversation]", " ")
+                .replace("[Summary]", " ")
+            COMPACT_SUMMARY_WHITESPACE_RE.replace(scrubbed, " ").trim()
         }
+        // 2026-05-18 (post-review): take the FIRST 120 chars rather than the
+        // last. buildCompressionPrompt mandates a single ≤100 char preamble
+        // sentence — its meaning lives at the START of the buffer. takeLast
+        // was a holdover from a "scrolling cursor" UX that made sense for an
+        // unbounded build log; here it would surface the prose-near-JSON
+        // transition (e.g. "…goals are deploy, fix bug, ") rather than the
+        // actual sentence head, especially when a misbehaving model rambles
+        // before emitting `{`. JSON-side content stays hidden either way
+        // (cut at `{` happens before this).
         val tailText = remember(proseOnly) {
-            if (proseOnly.length > 120) "…" + proseOnly.takeLast(120) else proseOnly
+            if (proseOnly.length > 120) proseOnly.take(120) + "…" else proseOnly
         }
         Text(
             text = tailText.ifBlank { stringResource(R.string.chat_context_auto_compacting_subtitle) },
@@ -1379,9 +1405,17 @@ private fun ChatListNormal(
                             ) {
                                 if (isFirstVirtualItem) {
                                     val markers = compactMarkersByEndIndex[index - 1].orEmpty()
-                                    markers.forEach {
+                                    markers.forEach { compact ->
+                                        // 2026-05-18: virtual-items branch was missing the
+                                        // summaryPreview parameter that the non-virtual
+                                        // branch already passes, so for the common case
+                                        // (multi-part assistant messages with reasoning /
+                                        // tool / text → virtual items kick in) the divider
+                                        // rendered without its summary line. Match the
+                                        // non-virtual branch.
                                         ContextCompactMarker(
-                                            modifier = Modifier.padding(bottom = TimelineItemSpacing)
+                                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                            summaryPreview = summaryPreviewOf(compact),
                                         )
                                     }
                                 }

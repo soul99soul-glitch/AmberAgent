@@ -417,9 +417,25 @@ class ConversationContextEngine(
                     map + (conversationKey to accumulated.toString())
                 }
                 val summary = accumulated.toString().trim()
-                    .takeIf { it.isNotEmpty() }
-                    ?: error("Failed to generate compact summary")
-                val normalizedSummary = normalizeSummaryJson(summary, plan.sourceMessageIds)
+                // 2026-05-18 (post-review): reasoning-mode models (DeepSeek-R1,
+                // Claude extended thinking, o1-class) routinely emit only
+                // UIMessagePart.Reasoning parts during compaction streaming;
+                // the collector above filters to Text only, so accumulated
+                // ends up empty. Previously this threw and surfaced as
+                // status=failed with NO compact persisted — same UX dead-end
+                // as the missing-required-fields case fix #2 addressed.
+                // Persist a skeleton compact via fallbackPlainTextSummaryJson
+                // so the "———已自动压缩———" divider still appears and the
+                // conversation isn't silently stuck at high context pressure.
+                val normalizedSummary = if (summary.isEmpty()) {
+                    Log.w(
+                        TAG,
+                        "compact stream produced no Text parts (reasoning-only response?); persisting skeleton compact"
+                    )
+                    fallbackPlainTextSummaryJson("", plan.sourceMessageIds)
+                } else {
+                    normalizeSummaryJson(summary, plan.sourceMessageIds)
+                }
                 val now = System.currentTimeMillis()
                 val compact = ConversationCompact(
                     id = Uuid.random().toString(),
@@ -478,12 +494,27 @@ class ConversationContextEngine(
             policy = policy,
             modelContextWindowTokens = model?.contextWindowTokens,
         )
+        // 2026-05-18: `plan.estimatedTokens` is the RAW token count of all
+        // messageNodes — it ignores active compact substitution that the send
+        // pipeline (prepareMessagesWithCompacts) actually applies. The UI ring
+        // (ContextFootprintEstimator.estimateConversationInputTokens) DOES
+        // substitute, so before this change the model reported e.g. "335K /
+        // 1M = 33.5% pressure" while the ring + real API call were at 150K.
+        // Now we expose `effective_tokens` (post-substitution) as the
+        // headline number alongside `raw_tokens` (pre-substitution) for
+        // debug, and base `pressure_ratio` on the effective count so the
+        // model's reasoning about "should I compact" matches reality.
+        val effectiveTokens = ContextFootprintEstimator.estimateConversationInputTokens(
+            conversation = conversation,
+            activeCompacts = compacts,
+        )
         return buildJsonObject {
             put("enabled", policy.enabled)
             put("notify_only", policy.notifyOnly)
-            put("estimated_tokens", plan.estimatedTokens)
+            put("estimated_tokens", effectiveTokens)
+            put("raw_tokens", plan.estimatedTokens)
             put("context_window_tokens", plan.contextWindowTokens)
-            put("pressure_ratio", plan.estimatedTokens.toFloat() / plan.contextWindowTokens.toFloat())
+            put("pressure_ratio", effectiveTokens.toFloat() / plan.contextWindowTokens.toFloat())
             put("summary_count", compacts.count { it.status == "completed" })
             put("latest_status", compacts.lastOrNull()?.status ?: "none")
             put("next_action", plan.reason)
@@ -524,16 +555,14 @@ class ConversationContextEngine(
     }
 
     private fun normalizeSummaryJson(summary: String, sourceMessageIds: List<String>): String {
-        val candidate = summary.trim()
+        val trimmed = summary.trim()
             .removePrefix("```json")
             .removePrefix("```")
             .removeSuffix("```")
             .trim()
-            .let { cleaned ->
-                val start = cleaned.indexOf('{')
-                val end = cleaned.lastIndexOf('}')
-                if (start >= 0 && end > start) cleaned.substring(start, end + 1) else cleaned
-            }
+        val start = trimmed.indexOf('{')
+        val end = trimmed.lastIndexOf('}')
+        val candidate = if (start >= 0 && end > start) trimmed.substring(start, end + 1) else trimmed
         val parsed = runCatching { json.parseToJsonElement(candidate).jsonObject }.getOrNull()
             ?: return fallbackPlainTextSummaryJson(summary, sourceMessageIds)
         val required = listOf(
@@ -548,10 +577,66 @@ class ConversationContextEngine(
             "source_message_ids",
         )
         val missing = required.filterNot { it in parsed }
-        require(missing.isEmpty()) {
-            "Compact summary JSON missing fields: ${missing.joinToString(", ")}"
+        // 2026-05-18: previously a missing required field threw via require(),
+        // which runCatching in compactInternal turned into status=failed → NO
+        // ConversationCompact entity persisted → no "———已自动压缩———" divider,
+        // no greyed-out source range, even though the streaming UI just
+        // finished running. Less-instructable models routinely skip one or
+        // two of the 9 required keys (e.g. "tool_results" when there were no
+        // tools in the segment). Patching missing keys with empty arrays
+        // preserves what the model DID give us AND keeps the divider/grey
+        // UX functioning — partial signal beats vanished compact.
+        // source_message_ids needs the planner-supplied list, not an empty
+        // array, since prepareMessages relies on it for substitution.
+        val normalizedJson = if (missing.isEmpty()) {
+            candidate
+        } else {
+            Log.w(
+                TAG,
+                "Compact summary JSON missing fields, patching: ${missing.joinToString(", ")}"
+            )
+            val patched = buildJsonObject {
+                parsed.forEach { (k, v) -> put(k, v) }
+                missing.forEach { key ->
+                    if (key == "source_message_ids") {
+                        put(key, buildJsonArray { sourceMessageIds.forEach { add(it) } })
+                    } else {
+                        put(key, buildJsonArray { })
+                    }
+                }
+            }
+            patched.toString()
         }
-        return candidate
+        // 2026-05-18: preserve the prose preamble (text before first `{`) so the
+        // permanent ContextCompactMarker's summaryPreview can render a
+        // human-readable line under the divider. Earlier behaviour stored
+        // ONLY the JSON body, so summaryPreviewOf(compact) always returned
+        // null and the divider had no subtitle even though buildCompressionPrompt
+        // explicitly asks the model for a leading sentence. Strip code fences
+        // and any "[Summary…]" markdown headings the model occasionally emits,
+        // collapse whitespace to one line, cap at 240 chars so we don't bloat
+        // the system message budget materially.
+        val preamble = if (start > 0) trimmed.substring(0, start).trim() else ""
+        // 2026-05-18 (post-review): scrub fences / headings via .replace()
+        // rather than removePrefix() so they get stripped anywhere in the
+        // preamble, not only at its very start. Earlier removePrefix-only
+        // version persisted a leaked "```json" when the model emitted the
+        // fence on a separate line AFTER the prose ("Summary.\n```json\n{..."),
+        // which showed up in the permanent marker's subtitle. Mirrors the
+        // streaming-side ContextCompactInProgressMarker scrub for parity.
+        val cleanedPreamble = preamble
+            .replace("```json", " ")
+            .replace("```", " ")
+            .replace("[Summary of previous conversation]", " ")
+            .replace("[Summary]", " ")
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(240)
+        return if (cleanedPreamble.isNotEmpty()) "$cleanedPreamble\n$normalizedJson" else normalizedJson
     }
 
     private fun fallbackPlainTextSummaryJson(summary: String, sourceMessageIds: List<String>): String {
