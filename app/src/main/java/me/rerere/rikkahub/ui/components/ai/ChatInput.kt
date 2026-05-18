@@ -119,6 +119,7 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.utils.ChatSendTransitionTracker
 import me.rerere.rikkahub.utils.formatNumber
 import org.koin.compose.koinInject
 import okhttp3.OkHttpClient
@@ -186,6 +187,9 @@ fun ChatInput(
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val imeVisible = WindowInsets.isImeVisible
+    var expand by remember { mutableStateOf(ExpandState.Collapsed) }
+
     fun hideKeyboardAfterSend() {
         coroutineScope.launch {
             // Let the sent message, input clear, and bottom-follow layout commit
@@ -203,6 +207,10 @@ fun ChatInput(
             keyboardController?.hide()
             onCancelClick()
         } else {
+            ChatSendTransitionTracker.start(
+                conversationId = conversation.id.toString(),
+                preSendLatestMessageId = conversation.currentMessages.lastOrNull()?.id?.toString(),
+            )
             coroutineScope.launch {
                 val blockingIssue = withContext(Dispatchers.IO) {
                     ImageAttachmentValidator.firstBlockingIssueForSend(
@@ -227,6 +235,11 @@ fun ChatInput(
             keyboardController?.hide()
             onCancelClick()
         } else {
+            val queueMode = if (loading) PendingUserMessageMode.STEER else PendingUserMessageMode.FOLLOWUP
+            ChatSendTransitionTracker.start(
+                conversationId = conversation.id.toString(),
+                preSendLatestMessageId = conversation.currentMessages.lastOrNull()?.id?.toString(),
+            )
             coroutineScope.launch {
                 val blockingIssue = withContext(Dispatchers.IO) {
                     ImageAttachmentValidator.firstBlockingIssueForSend(
@@ -238,14 +251,13 @@ fun ChatInput(
                 if (blockingIssue != null) {
                     toaster.show(blockingIssue.message, type = ToastType.Error)
                 } else {
-                    onLongSendClick(if (loading) PendingUserMessageMode.STEER else PendingUserMessageMode.FOLLOWUP)
+                    onLongSendClick(queueMode)
                     hideKeyboardAfterSend()
                 }
             }
         }
     }
 
-    var expand by remember { mutableStateOf(ExpandState.Collapsed) }
     var showUsageSheet by remember { mutableStateOf(false) }
     var usageStatus by remember { mutableStateOf(ComposerUsageStatus()) }
     var usageLoading by remember { mutableStateOf(false) }
@@ -436,9 +448,8 @@ fun ChatInput(
         }
 
     // Collapse when ime is visible
-    val imeVisile = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisile, showUsageSheet) {
-        if (imeVisile && !showUsageSheet) {
+    LaunchedEffect(imeVisible, showUsageSheet) {
+        if (imeVisible && !showUsageSheet) {
             dismissExpand()
         }
     }

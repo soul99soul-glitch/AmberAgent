@@ -117,6 +117,7 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
+import me.rerere.rikkahub.utils.ChatSendTransitionTracker
 import me.rerere.rikkahub.utils.sendNotification
 import java.time.Instant
 import java.util.Locale
@@ -768,11 +769,16 @@ class ChatService(
             initializeConversation(conversationId)
         }
         val currentConversation = session.state.value
+        val userNode = UIMessage(
+            role = MessageRole.USER,
+            parts = message.parts,
+        ).toMessageNode()
+        ChatSendTransitionTracker.markSentUserMessage(
+            conversationId = conversationId.toString(),
+            messageId = userNode.currentMessage.id.toString(),
+        )
         val newConversation = currentConversation.copy(
-            messageNodes = currentConversation.messageNodes + UIMessage(
-                role = MessageRole.USER,
-                parts = message.parts,
-            ).toMessageNode(),
+            messageNodes = currentConversation.messageNodes + userNode,
         )
         updateConversation(conversationId, newConversation)
         persistConversationWindow(conversationId, newConversation, indexFts = true)

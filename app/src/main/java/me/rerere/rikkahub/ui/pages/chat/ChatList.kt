@@ -155,6 +155,7 @@ import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
+import me.rerere.rikkahub.utils.ChatSendTransitionTracker
 import me.rerere.rikkahub.utils.plus
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -786,6 +787,21 @@ private fun ChatListNormal(
     } else {
         emptyList()
     }
+    val latestMessage = conversation.currentMessages.lastOrNull()
+    val latestMessageId = latestMessage?.id?.toString()
+    val conversationId = conversation.id.toString()
+    val latestIsPreSendTail = ChatSendTransitionTracker.isPreSendLatestMessage(
+        conversationId = conversationId,
+        messageId = latestMessageId,
+    )
+    val latestIsSentUserTail = latestMessage?.role == MessageRole.USER &&
+        ChatSendTransitionTracker.isSentUserMessage(
+            conversationId = conversationId,
+            messageId = latestMessageId,
+        )
+    val postSendTailWaitingForAssistant = activeGeneration &&
+        (latestIsPreSendTail || latestIsSentUserTail)
+    val timelineLoading = loading && !postSendTailWaitingForAssistant
 
     // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
     // transition point so we can correlate "哗哗出字最后没贴底" timeline
@@ -961,7 +977,7 @@ private fun ChatListNormal(
         conversation.messageNodes,
         timelineLoadState.isFullyLoaded,
         pendingUserMessages.size,
-        loading,
+        timelineLoading,
         chatAssistant,
         showAssistantBubble,
         markdownVirtualizationEpoch,
@@ -970,7 +986,7 @@ private fun ChatListNormal(
             messageNodes = conversation.messageNodes,
             assistant = chatAssistant,
             showAssistantBubble = showAssistantBubble,
-            loading = loading,
+            loading = timelineLoading,
             hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
             pendingMessageCount = pendingUserMessages.size,
         )
@@ -1037,8 +1053,6 @@ private fun ChatListNormal(
             )
         }
     }
-
-    val latestMessage = conversation.currentMessages.lastOrNull()
 
     LaunchedEffect(conversation.id, latestMessage?.id, activeGeneration) {
         logScroll(
@@ -1158,7 +1172,7 @@ private fun ChatListNormal(
         conversation.id,
         conversation.messageNodes,
         timelineLoadState.isFullyLoaded,
-        loading,
+        timelineLoading,
         chatAssistant,
         lazyItemMessageIndexes,
     ) {
@@ -1166,7 +1180,7 @@ private fun ChatListNormal(
             state.markdownPrewarmTexts(
                 messageNodes = conversation.messageNodes,
                 assistant = chatAssistant,
-                loadingLastMessage = loading,
+                loadingLastMessage = timelineLoading,
                 lazyItemMessageIndexes = lazyItemMessageIndexes,
             )
         }
@@ -1187,7 +1201,7 @@ private fun ChatListNormal(
         state = state,
         messageNodes = conversation.messageNodes,
         lazyItemMessageIndexes = lazyItemMessageIndexes,
-        loading = loading,
+        loading = timelineLoading,
         timelineLoadState = timelineLoadState,
         pendingUserMessages = pendingUserMessages,
     )
@@ -1294,7 +1308,7 @@ private fun ChatListNormal(
 
             conversation.messageNodes.forEachIndexed { index, node ->
                 val isLastMessage = index == conversation.messageNodes.lastIndex
-                val isLoadingMessage = loading && isLastMessage
+                val isLoadingMessage = timelineLoading && isLastMessage
                 val isPreCompacted = coveredMessageIds.isNotEmpty() &&
                     node.currentMessage.id.toString() in coveredMessageIds
                 val virtualItems = buildChatMessageVirtualItems(
@@ -1566,7 +1580,7 @@ private fun ChatListNormal(
                 }
             }
 
-            if (loading) {
+            if (timelineLoading) {
                 item(
                     key = LoadingIndicatorKey,
                     contentType = "loading",
@@ -1596,6 +1610,16 @@ private fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            if (loading && postSendTailWaitingForAssistant) {
+                AgentWorkingIndicator(
+                    processingStatus = processingStatus,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                        .zIndex(4f),
+                )
+            }
+
             // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,
