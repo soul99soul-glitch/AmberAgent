@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -480,10 +481,9 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
     /**
-     * Streaming still uses the incremental/background parse cache, but the
-     * per-frame character reveal controller is disabled on the hot path. That
-     * keeps long streaming markdown close to upstream RikkaHub's stable render
-     * model while preserving the caller API for a future draw-time experiment.
+     * Streaming still uses the incremental/background parse cache. When true,
+     * only the trailing active block gets a [CharRevealController] so newly
+     * arrived text can fade in while finalized blocks stay on the fast path.
      */
     streaming: Boolean = false,
     onClickCitation: (String) -> Unit = {}
@@ -535,6 +535,11 @@ fun MarkdownBlock(
             }
     }
 
+    val revealController = rememberCharRevealController(
+        streaming = streaming,
+        content = data.preprocessed,
+    )
+
     TraceMarkdownComposable("Amber MarkdownBlock render") {
       CompositionLocalProvider(
           LocalMarkdownFillWidth provides fillWidth,
@@ -580,7 +585,7 @@ fun MarkdownBlock(
                         children.lastOrNull()?.let { activeChild ->
                             key("active:${activeChild.type}:${activeChild.startOffset}") {
                                 CompositionLocalProvider(
-                                    LocalCharRevealController provides null,
+                                    LocalCharRevealController provides revealController,
                                 ) {
                                     MarkdownNode(
                                         node = activeChild,
@@ -592,9 +597,14 @@ fun MarkdownBlock(
                             }
                         }
                     } else {
-                        children.fastForEach { child ->
+                        children.fastForEachIndexed { index, child ->
+                            val childRevealController = if (index == children.lastIndex) {
+                                revealController
+                            } else {
+                                null
+                            }
                             CompositionLocalProvider(
-                                LocalCharRevealController provides null,
+                                LocalCharRevealController provides childRevealController,
                             ) {
                                 MarkdownNode(
                                     node = child,
@@ -1148,11 +1158,12 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
-    // The reveal controller is currently never provided by MarkdownBlock's
-    // streaming path, so AnnotatedString construction stays keyed by content
-    // rather than by a per-frame clock.
+    // Active streaming paragraphs deliberately rebuild only their AnnotatedString
+    // while reveal entries are alive. Finalized paragraphs have a null controller
+    // and stay keyed by content like the stable path.
     val revealController = LocalCharRevealController.current
     val baseColor = LocalContentColor.current
+    val revealClock = revealController?.nowNanos ?: 0L
 
     FlowRow(
         modifier = modifier
@@ -1167,6 +1178,7 @@ private fun Paragraph(
             enableLatexRendering,
             onClickUrl,
             revealController,
+            revealClock,
             baseColor,
         ) {
             buildAnnotatedString {
