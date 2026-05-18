@@ -27,7 +27,10 @@ class WebMountBridgeRefProtocolTest {
 
     @Test
     fun primitiveToolsExposeTargetAndGetTool() {
-        val source = locatePrimitiveTools().readText()
+        // The WebMount primitives now live across multiple sibling factory files
+        // under `webmount/tools/`. Concatenate the package's source so the
+        // assertions don't care which file each tool ended up in.
+        val source = locatePrimitiveToolsSources().joinToString("\n") { it.readText() }
 
         assertTrue(source.contains("name = \"wm_get\""))
         assertTrue(source.contains("put(\"target\""))
@@ -44,12 +47,16 @@ class WebMountBridgeRefProtocolTest {
             ?: error("Could not locate webmount bridge.js")
     }
 
-    private fun locatePrimitiveTools(): File {
+    private fun locatePrimitiveToolsSources(): List<File> {
         val candidates = listOf(
-            File("src/main/java/me/rerere/rikkahub/data/agent/webmount/tools/WebMountPrimitiveTools.kt"),
-            File("app/src/main/java/me/rerere/rikkahub/data/agent/webmount/tools/WebMountPrimitiveTools.kt"),
+            File("src/main/java/me/rerere/rikkahub/data/agent/webmount/tools"),
+            File("app/src/main/java/me/rerere/rikkahub/data/agent/webmount/tools"),
         )
-        return candidates.firstOrNull { it.isFile }
-            ?: error("Could not locate WebMountPrimitiveTools.kt")
+        val dir = candidates.firstOrNull { it.isDirectory }
+            ?: error("Could not locate webmount/tools package directory")
+        return dir.listFiles { f -> f.isFile && f.name.endsWith(".kt") }
+            ?.sortedBy { it.name }
+            ?.toList()
+            ?: error("webmount/tools directory has no .kt files")
     }
 }
