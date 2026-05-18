@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,11 +42,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -696,57 +693,6 @@ fun ChatInput(
                         )
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun SandboxActivitySheet(
-    activity: SandboxActivityUiState,
-    onDismiss: () -> Unit,
-    onCancel: (() -> Unit)?,
-    onPrevious: (() -> Unit)?,
-    onNext: (() -> Unit)?,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        BackHandler { onDismiss() }
-        Column(
-            modifier = Modifier
-                .fillMaxHeight(0.86f)
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val previewUrl = activity.operationPreviewUrl()
-            SandboxSheetHeader(
-                activity = activity,
-                isWebPreview = previewUrl != null,
-                onCancel = onCancel,
-                onPrevious = onPrevious,
-                onNext = onNext,
-            )
-
-            if (previewUrl != null) {
-                SandboxWebActivityContent(
-                    activity = activity,
-                    url = previewUrl,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                )
-            } else {
-                SandboxToolActivityContent(
-                    activity = activity,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                )
             }
         }
     }

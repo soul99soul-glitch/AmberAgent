@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView as AndroidWebView
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,8 +32,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -763,7 +767,7 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
 }
 
 @Composable
-internal fun SandboxSheetHeader(
+private fun SandboxSheetHeader(
     activity: SandboxActivityUiState,
     isWebPreview: Boolean,
     onCancel: (() -> Unit)?,
@@ -840,7 +844,7 @@ internal fun SandboxSheetHeader(
 }
 
 @Composable
-internal fun SandboxToolActivityContent(
+private fun SandboxToolActivityContent(
     activity: SandboxActivityUiState,
     modifier: Modifier = Modifier,
 ) {
@@ -868,7 +872,7 @@ internal fun SandboxToolActivityContent(
 }
 
 @Composable
-internal fun SandboxWebActivityContent(
+private fun SandboxWebActivityContent(
     activity: SandboxActivityUiState,
     url: String,
     modifier: Modifier = Modifier,
@@ -1075,6 +1079,57 @@ private fun SandboxSheetCodeBlock(
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurface,
             )
+        }
+    }
+}
+
+@Composable
+internal fun SandboxActivitySheet(
+    activity: SandboxActivityUiState,
+    onDismiss: () -> Unit,
+    onCancel: (() -> Unit)?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        BackHandler { onDismiss() }
+        Column(
+            modifier = Modifier
+                .fillMaxHeight(0.86f)
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val previewUrl = activity.operationPreviewUrl()
+            SandboxSheetHeader(
+                activity = activity,
+                isWebPreview = previewUrl != null,
+                onCancel = onCancel,
+                onPrevious = onPrevious,
+                onNext = onNext,
+            )
+
+            if (previewUrl != null) {
+                SandboxWebActivityContent(
+                    activity = activity,
+                    url = previewUrl,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+            } else {
+                SandboxToolActivityContent(
+                    activity = activity,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+            }
         }
     }
 }
