@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
+import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.context.ConversationContextRepository
 import me.rerere.rikkahub.data.files.FilesManager
@@ -78,6 +79,9 @@ class ChatVM(
     val activeCompactBoundary: StateFlow<ActiveCompactBoundary?> =
         chatService.getActiveCompactBoundaryFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val compactLifecycleState: StateFlow<CompactLifecycleState> =
+        chatService.getCompactLifecycleStateFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, CompactLifecycleState.idle())
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException

@@ -104,6 +104,7 @@ internal fun buildLazyItemMessageIndexMap(
     loading: Boolean,
     hasHistoryLoadingItem: Boolean,
     pendingMessageCount: Int,
+    hasPostSendWaitingPlaceholder: Boolean = false,
 ): List<Int?> = buildList {
     if (hasHistoryLoadingItem) add(null)
     messageNodes.forEachIndexed { index, node ->
@@ -116,9 +117,25 @@ internal fun buildLazyItemMessageIndexMap(
         )?.size ?: 1
         repeat(itemCount) { add(index) }
     }
+    if (hasPostSendWaitingPlaceholder) add(null)
     repeat(pendingMessageCount) { add(null) }
     if (loading) add(null)
     add(null)
+}
+
+internal fun List<UIMessagePart>.hasVisibleTimelineContent(): Boolean {
+    return any { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text.isNotBlank()
+            is UIMessagePart.Image -> part.url.isNotBlank()
+            is UIMessagePart.Document -> part.url.isNotBlank()
+            is UIMessagePart.Video -> part.url.isNotBlank()
+            is UIMessagePart.Audio -> part.url.isNotBlank()
+            is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
+            is UIMessagePart.Tool -> true
+            else -> false
+        }
+    }
 }
 
 internal fun List<Int?>.firstLazyIndexForMessage(messageIndex: Int): Int? {

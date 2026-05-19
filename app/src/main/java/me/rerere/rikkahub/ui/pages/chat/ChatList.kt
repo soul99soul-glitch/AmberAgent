@@ -24,6 +24,7 @@ import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
+import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Conversation
@@ -73,6 +74,15 @@ internal data class TimelineScrollAnchor(
  */
 internal fun summaryPreviewOf(compact: ConversationCompact): String? {
     val raw = compact.summary.ifBlank { return null }
+    return summaryPreviewOf(raw)
+}
+
+internal fun summaryPreviewOf(state: CompactLifecycleState): String? {
+    val raw = state.streamingSummary.ifBlank { return null }
+    return summaryPreviewOf(raw)
+}
+
+private fun summaryPreviewOf(raw: String): String? {
     val cutIndex = raw.indexOf('{')
     val prose = if (cutIndex >= 0) raw.substring(0, cutIndex) else raw
     val collapsed = COMPACT_SUMMARY_WHITESPACE_RE.replace(prose, " ").trim()
@@ -81,6 +91,7 @@ internal fun summaryPreviewOf(compact: ConversationCompact): String? {
 }
 internal val TimelineTopPadding = 12.dp
 internal val TimelineBottomSafetyPadding = 28.dp
+internal val PostSendWaitingBottomReserve = 156.dp
 internal val TimelineItemSpacing = 14.dp
 internal val TimelineMessageInnerSpacing = 4.dp
 internal val TimelineSelectionToolbarOffset = 56.dp
@@ -141,6 +152,7 @@ fun ChatList(
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
     activeCompactBoundary: ActiveCompactBoundary? = null,
+    compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
     isCompacting: Boolean = false,
     streamingSummary: String = "",
     state: LazyListState,
@@ -195,6 +207,7 @@ fun ChatList(
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 activeCompactBoundary = activeCompactBoundary,
+                compactLifecycleState = compactLifecycleState,
                 isCompacting = isCompacting,
                 streamingSummary = streamingSummary,
                 state = state,

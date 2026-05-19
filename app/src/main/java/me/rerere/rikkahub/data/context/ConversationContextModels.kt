@@ -67,6 +67,38 @@ data class CompactResult(
     val error: String? = null,
 )
 
+enum class CompactLifecycleStatus {
+    IDLE,
+    PLANNING,
+    COMPACTING,
+    COMPLETED,
+    FAILED,
+    SKIPPED,
+}
+
+data class CompactLifecycleState(
+    val status: CompactLifecycleStatus = CompactLifecycleStatus.IDLE,
+    val reason: String = "",
+    val sourceStartIndex: Int = -1,
+    val sourceEndIndex: Int = -1,
+    val sourceMessageIds: List<String> = emptyList(),
+    val streamingSummary: String = "",
+    val completedCompactId: String? = null,
+    val error: String? = null,
+    val updatedAt: Long = 0L,
+) {
+    val isActive: Boolean
+        get() = status == CompactLifecycleStatus.PLANNING ||
+            status == CompactLifecycleStatus.COMPACTING
+
+    val hasBoundary: Boolean
+        get() = sourceEndIndex >= 0 && sourceMessageIds.isNotEmpty()
+
+    companion object {
+        fun idle() = CompactLifecycleState()
+    }
+}
+
 data class ActiveCompactBoundary(
     val sourceStartIndex: Int,
     val sourceEndIndex: Int,

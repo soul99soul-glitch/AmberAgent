@@ -274,10 +274,12 @@
   <string name="chat_page_compress_context_title">Compress Conversation History</string>
   <string name="chat_page_compress_keep_recent">Keep recent messages</string>
   <string name="chat_page_compress_not_enough_messages">Not enough messages to compress. Reduce the number of messages to keep or add more messages.</string>
+  <string name="chat_page_compress_recent_content_too_large">Recent content is too large to free more context with a summary.</string>
   <string name="chat_page_compress_target_tokens">Target Token Size</string>
   <string name="chat_page_compress_warning">Context will be organized into an expandable summary. Original messages stay in this conversation.</string>
   <string name="chat_page_compressing">Compressing...</string>
   <string name="chat_context_auto_compacted">Context compressed</string>
+  <string name="chat_context_compact_completed">Compression complete</string>
   <string name="chat_context_auto_compacting">Auto-compressing</string>
   <string name="chat_context_auto_compacting_subtitle">Generating context summary…</string>
   <string name="chat_page_delete">Delete</string>

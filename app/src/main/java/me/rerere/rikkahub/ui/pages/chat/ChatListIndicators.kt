@@ -7,8 +7,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -24,14 +27,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Package01
@@ -39,7 +48,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
-import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 
 @Composable
@@ -64,7 +72,7 @@ internal fun TimelineHistoryLoadingIndicator(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PigLoadingIndicator(modifier = Modifier.size(18.dp))
+            AgentWaitingDot(modifier = Modifier.size(18.dp))
             Text(
                 text = if (prefetching) {
                     "正在预取更早消息 $loadedNodeCount/$totalNodeCount"
@@ -81,29 +89,78 @@ internal fun TimelineHistoryLoadingIndicator(
 }
 
 @Composable
+internal fun AgentWaitingDot(
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    val transition = rememberInfiniteTransition(label = "agent_waiting_dot")
+    val dotScale by transition.animateFloat(
+        initialValue = 0.82f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "agent_waiting_dot_scale",
+    )
+    val haloAlpha by transition.animateFloat(
+        initialValue = 0.08f,
+        targetValue = 0.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "agent_waiting_dot_halo",
+    )
+    val dotAlpha by transition.animateFloat(
+        initialValue = 0.56f,
+        targetValue = 0.94f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "agent_waiting_dot_alpha",
+    )
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .scale(dotScale)
+                .clip(CircleShape)
+                .background(workspace.blue.copy(alpha = haloAlpha))
+        )
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .scale(dotScale)
+                .clip(CircleShape)
+                .background(workspace.blue.copy(alpha = dotAlpha))
+        )
+    }
+}
+
+@Suppress("UNUSED_PARAMETER")
+@Composable
 internal fun AgentWorkingIndicator(
     processingStatus: String?,
     modifier: Modifier = Modifier,
 ) {
-    val workspace = workspaceColors()
+    AgentWaitingDot(modifier = modifier.size(28.dp))
+}
+
+@Composable
+internal fun PostSendWaitingIndicator(
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = modifier,
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        PigLoadingIndicator(
-            modifier = Modifier.size(28.dp)
-        )
-        if (!processingStatus.isNullOrBlank()) {
-            Text(
-                text = processingStatus,
-                style = MaterialTheme.typography.labelMedium,
-                color = workspace.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 220.dp),
-            )
-        }
+        AgentWaitingDot(modifier = Modifier.size(32.dp))
     }
 }
 
@@ -259,8 +316,19 @@ internal fun ContextCompactInProgressMarker(
 internal fun ContextCompactMarker(
     modifier: Modifier = Modifier,
     summaryPreview: String? = null,
+    freshlyCompletedKey: String? = null,
 ) {
     val workspace = workspaceColors()
+    var showFreshCompletion by remember(freshlyCompletedKey) {
+        mutableStateOf(freshlyCompletedKey != null)
+    }
+    LaunchedEffect(freshlyCompletedKey) {
+        if (freshlyCompletedKey != null) {
+            showFreshCompletion = true
+            delay(2_400)
+            showFreshCompletion = false
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -288,7 +356,11 @@ internal fun ContextCompactMarker(
                 tint = workspace.muted,
             )
             Text(
-                text = stringResource(R.string.chat_context_auto_compacted),
+                text = if (showFreshCompletion) {
+                    stringResource(R.string.chat_context_compact_completed)
+                } else {
+                    stringResource(R.string.chat_context_auto_compacted)
+                },
                 style = MaterialTheme.typography.labelLarge,
                 color = workspace.muted,
             )
