@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent.board.hotlist
 
+import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,6 +59,29 @@ class HotListAggregatorTest {
     }
 
     @Test
+    fun usesChineseDisplayTitleWithoutLosingOriginalSourceTitle() {
+        val topics = aggregator.aggregate(
+            listOf(
+                snapshot(
+                    "github",
+                    "GitHub AI",
+                    HotListItem(
+                        rank = 1,
+                        title = "sponsors / explore",
+                        displayTitle = "GitHub 项目：sponsors/explore",
+                        url = "https://example.com/repo",
+                    ),
+                )
+            )
+        )
+
+        val topic = topics.single()
+        assertEquals("GitHub 项目：sponsors/explore", topic.title)
+        assertEquals("sponsors / explore", topic.sources.single().title)
+        assertEquals("GitHub 项目：sponsors/explore", topic.sources.single().presentationTitle)
+    }
+
+    @Test
     fun dashboardFilterRemovesDisabledProviderCachesAndTopicSources() {
         val topic = HotTopic(
             id = "topic",
@@ -102,6 +126,62 @@ class HotListAggregatorTest {
         assertTrue(filtered.isEmpty)
         assertTrue(!filtered.hasEnabledSources)
         assertTrue(!filtered.shouldShowSkeleton)
+    }
+
+    @Test
+    fun focusOnlyCanFindAiTopicOutsideTopTenPool() {
+        val topics = (1..30).map { rank ->
+            HotTopic(
+                id = "topic-$rank",
+                title = if (rank == 30) "具身智能机器人新进展" else "普通热点 $rank",
+                sources = listOf(HotTopicSource("bilibili", "B站", rank = rank, title = "普通热点 $rank")),
+                sourceCount = 1,
+                bestRank = rank,
+                latestFetchedAt = 100L,
+            )
+        }
+        val dashboard = HotListDashboard(
+            topics = topics,
+            providers = listOf(snapshot("bilibili", "B站", *topics.map { item(it.bestRank, it.title) }.toTypedArray())),
+            lastUpdatedAt = 100L,
+        )
+
+        val filtered = dashboard.applyInterestFilter(listOf("机器人"), TodayBoardHotListFilterMode.FOCUS_ONLY)
+
+        assertEquals(listOf("具身智能机器人新进展"), filtered.topics.map { it.title })
+        assertEquals(listOf("具身智能机器人新进展"), filtered.providers.single().items.map { it.title })
+    }
+
+    @Test
+    fun focusFirstKeepsOtherHotTopicsAfterMatches() {
+        val dashboard = HotListDashboard(
+            topics = listOf(
+                HotTopic("normal", "普通热点", emptyList(), sourceCount = 1, bestRank = 1, latestFetchedAt = 100L),
+                HotTopic("ai", "OpenAI 发布新能力", emptyList(), sourceCount = 1, bestRank = 20, latestFetchedAt = 100L),
+            ),
+            providers = emptyList(),
+            lastUpdatedAt = 100L,
+        )
+
+        val filtered = dashboard.applyInterestFilter(listOf("OpenAI"), TodayBoardHotListFilterMode.FOCUS_FIRST)
+
+        assertEquals(listOf("OpenAI 发布新能力", "普通热点"), filtered.topics.map { it.title })
+    }
+
+    @Test
+    fun shortAsciiFocusKeywordUsesTokenBoundary() {
+        val dashboard = HotListDashboard(
+            topics = listOf(
+                HotTopic("claim", "Company claim denied", emptyList(), sourceCount = 1, bestRank = 1, latestFetchedAt = 100L),
+                HotTopic("ai", "AI robot demo", emptyList(), sourceCount = 1, bestRank = 2, latestFetchedAt = 100L),
+            ),
+            providers = emptyList(),
+            lastUpdatedAt = 100L,
+        )
+
+        val filtered = dashboard.applyInterestFilter(listOf("AI"), TodayBoardHotListFilterMode.FOCUS_ONLY)
+
+        assertEquals(listOf("AI robot demo"), filtered.topics.map { it.title })
     }
 
     private fun item(rank: Int, title: String) =

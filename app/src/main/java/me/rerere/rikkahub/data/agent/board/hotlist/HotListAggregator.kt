@@ -29,20 +29,23 @@ class HotListAggregator(
 
         return groups.map { group ->
             val sources = group
-                .sortedWith(compareBy<Candidate> { it.snapshot.providerId }.thenBy { it.item.rank })
+                .sortedWith(compareBy<Candidate> { it.item.rank }.thenBy { it.snapshot.providerId })
                 .map { candidate ->
                     HotTopicSource(
                         providerId = candidate.snapshot.providerId,
                         providerName = candidate.snapshot.providerName,
                         rank = candidate.item.rank,
                         title = candidate.item.title,
+                        displayTitle = candidate.item.displayTitle,
                         url = candidate.item.url,
                         heat = candidate.item.heat,
+                        images = candidate.item.images,
                     )
                 }
-            val title = chooseTitle(group)
+            val chosen = chooseTitleCandidate(group)
+            val title = chosen.item.presentationTitle
             HotTopic(
-                id = HotListRepository.topicId(title),
+                id = HotListRepository.topicId(chosen.item.title),
                 title = title,
                 sources = sources,
                 sourceCount = sources.map { it.providerId }.distinct().size,
@@ -92,12 +95,12 @@ class HotListAggregator(
         return false
     }
 
-    private fun chooseTitle(group: List<Candidate>): String =
+    private fun chooseTitleCandidate(group: List<Candidate>): Candidate =
         group.sortedWith(
             compareByDescending<Candidate> { it.snapshot.items.size }
                 .thenBy { it.item.rank }
                 .thenByDescending { it.item.title.length }
-        ).first().item.title
+        ).first()
 
     private fun normalizeTitle(raw: String): String =
         raw.lowercase(Locale.ROOT)
@@ -142,6 +145,25 @@ class HotListAggregator(
             "openai" to "openai",
             "chatgpt" to "openai",
             "gpt" to "openai",
+            "人工智能" to "ai",
+            "llm" to "llm",
+            "大模型" to "llm",
+            "agent" to "agent",
+            "智能体" to "agent",
+            "claude" to "claude",
+            "anthropic" to "claude",
+            "deepseek" to "deepseek",
+            "gemini" to "gemini",
+            "机器人" to "robotics",
+            "robot" to "robotics",
+            "robotics" to "robotics",
+            "具身智能" to "embodied_ai",
+            "自动驾驶" to "autonomous_driving",
+            "芯片" to "chip",
+            "半导体" to "semiconductor",
+            "数码" to "digital",
+            "3c" to "digital",
+            "智能硬件" to "smart_hardware",
             "gpt5" to "gpt_5",
             "gpt-5" to "gpt_5",
             "苹果" to "apple",

@@ -11,9 +11,15 @@ import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_HARD_MUTE_WEIGHT
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListDashboard
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListItem
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderSnapshot
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
+import me.rerere.rikkahub.data.agent.board.hotlist.HotTopic
+import me.rerere.rikkahub.data.agent.board.hotlist.HotTopicSource
+import me.rerere.rikkahub.data.agent.board.hotlist.applyInterestFilter
 import me.rerere.rikkahub.data.agent.board.hotlist.filterEnabledSources
+import me.rerere.rikkahub.data.agent.board.hotlist.presentationTitle
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
@@ -49,7 +55,10 @@ class BoardViewModel(
         hotListRepository.observeDashboard(),
         settings,
     ) { dashboard, currentSettings ->
-        dashboard.filterEnabledSources(currentSettings.agentRuntime.todayBoard.hotListEnabledSources)
+        val board = currentSettings.agentRuntime.todayBoard
+        dashboard
+            .filterEnabledSources(board.hotListEnabledSources)
+            .applyInterestFilter(board.hotListFocusKeywords, board.hotListFilterMode)
     }
 
     fun markCompleted(itemId: String) {
@@ -93,6 +102,34 @@ class BoardViewModel(
                 )
             )
         }
+    }
+
+    suspend fun createProviderTopic(provider: HotListProviderSnapshot, item: HotListItem): HotTopic {
+        val title = item.presentationTitle
+        val source = HotTopicSource(
+            providerId = provider.providerId,
+            providerName = provider.providerName,
+            rank = item.rank,
+            title = item.title,
+            displayTitle = item.displayTitle,
+            url = item.url,
+            heat = item.heat,
+            images = item.images,
+        )
+        val topic = HotTopic(
+            id = HotListRepository.topicId("${provider.providerId}:${item.url ?: item.title}"),
+            title = title,
+            sources = listOf(source),
+            sourceCount = 1,
+            bestRank = item.rank,
+            latestFetchedAt = provider.fetchedAt,
+        )
+        return topic
+    }
+
+    suspend fun prepareDeepReadTopic(topic: HotTopic): HotTopic {
+        hotListRepository.upsertTopic(topic)
+        return topic
     }
 
     // ---- Feedback Learning ------------------------------------------------------------

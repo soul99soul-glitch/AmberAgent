@@ -83,3 +83,29 @@ fun DeepReadOutput.hasReadableArticle(): Boolean {
         analysis.perspectives.any { it.viewpoint.isNotBlank() } ||
         analysis.quotes.any { it.text.isNotBlank() }
 }
+
+fun DeepReadOutput.hasEnoughChinese(): Boolean {
+    val text = visibleTextForLanguageCheck()
+    val cjk = text.count { it in '\u4e00'..'\u9fff' }
+    val latin = text.count { it in 'a'..'z' || it in 'A'..'Z' }
+    if (cjk >= 80) return true
+    if (cjk < 12 && latin > 30) return false
+    val denominator = (cjk + latin).coerceAtLeast(1)
+    return cjk.toDouble() / denominator >= 0.35
+}
+
+private fun DeepReadOutput.visibleTextForLanguageCheck(): String =
+    buildString {
+        append(summary)
+        append(' ')
+        keyEntities.forEach { append(it).append(' ') }
+        timeline.orEmpty().forEach { append(it.date).append(' ').append(it.event).append(' ') }
+        corePoints.orEmpty().forEach { append(it.point).append(' ').append(it.supporting).append(' ') }
+        append(analysis.coreDispute).append(' ')
+        analysis.perspectives.forEach { append(it.holder).append(' ').append(it.viewpoint).append(' ') }
+        append(analysis.implications).append(' ')
+        analysis.quotes.forEach { append(it.text).append(' ').append(it.attribution).append(' ') }
+        extendedReading.forEach { append(it.title).append(' ') }
+        append(heroCaption).append(' ')
+        references.forEach { append(it.title).append(' ') }
+    }

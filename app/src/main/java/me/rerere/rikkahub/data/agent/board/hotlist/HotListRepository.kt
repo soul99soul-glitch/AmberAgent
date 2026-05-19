@@ -19,7 +19,7 @@ class HotListRepository(
     private val json: Json,
 ) {
     fun observeDashboard(): Flow<HotListDashboard> = combine(
-        dao.observeHotTopics(10),
+        dao.observeHotTopics(HOT_LIST_TOPIC_CACHE_LIMIT),
         dao.observeProviderCaches(),
     ) { topicEntities, providerEntities ->
         val providers = providerEntities.map { it.toSnapshot(json) }
@@ -92,6 +92,23 @@ class HotListRepository(
                 updatedAt = now,
             )
         })
+    }
+
+    suspend fun upsertTopic(topic: HotTopic) {
+        val now = System.currentTimeMillis()
+        dao.upsertHotTopics(
+            listOf(
+                HotTopicCacheEntity(
+                    topicId = topic.id,
+                    title = topic.title,
+                    sourcesJson = json.encodeToString(topic.sources),
+                    sourceCount = topic.sourceCount,
+                    bestRank = topic.bestRank,
+                    latestFetchedAt = topic.latestFetchedAt,
+                    updatedAt = now,
+                )
+            )
+        )
     }
 
     suspend fun getHotTopic(topicId: String): HotTopic? = dao.getHotTopic(topicId)?.toTopic(json)

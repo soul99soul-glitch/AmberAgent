@@ -37,7 +37,7 @@ class DeepReadSanitizerTest {
             extendedReading = listOf(ReadingLink("Fake", "https://invented.example.com/fake", "fake")),
         )
 
-        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source))
+        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "AI 热点")
 
         assertEquals("https://news.example.com/a.jpg", sanitized.heroImageUrl)
         assertFalse(sanitized.references.any { it.url.contains("invented") })

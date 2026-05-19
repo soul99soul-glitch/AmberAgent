@@ -98,13 +98,18 @@ class HotListWorker(
             repository.replaceTopics(emptyList())
             return Result.success()
         }
+        val cachedBeforeFetch = providers
+            .mapNotNull { provider ->
+                repository.getProviderCache(provider.id)?.let { provider.id to it }
+            }
+            .toMap()
 
         val snapshots = coroutineScope {
             providers.map { provider ->
                 async {
                     get<HotListSafeFetcher>().fetch(
                         provider = provider,
-                        cachedSnapshot = { repository.getProviderCache(provider.id) },
+                        cachedSnapshot = { cachedBeforeFetch[provider.id] },
                         saveResult = { result ->
                             repository.saveProviderResult(provider.id, provider.displayName, result)
                         },
@@ -112,15 +117,29 @@ class HotListWorker(
                 }
             }.awaitAll()
         }
-        snapshots
+        val localizedSnapshots = get<HotListTitleLocalizer>().localize(snapshots, cachedBeforeFetch)
+        localizedSnapshots
+            .filter { !it.stale }
+            .filter { localized ->
+                snapshots.firstOrNull { it.providerId == localized.providerId }?.items != localized.items
+            }
+            .forEach { snapshot ->
+                repository.saveProviderResult(
+                    snapshot.providerId,
+                    snapshot.providerName,
+                    HotListResult(snapshot.items, snapshot.fetchedAt),
+                )
+            }
+
+        localizedSnapshots
             .filter { it.stale && !it.error.isNullOrBlank() }
             .forEach { snapshot ->
                 repository.saveProviderFailure(snapshot.providerId, snapshot.providerName, snapshot.error.orEmpty())
             }
 
         val topics = get<HotListAggregator>().aggregate(
-            snapshots = snapshots.filter { it.items.isNotEmpty() },
-            limit = 10,
+            snapshots = localizedSnapshots.filter { it.items.isNotEmpty() },
+            limit = HOT_LIST_TOPIC_CACHE_LIMIT,
         )
         repository.replaceTopics(topics)
         repository.pruneExpiredDeepReads()

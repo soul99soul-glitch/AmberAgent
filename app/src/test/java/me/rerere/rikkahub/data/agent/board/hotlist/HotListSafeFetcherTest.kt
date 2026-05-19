@@ -72,6 +72,22 @@ class HotListSafeFetcherTest {
         assertTrue(snapshot.error.orEmpty().contains("HTTP 500"))
     }
 
+    @Test
+    fun emptyFetchFallsBackToStaleCache() = runTest {
+        val cached = HotListProviderSnapshot("fake", "Fake", listOf(HotListItem(1, "cached")), 1L)
+        val provider = fakeProvider { HotListResult(emptyList(), fetchedAt = 10L) }
+
+        val snapshot = HotListSafeFetcher().fetch(
+            provider = provider,
+            cachedSnapshot = { cached },
+            saveResult = {},
+        )
+
+        assertTrue(snapshot.stale)
+        assertEquals("cached", snapshot.items.single().title)
+        assertTrue(snapshot.error.orEmpty().contains("empty hot list"))
+    }
+
     private fun fakeProvider(block: suspend () -> HotListResult): HotListProvider =
         object : HotListProvider {
             override val id = "fake"

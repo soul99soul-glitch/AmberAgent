@@ -43,12 +43,19 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
+import me.rerere.rikkahub.data.agent.board.DEFAULT_HOT_LIST_FOCUS_KEYWORDS
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
+import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
+import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderIds
+import me.rerere.rikkahub.data.agent.board.hotlist.normalizeHotListFocusKeywords
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
+import me.rerere.rikkahub.data.font.FontPackCategory
+import me.rerere.rikkahub.data.font.FontPackState
+import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ui.NotionSlider
 import me.rerere.rikkahub.ui.components.ui.Switch
@@ -66,10 +73,12 @@ import kotlin.uuid.Uuid
 @Composable
 fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
     val boardRepository: BoardRepository = koinInject()
+    val fontRepository: SlidesFontRepository = koinInject()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val focusRules by boardRepository.observeFocusRules().collectAsStateWithLifecycle(initialValue = emptyList())
+    val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
     val board = settings.agentRuntime.todayBoard
     var sourceWeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var weightReloadKey by remember { mutableIntStateOf(0) }
@@ -160,6 +169,13 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                         }
                     }
                     ExperimentDivider()
+                    HotListFocusKeywordEditor(
+                        keywords = board.hotListFocusKeywords,
+                        mode = board.hotListFilterMode,
+                        onKeywordsChange = { keywords -> update { it.copy(hotListFocusKeywords = keywords) } },
+                        onModeChange = { mode -> update { it.copy(hotListFilterMode = mode) } },
+                    )
+                    ExperimentDivider()
                     SearchServiceSummary(
                         enabledCount = settings.searchEnabledServiceIds.size,
                         totalCount = settings.searchServices.size,
@@ -238,10 +254,131 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                     ExperimentDivider()
                     BoardModelRow(board = board, settings = settings, update = ::update)
                     ExperimentDivider()
+                    ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
+                    ExperimentDivider()
                     BackgroundStrategyRow(board.backgroundStrategy) { value ->
                         update { it.copy(backgroundStrategy = value) }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HotListFocusKeywordEditor(
+    keywords: List<String>,
+    mode: TodayBoardHotListFilterMode,
+    onKeywordsChange: (List<String>) -> Unit,
+    onModeChange: (TodayBoardHotListFilterMode) -> Unit,
+) {
+    var draft by rememberSaveable(keywords.joinToString("|")) { mutableStateOf(keywords.joinToString("、")) }
+    val parsed = normalizeHotListFocusKeywords(listOf(draft))
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("关注筛选", style = MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                TodayBoardHotListFilterMode.ALL to "全部",
+                TodayBoardHotListFilterMode.FOCUS_FIRST to "关注优先",
+                TodayBoardHotListFilterMode.FOCUS_ONLY to "只看关注",
+            ).forEach { (value, label) ->
+                ChoiceChip(selected = mode == value, label = label, onClick = { onModeChange(value) })
+            }
+        }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("AI、大模型、机器人、数码 3C...") },
+            minLines = 2,
+            maxLines = 4,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                enabled = parsed.isNotEmpty(),
+                onClick = { onKeywordsChange(parsed) },
+            ) {
+                Text("应用")
+            }
+            TextButton(
+                onClick = {
+                    draft = DEFAULT_HOT_LIST_FOCUS_KEYWORDS.joinToString("、")
+                    onKeywordsChange(DEFAULT_HOT_LIST_FOCUS_KEYWORDS)
+                },
+            ) {
+                Text("恢复推荐")
+            }
+        }
+        if (keywords.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                keywords.take(16).forEach { keyword ->
+                    ChoiceChip(selected = false, label = keyword, onClick = {})
+                }
+                if (keywords.size > 16) {
+                    Text("+${keywords.size - 16}", style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ReadingFontRow(
+    board: TodayBoardSetting,
+    fontStates: List<FontPackState>,
+    update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
+) {
+    val installedFonts = fontStates.filter { it.installed && !it.installedPath.isNullOrBlank() }
+    val selectedPackAvailable = installedFonts.any { it.pack.id == board.boardReadingFontPackId }
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("深度阅读字体", style = MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceChip(
+                selected = board.boardReadingFontMode == TodayBoardReadingFontMode.SYSTEM,
+                label = "系统默认",
+                onClick = { update { it.copy(boardReadingFontMode = TodayBoardReadingFontMode.SYSTEM) } },
+            )
+            ChoiceChip(
+                selected = board.boardReadingFontMode == TodayBoardReadingFontMode.SERIF,
+                label = "内置宋体",
+                onClick = {
+                    update {
+                        it.copy(
+                            boardReadingFontMode = TodayBoardReadingFontMode.SERIF,
+                            boardReadingFontPackId = null,
+                        )
+                    }
+                },
+            )
+        }
+        if (installedFonts.isEmpty()) {
+            Text("已下载 Slides 字体包会显示在这里；当前深度阅读会使用内置宋体。", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+        } else {
+            Text("已下载 Slides 字体", style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                installedFonts
+                    .sortedWith(compareByDescending<FontPackState> { it.pack.category == FontPackCategory.SERIF }.thenBy { it.pack.displayName })
+                    .take(12)
+                    .forEach { state ->
+                        ChoiceChip(
+                            selected = board.boardReadingFontMode == TodayBoardReadingFontMode.SLIDES_PACK &&
+                                board.boardReadingFontPackId == state.pack.id,
+                            label = "${state.pack.displayName} · ${state.pack.category.label()}",
+                            onClick = {
+                                update {
+                                    it.copy(
+                                        boardReadingFontMode = TodayBoardReadingFontMode.SLIDES_PACK,
+                                        boardReadingFontPackId = state.pack.id,
+                                    )
+                                }
+                            },
+                        )
+                    }
+            }
+            if (board.boardReadingFontMode == TodayBoardReadingFontMode.SLIDES_PACK && !selectedPackAvailable) {
+                Text("当前选择的字体包不可用，阅读页会自动回退内置宋体。", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
             }
         }
     }
@@ -476,6 +613,14 @@ private fun toggleSignalSource(
     }
 }
 
+private fun FontPackCategory.label(): String =
+    when (this) {
+        FontPackCategory.SERIF -> "宋/明体"
+        FontPackCategory.SANS -> "黑体"
+        FontPackCategory.HANDWRITING -> "手写"
+        FontPackCategory.MONO -> "等宽"
+    }
+
 private data class HotListSourceOption(
     val id: String,
     val label: String,
@@ -485,9 +630,13 @@ private data class HotListSourceOption(
 private val HOT_LIST_SOURCE_OPTIONS = listOf(
     HotListSourceOption(HotListProviderIds.BILIBILI, "B站热门", true),
     HotListSourceOption(HotListProviderIds.HACKER_NEWS, "HackerNews", true),
+    HotListSourceOption(HotListProviderIds.ARXIV_AI, "arXiv AI", true),
+    HotListSourceOption(HotListProviderIds.INFOQ_AI, "InfoQ AI", true),
     HotListSourceOption(HotListProviderIds.WEIBO, "微博热搜", false),
     HotListSourceOption(HotListProviderIds.ZHIHU, "知乎热榜", false),
     HotListSourceOption(HotListProviderIds.KR36, "36Kr", false),
+    HotListSourceOption(HotListProviderIds.HUGGINGFACE_PAPERS, "HF Papers", false),
+    HotListSourceOption(HotListProviderIds.GITHUB_TRENDING_AI, "GitHub AI", false),
 )
 
 private data class BoardWeightSource(

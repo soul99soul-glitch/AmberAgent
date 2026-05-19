@@ -1,7 +1,8 @@
 package me.rerere.rikkahub.ui.pages.board
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,9 +26,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
@@ -38,6 +41,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,22 +52,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Notebook01
-import me.rerere.hugeicons.stroke.Refresh
+import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.Screen.DeepRead
+import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListDashboard
+import me.rerere.rikkahub.data.agent.board.hotlist.HOT_LIST_TOPIC_DISPLAY_LIMIT
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListItem
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderSnapshot
 import me.rerere.rikkahub.data.agent.board.hotlist.HotTopic
+import me.rerere.rikkahub.data.agent.board.hotlist.presentationTitle
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -95,22 +107,49 @@ fun TodayBoardPage() {
     )
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     var pendingDeepRead by remember { mutableStateOf<HotTopic?>(null) }
+    var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
+
+    fun requestDeepRead(topic: HotTopic) {
+        if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
+            scope.launch {
+                val prepared = vm.prepareDeepReadTopic(topic)
+                navController.navigate(DeepRead(prepared.id, prepared.title))
+            }
+        } else {
+            pendingDeepRead = topic
+        }
+    }
+
+    fun shareTopic(topic: HotTopic) {
+        val text = buildString {
+            append(topic.title)
+            topic.primaryUrl()?.let { url ->
+                append('\n')
+                append(url)
+            }
+        }
+        runCatching {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(Intent.createChooser(intent, "分享热点"))
+        }.onFailure {
+            Toast.makeText(context, "无法打开分享面板", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "今日看板",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    )
+                    Text("今日看板")
                 },
                 navigationIcon = { BackButton() },
                 actions = {
-                    IconButton(onClick = { vm.refresh() }) {
-                        Icon(HugeIcons.Refresh, contentDescription = "刷新")
-                    }
                     IconButton(onClick = { navController.navigate(Screen.SettingTodayBoard) }) {
                         Icon(HugeIcons.Settings03, contentDescription = "设置")
                     }
@@ -152,12 +191,14 @@ fun TodayBoardPage() {
                 when (page) {
                     0 -> HotListTab(
                         dashboard = dashboard,
+                        filterMode = settings.agentRuntime.todayBoard.hotListFilterMode,
                         onRefresh = vm::refreshHotList,
-                        onDeepRead = { topic ->
-                            if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
-                                navController.navigate(DeepRead(topic.id, topic.title))
-                            } else {
-                                pendingDeepRead = topic
+                        onTopicClick = { topic ->
+                            selectedTopic = topic
+                        },
+                        onProviderItemClick = { provider, item ->
+                            scope.launch {
+                                selectedTopic = vm.createProviderTopic(provider, item)
                             }
                         },
                     )
@@ -187,8 +228,9 @@ fun TodayBoardPage() {
                     onClick = {
                         scope.launch {
                             vm.confirmDeepReadCost()
+                            val prepared = vm.prepareDeepReadTopic(topic)
                             pendingDeepRead = null
-                            navController.navigate(DeepRead(topic.id, topic.title))
+                            navController.navigate(DeepRead(prepared.id, prepared.title))
                         }
                     }
                 ) {
@@ -201,6 +243,106 @@ fun TodayBoardPage() {
                 }
             },
         )
+    }
+
+    selectedTopic?.let { topic ->
+        HotListActionSheet(
+            topic = topic,
+            onDismiss = { selectedTopic = null },
+            onDeepRead = {
+                selectedTopic = null
+                requestDeepRead(topic)
+            },
+            onOpenOriginal = {
+                selectedTopic = null
+                topic.primaryUrl()?.let { url ->
+                    runCatching { uriHandler.openUri(url) }
+                }
+            },
+            onShare = {
+                selectedTopic = null
+                shareTopic(topic)
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HotListActionSheet(
+    topic: HotTopic,
+    onDismiss: () -> Unit,
+    onDeepRead: () -> Unit,
+    onOpenOriginal: () -> Unit,
+    onShare: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                topic.title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (topic.sources.isNotEmpty()) {
+                Text(
+                    topic.sources.joinToString(" · ") { "${it.providerName} #${it.rank}" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspaceColors().muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider(color = workspaceColors().hairline)
+            TopicActionRow(
+                label = "深度阅读",
+                icon = HugeIcons.Notebook01,
+                onClick = onDeepRead,
+            )
+            TopicActionRow(
+                label = "打开原文",
+                icon = HugeIcons.ArrowRight01,
+                enabled = topic.primaryUrl() != null,
+                onClick = onOpenOriginal,
+            )
+            TopicActionRow(
+                label = "分享",
+                icon = HugeIcons.Share03,
+                onClick = onShare,
+            )
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun TopicActionRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val color = if (enabled) MaterialTheme.colorScheme.onSurface else workspaceColors().muted
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = color)
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
     }
 }
 
@@ -216,8 +358,10 @@ internal fun visibleTodayReviewTodoItems(items: List<BoardItemEntity>): List<Boa
 @Composable
 private fun HotListTab(
     dashboard: HotListDashboard,
+    filterMode: TodayBoardHotListFilterMode,
     onRefresh: () -> Unit,
-    onDeepRead: (HotTopic) -> Unit,
+    onTopicClick: (HotTopic) -> Unit,
+    onProviderItemClick: (HotListProviderSnapshot, HotListItem) -> Unit,
 ) {
     val pullState = rememberPullToRefreshState()
     var isRefreshing by remember { mutableStateOf(false) }
@@ -261,14 +405,25 @@ private fun HotListTab(
                     )
                 }
                 if (dashboard.topics.isEmpty()) {
-                    item { EmptyLine("暂时没有可聚合的综合热点。") }
+                    item {
+                        EmptyLine(
+                            if (filterMode == TodayBoardHotListFilterMode.FOCUS_ONLY) {
+                                "没有匹配关注词的热点。可以在今日看板设置里调整关注词，或切换为关注优先。"
+                            } else {
+                                "暂时没有可聚合的综合热点。"
+                            }
+                        )
+                    }
                 }
-                items(dashboard.topics, key = { it.id }) { topic ->
-                    HotTopicRow(topic = topic, onDeepRead = { onDeepRead(topic) })
+                items(dashboard.topics.take(HOT_LIST_TOPIC_DISPLAY_LIMIT), key = { it.id }) { topic ->
+                    HotTopicRow(topic = topic, onClick = { onTopicClick(topic) })
                 }
                 dashboard.providers.forEach { provider ->
                     item(provider.providerId) {
-                        ProviderSection(provider)
+                        ProviderSection(
+                            provider = provider,
+                            onItemClick = { item -> onProviderItemClick(provider, item) },
+                        )
                     }
                 }
             }
@@ -278,7 +433,7 @@ private fun HotListTab(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HotTopicRow(topic: HotTopic, onDeepRead: () -> Unit) {
+private fun HotTopicRow(topic: HotTopic, onClick: () -> Unit) {
     val ws = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -286,7 +441,13 @@ private fun HotTopicRow(topic: HotTopic, onDeepRead: () -> Unit) {
         color = ws.paper,
         border = workspaceBorder(),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Text(
                     "#${topic.bestRank}",
@@ -305,19 +466,12 @@ private fun HotTopicRow(topic: HotTopic, onDeepRead: () -> Unit) {
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                WorkspaceTextButton(
-                    text = "深度阅读 · ~3万字",
-                    onClick = onDeepRead,
-                    tone = WorkspaceTone.Accent,
-                )
-            }
         }
     }
 }
 
 @Composable
-private fun ProviderSection(provider: HotListProviderSnapshot) {
+private fun ProviderSection(provider: HotListProviderSnapshot, onItemClick: (HotListItem) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionTitle(
             title = provider.providerName,
@@ -341,13 +495,16 @@ private fun ProviderSection(provider: HotListProviderSnapshot) {
                 } else {
                     provider.items.take(12).forEach { item ->
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onItemClick(item) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
                             Text("${item.rank}.", style = MaterialTheme.typography.bodyMedium, color = workspaceColors().muted)
                             Column(Modifier.weight(1f)) {
-                                Text(item.title, style = MaterialTheme.typography.bodyMedium)
+                                Text(item.presentationTitle, style = MaterialTheme.typography.bodyMedium)
                                 if (!item.heat.isNullOrBlank()) {
                                     Text(item.heat, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
                                 }
@@ -551,3 +708,10 @@ private fun timeAgo(timestamp: Long): String {
         else -> "${minutes / (24 * 60)}天前"
     }
 }
+
+private fun HotTopic.primaryUrl(): String? =
+    sources
+        .sortedBy { it.rank }
+        .firstNotNullOfOrNull { source ->
+            source.url?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        }

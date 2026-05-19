@@ -33,6 +33,39 @@ class DeepReadAgentSupportTest {
     }
 
     @Test
+    fun parserAcceptsFencedJsonWithTrailingCommas() {
+        val parsed = DeepReadOutputParser.parse(
+            """
+            ```json
+            {
+              "summary": "这是一个足够长的摘要文本",
+              "key_entities": ["小米",],
+              "analysis": {"implications": "影响分析",},
+            }
+            ```
+            """.trimIndent(),
+            json,
+        )
+
+        assertNotNull(parsed)
+        assertEquals(listOf("小米"), parsed?.keyEntities)
+    }
+
+    @Test
+    fun parserSkipsEarlierBracesAndUsesBalancedJsonObject() {
+        val parsed = DeepReadOutputParser.parse(
+            """
+            草稿 {not json}
+            {"summary":"这是一个足够长的摘要文本","analysis":{"implications":"影响分析"}}
+            """.trimIndent(),
+            json,
+        )
+
+        assertNotNull(parsed)
+        assertEquals("影响分析", parsed?.analysis?.implications)
+    }
+
+    @Test
     fun noEnabledSearchServiceLeavesDeepReadWithoutSources() {
         val service = SearchServiceOptions.BingLocalOptions()
         val settings = Settings(

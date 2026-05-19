@@ -7,6 +7,10 @@ object HotListProviderIds {
     const val ZHIHU = "zhihu"
     const val BILIBILI = "bilibili"
     const val HACKER_NEWS = "hacker_news"
+    const val ARXIV_AI = "arxiv_ai"
+    const val INFOQ_AI = "infoq_ai"
+    const val HUGGINGFACE_PAPERS = "huggingface_papers"
+    const val GITHUB_TRENDING_AI = "github_trending_ai"
     const val DOUYIN = "douyin"
     const val BAIDU = "baidu"
     const val TOUTIAO = "toutiao"
@@ -15,13 +19,18 @@ object HotListProviderIds {
     val DEFAULT_ENABLED: Set<String> = setOf(BILIBILI, HACKER_NEWS)
 }
 
+const val HOT_LIST_TOPIC_CACHE_LIMIT = 80
+const val HOT_LIST_TOPIC_DISPLAY_LIMIT = 20
+
 @Serializable
 data class HotListItem(
     val rank: Int,
     val title: String,
+    val displayTitle: String? = null,
     val heat: String? = null,
     val url: String? = null,
     val category: String? = null,
+    val images: List<String> = emptyList(),
 )
 
 @Serializable
@@ -36,8 +45,10 @@ data class HotTopicSource(
     val providerName: String,
     val rank: Int,
     val title: String,
+    val displayTitle: String? = null,
     val url: String? = null,
     val heat: String? = null,
+    val images: List<String> = emptyList(),
 )
 
 @Serializable
@@ -70,6 +81,12 @@ data class HotListDashboard(
     val hasEnabledSources: Boolean get() = enabledSourceCount > 0
     val shouldShowSkeleton: Boolean get() = hasEnabledSources && isEmpty
 }
+
+val HotListItem.presentationTitle: String
+    get() = displayTitle?.takeIf { it.isNotBlank() } ?: title
+
+val HotTopicSource.presentationTitle: String
+    get() = displayTitle?.takeIf { it.isNotBlank() } ?: title
 
 fun HotListDashboard.filterEnabledSources(enabledSourceIds: Set<String>): HotListDashboard {
     if (enabledSourceIds.isEmpty()) {

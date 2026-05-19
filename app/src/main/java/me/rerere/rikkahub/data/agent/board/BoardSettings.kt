@@ -25,6 +25,30 @@ const val TODAY_BOARD_HARD_MUTE_WEIGHT = -10
 /** Number of consecutive dismisses before auto-mute kicks in. */
 const val TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT = 3
 
+val DEFAULT_HOT_LIST_FOCUS_KEYWORDS = listOf(
+    "AI",
+    "人工智能",
+    "大模型",
+    "LLM",
+    "Agent",
+    "机器人",
+    "具身智能",
+    "自动驾驶",
+    "数码",
+    "3C",
+    "智能硬件",
+    "芯片",
+    "半导体",
+    "OpenAI",
+    "Claude",
+    "DeepSeek",
+    "Gemini",
+    "NVIDIA",
+    "小米",
+    "华为",
+    "特斯拉",
+)
+
 @Serializable
 enum class TodayBoardDensity(val wireName: String) {
     @SerialName("compact")
@@ -59,6 +83,40 @@ enum class TodayBoardBackgroundStrategy(val wireName: String) {
     companion object {
         fun fromWireName(raw: String?): TodayBoardBackgroundStrategy =
             entries.firstOrNull { it.wireName == raw } ?: SMART
+    }
+}
+
+@Serializable
+enum class TodayBoardHotListFilterMode(val wireName: String) {
+    @SerialName("all")
+    ALL("all"),
+
+    @SerialName("focus_first")
+    FOCUS_FIRST("focus_first"),
+
+    @SerialName("focus_only")
+    FOCUS_ONLY("focus_only");
+
+    companion object {
+        fun fromWireName(raw: String?): TodayBoardHotListFilterMode =
+            entries.firstOrNull { it.wireName == raw } ?: FOCUS_FIRST
+    }
+}
+
+@Serializable
+enum class TodayBoardReadingFontMode(val wireName: String) {
+    @SerialName("system")
+    SYSTEM("system"),
+
+    @SerialName("serif")
+    SERIF("serif"),
+
+    @SerialName("slides_pack")
+    SLIDES_PACK("slides_pack");
+
+    companion object {
+        fun fromWireName(raw: String?): TodayBoardReadingFontMode =
+            entries.firstOrNull { it.wireName == raw } ?: SERIF
     }
 }
 
@@ -107,7 +165,11 @@ data class TodayBoardSetting(
     val hotListRefreshIntervalMinutes: Int = 60,
     val hotListWifiOnly: Boolean = false,
     val hotListEnabledSources: Set<String> = HotListProviderIds.DEFAULT_ENABLED,
+    val hotListFocusKeywords: List<String> = DEFAULT_HOT_LIST_FOCUS_KEYWORDS,
+    val hotListFilterMode: TodayBoardHotListFilterMode = TodayBoardHotListFilterMode.FOCUS_FIRST,
     val deepReadFirstUseConfirmed: Boolean = false,
+    val boardReadingFontMode: TodayBoardReadingFontMode = TodayBoardReadingFontMode.SERIF,
+    val boardReadingFontPackId: String? = null,
     val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
     val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,
     val foregroundCompensationGapMs: Long = 2 * 60 * 60 * 1000L,

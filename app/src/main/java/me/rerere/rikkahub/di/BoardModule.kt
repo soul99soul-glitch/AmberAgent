@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.agent.board.collector.TimeAnchorSignalCollector
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListAggregator
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListSafeFetcher
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListTitleLocalizer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.providers.BuiltInHotListProviders
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
@@ -46,11 +47,20 @@ val boardModule = module {
     single { HotListSafeFetcher() }
 
     single {
+        HotListTitleLocalizer(
+            settingsStore = get(),
+            providerManager = get(),
+            json = get(),
+        )
+    }
+
+    single {
         DeepReadAgent(
             settingsStore = get(),
             providerManager = get(),
             hotListRepository = get(),
             json = get(),
+            client = get(),
         )
     }
 

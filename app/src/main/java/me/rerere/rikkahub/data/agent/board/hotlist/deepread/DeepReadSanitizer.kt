@@ -1,12 +1,16 @@
 package me.rerere.rikkahub.data.agent.board.hotlist.deepread
 
 object DeepReadSanitizer {
-    fun sanitize(parsed: DeepReadOutput, sources: List<DeepReadSource>): DeepReadOutput {
+    fun sanitize(parsed: DeepReadOutput, sources: List<DeepReadSource>, topicTitle: String): DeepReadOutput {
         val sourceUrls = sources.map { it.url }.toSet()
         val sourceImages = sources.flatMap { it.images }.filter { it.startsWith("http") }.distinct()
         val safeReferences = parsed.references.filter { it.url in sourceUrls }
+            .mapIndexed { index, link -> link.withChineseSafeTitle(topicTitle, index) }
         val safeExtended = parsed.extendedReading.filter { it.url in sourceUrls }
-        val fallbackReading = sources.map { ReadingLink(it.title, it.url, it.source) }
+            .mapIndexed { index, link -> link.withChineseSafeTitle(topicTitle, index) }
+        val fallbackReading = sources.mapIndexed { index, source ->
+            ReadingLink(source.chineseSafeTitle(topicTitle, index), source.url, source.source)
+        }
             .distinctBy { it.url }
             .take(6)
 
@@ -23,6 +27,20 @@ object DeepReadSanitizer {
             extendedReading = safeExtended.ifEmpty { fallbackReading },
         )
     }
+
+    private fun ReadingLink.withChineseSafeTitle(topicTitle: String, index: Int): ReadingLink =
+        if (title.hasCjk()) this else copy(title = fallbackReadingTitle(topicTitle, source, url, index))
+
+    private fun DeepReadSource.chineseSafeTitle(topicTitle: String, index: Int): String =
+        title.takeIf { it.hasCjk() } ?: fallbackReadingTitle(topicTitle, source, url, index)
+
+    private fun fallbackReadingTitle(topicTitle: String, source: String?, url: String, index: Int): String {
+        val sourceName = source?.takeIf { it.isNotBlank() }
+            ?: url.substringAfter("://", url).substringBefore('/').removePrefix("www.")
+        return "原文来源 ${index + 1}：$sourceName 关于「$topicTitle」的报道"
+    }
+
+    private fun String.hasCjk(): Boolean = any { it in '\u4e00'..'\u9fff' }
 
     private fun String.containsQuote(quote: String): Boolean {
         val normalizedQuote = quote.normalizeQuoteText()

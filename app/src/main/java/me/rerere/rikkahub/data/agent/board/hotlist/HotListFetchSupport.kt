@@ -13,7 +13,10 @@ class HotListSafeFetcher(
         saveResult: suspend (HotListResult) -> Unit,
     ): HotListProviderSnapshot {
         val result = try {
-            withTimeout(timeoutMs) { provider.fetch(limit = 50) }
+            withTimeout(timeoutMs) { provider.fetch(limit = HOT_LIST_TOPIC_CACHE_LIMIT) }
+                .also { fetched ->
+                    if (fetched.items.isEmpty()) error("empty hot list")
+                }
                 .let { Result.success(it) }
         } catch (error: TimeoutCancellationException) {
             Result.failure(error)

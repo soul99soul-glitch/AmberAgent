@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -44,13 +43,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
@@ -60,6 +63,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
@@ -69,8 +73,16 @@ import org.koin.compose.koinInject
 fun DeepReadScreen(topicId: String, title: String) {
     val agent: DeepReadAgent = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
+    val fontRepository: SlidesFontRepository = koinInject()
     val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
     val confirmed = settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed
+    val board = settings.agentRuntime.todayBoard
+    val readingFontFamily = rememberBoardReadingFontFamily(
+        mode = board.boardReadingFontMode,
+        fontPackId = board.boardReadingFontPackId,
+        fontStates = fontStates,
+    )
     var loading by remember { mutableStateOf(true) }
     var output by remember { mutableStateOf<DeepReadOutput?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -135,6 +147,7 @@ fun DeepReadScreen(topicId: String, title: String) {
             !confirmed -> DeepReadConfirmation(
                 modifier = Modifier.padding(innerPadding),
                 palette = palette,
+                fontFamily = readingFontFamily,
                 onConfirm = {
                     scope.launch {
                         settingsStore.update { current ->
@@ -155,6 +168,7 @@ fun DeepReadScreen(topicId: String, title: String) {
                 title = title,
                 output = output!!,
                 palette = palette,
+                fontFamily = readingFontFamily,
                 contentPadding = innerPadding,
                 listState = listState,
             )
@@ -166,6 +180,7 @@ fun DeepReadScreen(topicId: String, title: String) {
 private fun DeepReadConfirmation(
     modifier: Modifier,
     palette: MagazinePalette,
+    fontFamily: FontFamily?,
     onConfirm: () -> Unit,
 ) {
     Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
@@ -176,11 +191,13 @@ private fun DeepReadConfirmation(
         ) {
             Text(
                 "深度阅读会消耗更多 tokens",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
+                    .withReadingFont(fontFamily),
             )
             Text(
                 "每次生成约消耗 3 万 tokens。同一话题 24 小时内优先使用缓存。",
-                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted),
+                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted)
+                    .withReadingFont(fontFamily),
             )
             Button(onClick = onConfirm) {
                 Text("继续生成")
@@ -195,6 +212,7 @@ private fun DeepReadArticle(
     title: String,
     output: DeepReadOutput,
     palette: MagazinePalette,
+    fontFamily: FontFamily?,
     contentPadding: PaddingValues,
     listState: androidx.compose.foundation.lazy.LazyListState,
 ) {
@@ -210,91 +228,165 @@ private fun DeepReadArticle(
         verticalArrangement = Arrangement.spacedBy(46.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                Text(
-                    output.topicType.uppercase(),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        letterSpacing = 3.sp,
-                        fontWeight = FontWeight.Light,
-                        color = palette.muted,
-                    ),
-                )
-                Text(
-                    title,
-                    style = MaterialTheme.typography.displaySmall.copy(
-                        fontWeight = FontWeight.Light,
-                        letterSpacing = 1.5.sp,
-                        color = palette.ink,
-                    ),
-                )
-                Text(
-                    output.summary,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        lineHeight = 26.sp,
-                        color = palette.ink,
-                    ),
-                )
-                if (output.keyEntities.isNotEmpty()) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        output.keyEntities.take(4).forEach { entity ->
-                            EntityPill(entity, palette)
-                        }
-                    }
-                }
-            }
-        }
-
-        output.heroImageUrl?.takeIf { it.startsWith("http") }?.let { image ->
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AsyncImage(
-                        model = image,
-                        contentDescription = output.heroCaption ?: title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(248.dp)
-                            .clip(RoundedCornerShape(2.dp)),
-                    )
-                    if (!output.heroCaption.isNullOrBlank()) {
-                        Text(output.heroCaption, style = MaterialTheme.typography.labelSmall, color = palette.muted)
-                    }
-                }
-            }
+            MagazineHero(
+                title = title,
+                output = output,
+                palette = palette,
+                fontFamily = fontFamily,
+            )
         }
 
         output.timeline?.takeIf { it.isNotEmpty() }?.let { timeline ->
-            item { TimelineSection(timeline, palette) }
+            item { TimelineSection(timeline, palette, fontFamily) }
         }
 
         output.corePoints?.takeIf { it.isNotEmpty() }?.let { points ->
-            item { CorePointsSection(type = output.topicType, points = points, palette = palette) }
+            item { CorePointsSection(type = output.topicType, points = points, palette = palette, fontFamily = fontFamily) }
         }
 
-        item { AnalysisSection(output.analysis, palette) }
+        item { AnalysisSection(output.analysis, palette, fontFamily) }
 
         if (output.extendedReading.isNotEmpty()) {
-            item { ReadingSection(output.extendedReading, palette) }
+            item { ReadingSection(output.extendedReading, palette, fontFamily) }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MagazineHero(
+    title: String,
+    output: DeepReadOutput,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    val image = output.heroImageUrl?.takeIf { it.startsWith("http") }
+    var imageFailed by remember(image) { mutableStateOf(false) }
+    val showImage = image != null && !imageFailed
+
+    if (showImage) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+            ) {
+                AsyncImage(
+                    model = image,
+                    contentDescription = output.heroCaption ?: title,
+                    contentScale = ContentScale.Crop,
+                    onError = { imageFailed = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp)
+                        .align(Alignment.TopCenter),
+                )
+                Canvas(Modifier.fillMaxSize()) {
+                    val startY = 224.dp.toPx()
+                    val endY = 310.dp.toPx()
+                    val path = Path().apply {
+                        moveTo(0f, startY)
+                        lineTo(size.width, endY)
+                        lineTo(size.width, size.height)
+                        lineTo(0f, size.height)
+                        close()
+                    }
+                    drawPath(path, palette.background)
+                }
+                output.heroCaption?.takeIf { it.isNotBlank() }?.let { caption ->
+                    Text(
+                        caption,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 8.dp, bottom = 8.dp),
+                        style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily),
+                        color = palette.muted,
+                    )
+                }
+            }
+            HeroTextBlock(
+                modifier = Modifier.fillMaxWidth(),
+                title = title,
+                output = output,
+                palette = palette,
+                fontFamily = fontFamily,
+            )
+        }
+    } else {
+        HeroTextBlock(
+            modifier = Modifier.fillMaxWidth(),
+            title = title,
+            output = output,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HeroTextBlock(
+    modifier: Modifier,
+    title: String,
+    output: DeepReadOutput,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text(
+            output.topicType.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                letterSpacing = 3.sp,
+                fontWeight = FontWeight.Light,
+                color = palette.muted,
+            ),
+        )
+        Text(
+            title,
+            style = MaterialTheme.typography.displaySmall.copy(
+                fontWeight = FontWeight.Light,
+                letterSpacing = 1.5.sp,
+                color = palette.ink,
+            ).withReadingFont(fontFamily),
+        )
+        Text(
+            output.summary,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                lineHeight = 26.sp,
+                color = palette.ink,
+            ).withReadingFont(fontFamily),
+        )
+        if (output.keyEntities.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                output.keyEntities.take(4).forEach { entity ->
+                    EntityPill(entity, palette)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun EditorialSection(title: String, body: String, palette: MagazinePalette) {
+private fun EditorialSection(title: String, body: String, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionKicker(title, palette)
         Text(
             body,
-            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink),
+            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
+                .withReadingFont(fontFamily),
         )
     }
 }
 
 @Composable
-private fun TimelineSection(events: List<TimelineEvent>, palette: MagazinePalette) {
+private fun TimelineSection(events: List<TimelineEvent>, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         SectionKicker("时间轴", palette)
         events.forEach { event ->
@@ -304,7 +396,8 @@ private fun TimelineSection(events: List<TimelineEvent>, palette: MagazinePalett
                     Text(event.date, style = MaterialTheme.typography.labelMedium, color = palette.muted)
                     Text(
                         event.event,
-                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink),
+                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
+                            .withReadingFont(fontFamily),
                     )
                 }
             }
@@ -332,7 +425,7 @@ private fun TimelineMarker(highlight: Boolean, palette: MagazinePalette) {
 }
 
 @Composable
-private fun CorePointsSection(type: String, points: List<CorePoint>, palette: MagazinePalette) {
+private fun CorePointsSection(type: String, points: List<CorePoint>, palette: MagazinePalette, fontFamily: FontFamily?) {
     val title = when (type) {
         "product" -> "功能亮点"
         "person" -> "人物背景"
@@ -349,9 +442,18 @@ private fun CorePointsSection(type: String, points: List<CorePoint>, palette: Ma
                     color = palette.accent,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(point.point, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light, color = palette.ink))
+                    Text(
+                        point.point,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light, color = palette.ink)
+                            .withReadingFont(fontFamily),
+                    )
                     if (!point.supporting.isNullOrBlank()) {
-                        Text(point.supporting, style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp), color = palette.muted)
+                        Text(
+                            point.supporting,
+                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp)
+                                .withReadingFont(fontFamily),
+                            color = palette.muted,
+                        )
                     }
                 }
             }
@@ -360,45 +462,48 @@ private fun CorePointsSection(type: String, points: List<CorePoint>, palette: Ma
 }
 
 @Composable
-private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette) {
+private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
         SectionKicker("深度分析", palette)
         if (!analysis.coreDispute.isNullOrBlank()) {
             Text(
                 analysis.coreDispute,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
+                    .withReadingFont(fontFamily),
             )
         }
         analysis.quotes.take(2).forEach { quote ->
-            QuoteBlock(text = quote.text, attribution = quote.attribution, palette = palette)
+            QuoteBlock(text = quote.text, attribution = quote.attribution, palette = palette, fontFamily = fontFamily)
         }
         analysis.perspectives.takeIf { it.isNotEmpty() }?.let { perspectives ->
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                perspectives.forEach { PerspectiveRow(it, palette) }
+                perspectives.forEach { PerspectiveRow(it, palette, fontFamily) }
             }
         }
         if (!analysis.implications.isNullOrBlank()) {
             Text(
                 analysis.implications,
-                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink),
+                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
+                    .withReadingFont(fontFamily),
             )
         }
     }
 }
 
 @Composable
-private fun PerspectiveRow(perspective: Perspective, palette: MagazinePalette) {
+private fun PerspectiveRow(perspective: Perspective, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(perspective.holder ?: "观点", style = MaterialTheme.typography.labelMedium, color = palette.accent)
         Text(
             perspective.viewpoint,
-            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink),
+            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
+                .withReadingFont(fontFamily),
         )
     }
 }
 
 @Composable
-private fun QuoteBlock(text: String, attribution: String?, palette: MagazinePalette) {
+private fun QuoteBlock(text: String, attribution: String?, palette: MagazinePalette, fontFamily: FontFamily?) {
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
         Text("“", style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light, color = palette.accent))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -409,17 +514,17 @@ private fun QuoteBlock(text: String, attribution: String?, palette: MagazinePale
                     fontStyle = FontStyle.Italic,
                     fontWeight = FontWeight.Light,
                     color = palette.ink,
-                ),
+                ).withReadingFont(fontFamily),
             )
             if (!attribution.isNullOrBlank()) {
-                Text("— $attribution", style = MaterialTheme.typography.labelSmall, color = palette.muted)
+                Text("— $attribution", style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily), color = palette.muted)
             }
         }
     }
 }
 
 @Composable
-private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette) {
+private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, fontFamily: FontFamily?) {
     val uriHandler = LocalUriHandler.current
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionKicker("扩展阅读", palette)
@@ -433,7 +538,11 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette) {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 TextButton(onClick = { uriHandler.openUri(link.url) }, contentPadding = PaddingValues(0.dp)) {
-                    Text(link.title, style = MaterialTheme.typography.bodyLarge.copy(color = palette.ink))
+                    Text(
+                        link.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(color = palette.ink)
+                            .withReadingFont(fontFamily),
+                    )
                 }
                 Text(link.source ?: link.url, style = MaterialTheme.typography.labelSmall, color = palette.muted)
             }
@@ -467,10 +576,55 @@ private fun SectionKicker(text: String, palette: MagazinePalette) {
 
 @Composable
 private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
+    val stages = remember { listOf("收集来源", "组织脉络", "生成中文深读") }
+    var activeStage by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_600L)
+            activeStage = (activeStage + 1).coerceAtMost(stages.lastIndex)
+        }
+    }
     Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            CircularProgressIndicator(color = palette.accent)
-            Text("正在生成深度阅读", color = palette.muted)
+        Column(
+            modifier = Modifier.padding(horizontal = 38.dp),
+            verticalArrangement = Arrangement.spacedBy(34.dp),
+        ) {
+            Text(
+                "正在为你生成\n一篇深度好文",
+                style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light, color = palette.ink),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                stages.forEachIndexed { index, stage ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        TimelineMarker(highlight = index <= activeStage, palette = palette)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stage,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light),
+                                color = if (index <= activeStage) palette.ink else palette.muted,
+                            )
+                            Text(
+                                when (index) {
+                                    0 -> "正在检索高质量信息源..."
+                                    1 -> "提炼观点，构建内容框架"
+                                    else -> "专业重写，打磨中文表达"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = palette.muted,
+                            )
+                        }
+                    }
+                }
+            }
+            LinearProgressIndicator(
+                progress = { ((activeStage + 1).toFloat() / stages.size).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = palette.accent,
+                trackColor = palette.line,
+            )
         }
     }
 }
@@ -484,6 +638,9 @@ private fun DeepReadError(error: String, modifier: Modifier, onRetry: () -> Unit
         }
     }
 }
+
+private fun TextStyle.withReadingFont(fontFamily: FontFamily?): TextStyle =
+    if (fontFamily == null) this else copy(fontFamily = fontFamily)
 
 @Composable
 private fun magazinePalette(): MagazinePalette {
