@@ -41,7 +41,7 @@ val workspaceModule = module {
 
     single { AgentCapabilitySnapshotBuilder(get()) }
 
-    single { ConversationContextEngine(get(), get(), get(), get(), get()) }
+    single { ConversationContextEngine(get(), get(), get(), get(), get(), get()) }
 
     single { WorkspaceArtifactTools(get(), get(), get()) }
 

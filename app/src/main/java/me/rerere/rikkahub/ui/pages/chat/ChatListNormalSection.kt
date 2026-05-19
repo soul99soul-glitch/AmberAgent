@@ -66,6 +66,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
@@ -140,7 +142,8 @@ internal fun ChatListNormal(
     onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
-    val activeGeneration = loading || pendingUserMessages.isNotEmpty()
+    val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
+    val activeGeneration = loading || pendingUserMessages.isNotEmpty() || compactInTimelineActive
     val activeGenerationState by rememberUpdatedState(activeGeneration)
     val timelineLoadStateState by rememberUpdatedState(timelineLoadState)
     val loadOlderTimelineState by rememberUpdatedState(onLoadOlderTimeline)
@@ -363,13 +366,24 @@ internal fun ChatListNormal(
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
-    val compactMarkersByEndIndex = remember(contextCompacts, timelineLoadState.oldestLoadedIndex) {
-        contextCompacts
-            .filter { compact -> compact.status == "completed" }
-            .mapNotNull { compact ->
-                val visibleEndIndex = compact.sourceEndIndex - timelineLoadState.oldestLoadedIndex
-                visibleEndIndex.takeIf { it >= 0 }?.let { it to compact }
-            }
+    fun timelineAnchorForCompactEvent(eventAt: Long): Int {
+        if (conversation.messageNodes.isEmpty()) return -1
+        val timeZone = TimeZone.currentSystemDefault()
+        val anchor = conversation.messageNodes.indexOfLast { node ->
+            node.currentMessage.createdAt.toInstant(timeZone).toEpochMilliseconds() <= eventAt
+        }
+        return anchor.coerceIn(-1, conversation.messageNodes.lastIndex)
+    }
+
+    val completedCompacts = remember(contextCompacts) {
+        contextCompacts.filter { compact -> compact.status == "completed" }
+    }
+    val completedMarkersByTimelineEndIndex = remember(
+        contextCompacts,
+        conversation.messageNodes,
+    ) {
+        completedCompacts
+            .map { compact -> timelineAnchorForCompactEvent(compact.createdAt) to compact }
             .groupBy(keySelector = { it.first }, valueTransform = { it.second })
     }
     val completedCompactIds = remember(contextCompacts) {
@@ -378,79 +392,55 @@ internal fun ChatListNormal(
             .map { it.id }
             .toSet()
     }
-    val lifecycleCompletedCompactId = compactLifecycleState.completedCompactId
-        ?.takeIf { compactLifecycleState.status == CompactLifecycleStatus.COMPLETED }
-    val freshLifecycleCompletedCompactKey = lifecycleCompletedCompactId?.takeIf {
-        System.currentTimeMillis() - compactLifecycleState.updatedAt < 5_000L
-    }
-    val activeCompactVisibleEndIndex = remember(
+    val activeCompactTimelineEndIndex = remember(
         compactLifecycleState,
-        activeCompactBoundary,
-        timelineLoadState.oldestLoadedIndex,
         isCompacting,
+        conversation.messageNodes.size,
     ) {
-        val lifecycleEndIndex = compactLifecycleState
-            .takeIf { it.hasBoundary && it.isActive }
-            ?.sourceEndIndex
-        val fallbackEndIndex = activeCompactBoundary
-            ?.takeIf { isCompacting }
-            ?.sourceEndIndex
-        (lifecycleEndIndex ?: fallbackEndIndex)
-            ?.minus(timelineLoadState.oldestLoadedIndex)
-            ?.takeIf { it >= 0 }
+        conversation.messageNodes.lastIndex
+            .takeIf { it >= 0 && (compactLifecycleState.isActive || isCompacting) }
     }
-    val lifecycleCompletedVisibleEndIndex = remember(
+    val lifecycleCompletedTimelineEndIndex = remember(
         compactLifecycleState,
         completedCompactIds,
-        timelineLoadState.oldestLoadedIndex,
+        conversation.messageNodes.size,
     ) {
         compactLifecycleState
             .takeIf {
                 it.status == CompactLifecycleStatus.COMPLETED &&
-                    it.hasBoundary &&
                     it.completedCompactId != null &&
                     it.completedCompactId !in completedCompactIds
             }
-            ?.sourceEndIndex
-            ?.minus(timelineLoadState.oldestLoadedIndex)
-            ?.takeIf { it >= 0 }
+            ?.let { timelineAnchorForCompactEvent(it.anchorAt.takeIf { anchor -> anchor > 0L } ?: it.updatedAt) }
     }
     val activeCompactStreamingSummary = compactLifecycleState.streamingSummary.ifBlank { streamingSummary }
-    val lifecycleCoveredMessageIds = remember(compactLifecycleState, activeCompactBoundary, isCompacting) {
-        when {
-            compactLifecycleState.hasBoundary &&
-                (compactLifecycleState.isActive || compactLifecycleState.status == CompactLifecycleStatus.COMPLETED) ->
-                compactLifecycleState.sourceMessageIds.toSet()
-            isCompacting -> activeCompactBoundary?.sourceMessageIds.orEmpty().toSet()
-            else -> emptySet()
+    val tailTimelineEndIndex = conversation.messageNodes.lastIndex
+    val tailCompactItemKey = remember(conversation.id, tailTimelineEndIndex) {
+        "compact-timeline-tail-${conversation.id}-$tailTimelineEndIndex"
+    }
+    val compactTailMarkerVisible by remember(state, tailCompactItemKey) {
+        derivedStateOf {
+            state.layoutInfo.visibleItemsInfo.any { item -> item.key == tailCompactItemKey }
         }
     }
-    // Set of message ids covered by an already-completed compact. ChatMessage
-    // container alpha is dimmed for these so the user can VISUALLY tell that
-    // "above the '———已自动压缩———' divider is no longer in active context,
-    // only the summary is sent to the model." Keyed on contextCompacts ONLY —
-    // NOT on conversation.messageNodes — so the streaming-time
-    // updateConversation() that re-emits a new messageNodes List reference per
-    // 33ms chunk does NOT cause this Set to be rebuilt. Per-node containment
-    // is checked inline at render time (O(1) HashSet lookup).
-    val coveredMessageIds = remember(contextCompacts, lifecycleCoveredMessageIds) {
-        val completedIds = contextCompacts
-            .filter { it.status == "completed" }
-            .flatMap { it.sourceMessageIds }
-            .toSet()
-        if (lifecycleCoveredMessageIds.isEmpty()) {
-            completedIds
-        } else {
-            completedIds + lifecycleCoveredMessageIds
-        }
+    val showFloatingCompactMarker = (compactLifecycleState.isActive || isCompacting) &&
+        !compactTailMarkerVisible &&
+        !state.isScrollInProgress
+    // Timeline index covered by completed compacts. Messages above that visible
+    // divider are dimmed so the user can tell they are represented by summary
+    // context, even if the runtime privately keeps recent turns for continuity.
+    val visualCompactedTimelineEndIndex = remember(
+        completedMarkersByTimelineEndIndex,
+        lifecycleCompletedTimelineEndIndex,
+    ) {
+        (completedMarkersByTimelineEndIndex.keys + listOfNotNull(lifecycleCompletedTimelineEndIndex))
+            .maxOrNull()
     }
 
-    // 2026-05-18: active compaction is rendered at the same real boundary as
-    // completed compaction: sourceEndIndex. That gives the intended transition:
-    // "正在自动压缩" at the boundary while the summary streams, then
-    // "上下文已压缩" with the final human-readable summary at that exact spot.
-    // We deliberately do not render a fake bottom marker; otherwise the UI lies
-    // about which messages were removed from model context.
+    // Front-end dimming is based on what the user sees: every message above the
+    // completed divider is visually old context, even if the runtime keeps a
+    // few recent turns behind the scenes for continuity. The source ids remain
+    // the model-substitution contract; this index is only presentation state.
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
@@ -810,8 +800,7 @@ internal fun ChatListNormal(
                 }
                 val isLastMessage = index == conversation.messageNodes.lastIndex
                 val isLoadingMessage = timelineLoading && isLastMessage
-                val isPreCompacted = coveredMessageIds.isNotEmpty() &&
-                    node.currentMessage.id.toString() in coveredMessageIds
+                val isPreCompacted = visualCompactedTimelineEndIndex?.let { index <= it } == true
                 val virtualItems = buildChatMessageVirtualItems(
                     node = node,
                     assistant = chatAssistant,
@@ -827,33 +816,15 @@ internal fun ChatListNormal(
                         Column(
                             modifier = Modifier.padding(bottom = TimelineItemSpacing)
                         ) {
-                            val markers = compactMarkersByEndIndex[index - 1].orEmpty()
-                            markers.forEach { compact ->
-                                // 2026-05-15 (1.9.8): historical marker also carries
-                                // the summary preview (was display-divider-only before).
-                                // Users scrolling back through the timeline can see what
-                                // each compaction summarised — same content the transient
-                                // bottom marker shows when compact just finished, but
-                                // permanent at the proper sourceEndIndex position.
-                                ContextCompactMarker(
-                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                    summaryPreview = summaryPreviewOf(compact),
-                                    freshlyCompletedKey = compact.id.takeIf { it == freshLifecycleCompletedCompactKey },
-                                )
-                            }
-                            if (lifecycleCompletedVisibleEndIndex == index - 1) {
-                                ContextCompactMarker(
-                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                    summaryPreview = summaryPreviewOf(compactLifecycleState),
-                                    freshlyCompletedKey = freshLifecycleCompletedCompactKey,
-                                )
-                            }
-                            if (activeCompactVisibleEndIndex == index - 1) {
-                                ContextCompactInProgressMarker(
-                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                    streamingText = activeCompactStreamingSummary,
-                                )
-                            }
+                            TimelineCompactMarkers(
+                                timelineEndIndex = index - 1,
+                                completedMarkersByTimelineEndIndex = completedMarkersByTimelineEndIndex,
+                                lifecycleCompletedTimelineEndIndex = lifecycleCompletedTimelineEndIndex,
+                                compactLifecycleState = compactLifecycleState,
+                                activeCompactTimelineEndIndex = activeCompactTimelineEndIndex,
+                                activeCompactStreamingSummary = activeCompactStreamingSummary,
+                                modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                            )
                             // 2026-05-15 (1.9.5): pass alpha modifier directly to
                             // ListSelectableItem instead of wrapping in a Box. Compose's
                             // Modifier.alpha(1f) is a no-op (returns Modifier as-is, no
@@ -951,34 +922,15 @@ internal fun ChatListNormal(
                                 modifier = Modifier.padding(bottom = bottomPadding),
                             ) {
                                 if (isFirstVirtualItem) {
-                                    val markers = compactMarkersByEndIndex[index - 1].orEmpty()
-                                    markers.forEach { compact ->
-                                        // 2026-05-18: virtual-items branch was missing the
-                                        // summaryPreview parameter that the non-virtual
-                                        // branch already passes, so for the common case
-                                        // (multi-part assistant messages with reasoning /
-                                        // tool / text → virtual items kick in) the divider
-                                        // rendered without its summary line. Match the
-                                        // non-virtual branch.
-                                        ContextCompactMarker(
-                                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                            summaryPreview = summaryPreviewOf(compact),
-                                            freshlyCompletedKey = compact.id.takeIf { it == freshLifecycleCompletedCompactKey },
-                                        )
-                                    }
-                                    if (lifecycleCompletedVisibleEndIndex == index - 1) {
-                                        ContextCompactMarker(
-                                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                            summaryPreview = summaryPreviewOf(compactLifecycleState),
-                                            freshlyCompletedKey = freshLifecycleCompletedCompactKey,
-                                        )
-                                    }
-                                    if (activeCompactVisibleEndIndex == index - 1) {
-                                        ContextCompactInProgressMarker(
-                                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                            streamingText = activeCompactStreamingSummary,
-                                        )
-                                    }
+                                    TimelineCompactMarkers(
+                                        timelineEndIndex = index - 1,
+                                        completedMarkersByTimelineEndIndex = completedMarkersByTimelineEndIndex,
+                                        lifecycleCompletedTimelineEndIndex = lifecycleCompletedTimelineEndIndex,
+                                        compactLifecycleState = compactLifecycleState,
+                                        activeCompactTimelineEndIndex = activeCompactTimelineEndIndex,
+                                        activeCompactStreamingSummary = activeCompactStreamingSummary,
+                                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                    )
                                 }
                                 // See non-virtual branch comment above — alpha is passed to
                                 // TimelineSelectableMessageItem.modifier so the active-message
@@ -1058,39 +1010,29 @@ internal fun ChatListNormal(
                 }
             }
 
-            val trailingCompactMarkers = compactMarkersByEndIndex[conversation.messageNodes.lastIndex].orEmpty()
-            trailingCompactMarkers.forEach { compact ->
+            val hasTailCompletedCompactMarkers =
+                completedMarkersByTimelineEndIndex[tailTimelineEndIndex].orEmpty().isNotEmpty()
+            val hasTailLifecycleCompletedCompactMarker =
+                lifecycleCompletedTimelineEndIndex == tailTimelineEndIndex
+            val hasTailActiveCompactMarker =
+                activeCompactTimelineEndIndex == tailTimelineEndIndex
+            if (
+                hasTailCompletedCompactMarkers ||
+                hasTailLifecycleCompletedCompactMarker ||
+                hasTailActiveCompactMarker
+            ) {
                 item(
-                    key = "compact-boundary-tail-${compact.id}",
-                    contentType = "compact-boundary-tail",
+                    key = tailCompactItemKey,
+                    contentType = "compact-timeline-tail",
                 ) {
-                    ContextCompactMarker(
+                    TimelineCompactMarkers(
+                        timelineEndIndex = tailTimelineEndIndex,
+                        completedMarkersByTimelineEndIndex = completedMarkersByTimelineEndIndex,
+                        lifecycleCompletedTimelineEndIndex = lifecycleCompletedTimelineEndIndex,
+                        compactLifecycleState = compactLifecycleState,
+                        activeCompactTimelineEndIndex = activeCompactTimelineEndIndex,
+                        activeCompactStreamingSummary = activeCompactStreamingSummary,
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        summaryPreview = summaryPreviewOf(compact),
-                        freshlyCompletedKey = compact.id.takeIf { it == freshLifecycleCompletedCompactKey },
-                    )
-                }
-            }
-            if (lifecycleCompletedVisibleEndIndex == conversation.messageNodes.lastIndex) {
-                item(
-                    key = "compact-boundary-lifecycle-tail-${compactLifecycleState.completedCompactId ?: conversation.id}",
-                    contentType = "compact-boundary-tail",
-                ) {
-                    ContextCompactMarker(
-                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        summaryPreview = summaryPreviewOf(compactLifecycleState),
-                        freshlyCompletedKey = freshLifecycleCompletedCompactKey,
-                    )
-                }
-            }
-            if (activeCompactVisibleEndIndex == conversation.messageNodes.lastIndex) {
-                item(
-                    key = "compact-boundary-active-tail-${conversation.id}",
-                    contentType = "compact-boundary-active-tail",
-                ) {
-                    ContextCompactInProgressMarker(
-                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        streamingText = activeCompactStreamingSummary,
                     )
                 }
             }
@@ -1151,6 +1093,20 @@ internal fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            if (showFloatingCompactMarker) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .zIndex(4f)
+                        .padding(horizontal = TimelineHorizontalPadding, vertical = 8.dp),
+                ) {
+                    ContextCompactInProgressMarker(
+                        streamingText = activeCompactStreamingSummary,
+                    )
+                }
+            }
+
             // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,

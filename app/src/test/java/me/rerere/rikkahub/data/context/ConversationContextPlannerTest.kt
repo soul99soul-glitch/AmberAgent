@@ -42,6 +42,66 @@ class ConversationContextPlannerTest {
     }
 
     @Test
+    fun forceCompactionSkipsShallowPlanThatWouldNotReleaseEnoughTokens() {
+        val nodes = List(4) { MessageNode.of(UIMessage.user("short $it")) } +
+            List(24) { MessageNode.of(UIMessage.user("x".repeat(4_000))) }
+
+        val plan = ConversationContextPlanner.planForceCompaction(
+            nodes = nodes,
+            activeCompacts = emptyList(),
+            policy = CompactPolicy(
+                precompactRatio = 0.40f,
+                forceRatio = 0.85f,
+                keepRecentTurns = 12,
+                maxSummaryTokens = 500,
+            ),
+            modelContextWindowTokens = 10_000,
+        )
+
+        assertTrue(plan.shouldCompact)
+        assertEquals("force_threshold", plan.reason)
+        assertTrue("force plan should go beyond the first 4 tiny messages", plan.sourceEndIndex > 3)
+    }
+
+    @Test
+    fun forceCompactionDepthUsesEffectiveCompactAwarePressure() {
+        val nodes = List(100) { MessageNode.of(UIMessage.user("x".repeat(4_000))) }
+        val oldCompact = ConversationCompact(
+            id = "old-compact",
+            conversationId = "conversation",
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "Old cumulative facts.",
+                sourceMessageIds = nodes.take(80).map { it.currentMessage.id.toString() },
+            ),
+            level = 1,
+            sourceStartIndex = 0,
+            sourceEndIndex = 79,
+            sourceMessageIds = nodes.take(80).map { it.currentMessage.id.toString() },
+            tokenEstimate = 500,
+            createdAt = 1,
+            updatedAt = 1,
+            status = "completed",
+        )
+
+        val plan = ConversationContextPlanner.planForceCompaction(
+            nodes = nodes,
+            activeCompacts = listOf(oldCompact),
+            policy = CompactPolicy(
+                precompactRatio = 0.40f,
+                forceRatio = 0.90f,
+                keepRecentTurns = 8,
+                maxSummaryTokens = 500,
+            ),
+            modelContextWindowTokens = 20_000,
+        )
+
+        assertTrue(plan.shouldCompact)
+        assertEquals("force_threshold", plan.reason)
+        assertEquals(80, plan.sourceStartIndex)
+        assertEquals(83, plan.sourceEndIndex)
+    }
+
+    @Test
     fun prepareMessagesInjectsSummaryAndDropsCoveredOriginals() {
         val messages = List(8) { UIMessage.user("message $it") }
         val compact = ConversationCompact(
@@ -68,6 +128,57 @@ class ConversationContextPlannerTest {
         assertEquals(5, prepared.size)
         assertTrue(prepared.first().toText().contains("summary-1"))
         assertEquals(messages.drop(4).map { it.id }, prepared.drop(1).map { it.id })
+    }
+
+    @Test
+    fun prepareMessagesInjectsLatestCumulativeHandoffOnly() {
+        val messages = List(8) { UIMessage.user("message $it") }
+        val olderCompact = ConversationCompact(
+            id = "summary-old",
+            conversationId = "conversation",
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "Older facts.",
+                sourceMessageIds = messages.take(4).map { it.id.toString() },
+            ),
+            level = 1,
+            sourceStartIndex = 0,
+            sourceEndIndex = 3,
+            sourceMessageIds = messages.take(4).map { it.id.toString() },
+            tokenEstimate = 100,
+            createdAt = 1,
+            updatedAt = 1,
+            status = "completed",
+        )
+        val latestCompact = ConversationCompact(
+            id = "summary-latest",
+            conversationId = "conversation",
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "Latest cumulative facts.",
+                sourceMessageIds = messages.drop(4).take(2).map { it.id.toString() },
+                coveredCompactIds = listOf("summary-old"),
+                carriedHandoffMarkdown = CompactSummaryPayloads.injectionText(olderCompact),
+            ),
+            level = 1,
+            sourceStartIndex = 4,
+            sourceEndIndex = 5,
+            sourceMessageIds = messages.drop(4).take(2).map { it.id.toString() },
+            tokenEstimate = 100,
+            createdAt = 2,
+            updatedAt = 2,
+            status = "completed",
+        )
+
+        val prepared = ConversationContextPlanner.prepareMessages(
+            messages = messages,
+            activeCompacts = listOf(olderCompact, latestCompact),
+            policy = CompactPolicy(keepRecentTurns = 2),
+            contextMessageSize = 0,
+        )
+
+        assertEquals(3, prepared.size)
+        assertTrue(prepared.first().toText().contains("summary-latest"))
+        assertTrue(prepared.first().toText().contains("summary-old"))
+        assertEquals(messages.drop(6).map { it.id }, prepared.drop(1).map { it.id })
     }
 
     @Test

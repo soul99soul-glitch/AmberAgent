@@ -85,6 +85,7 @@ data class CompactLifecycleState(
     val streamingSummary: String = "",
     val completedCompactId: String? = null,
     val error: String? = null,
+    val anchorAt: Long = 0L,
     val updatedAt: Long = 0L,
 ) {
     val isActive: Boolean

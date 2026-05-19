@@ -280,7 +280,7 @@
   <string name="chat_page_compressing">Compressing...</string>
   <string name="chat_context_auto_compacted">Context compressed</string>
   <string name="chat_context_compact_completed">Compression complete</string>
-  <string name="chat_context_auto_compacting">Auto-compressing</string>
+  <string name="chat_context_auto_compacting">Compressing context</string>
   <string name="chat_context_auto_compacting_subtitle">Generating context summary…</string>
   <string name="chat_page_delete">Delete</string>
   <string name="chat_page_dismiss_error">Dismiss error</string>

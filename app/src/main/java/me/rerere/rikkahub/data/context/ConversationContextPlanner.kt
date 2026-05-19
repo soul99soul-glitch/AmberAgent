@@ -77,6 +77,63 @@ object ConversationContextPlanner {
         )
     }
 
+    fun planForceCompaction(
+        nodes: List<MessageNode>,
+        activeCompacts: List<ConversationCompact>,
+        policy: CompactPolicy,
+        modelContextWindowTokens: Int?,
+    ): CompactPlan {
+        val turns = buildList {
+            var currentTurns = policy.keepRecentTurns.coerceAtLeast(1)
+            while (currentTurns > 1) {
+                add(currentTurns)
+                currentTurns = (currentTurns / 2).coerceAtLeast(1)
+            }
+            add(1)
+        }.distinct()
+
+        val contextWindow = estimateContextWindow(modelContextWindowTokens)
+        val targetTokens = (contextWindow * policy.forceRatio)
+            .toInt()
+            .coerceAtLeast(1)
+        var deepestPlan: CompactPlan? = null
+        var lastPlan: CompactPlan? = null
+
+        turns.forEach { keepRecentTurns ->
+            val plan = planCompaction(
+                nodes = nodes,
+                activeCompacts = activeCompacts,
+                policy = policy.copy(
+                    enabled = true,
+                    keepRecentTurns = keepRecentTurns,
+                    precompactRatio = 0f,
+                    forceRatio = Float.MAX_VALUE,
+                ),
+                modelContextWindowTokens = modelContextWindowTokens,
+            )
+            lastPlan = plan
+            if (plan.shouldCompact) {
+                deepestPlan = plan
+                if (estimateAfterCompaction(nodes, activeCompacts, plan, policy.maxSummaryTokens) <= targetTokens) {
+                    return plan.copy(reason = "force_threshold")
+                }
+            }
+        }
+
+        return deepestPlan?.copy(reason = "force_threshold")
+            ?: lastPlan
+            ?: planCompaction(
+                nodes = nodes,
+                activeCompacts = activeCompacts,
+                policy = policy.copy(
+                    enabled = true,
+                    precompactRatio = 0f,
+                    forceRatio = Float.MAX_VALUE,
+                ),
+                modelContextWindowTokens = modelContextWindowTokens,
+            )
+    }
+
     fun prepareMessages(
         messages: List<UIMessage>,
         activeCompacts: List<ConversationCompact>,
@@ -87,22 +144,14 @@ object ConversationContextPlanner {
             return messages.limitContext(contextMessageSize)
         }
         val existingMessageIds = messages.map { it.id.toString() }.toSet()
-        val completedCompacts = activeCompacts.filter { compact ->
-            compact.status == "completed" &&
-                compact.sourceMessageIds.isNotEmpty() &&
-                compact.sourceMessageIds.all { it in existingMessageIds }
-        }
+        val completedCompacts = CompactSummaryPayloads.validCompletedCompacts(activeCompacts, existingMessageIds)
         if (completedCompacts.isEmpty()) return messages.limitContext(contextMessageSize)
 
-        val compactSummaryMessages = completedCompacts.map { compact ->
-            UIMessage.system(
-                """
-                [Conversation compact summary: ${compact.id}]
-                Source message ids: ${compact.sourceMessageIds.joinToString(", ")}
-                ${compact.summary}
-                """.trimIndent()
-            )
-        }
+        val compactSummaryMessages = CompactSummaryPayloads
+            .selectCompactsForInjection(activeCompacts, existingMessageIds)
+            .map { compact ->
+                UIMessage.system(CompactSummaryPayloads.injectionText(compact))
+            }
         val coveredMessageIds = completedCompacts.flatMap { it.sourceMessageIds }.toSet()
         val recentMessages = messages.filter { it.id.toString() !in coveredMessageIds }
         val keepLimit = if (contextMessageSize > 0) {
@@ -162,6 +211,45 @@ object ConversationContextPlanner {
             sourceEndIndex = -1,
             sourceMessageIds = emptyList(),
         )
+    }
+
+    private fun estimateAfterCompaction(
+        nodes: List<MessageNode>,
+        activeCompacts: List<ConversationCompact>,
+        plan: CompactPlan,
+        maxSummaryTokens: Int,
+    ): Int {
+        if (!plan.shouldCompact) return plan.estimatedTokens
+        val messages = nodes.map { it.currentMessage }
+        val existingMessageIds = messages.map { it.id.toString() }.toSet()
+        val completedCompacts = CompactSummaryPayloads.validCompletedCompacts(activeCompacts, existingMessageIds)
+        val carriedCompacts = CompactSummaryPayloads.selectCompactsForInjection(activeCompacts, existingMessageIds)
+        val carriedCompactIds = carriedCompacts.transitiveCompactIds()
+        val remainingCompactSummaryMessages = completedCompacts
+            .filter { it.id !in carriedCompactIds }
+            .map { compact -> UIMessage.system(CompactSummaryPayloads.injectionText(compact)) }
+        val coveredMessageIds = completedCompacts
+            .flatMap { it.sourceMessageIds }
+            .plus(plan.sourceMessageIds)
+            .toSet()
+        val recentMessages = messages.filter { it.id.toString() !in coveredMessageIds }
+        return estimateTokens(remainingCompactSummaryMessages) +
+            estimateTokens(recentMessages) +
+            maxSummaryTokens.coerceAtLeast(256)
+    }
+
+    private fun List<ConversationCompact>.transitiveCompactIds(): Set<String> {
+        if (isEmpty()) return emptySet()
+        val byId = associateBy { it.id }
+        val seen = linkedSetOf<String>()
+        fun visit(id: String) {
+            if (!seen.add(id)) return
+            byId[id]?.let { compact ->
+                CompactSummaryPayloads.parse(compact.summary)?.coveredCompactIds.orEmpty().forEach(::visit)
+            }
+        }
+        forEach { visit(it.id) }
+        return seen
     }
 
     private fun UIMessagePart.estimatedChars(): Int = when (this) {

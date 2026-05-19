@@ -357,7 +357,7 @@ class ChatService(
      * Live-streaming summary text for this conversation while compaction is
      * running. Empty string when not compacting or compaction just finished.
      * 1.9.6 feature — drives the rolling-text display under the
-     * "———正在自动压缩———" shimmer divider.
+     * "———正在压缩上下文———" shimmer divider.
      */
     fun getStreamingSummaryFlow(conversationId: Uuid): Flow<String> {
         return getCompactLifecycleStateFlow(conversationId).map { it.streamingSummary }
@@ -1889,8 +1889,11 @@ class ChatService(
             messageNodes = copiedNodes,
         )
 
-        contextEngine.invalidateCompacts(conversationId, "conversation_forked")
         saveConversation(forkConversation.id, forkConversation)
+        contextEngine.copyValidCompactsToConversation(
+            sourceConversationId = conversationId,
+            targetConversation = forkConversation,
+        )
         return forkConversation
     }
 

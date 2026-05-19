@@ -19,6 +19,22 @@ const val DEFAULT_IMAGE_PROMPT_INJECTION: String =
 const val DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION: String =
     "Overcrowded micro-details, muddy textures, distorted hands or faces, unreadable text, duplicated limbs, heavy artifacts, random decorative clutter, and low-contrast composition."
 
+val DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT: String = """
+# Context Compaction Handoff
+
+Write a continuation handoff for another model that will resume the same conversation.
+
+Return valid JSON only. The JSON must include:
+- `schema_version`: 2
+- `timeline_summary`: 4-5 human-readable sentences in the user's language, written for the chat timeline
+- `handoff_markdown`: dense Markdown for the next model, with sections: Goal, Constraints, Progress, Decisions, Current State, Next Steps, Critical Context, Relevant Files
+- `covered_compact_ids`: the compact ids from the provided previous handoffs that this handoff carries forward
+- `source_message_ids`: exactly the source ids provided for this compact pass
+- `created_at`: the unix epoch millis provided by the app
+
+The timeline summary is for humans. The handoff Markdown is for the model. Preserve concrete names, files, commands, errors, user preferences, approvals, rejected approaches, and unresolved decisions. Do not include raw tool logs unless they are needed to continue safely.
+""".trimIndent()
+
 data class ImagePromptInjectionConfig(
     val enabled: Boolean = true,
     val defaultPrompt: String = DEFAULT_IMAGE_PROMPT_INJECTION,
@@ -47,6 +63,9 @@ class AgentPromptConfigRepository(
 
     val modelCouncilPromptFile: File
         get() = File(directory, MODEL_COUNCIL_PROMPT_FILE)
+
+    val contextCompactionPromptFile: File
+        get() = File(directory, CONTEXT_COMPACTION_PROMPT_FILE)
 
     suspend fun effectiveImagePrompt(userPrompt: String): String = withContext(Dispatchers.IO) {
         applyImagePrompt(userPrompt, readImageConfigBlocking())
@@ -152,6 +171,19 @@ class AgentPromptConfigRepository(
             }
         }
 
+    suspend fun readContextCompactionPrompt(): String = withContext(Dispatchers.IO) {
+        readContextCompactionPromptBlocking()
+    }
+
+    suspend fun writeContextCompactionPrompt(prompt: String): PromptConfigWriteResult =
+        withContext(Dispatchers.IO) {
+            val trimmed = prompt.validPrompt(MAX_CONTEXT_COMPACTION_PROMPT_CHARS, "context compaction prompt")
+            writeMutex.withLock {
+                contextCompactionPromptFile.writeTextAtomically(renderContextCompactionPrompt(trimmed))
+            }
+            PromptConfigWriteResult(contextCompactionPromptFile, "context_compaction")
+        }
+
     suspend fun applyModelCouncilMarkdownToSetting(setting: ModelCouncilRuntimeSetting): ModelCouncilRuntimeSetting =
         withContext(Dispatchers.IO) {
             if (!modelCouncilPromptFile.exists()) return@withContext setting
@@ -180,6 +212,11 @@ class AgentPromptConfigRepository(
             if (!imagePromptFile.exists()) {
                 imagePromptFile.writeTextAtomically(renderImageConfig(ImagePromptInjectionConfig()))
             }
+            if (!contextCompactionPromptFile.exists()) {
+                contextCompactionPromptFile.writeTextAtomically(
+                    renderContextCompactionPrompt(DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT)
+                )
+            }
         }
     }
 
@@ -198,6 +235,16 @@ class AgentPromptConfigRepository(
     private fun writeModelCouncilMarkdownBlocking(setting: ModelCouncilRuntimeSetting): File {
         modelCouncilPromptFile.writeTextAtomically(renderModelCouncilPrompts(setting))
         return modelCouncilPromptFile
+    }
+
+    private fun readContextCompactionPromptBlocking(): String {
+        if (!contextCompactionPromptFile.exists()) {
+            contextCompactionPromptFile.writeTextAtomically(
+                renderContextCompactionPrompt(DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT)
+            )
+        }
+        return extractFencedSection(contextCompactionPromptFile.readText(), "Prompt")
+            .ifBlank { DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT }
     }
 
     private fun applyImagePrompt(userPrompt: String, config: ImagePromptInjectionConfig): String {
@@ -285,6 +332,19 @@ class AgentPromptConfigRepository(
             appendLine()
         }
     }
+
+    private fun renderContextCompactionPrompt(prompt: String): String = """
+        # Context Compaction Handoff Prompt
+
+        Agent-editable instructions appended to every conversation compaction request.
+        Keep the JSON contract intact unless the app is updated to parse a new schema.
+
+        ## Prompt
+
+        ```text
+        ${prompt.trim().safeFence()}
+        ```
+    """.trimIndent() + "\n"
 
     private fun extractFencedSection(markdown: String, heading: String): String {
         val section = extractSection(markdown, heading)
@@ -393,12 +453,14 @@ class AgentPromptConfigRepository(
         private const val IMAGE_PROMPT_FILE = "image-generation.md"
         private const val SUB_AGENT_PROMPT_FILE = "subagents.md"
         private const val MODEL_COUNCIL_PROMPT_FILE = "model-council.md"
+        private const val CONTEXT_COMPACTION_PROMPT_FILE = "context-compaction-handoff.md"
 
         private val FENCE_REGEX = Regex("(?s)```(?:text|prompt|markdown)?\\s*\\n(.*?)\\n```")
         private const val MAX_IMAGE_PROMPT_CHARS = 4_000
         private const val MAX_IMAGE_NEGATIVE_PROMPT_CHARS = 4_000
         private const val MAX_SUB_AGENT_PROMPT_CHARS = 8_000
         private const val MAX_COUNCIL_PROMPT_CHARS = 2_000
+        private const val MAX_CONTEXT_COMPACTION_PROMPT_CHARS = 8_000
         private const val MAX_MARKDOWN_FILE_CHARS = 80_000
     }
 }

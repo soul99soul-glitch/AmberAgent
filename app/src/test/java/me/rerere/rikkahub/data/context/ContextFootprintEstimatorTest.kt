@@ -4,10 +4,13 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.uuid.Uuid
 
 class ContextFootprintEstimatorTest {
     @Test
@@ -66,5 +69,59 @@ class ContextFootprintEstimatorTest {
             ContextFootprintEstimator.inputFingerprint(listOf(withShortReasoning)),
             ContextFootprintEstimator.inputFingerprint(listOf(withLongReasoning))
         )
+    }
+
+    @Test
+    fun estimateUsesLatestCumulativeHandoffOnly() {
+        val messages = List(8) { UIMessage.user("message $it " + "x".repeat(1_000)) }
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = messages.map { MessageNode.of(it) },
+        )
+        val olderCompact = ConversationCompact(
+            id = "summary-old",
+            conversationId = conversation.id.toString(),
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "Older compact.",
+                sourceMessageIds = messages.take(4).map { it.id.toString() },
+            ),
+            level = 1,
+            sourceStartIndex = 0,
+            sourceEndIndex = 3,
+            sourceMessageIds = messages.take(4).map { it.id.toString() },
+            tokenEstimate = 100,
+            createdAt = 1,
+            updatedAt = 1,
+            status = "completed",
+        )
+        val latestCompact = ConversationCompact(
+            id = "summary-latest",
+            conversationId = conversation.id.toString(),
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "Latest cumulative compact.",
+                sourceMessageIds = messages.drop(4).take(2).map { it.id.toString() },
+                coveredCompactIds = listOf("summary-old"),
+                carriedHandoffMarkdown = CompactSummaryPayloads.injectionText(olderCompact),
+            ),
+            level = 1,
+            sourceStartIndex = 4,
+            sourceEndIndex = 5,
+            sourceMessageIds = messages.drop(4).take(2).map { it.id.toString() },
+            tokenEstimate = 100,
+            createdAt = 2,
+            updatedAt = 2,
+            status = "completed",
+        )
+
+        val estimate = ContextFootprintEstimator.estimateConversationInputTokens(
+            conversation = conversation,
+            activeCompacts = listOf(olderCompact, latestCompact),
+        )
+        val expected = ContextFootprintEstimator.estimateMessages(
+            listOf(UIMessage.system(CompactSummaryPayloads.injectionText(latestCompact))) + messages.drop(6)
+        )
+
+        assertEquals(expected, estimate)
+        assertTrue(estimate < ContextFootprintEstimator.estimateMessages(messages))
     }
 }

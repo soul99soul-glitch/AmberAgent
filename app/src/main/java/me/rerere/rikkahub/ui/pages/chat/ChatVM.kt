@@ -103,8 +103,8 @@ class ChatVM(
 
     /**
      * Whether automatic context compaction is currently in progress for THIS
-     * conversation. Drives the Codex-style "———正在自动压缩———" shimmer divider
-     * shown above the chat input while a compact summary is being generated.
+     * conversation. Drives the Codex-style "———正在压缩上下文———" timeline divider
+     * while a compact summary is being generated.
      */
     val isCompacting: StateFlow<Boolean> =
         chatService
