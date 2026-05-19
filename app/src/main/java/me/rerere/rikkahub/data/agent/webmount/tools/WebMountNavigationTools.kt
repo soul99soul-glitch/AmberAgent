@@ -29,7 +29,8 @@ internal fun createOpenTool(
     description = """
         Open a URL in a pooled headless WebView. Re-uses an existing session if `session_id` is provided
         and still alive, otherwise allocates a new one. Returns the session id, the load status, the
-        current URL, and the latest title. Use `wait="load"` (default) to block until onPageFinished;
+        current URL, and the latest title. Use `wait="semantic_idle"` (default) to wait for
+        a semantic page settle after onPageFinished; `wait="load"` only waits for onPageFinished;
         `wait="none"` returns immediately after issuing the navigation. The headless WebView reuses the
         app-wide cookie jar, so any sites the user has logged into through other in-app WebViews are
         already authenticated here.
@@ -39,7 +40,7 @@ internal fun createOpenTool(
             properties = buildJsonObject {
                 put("url", stringProp("Absolute http(s) URL to navigate to."))
                 put("session_id", stringProp("Reuse an existing session. Omit to allocate a new one."))
-                put("wait", stringProp("'load' (default) waits for onPageFinished; 'none' returns immediately."))
+                put("wait", stringProp("'semantic_idle' (default) | 'load' | 'dom_stable' | 'network_idle' | 'none'."))
                 put("timeout_ms", integerProp("Load timeout in ms. Default 30000, clamped to [1000, 60000]."))
             },
             required = listOf("url"),
@@ -51,8 +52,10 @@ internal fun createOpenTool(
             require(url.startsWith("http://") || url.startsWith("https://")) {
                 "wm_open only supports http(s) URLs"
             }
-            val wait = input.string("wait")?.lowercase() ?: "load"
-            require(wait in setOf("load", "none")) { "wait must be one of: load, none" }
+            val wait = input.string("wait")?.lowercase() ?: "semantic_idle"
+            require(wait in setOf("semantic_idle", "dom_stable", "network_idle", "load", "none")) {
+                "wait must be one of: semantic_idle, dom_stable, network_idle, load, none"
+            }
             val timeoutMs = (input.long("timeout_ms") ?: SessionHandle.DEFAULT_LOAD_TIMEOUT_MS)
                 .coerceIn(1_000L, 60_000L)
             val sessionId = input.string("session_id")
@@ -69,13 +72,27 @@ internal fun createOpenTool(
                 buildJsonObject {
                     put("session_id", handle.sessionId)
                     put("status", state.status.wireName)
-                    put("url", state.currentUrl ?: url)
-                    put("requested_url", url)
+                    put("url", redactWebMountUrl(state.currentUrl ?: url).orEmpty())
+                    put("requested_url", redactWebMountUrl(url).orEmpty())
                     put("waited", false)
                     profile?.let { put("applicable_profile", it) }
                 }
             } else {
                 val state = handle.loadUrl(url, timeoutMs)
+                val semanticWait = if (wait in setOf("semantic_idle", "dom_stable", "network_idle")) {
+                    runCatching {
+                        handle.callBridge(
+                            "wait",
+                            buildJsonObject {
+                                put("until", wait)
+                                put("timeout_ms", (timeoutMs / 2).coerceIn(700L, 8_000L))
+                            },
+                            timeoutMs = (timeoutMs / 2).coerceIn(700L, 8_000L) + 1_500L,
+                        )
+                    }.getOrNull()
+                } else {
+                    null
+                }
                 // M2.1 review W-1 fix: prefer committed URL so redirect chains
                 // (http→https, root→www) get the *actual* origin's profile,
                 // not a stale match against the requested URL.
@@ -83,12 +100,15 @@ internal fun createOpenTool(
                 buildJsonObject {
                     put("session_id", handle.sessionId)
                     put("status", state.status.wireName)
-                    put("url", state.currentUrl ?: url)
+                    put("url", redactWebMountUrl(state.currentUrl ?: url).orEmpty())
                     put("title", state.title)
-                    put("requested_url", url)
+                    put("requested_url", redactWebMountUrl(url).orEmpty())
                     put("load_progress", state.progress)
                     put("error", state.error)
                     put("waited", true)
+                    put("wait_mode", wait)
+                    put("network_coverage", handle.bridgeInjectionCoverage)
+                    semanticWait?.let { put("semantic_wait", it) }
                     profile?.let { put("applicable_profile", it) }
                 }
             }
@@ -141,7 +161,7 @@ internal fun createStateTool(
                     // Bridge failure is recoverable — surface partial state from Kotlin side.
                     val ls = handle.loadState.value
                     return@getOrElse buildJsonObject {
-                        put("url", ls.currentUrl)
+                        put("url", redactWebMountUrl(ls.currentUrl))
                         put("title", ls.title)
                         put("ready_state", "unknown")
                         put("bridge_error", error.message ?: error.toString())
@@ -155,8 +175,8 @@ internal fun createStateTool(
                 put("session_id", sessionId)
                 put("status", ls.status.wireName)
                 put("load_progress", ls.progress)
-                put("requested_url", ls.requestedUrl)
-                put("committed_url", ls.committedUrl)
+                put("requested_url", redactWebMountUrl(ls.requestedUrl))
+                put("committed_url", redactWebMountUrl(ls.committedUrl))
                 put("error", ls.error)
                 put("updated_at_ms", ls.updatedAtMs)
                 put("page", bridgePayload)
@@ -371,7 +391,7 @@ private fun applicableProfileJson(
 
 private fun JsonElement.safeUrlPreview(): JsonObject =
     buildJsonObject {
-        put("url", string("url").orEmpty())
+        put("url", redactWebMountUrl(string("url")).orEmpty())
         put("session_id", string("session_id"))
         put("wait", string("wait"))
     }

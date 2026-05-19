@@ -50,7 +50,7 @@ internal object FeishuDocsNetworkSummary {
         if (!isFeishuHost(host)) return null
         val path = uri?.rawPath ?: url.takeWhile { it != '?' }.take(160)
         val responsePreview = event.s("response_preview")
-        val shape = responseShape(responsePreview)
+        val shape = (event["response_shape"] as? JsonObject) ?: responseShape(responsePreview)
         val candidate = isDocCandidate(host, path)
         return buildJsonObject {
             put("event_ref", "wm_seq_${event.s("seq") ?: "unknown"}")
@@ -60,7 +60,7 @@ internal object FeishuDocsNetworkSummary {
             put("endpoint_key", endpointKey(host, path))
             event.i("status")?.let { put("status", it) }
             put("size_bytes", event.i("response_chars") ?: 0)
-            put("content_kind", contentKind(responsePreview))
+            put("content_kind", event.s("response_kind") ?: contentKind(responsePreview))
             put("response_shape", shape ?: JsonNull)
             put("is_doc_candidate", candidate)
             hintFor(host, path, shape, candidate)?.let { put("hint", it) } ?: put("hint", JsonNull)

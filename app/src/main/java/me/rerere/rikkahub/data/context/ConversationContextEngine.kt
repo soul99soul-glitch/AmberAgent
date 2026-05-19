@@ -16,12 +16,15 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
@@ -72,12 +75,13 @@ class ConversationContextEngine(
     private val contextRepository: ConversationContextRepository,
     private val appScope: AppScope,
     private val capabilitySnapshotBuilder: AgentCapabilitySnapshotBuilder,
+    private val promptConfigRepository: AgentPromptConfigRepository,
 ) {
     private val compactMutex = Mutex()
 
     // 2026-05-15: exposes "which conversations are currently compacting" so the
-    // UI can render a Codex-style "———正在自动压缩———" shimmer divider above the
-    // ChatInput while compactConversation runs. Without this signal the user had
+    // UI can render a Codex-style "———正在压缩上下文———" timeline divider while
+    // compactConversation runs. Without this signal the user had
     // zero feedback that compaction was happening — a 30s+ silent stall before
     // the next AI reply, indistinguishable from a network hang. Set membership
     // is keyed on conversationId (Uuid as String to align with the
@@ -96,9 +100,8 @@ class ConversationContextEngine(
     // the finally block. UI (ContextCompactInProgressMarker) reads this and
     // renders the trailing 120 chars under the shimmer divider so the user
     // can see the summary being generated in real time. Once compaction
-    // finishes the stream entry is cleared and the permanent boundary marker
-    // at sourceEndIndex takes over with the FINAL summary preview from
-    // ConversationCompact.summary.
+    // finishes the stream entry is cleared and the permanent completed marker
+    // reads the FINAL summary preview from ConversationCompact.summary.
     private val _summaryStreamFlow = MutableStateFlow<Map<String, String>>(emptyMap())
     val summaryStreamFlow: StateFlow<Map<String, String>> = _summaryStreamFlow.asStateFlow()
 
@@ -332,39 +335,10 @@ class ConversationContextEngine(
             )
         }
 
-        val turns = buildList {
-            var currentTurns = policy.keepRecentTurns.coerceAtLeast(1)
-            while (currentTurns > 1) {
-                add(currentTurns)
-                currentTurns = (currentTurns / 2).coerceAtLeast(1)
-            }
-            add(1)
-        }.distinct()
-
-        var lastPlan: CompactPlan? = null
-        turns.forEach { keepRecentTurns ->
-            val plan = ConversationContextPlanner.planCompaction(
-                nodes = nodes,
-                activeCompacts = activeCompacts,
-                policy = policy.copy(
-                    enabled = true,
-                    keepRecentTurns = keepRecentTurns,
-                    precompactRatio = 0f,
-                    forceRatio = Float.MAX_VALUE,
-                ),
-                modelContextWindowTokens = modelContextWindowTokens,
-            )
-            if (plan.shouldCompact) return plan
-            lastPlan = plan
-        }
-        return lastPlan ?: ConversationContextPlanner.planCompaction(
+        return ConversationContextPlanner.planForceCompaction(
             nodes = nodes,
             activeCompacts = activeCompacts,
-            policy = policy.copy(
-                enabled = true,
-                precompactRatio = 0f,
-                forceRatio = Float.MAX_VALUE,
-            ),
+            policy = policy.copy(enabled = true),
             modelContextWindowTokens = modelContextWindowTokens,
         )
     }
@@ -411,8 +385,8 @@ class ConversationContextEngine(
                     state
                 }
             }
-            // Clear any leftover streaming text — UI swaps to the transient
-            // "已自动压缩" marker which reads from ConversationCompact.summary
+            // Clear any leftover streaming text — UI swaps to the completed
+            // "上下文已压缩" marker which reads from ConversationCompact.summary
             // (final, persisted). Leaving a partial in _summaryStreamFlow
             // would either show stale streaming under the next compact or
             // ghost under the wrong conversation.
@@ -484,88 +458,104 @@ class ConversationContextEngine(
                 )
                 val nodes = conversation.messageNodes.subList(plan.sourceStartIndex, plan.sourceEndIndex + 1)
                 val contentToCompress = ConversationContextPlanner.buildCompressionInput(nodes.map { it.currentMessage })
+                val existingMessageIds = conversation.currentMessages.map { it.id.toString() }.toSet()
+                val previousCompacts = CompactSummaryPayloads.selectCompactsForInjection(
+                    activeCompacts = activeCompacts,
+                    existingMessageIds = existingMessageIds,
+                )
+                val coveredCompactIds = previousCompacts.map { it.id }
+                val previousCompactContext = previousCompacts.joinToString("\n\n") { compact ->
+                    CompactSummaryPayloads.injectionText(compact)
+                }
+                val payloadCreatedAt = System.currentTimeMillis()
+                val handoffPrompt = promptConfigRepository.readContextCompactionPrompt()
                 val prompt = buildCompressionPrompt(
                     basePrompt = settings.compressPrompt,
                     content = contentToCompress,
                     targetTokens = policy.maxSummaryTokens,
                     additionalPrompt = additionalPrompt,
                     sourceMessageIds = plan.sourceMessageIds,
+                    previousCompacts = previousCompacts,
+                    coveredCompactIds = coveredCompactIds,
+                    payloadCreatedAt = payloadCreatedAt,
+                    handoffPrompt = handoffPrompt,
                 )
-                // 2026-05-15 (1.9.6): switched from generateText to streamText
-                // so the UI can render the trailing portion of the summary live.
-                // 1.9.7 added a 33ms flush throttle (matches GenerationHandler's
-                // STREAM_UI_FLUSH_INTERVAL_MS) — without it, fast models pushing
-                // 30+ tokens/sec caused MutableStateFlow.update / accumulated
-                // .toString() to fire 30+ times per second, each rebuilding the
-                // (potentially KB-sized) string and triggering ChatList
-                // recomposition. 33ms ceiling = ≤30 fps update rate, plenty for
-                // smooth rolling text and bounded allocation.
-                val accumulated = StringBuilder()
-                var lastFlushAt = 0L
-                providerHandler.streamText(
-                    providerSetting = provider,
-                    messages = listOf(UIMessage.user(prompt)),
-                    params = TextGenerationParams(model = compressionModel),
-                ).collect { chunk ->
-                    val deltaParts = chunk.choices.firstOrNull()?.let { choice ->
-                        choice.delta?.parts ?: choice.message?.parts
-                    }.orEmpty()
-                    val deltaText = deltaParts
-                        .filterIsInstance<UIMessagePart.Text>()
-                        .joinToString("") { it.text }
-                    if (deltaText.isNotEmpty()) {
-                        accumulated.append(deltaText)
-                        val now = System.currentTimeMillis()
-                        if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_FLUSH_INTERVAL_MS) {
-                            val text = accumulated.toString()
-                            _summaryStreamFlow.update { map ->
-                                map + (conversationKey to text)
-                            }
-                            updateCompactLifecycle(conversationKey) { state ->
-                                state.copy(
-                                    streamingSummary = text,
-                                    updatedAt = now,
-                                )
-                            }
-                            lastFlushAt = now
-                        }
-                    }
-                }
-                // Final flush — ensure the last partial that landed within the
-                // 33ms window before stream completion makes it to the UI.
-                val finalStreamText = accumulated.toString()
-                _summaryStreamFlow.update { map ->
-                    map + (conversationKey to finalStreamText)
-                }
-                updateCompactLifecycle(conversationKey) { state ->
-                    state.copy(
-                        streamingSummary = finalStreamText,
-                        updatedAt = System.currentTimeMillis(),
-                    )
-                }
-                val summary = accumulated.toString().trim()
-                val normalizedSummary = CompactSummaryNormalizer.normalizeOrNull(
+                val summary = streamCompactSummary(
+                    providerHandler = providerHandler,
+                    provider = provider,
+                    compressionModel = compressionModel,
+                    conversationKey = conversationKey,
+                    prompt = prompt,
+                )
+                var normalizedSummary = CompactSummaryNormalizer.normalizeOrNull(
                     json = json,
                     summary = summary,
                     sourceMessageIds = plan.sourceMessageIds,
-                ) ?: run {
-                    Log.w(
-                        TAG,
-                        "compact stream produced no Text parts; refusing to persist an empty completed compact"
+                    coveredCompactIds = coveredCompactIds,
+                    createdAt = payloadCreatedAt,
+                )
+                if (normalizedSummary == null || !CompactSummaryPayloads.isHighQualityPayload(normalizedSummary)) {
+                    val retryPrompt = buildCompressionPrompt(
+                        basePrompt = settings.compressPrompt,
+                        content = contentToCompress,
+                        targetTokens = policy.maxSummaryTokens,
+                        additionalPrompt = listOf(
+                            additionalPrompt,
+                            "Retry because the previous compaction did not satisfy the schema or the timeline summary was too short. Return valid JSON only. `timeline_summary` must contain 4-5 complete sentences, and `handoff_markdown` must contain the required sections.",
+                        ).filter { it.isNotBlank() }.joinToString("\n\n"),
+                        sourceMessageIds = plan.sourceMessageIds,
+                        previousCompacts = previousCompacts,
+                        coveredCompactIds = coveredCompactIds,
+                        payloadCreatedAt = payloadCreatedAt,
+                        handoffPrompt = handoffPrompt,
                     )
-                    error("Compact summary contained no text content")
+                    val retrySummary = streamCompactSummary(
+                        providerHandler = providerHandler,
+                        provider = provider,
+                        compressionModel = compressionModel,
+                        conversationKey = conversationKey,
+                        prompt = retryPrompt,
+                    )
+                    normalizedSummary = CompactSummaryNormalizer.normalizeOrNull(
+                        json = json,
+                        summary = retrySummary,
+                        sourceMessageIds = plan.sourceMessageIds,
+                        coveredCompactIds = coveredCompactIds,
+                        createdAt = payloadCreatedAt,
+                    )
+                    if (normalizedSummary == null || !CompactSummaryPayloads.isHighQualityPayload(normalizedSummary)) {
+                        normalizedSummary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                            summary = retrySummary.ifBlank { summary },
+                            sourceMessageIds = plan.sourceMessageIds,
+                            coveredCompactIds = coveredCompactIds,
+                            createdAt = payloadCreatedAt,
+                            sourceContent = contentToCompress,
+                            carriedHandoffMarkdown = previousCompactContext,
+                        )
+                    }
                 }
+                val compactId = Uuid.random().toString()
                 val now = System.currentTimeMillis()
                 val compact = ConversationCompact(
-                    id = Uuid.random().toString(),
+                    id = compactId,
                     conversationId = conversation.id.toString(),
                     summary = normalizedSummary,
                     level = 1,
                     sourceStartIndex = plan.sourceStartIndex,
                     sourceEndIndex = plan.sourceEndIndex,
                     sourceMessageIds = plan.sourceMessageIds,
-                    tokenEstimate = ConversationContextPlanner.estimateTokens(listOf(UIMessage.system(normalizedSummary))),
-                    createdAt = now,
+                    tokenEstimate = ConversationContextPlanner.estimateTokens(
+                        listOf(
+                            UIMessage.system(
+                                CompactSummaryPayloads.injectionText(
+                                    id = compactId,
+                                    summary = normalizedSummary,
+                                    sourceMessageIds = plan.sourceMessageIds,
+                                )
+                            )
+                        )
+                    ),
+                    createdAt = payloadCreatedAt,
                     updatedAt = now,
                     status = "completed",
                 )
@@ -579,8 +569,9 @@ class ConversationContextEngine(
                         sourceStartIndex = plan.sourceStartIndex,
                         sourceEndIndex = plan.sourceEndIndex,
                         sourceMessageIds = plan.sourceMessageIds,
-                        streamingSummary = summary.ifBlank { normalizedSummary },
+                        streamingSummary = CompactSummaryPayloads.timelineSummary(normalizedSummary).orEmpty(),
                         completedCompactId = compact.id,
+                        anchorAt = payloadCreatedAt,
                         updatedAt = now,
                     )
                 )
@@ -615,6 +606,18 @@ class ConversationContextEngine(
 
     suspend fun invalidateCompacts(conversationId: Uuid, reason: String) {
         contextRepository.invalidateCompacts(conversationId, reason)
+    }
+
+    suspend fun copyValidCompactsToConversation(
+        sourceConversationId: Uuid,
+        targetConversation: Conversation,
+        reason: String = "conversation_forked_compacts_copied",
+    ): Int {
+        return contextRepository.copyValidCompactsToConversation(
+            sourceConversationId = sourceConversationId,
+            targetConversation = targetConversation,
+            reason = reason,
+        )
     }
 
     suspend fun search(conversationId: Uuid, query: String, limit: Int): List<ContextSearchResult> {
@@ -668,28 +671,96 @@ class ConversationContextEngine(
         }
     }
 
+    private suspend fun <T : ProviderSetting> streamCompactSummary(
+        providerHandler: Provider<T>,
+        provider: T,
+        compressionModel: Model,
+        conversationKey: String,
+        prompt: String,
+    ): String {
+        // 2026-05-15 (1.9.6): switched from generateText to streamText so the
+        // UI can render compaction progress live. Flush at <=30fps to avoid a
+        // large StateFlow string copy and ChatList recomposition per token.
+        val accumulated = StringBuilder()
+        var lastFlushAt = 0L
+        providerHandler.streamText(
+            providerSetting = provider,
+            messages = listOf(UIMessage.user(prompt)),
+            params = TextGenerationParams(model = compressionModel),
+        ).collect { chunk ->
+            val deltaParts = chunk.choices.firstOrNull()?.let { choice ->
+                choice.delta?.parts ?: choice.message?.parts
+            }.orEmpty()
+            val deltaText = deltaParts
+                .filterIsInstance<UIMessagePart.Text>()
+                .joinToString("") { it.text }
+            if (deltaText.isNotEmpty()) {
+                accumulated.append(deltaText)
+                val now = System.currentTimeMillis()
+                if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_FLUSH_INTERVAL_MS) {
+                    val text = accumulated.toString()
+                    _summaryStreamFlow.update { map ->
+                        map + (conversationKey to text)
+                    }
+                    updateCompactLifecycle(conversationKey) { state ->
+                        state.copy(
+                            streamingSummary = text,
+                            updatedAt = now,
+                        )
+                    }
+                    lastFlushAt = now
+                }
+            }
+        }
+        val finalStreamText = accumulated.toString().trim()
+        _summaryStreamFlow.update { map ->
+            map + (conversationKey to finalStreamText)
+        }
+        updateCompactLifecycle(conversationKey) { state ->
+            state.copy(
+                streamingSummary = finalStreamText,
+                updatedAt = System.currentTimeMillis(),
+            )
+        }
+        if (finalStreamText.isBlank()) {
+            Log.w(TAG, "compact stream produced no Text parts")
+        }
+        return finalStreamText
+    }
+
     private fun buildCompressionPrompt(
         basePrompt: String,
         content: String,
         targetTokens: Int,
         additionalPrompt: String,
         sourceMessageIds: List<String>,
+        previousCompacts: List<ConversationCompact>,
+        coveredCompactIds: List<String>,
+        payloadCreatedAt: Long,
+        handoffPrompt: String,
     ): String {
-        // 2026-05-15 (1.9.7): require a single-sentence prose preamble BEFORE
-        // the JSON. The streaming UI ("正在自动压缩" shimmer) shows the live
-        // accumulated text under the divider — without the preamble, users
-        // saw raw JSON tokens scrolling (`"goals": [...], "facts": [...]`)
-        // instead of human-readable summary. The preamble is naturally
-        // emitted as the FIRST tokens of the stream, so it lands in the
-        // marker before any JSON shows up. normalizeSummaryJson tolerates
-        // leading prose and now safely wraps legacy/plain-text summaries
-        // from older custom prompts, so this doesn't break persistence.
+        val previousCompactContext = previousCompacts.joinToString("\n\n") { compact ->
+            CompactSummaryPayloads.injectionText(compact)
+        }
         val structuredInstructions = """
-            First, write ONE concise sentence (max 100 chars) in the user's language summarising what this conversation segment covered. This sentence is shown live to the user while the summary streams in.
-            Then on a new line, return only valid JSON with these keys:
-            goals, facts, decisions, open_tasks, failed_attempts, tool_results, entities, timeline, source_message_ids.
-            Preserve concrete names, files, commands, errors, user preferences, and unresolved decisions.
-            source_message_ids must exactly list: ${sourceMessageIds.joinToString(", ")}.
+            Return valid JSON only. Required schema:
+            {
+              "schema_version": 2,
+              "timeline_summary": "4-5 complete human-readable sentences in the user's language for the chat timeline.",
+              "handoff_markdown": "Dense Markdown continuation handoff with sections: Goal, Constraints, Progress, Decisions, Current State, Next Steps, Critical Context, Relevant Files.",
+              "covered_compact_ids": [${coveredCompactIds.joinToString(", ") { "\"$it\"" }}],
+              "source_message_ids": [${sourceMessageIds.joinToString(", ") { "\"$it\"" }}],
+              "created_at": $payloadCreatedAt
+            }
+            `covered_compact_ids`, `source_message_ids`, and `created_at` must exactly match the values above.
+            Preserve concrete names, files, commands, errors, user preferences, rejected approaches, tool outcomes, and unresolved decisions.
+            The timeline summary is for the human timeline; the handoff Markdown is what the next model will receive.
+
+            Agent-editable handoff instructions:
+            $handoffPrompt
+
+            Previous compact handoffs to carry forward:
+            ${previousCompactContext.ifBlank { "None." }}
         """.trimIndent()
         return basePrompt.applyPlaceholders(
             "content" to content,

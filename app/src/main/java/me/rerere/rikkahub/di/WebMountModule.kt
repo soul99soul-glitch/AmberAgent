@@ -33,6 +33,7 @@ import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 import me.rerere.rikkahub.data.agent.webmount.profile.HostShimRegistry
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileBridge
 import me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry
+import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPageSnapshotCache
 import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 import org.koin.dsl.module
@@ -120,7 +121,12 @@ val webMountModule = module {
         )
     }
 
-    single { WebViewPool(appContext = get()) }
+    single {
+        WebViewPool(
+            appContext = get(),
+            onSessionDestroyed = WebMountPageSnapshotCache::invalidate,
+        )
+    }
 
     single { ProfileRegistry(context = get()) }
 

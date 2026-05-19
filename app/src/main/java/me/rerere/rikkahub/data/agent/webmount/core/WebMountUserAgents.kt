@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.webmount.core
 
 import android.content.Context
 import android.os.Build
+import android.webkit.WebView
 
 /**
  * Site-specific User-Agent overrides for visible WebMount login flows.
@@ -20,7 +21,7 @@ object WebMountUserAgents {
         val normalizedStation = stationId?.lowercase().orEmpty()
         return when {
             normalizedStation == "feishu_docs" || normalizedUrl.isFeishuOrLarkUrl() -> mobileChromeUserAgent(context)
-            else -> loginUserAgent(stationId, url)
+            else -> mobileChromeUserAgent(context)
         }
     }
 
@@ -29,12 +30,14 @@ object WebMountUserAgents {
         val normalizedStation = stationId?.lowercase().orEmpty()
         return when {
             normalizedStation == "feishu_docs" || normalizedUrl.isFeishuOrLarkUrl() -> MODERN_ANDROID_CHROME
-            else -> null
+            else -> MODERN_ANDROID_CHROME
         }
     }
 
-    private fun mobileChromeUserAgent(context: Context): String {
-        val chromeVersion = context.chromeVersionName() ?: "138.0.7204.179"
+    fun mobileChromeUserAgent(context: Context): String {
+        val chromeVersion = context.webViewVersionName()
+            ?: context.chromeVersionName()
+            ?: "138.0.7204.179"
         val androidVersion = Build.VERSION.RELEASE.orEmpty().ifBlank { "14" }
         val model = Build.MODEL.orEmpty()
             .replace(Regex("[;()]"), "")
@@ -42,6 +45,12 @@ object WebMountUserAgents {
         val buildId = Build.ID.orEmpty().ifBlank { "AP3A" }
         return "Mozilla/5.0 (Linux; Android $androidVersion; $model Build/$buildId) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$chromeVersion Mobile Safari/537.36"
+    }
+
+    private fun Context.webViewVersionName(): String? {
+        return runCatching {
+            WebView.getCurrentWebViewPackage()?.versionName
+        }.getOrNull()
     }
 
     @Suppress("DEPRECATION")

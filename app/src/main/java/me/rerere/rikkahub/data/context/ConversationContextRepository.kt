@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.db.dao.ConversationCompactDAO
 import me.rerere.rikkahub.data.db.dao.ConversationContextEventDAO
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
 import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
+import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
@@ -34,6 +35,45 @@ class ConversationContextRepository(
         compactDAO.insert(compact.toEntity())
     }
 
+    suspend fun copyValidCompactsToConversation(
+        sourceConversationId: Uuid,
+        targetConversation: Conversation,
+        reason: String,
+    ): Int {
+        val targetMessageIds = targetConversation.currentMessages
+            .map { it.id.toString() }
+            .toSet()
+        val targetLastIndex = targetConversation.messageNodes.lastIndex
+        val eligibleCompacts = getCompacts(sourceConversationId)
+            .filter { compact ->
+                compact.status == "completed" &&
+                    compact.sourceEndIndex <= targetLastIndex &&
+                    compact.sourceMessageIds.isNotEmpty() &&
+                    compact.sourceMessageIds.all { it in targetMessageIds }
+            }
+        if (eligibleCompacts.isEmpty()) return 0
+
+        val idMapping = eligibleCompacts.associate { compact -> compact.id to Uuid.random().toString() }
+        val now = System.currentTimeMillis()
+        eligibleCompacts.forEach { compact ->
+            insertCompact(
+                compact.copy(
+                    id = idMapping.getValue(compact.id),
+                    conversationId = targetConversation.id.toString(),
+                    summary = CompactSummaryPayloads.remapCoveredCompactIds(compact.summary, idMapping),
+                    updatedAt = now,
+                )
+            )
+        }
+        insertEvent(
+            conversationId = targetConversation.id,
+            eventType = reason,
+            summaryId = null,
+            message = "Copied ${eligibleCompacts.size} compact summaries from fork parent",
+        )
+        return eligibleCompacts.size
+    }
+
     suspend fun invalidateCompacts(conversationId: Uuid, reason: String) {
         compactDAO.deleteByConversation(conversationId.toString())
         insertEvent(conversationId, "compact_invalidated", null, reason)
@@ -58,10 +98,11 @@ class ConversationContextRepository(
             query = query,
             limit = limit.coerceIn(1, 20),
         ).map { entity ->
+            val searchable = CompactSummaryPayloads.searchableText(entity.summary)
             ContextSearchResult(
                 source = "compact_summary",
                 id = entity.id,
-                preview = entity.summary.previewAround(query),
+                preview = searchable.previewAround(query),
             )
         }
         val conversation = conversationRepository.getConversationById(conversationId) ?: return compactResults

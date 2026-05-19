@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.os.Looper
 import android.util.Log
 import android.webkit.WebView
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +19,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import me.rerere.rikkahub.data.agent.webmount.core.WebViewCompatibility
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -45,6 +49,12 @@ class SessionHandle internal constructor(
     private val loadSeq = AtomicLong(0L)
     internal val pendingLoad = AtomicReference<LoadCompletion?>(null)
     val lastActivityMs: AtomicLong = AtomicLong(System.currentTimeMillis())
+    private var documentStartOrigin: String? = null
+    private val documentStartHandlers = mutableListOf<ScriptHandler>()
+
+    @Volatile
+    var bridgeInjectionCoverage: String = "page_finished"
+        private set
 
     @Volatile
     var destroyed: Boolean = false
@@ -60,7 +70,10 @@ class SessionHandle internal constructor(
         val completion = pendingLoad.get()?.completion
             ?: error("startLoad failed to install completion")
         try {
-            withContext(Dispatchers.Main) { webView.loadUrl(url) }
+            withContext(Dispatchers.Main) {
+                installDocumentStartBridge(url)
+                webView.loadUrl(url)
+            }
             withTimeoutOrNull(timeoutMs) { completion.await() }
         } finally {
             // Drop the completion if it's still ours; mark FAILED on timeout so
@@ -90,7 +103,10 @@ class SessionHandle internal constructor(
     suspend fun loadUrlNoWait(url: String): LoadState {
         ensureAlive()
         startLoad(url)
-        withContext(Dispatchers.Main) { webView.loadUrl(url) }
+        withContext(Dispatchers.Main) {
+            installDocumentStartBridge(url)
+            webView.loadUrl(url)
+        }
         lastActivityMs.set(System.currentTimeMillis())
         return _loadState.value
     }
@@ -342,6 +358,8 @@ class SessionHandle internal constructor(
 
     private fun destroyInternalOnMain() {
         runCatching {
+            documentStartHandlers.forEach { handler -> runCatching { handler.remove() } }
+            documentStartHandlers.clear()
             webView.stopLoading()
             webView.removeAllViews()
             webView.destroy()
@@ -350,6 +368,24 @@ class SessionHandle internal constructor(
 
     private fun ensureAlive() {
         check(!destroyed) { "session $sessionId already destroyed" }
+    }
+
+    private fun installDocumentStartBridge(url: String) {
+        val origin = WebViewCompatibility.originFor(url)
+        if (origin == null || origin == documentStartOrigin) return
+        documentStartHandlers.forEach { handler -> runCatching { handler.remove() } }
+        documentStartHandlers.clear()
+        documentStartOrigin = origin
+        bridgeInjectionCoverage = "page_finished"
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        runCatching {
+            documentStartHandlers += WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                bridgeBootstrapJs,
+                setOf(origin),
+            )
+            bridgeInjectionCoverage = "document_start"
+        }
     }
 
     // -------------------------------------------------------- nested types

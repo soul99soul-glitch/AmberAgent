@@ -125,6 +125,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalSubAgentPage
 import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalWebMountPage
 import me.rerere.rikkahub.ui.pages.board.TodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
+import me.rerere.rikkahub.ui.pages.board.DeepReadScreen
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
@@ -584,6 +585,10 @@ class RouteActivity : ComponentActivity() {
                                 TodayBoardPage()
                             }
 
+                            entry<Screen.DeepRead> { key ->
+                                DeepReadScreen(topicId = key.topicId, title = key.title)
+                            }
+
                             entry<Screen.SettingTodayBoard> {
                                 SettingTodayBoardPage()
                             }
@@ -886,6 +891,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object TodayBoard : Screen
+
+    @Serializable
+    data class DeepRead(val topicId: String, val title: String) : Screen
 
     @Serializable
     data object SettingTodayBoard : Screen

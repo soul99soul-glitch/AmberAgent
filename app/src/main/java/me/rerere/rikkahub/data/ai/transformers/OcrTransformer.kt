@@ -82,7 +82,11 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
     }
 
-    suspend fun performImageRecognition(part: UIMessagePart.Image): String {
+    suspend fun performImageRecognition(
+        part: UIMessagePart.Image,
+        promptOverride: String? = null,
+        useCache: Boolean = true,
+    ): String {
         val settings = get<SettingsAggregator>().settingsFlow.value
         val model = settings.findModelById(settings.ocrModelId)
             ?: throw VisualRecognitionException("请先配置视觉识别模型")
@@ -91,12 +95,15 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
         val providerSetting = model.findProvider(settings.providers)
             ?: throw VisualRecognitionException("视觉识别模型的提供商不可用")
-        val prompt = resolveVisionRecognitionPrompt(settings.ocrPrompt)
+        val prompt = promptOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: resolveVisionRecognitionPrompt(settings.ocrPrompt)
         val cacheKey = "${part.url}|${model.id}|${prompt.hashCode()}"
 
-        cache.get(cacheKey)?.let { cachedResult ->
-            Log.i(TAG, "performImageToText: Using cached result for ${part.url}")
-            return cachedResult
+        if (useCache) {
+            cache.get(cacheKey)?.let { cachedResult ->
+                Log.i(TAG, "performImageToText: Using cached result")
+                return cachedResult
+            }
         }
 
         val provider = get<ProviderManager>().getProviderByType(providerSetting)
@@ -129,7 +136,9 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
             * The image_context tag contains visual recognition results for an image uploaded by the user, not the user's prompt.
         """.trimIndent()
 
-        cache.put(cacheKey, visionResult)
+        if (useCache) {
+            cache.put(cacheKey, visionResult)
+        }
         return visionResult
     }
 }

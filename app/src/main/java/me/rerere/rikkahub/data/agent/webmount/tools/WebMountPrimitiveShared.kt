@@ -5,6 +5,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import me.rerere.rikkahub.data.agent.webmount.primitives.NetworkLog
 import me.rerere.rikkahub.data.agent.webmount.primitives.WebViewPool
 
 /**
@@ -74,3 +75,6 @@ internal fun integerProp(description: String) = buildJsonObject {
     put("type", "integer")
     put("description", description)
 }
+
+internal fun redactWebMountUrl(url: String?): String? =
+    url?.takeIf { it.isNotBlank() }?.let(NetworkLog::redactedUrl)

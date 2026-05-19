@@ -55,6 +55,33 @@ object WebViewScreenshot {
         ).also { bitmap.recycle() }
     }
 
+    suspend fun captureRegion(
+        handle: SessionHandle,
+        region: Region,
+        format: Format = Format.JPEG,
+        quality: Int = 70,
+        maxEdge: Int = 1280,
+        timeoutMs: Long = 15_000L,
+    ): Result {
+        val bitmap = runCatching {
+            withTimeoutOrNull(timeoutMs) {
+                captureViewportRegion(handle, region, maxEdge)
+            } ?: return Result.Failed("region screenshot timed out after ${timeoutMs}ms")
+        }.getOrElse { error ->
+            return Result.Failed(error.message ?: "region screenshot failed")
+        }
+
+        val bytes = encode(bitmap, format, quality)
+        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        return Result.Success(
+            base64 = base64,
+            width = bitmap.width,
+            height = bitmap.height,
+            format = format.wireName,
+            sizeBytes = bytes.size,
+        ).also { bitmap.recycle() }
+    }
+
     // ----------------------------------------------------------- viewport
 
     private suspend fun captureViewport(handle: SessionHandle): Bitmap = withContext(Dispatchers.Main) {
@@ -64,6 +91,29 @@ object WebViewScreenshot {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         drawWithSoftwareFallback(webView, Canvas(bitmap))
         bitmap
+    }
+
+    private suspend fun captureViewportRegion(
+        handle: SessionHandle,
+        region: Region,
+        maxEdge: Int,
+    ): Bitmap = withContext(Dispatchers.Main) {
+        val webView = handle.webView
+        val viewport = drawViewportBitmap(webView, webView.width.coerceAtLeast(1), webView.height.coerceAtLeast(1))
+        if (region.x < 0 || region.y < 0 ||
+            region.x + region.width > viewport.width ||
+            region.y + region.height > viewport.height
+        ) {
+            viewport.recycle()
+            error("region is outside the visible viewport; scroll the target into view or pass a visible region")
+        }
+        val left = region.x.coerceIn(0, viewport.width - 1)
+        val top = region.y.coerceIn(0, viewport.height - 1)
+        val right = (region.x + region.width).coerceIn(left + 1, viewport.width)
+        val bottom = (region.y + region.height).coerceIn(top + 1, viewport.height)
+        val cropped = Bitmap.createBitmap(viewport, left, top, right - left, bottom - top)
+        viewport.recycle()
+        scaleDown(cropped, maxEdge.coerceAtLeast(64))
     }
 
     // ---------------------------------------------------------- full page
@@ -169,6 +219,17 @@ object WebViewScreenshot {
         return stream.toByteArray()
     }
 
+    private fun scaleDown(bitmap: Bitmap, maxEdge: Int): Bitmap {
+        val currentMax = maxOf(bitmap.width, bitmap.height)
+        if (currentMax <= maxEdge) return bitmap
+        val scale = maxEdge.toFloat() / currentMax.toFloat()
+        val targetW = (bitmap.width * scale).toInt().coerceAtLeast(1)
+        val targetH = (bitmap.height * scale).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+        bitmap.recycle()
+        return scaled
+    }
+
     // -------------------------------------------------------------- types
 
     enum class Format(val wireName: String) {
@@ -187,6 +248,13 @@ object WebViewScreenshot {
 
         data class Failed(val message: String) : Result()
     }
+
+    data class Region(
+        val x: Int,
+        val y: Int,
+        val width: Int,
+        val height: Int,
+    )
 
     private const val TAG = "WebMountScreenshot"
     private const val MAX_FULL_PAGE_HEIGHT = 16_384

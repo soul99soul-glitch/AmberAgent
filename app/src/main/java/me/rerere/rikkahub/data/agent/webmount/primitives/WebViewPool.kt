@@ -16,6 +16,8 @@ import android.webkit.WebViewClient
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountWebViewCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -38,8 +40,10 @@ class WebViewPool(
     private val maxSessions: Int = DEFAULT_MAX_SESSIONS,
     private val userAgent: String? = DEFAULT_USER_AGENT,
     private val webContentsDebugging: Boolean = false,
+    private val onSessionDestroyed: (String) -> Unit = {},
 ) {
     private val sessions = ConcurrentHashMap<String, SessionHandle>()
+    private val createLock = Mutex()
     private val lru = LinkedHashSet<String>()      // protected by [lruLock]
     private val lruLock = Any()
     private val bridgeBootstrapJs: String by lazy { loadBridgeBootstrap() }
@@ -75,15 +79,30 @@ class WebViewPool(
             // Drop the stale entry; ignore race where someone else already removed it.
             sessions.remove(sessionId, existing)
             synchronized(lruLock) { lru.remove(sessionId) }
+            onSessionDestroyed(sessionId)
         }
-        return createSession(sessionId)
+        return createLock.withLock {
+            val racedExisting = sessions[sessionId]
+            if (racedExisting != null && !racedExisting.destroyed) {
+                touch(sessionId)
+                return@withLock racedExisting
+            }
+            if (racedExisting != null && racedExisting.destroyed) {
+                sessions.remove(sessionId, racedExisting)
+                synchronized(lruLock) { lru.remove(sessionId) }
+                onSessionDestroyed(sessionId)
+            }
+            createSessionLocked(sessionId)
+        }
     }
 
     /** Acquire with a freshly generated id. */
     suspend fun acquireNew(): SessionHandle {
         assertBridgeReady()
         val id = "wm_" + UUID.randomUUID().toString().substring(0, 12)
-        return createSession(id)
+        return createLock.withLock {
+            createSessionLocked(id)
+        }
     }
 
     /** Look up an existing live session without creating one. */
@@ -92,6 +111,7 @@ class WebViewPool(
         if (handle.destroyed) {
             sessions.remove(sessionId, handle)
             synchronized(lruLock) { lru.remove(sessionId) }
+            onSessionDestroyed(sessionId)
             return null
         }
         touch(sessionId)
@@ -102,6 +122,7 @@ class WebViewPool(
     suspend fun release(sessionId: String, reason: String = "released") {
         val handle = sessions.remove(sessionId) ?: return
         synchronized(lruLock) { lru.remove(sessionId) }
+        onSessionDestroyed(sessionId)
         withContext(Dispatchers.Main) { handle.destroy(reason) }
     }
 
@@ -122,7 +143,7 @@ class WebViewPool(
 
     // -------------------------------------------------- creation internals
 
-    private suspend fun createSession(sessionId: String): SessionHandle {
+    private suspend fun createSessionLocked(sessionId: String): SessionHandle {
         evictIfNeeded()
         val handle = withContext(Dispatchers.Main) { createOnMain(sessionId) }
         sessions[sessionId] = handle
@@ -201,6 +222,7 @@ class WebViewPool(
         }
         toEvict.forEach { id ->
             val handle = sessions.remove(id) ?: return@forEach
+            onSessionDestroyed(id)
             withContext(Dispatchers.Main) { handle.destroy("evicted (LRU cap=$maxSessions)") }
         }
     }

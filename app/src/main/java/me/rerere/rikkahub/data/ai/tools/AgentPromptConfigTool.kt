@@ -22,8 +22,8 @@ fun createAgentPromptConfigTool(
     description = """
         Read or update AmberAgent's local Markdown prompt configuration.
         Use this when the user asks to tune persistent defaults for image
-        generation, built-in SubAgent role prompts, or Model Council seat
-        prompts. The tool writes files under app-private agent_prompts/ and
+        generation, context compaction handoff prompts, built-in SubAgent role
+        prompts, or Model Council seat prompts. The tool writes files under app-private agent_prompts/ and
         mirrors SubAgent/Council changes into Settings immediately.
     """.trimIndent().replace("\n", " "),
     systemPrompt = { _, _ ->
@@ -31,9 +31,10 @@ fun createAgentPromptConfigTool(
             AmberAgent has agent-editable local Markdown prompt configuration.
             Use `agent_prompt_config` instead of long-term memory when the user wants persistent behavior changes for:
             - image generation defaults or negative tendencies;
+            - context compaction / handoff summary format;
             - built-in SubAgent role prompts (explorer, historian, oracle, designer, writer, fixer);
             - Model Council seat prompts.
-            The tool writes app-private Markdown files under `agent_prompts/` and mirrors SubAgent/Council prompt edits into settings. If the user says "以后生图都...", "把 designer 改成...", "这个 council 席位以后...", or asks where these prompts live, inspect or update this config.
+            The tool writes app-private Markdown files under `agent_prompts/` and mirrors SubAgent/Council prompt edits into settings. If the user says "以后生图都...", "压缩上下文以后...", "把 designer 改成...", "这个 council 席位以后...", or asks where these prompts live, inspect or update this config.
         """.trimIndent()
     },
     needsApproval = true,
@@ -48,6 +49,7 @@ fun createAgentPromptConfigTool(
                         buildJsonArray {
                             add("get")
                             add("update_image_generation")
+                            add("update_context_compaction_prompt")
                             add("update_subagent_prompt")
                             add("update_council_seat_prompt")
                             add("sync_markdown_to_settings")
@@ -56,7 +58,10 @@ fun createAgentPromptConfigTool(
                 })
                 put("target", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional target for get: image_generation, subagents, model_council, or all.")
+                    put(
+                        "description",
+                        "Optional target for get: image_generation, context_compaction, subagents, model_council, or all."
+                    )
                 })
                 put("enabled", buildJsonObject {
                     put("type", "boolean")
@@ -100,6 +105,9 @@ fun createAgentPromptConfigTool(
                         if (target == "all" || target == "image_generation") {
                             put("image_generation", promptConfigRepository.imagePromptFile.absolutePath)
                         }
+                        if (target == "all" || target == "context_compaction") {
+                            put("context_compaction", promptConfigRepository.contextCompactionPromptFile.absolutePath)
+                        }
                         if (target == "all" || target == "subagents") {
                             put("subagents", promptConfigRepository.subAgentPromptFile.absolutePath)
                         }
@@ -110,6 +118,10 @@ fun createAgentPromptConfigTool(
                     put("markdown", buildJsonObject {
                         if (target == "all" || target == "image_generation") {
                             put("image_generation", promptConfigRepository.imagePromptFile.readText())
+                        }
+                        if (target == "all" || target == "context_compaction") {
+                            promptConfigRepository.readContextCompactionPrompt()
+                            put("context_compaction", promptConfigRepository.contextCompactionPromptFile.readText())
                         }
                         if (target == "all" || target == "subagents") {
                             put("subagents", promptConfigRepository.subAgentPromptFile.readText())
@@ -132,6 +144,13 @@ fun createAgentPromptConfigTool(
                         ?: current.negativePrompt,
                 )
                 val result = promptConfigRepository.writeImageConfig(next)
+                buildWriteResponse(result.file.absolutePath, result.updatedId)
+            }
+
+            "update_context_compaction_prompt" -> {
+                val prompt = obj.stringValue("prompt")
+                require(prompt.isNotBlank()) { "prompt is required" }
+                val result = promptConfigRepository.writeContextCompactionPrompt(prompt)
                 buildWriteResponse(result.file.absolutePath, result.updatedId)
             }
 

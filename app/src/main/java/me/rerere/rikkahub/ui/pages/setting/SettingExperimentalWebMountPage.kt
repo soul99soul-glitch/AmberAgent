@@ -1,13 +1,11 @@
 package me.rerere.rikkahub.ui.pages.setting
 
-import android.os.Build
 import android.webkit.CookieManager
-import android.webkit.WebSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -29,8 +28,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,8 +44,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.collectLatest
@@ -64,9 +67,12 @@ import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
 import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountUserAgents
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountWebViewCompat
 import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
+import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginController
+import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginDetector
+import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginStatus
+import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginTarget
+import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginWebViewState
 import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
 import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
@@ -74,9 +80,8 @@ import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
 import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
 import me.rerere.rikkahub.data.agent.webmount.usersites.loginCookieCandidatesFor
+import me.rerere.rikkahub.data.agent.webmount.usersites.requiredLoginCookieSetsFor
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.ui.components.webview.WebView
-import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.plus
 import org.koin.compose.koinInject
@@ -368,12 +373,15 @@ fun SettingExperimentalWebMountPage(
     // Dialogs --------------------------------------------------------------
 
     loginDialogSite?.let { site ->
+        val target = remember(site, webMountManager, profileRegistry) {
+            WebMountLoginTarget.fromUserSite(site, webMountManager, profileRegistry)
+        }
         WebMountLoginDialog(
-            url = site.homepageUrl,
-            title = site.displayName,
-            stationId = site.id,
+            target = target,
+            cookieProvider = cookieProvider,
+            webMountManager = webMountManager,
             onClearSession = {
-                val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+                val urls = target.urls
                 val cleared = cookieProvider.clearCookiesFor(urls)
                 if (site.authKind == AuthKind.OAUTH) {
                     oauthClient.disconnect(site.oauthProviderId ?: site.id)
@@ -386,50 +394,84 @@ fun SettingExperimentalWebMountPage(
                     else noCookiesMessage.format(site.displayName)
                 )
             },
+            onVerifiedLogin = {
+                cookieRevision++
+            },
             onDismiss = {
                 CookieManager.getInstance().flush()
                 loginDialogSite = null
                 cookieRevision++
 
-                val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
-                val postCookies = cookieProvider.snapshotCookieEntries(urls)
+                val postCookies = cookieProvider.snapshotCookieEntries(target.urls)
                 val newCookies = postCookies.filterKeys { it !in preLoginCookies }
                 preLoginCookies = emptyMap()
-                val preferredCookieNames = loginCookieCandidatesFor(site)
+                val preferredCookieNames = target.candidateCookieNames
 
                 // If the user didn't configure a cookie name AND we detected a
                 // newly-set session-like cookie during the login session, save
                 // it back so the row's "logged_in" badge starts working without
                 // any further intervention. Toast tells the user what happened.
-                var autoInferredName: String? = null
+                val autoInferredName: String?
                 val savedCookieMissing = site.loginCookieName?.let { postCookies[it] == null } ?: true
-                if (site.loginCookieName.isNullOrBlank() || savedCookieMissing) {
+                autoInferredName = if (site.loginCookieName.isNullOrBlank() || savedCookieMissing) {
                     val guessSourceCookies = if (preferredCookieNames.isNotEmpty()) postCookies else newCookies
-                    val guess = cookieProvider.guessSessionCookieName(
+                    cookieProvider.guessSessionCookieName(
                         newCookies = guessSourceCookies,
                         preferredNames = preferredCookieNames,
                     )
-                    if (guess != null) {
-                        userSiteRegistry.update(site.id) { it.copy(loginCookieName = guess) }
-                        autoInferredName = guess
-                    }
+                } else {
+                    null
                 }
 
                 val effectiveCookieNames = buildList {
                     autoInferredName?.let { add(it) }
                     addAll(preferredCookieNames)
                 }.distinct()
-                val captured = if (effectiveCookieNames.isNotEmpty()) {
-                    effectiveCookieNames.any { postCookies[it] != null }
-                } else null
-                val message = when {
-                    autoInferredName != null && captured == true ->
-                        "已登录 $autoInferredName cookie 已识别并保存为 ${site.displayName} 的登录标记"
-                    captured == true -> signedInTemplate.format(site.displayName)
-                    captured == false -> notReadyTemplate.format(site.displayName)
-                    else -> unknownStatusTemplate.format(site.displayName)
+                val snapshot = cookieProvider.snapshotCookies(target.urls)
+                val status = WebMountLoginDetector.evaluate(target, null, snapshot)
+                val captured = when {
+                    status is WebMountLoginStatus.SignedIn -> true
+                    target.stationId != null -> false
+                    effectiveCookieNames.isNotEmpty() -> effectiveCookieNames.any { postCookies[it] != null }
+                    else -> null
                 }
-                toaster.show(message)
+
+                fun persistInferredCookie() {
+                    autoInferredName?.let { inferred ->
+                        userSiteRegistry.update(site.id) { it.copy(loginCookieName = inferred) }
+                    }
+                }
+
+                fun successMessage(): String {
+                    return if (autoInferredName != null) {
+                        "已登录 $autoInferredName cookie 已识别并保存为 ${site.displayName} 的登录标记"
+                    } else {
+                        signedInTemplate.format(site.displayName)
+                    }
+                }
+
+                val stationId = target.stationId
+                if (status is WebMountLoginStatus.SignedIn && stationId != null) {
+                    toaster.show("已检测到登录 Cookie，正在验证 ${site.displayName} 可用性…")
+                    scope.launch {
+                        val state = runCatching { webMountManager.probe(stationId) }.getOrNull()
+                        cookieRevision++
+                        if (state == null || state.status == WebMountStatus.ERROR || state.status == WebMountStatus.LOGIN_REQUIRED) {
+                            toaster.show(state?.message ?: notReadyTemplate.format(site.displayName))
+                        } else {
+                            persistInferredCookie()
+                            toaster.show(successMessage())
+                        }
+                    }
+                } else {
+                    if (captured == true) persistInferredCookie()
+                    val message = when {
+                        captured == true -> successMessage()
+                        captured == false -> notReadyTemplate.format(site.displayName)
+                        else -> unknownStatusTemplate.format(site.displayName)
+                    }
+                    toaster.show(message)
+                }
             },
         )
     }
@@ -528,20 +570,19 @@ private fun UserSiteCard(
     // CookieManager snapshot. The URL set matches what onSignOut /
     // onDismiss probe — no asymmetry between the row label and the toast.
     @Suppress("UNUSED_EXPRESSION") cookieRevision
-    val loggedIn = site.loginCookieName?.let { name ->
+    val loggedIn = run {
         val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
-        if (urls.isEmpty()) null
-        else {
-            val bundle = cookieProvider.getCookies(emptyList(), urls)
-            (listOf(name) + loginCookieCandidatesFor(site)).distinct()
-                .any { bundle.value(it) != null }
-        }
-    } ?: loginCookieCandidatesFor(site).takeIf { it.isNotEmpty() }?.let { names ->
-        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
-        if (urls.isEmpty()) null
-        else {
-            val bundle = cookieProvider.getCookies(emptyList(), urls)
-            names.any { bundle.value(it) != null }
+        if (urls.isEmpty()) {
+            null
+        } else {
+            val snapshot = cookieProvider.snapshotCookies(urls)
+            val requiredSets = requiredLoginCookieSetsFor(site)
+            when {
+                requiredSets.any { snapshot.containsAll(it) } -> true
+                requiredSets.isNotEmpty() -> false
+                else -> loginCookieCandidatesFor(site).takeIf { it.isNotEmpty() }
+                    ?.any { snapshot.valuesByName(it).isNotEmpty() }
+            }
         }
     }
     val oauthProviderIdLocal = site.oauthProviderId ?: site.id
@@ -726,40 +767,76 @@ private fun SiteStatusPill(
  */
 @Composable
 private fun WebMountLoginDialog(
-    url: String,
-    title: String,
-    stationId: String?,
+    target: WebMountLoginTarget,
+    cookieProvider: WebMountCookieProvider,
+    webMountManager: WebMountManager,
     onClearSession: (() -> Unit)?,
+    onVerifiedLogin: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val loginUserAgent = remember(context, stationId, url) {
-        WebMountUserAgents.loginUserAgent(context, stationId, url)
+    val scope = rememberCoroutineScope()
+    var webState by remember(target.id) {
+        mutableStateOf(WebMountLoginWebViewState(currentUrl = target.startUrl))
     }
-    val state = rememberWebViewState(
-        url = url,
-        settings = {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            loadsImagesAutomatically = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            javaScriptCanOpenWindowsAutomatically = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            WebMountWebViewCompat.applyBrowserLikeSettings(this)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                safeBrowsingEnabled = true
+    var loginStatus by remember(target.id) {
+        mutableStateOf<WebMountLoginStatus>(WebMountLoginStatus.Waiting)
+    }
+    var verifying by remember(target.id) { mutableStateOf(false) }
+    val controller = remember(target.id, target.startUrl, target.urls) {
+        WebMountLoginController(
+            context = context,
+            target = target,
+            cookieProvider = cookieProvider,
+            onStateChange = { webState = it },
+            onLoginStatus = { loginStatus = it },
+        )
+    }
+    DisposableEffect(controller) {
+        controller.start()
+        onDispose { controller.destroy() }
+    }
+
+    fun acceptIfSignedIn(
+        status: WebMountLoginStatus,
+        onAccepted: (Boolean) -> Unit = {},
+    ) {
+        if (status !is WebMountLoginStatus.SignedIn) {
+            loginStatus = status
+            onAccepted(false)
+            return
+        }
+        val stationId = target.stationId
+        if (stationId == null) {
+            onAccepted(true)
+            onVerifiedLogin()
+            onDismiss()
+            return
+        }
+        verifying = true
+        scope.launch {
+            val state = runCatching { webMountManager.probe(stationId) }
+                .getOrNull()
+            verifying = false
+            if (state == null || state.status == WebMountStatus.ERROR || state.status == WebMountStatus.LOGIN_REQUIRED) {
+                loginStatus = WebMountLoginStatus.Failed(
+                    state?.message ?: "Cookie exists, but ${target.displayName} probe did not confirm the session.",
+                )
+                onAccepted(false)
+            } else {
+                onAccepted(true)
+                onVerifiedLogin()
+                onDismiss()
             }
-            builtInZoomControls = true
-            displayZoomControls = false
-            loginUserAgent?.let { userAgentString = it }
-        },
-    )
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            securePolicy = SecureFlagPolicy.SecureOn,
+        ),
     ) {
         Box(
             modifier = Modifier
@@ -783,7 +860,7 @@ private fun WebMountLoginDialog(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = stringResource(R.string.setting_webmount_login_dialog_title, title),
+                            text = stringResource(R.string.setting_webmount_login_dialog_title, target.displayName),
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.weight(1f),
                         )
@@ -791,17 +868,7 @@ private fun WebMountLoginDialog(
                             TextButton(
                                 onClick = {
                                     onClearSession()
-                                    state.webView?.apply {
-                                        stopLoading()
-                                        clearCache(true)
-                                        clearHistory()
-                                        clearFormData()
-                                        evaluateJavascript(
-                                            "try{localStorage.clear();sessionStorage.clear();}catch(e){}",
-                                            null,
-                                        )
-                                    }
-                                    state.reload()
+                                    controller.clearSession()
                                 },
                             ) {
                                 Text(stringResource(R.string.setting_webmount_clear_session))
@@ -815,35 +882,197 @@ private fun WebMountLoginDialog(
                             )
                         }
                     }
-                    WebView(
-                        state = state,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        onCreated = { webView ->
-                            CookieManager.getInstance().setAcceptCookie(true)
-                            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-                            WebMountWebViewCompat.injectFeishuCompatibility(webView, url)
+                    WebMountLoginNavigationBar(
+                        state = webState,
+                        verifying = verifying,
+                        onBack = controller::goBack,
+                        onForward = controller::goForward,
+                        onReload = controller::reload,
+                        onDone = {
+                            acceptIfSignedIn(controller.manualCheck())
                         },
-                        onProgressChanged = { webView, progress ->
-                            if (progress >= 25) {
-                                WebMountWebViewCompat.injectFeishuCompatibility(
-                                    webView,
-                                    webView?.url ?: state.currentUrl ?: url,
-                                )
-                            }
-                        },
-                        onPageFinished = { webView, finishedUrl ->
-                            CookieManager.getInstance().flush()
-                            WebMountWebViewCompat.injectFeishuCompatibility(
-                                webView,
-                                finishedUrl ?: state.currentUrl ?: url,
+                    )
+                    if (webState.progress in 1..99) {
+                        LinearProgressIndicator(
+                            progress = { webState.progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Text(
+                        text = loginStatusLabel(loginStatus, verifying),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    )
+                    webState.blockedNavigation?.let { blocked ->
+                        Text(
+                            text = "已拦截打开 App 请求: ${blocked.take(80)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                        )
+                    }
+                    if (webState.renderProcessGone) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "登录页面已崩溃，可以重新加载。",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
                             )
+                            TextButton(onClick = controller::reload) {
+                                Text("重新加载")
+                            }
+                        }
+                    }
+                    key(webState.webViewGeneration) {
+                        AndroidView(
+                            factory = { controller.webView },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                        )
+                    }
+                    CookieImportFallback(
+                        target = target,
+                        enabled = !verifying,
+                        onImport = { cookies, onFinished ->
+                            controller.importCookies(cookies) { status ->
+                                acceptIfSignedIn(status, onAccepted = onFinished)
+                            }
                         },
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WebMountLoginNavigationBar(
+    state: WebMountLoginWebViewState,
+    verifying: Boolean,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+    onReload: () -> Unit,
+    onDone: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(enabled = state.canGoBack && !verifying, onClick = onBack) { Text("←") }
+        TextButton(enabled = state.canGoForward && !verifying, onClick = onForward) { Text("→") }
+        TextButton(enabled = !verifying, onClick = onReload) { Text("↻") }
+        Text(
+            text = state.currentUrl,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(enabled = !verifying, onClick = onDone) {
+            Text(if (verifying) "验证中" else stringResource(R.string.webmount_inline_login_done))
+        }
+    }
+}
+
+@Composable
+private fun CookieImportFallback(
+    target: WebMountLoginTarget,
+    enabled: Boolean,
+    onImport: (Map<String, String>, (Boolean) -> Unit) -> Unit,
+) {
+    var expanded by remember(target.id) { mutableStateOf(false) }
+    var rawCookie by remember(target.id) { mutableStateOf("") }
+    var fieldValues by remember(target.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var importing by remember(target.id) { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "登录遇到问题？收起 Cookie 导入" else "登录遇到问题？展开 Cookie 导入")
+        }
+        if (expanded) {
+            OutlinedTextField(
+                value = rawCookie,
+                onValueChange = { rawCookie = it },
+                label = { Text("整行 Cookie") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                minLines = 1,
+                maxLines = 3,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            target.manualCookieFields.forEach { field ->
+                OutlinedTextField(
+                    value = fieldValues[field.name].orEmpty(),
+                    onValueChange = { value -> fieldValues = fieldValues + (field.name to value) },
+                    label = { Text(field.name + if (field.required) " *" else "") },
+                    supportingText = {
+                        if (field.description.isNotBlank()) Text(field.description)
+                    },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    enabled = enabled && !importing,
+                    onClick = {
+                        val parsed = WebMountLoginController.parseCookieInput(rawCookie)
+                        val keyed = fieldValues
+                            .mapValues { it.value.trim() }
+                            .filterValues { it.isNotBlank() }
+                        val combined = parsed + keyed
+                        if (combined.isEmpty()) return@TextButton
+                        importing = true
+                        onImport(combined) { success ->
+                            importing = false
+                            if (success) {
+                                rawCookie = ""
+                                fieldValues = emptyMap()
+                            }
+                        }
+                    },
+                ) {
+                    Text(if (importing) "导入中" else "导入")
+                }
+            }
+        }
+    }
+}
+
+private fun loginStatusLabel(
+    status: WebMountLoginStatus,
+    verifying: Boolean,
+): String {
+    if (verifying) return "正在验证站点可用性…"
+    return when (status) {
+        WebMountLoginStatus.Waiting -> "等待网页登录完成。"
+        is WebMountLoginStatus.UrlMatched -> "页面已跳转到登录后地址，正在等待 cookie 写入。"
+        is WebMountLoginStatus.SignedIn -> "已检测到登录 Cookie: ${status.cookieNames.joinToString()}"
+        is WebMountLoginStatus.MissingCookies -> "Cookie 不完整，缺少: ${status.missing.joinToString()}"
+        is WebMountLoginStatus.Unknown -> status.reason
+        is WebMountLoginStatus.Failed -> status.reason
     }
 }
 

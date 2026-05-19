@@ -31,8 +31,7 @@ class BoardAgent(
         if (scoredSignals.isEmpty()) return BoardRunResult.Empty
 
         val settings = settingsStore.settingsFlow.value
-        val density = settings.agentRuntime.todayBoard.density
-        val prompt = BoardPrompt.build(scoredSignals, focusRules, density)
+        val prompt = BoardPrompt.build(scoredSignals, focusRules)
 
         val rawText = callModel(settings, prompt)
             ?: return BoardRunResult.Failed(
@@ -43,8 +42,8 @@ class BoardAgent(
             ?: retry(settings, prompt)
             ?: return BoardRunResult.Failed("parse failed after retry")
 
-        val signalsByRef = scoredSignals.associateBy { it.signal.sourceRef }
-        val validation = BoardOutputValidator.validate(parsed, signalsByRef, density)
+        val signalsByKey = scoredSignals.associateBy { boardSignalKey(it.signal.sourceType, it.signal.sourceRef) }
+        val validation = BoardOutputValidator.validate(parsed, scoredSignals)
         if (validation.warnings.isNotEmpty()) {
             Log.i(TAG, "validation warnings: ${validation.warnings.joinToString("; ")}")
         }
@@ -54,7 +53,7 @@ class BoardAgent(
 
         val now = System.currentTimeMillis()
         val entities = output.items.map { item ->
-            val sourceContent = signalsByRef[item.source_ref]?.signal?.content.orEmpty()
+            val sourceContent = signalsByKey[boardSignalKey(item.source_type, item.source_ref)]?.signal?.content.orEmpty()
             item.toEntity(sourceContent = sourceContent, boardDate = boardDate, nowMs = now)
         }
         boardRepository.saveItems(entities)

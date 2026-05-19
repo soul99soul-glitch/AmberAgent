@@ -48,6 +48,7 @@ import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.WebServerService
@@ -121,6 +122,7 @@ class RikkaHubApp : Application() {
 
         // Sync Today Board scheduler with settings + foreground-compensation hook.
         syncTodayBoardScheduler()
+        syncHotListScheduler()
 
         // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
         registerChatServiceCleanup()
@@ -316,6 +318,20 @@ class RikkaHubApp : Application() {
                 }
             },
         )
+    }
+
+    private fun syncHotListScheduler() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            val settingsStore = get<SettingsAggregator>()
+            val scheduler = get<HotListScheduler>()
+            settingsStore.settingsFlow
+                .map { it.agentRuntime.todayBoard }
+                .distinctUntilChanged()
+                .collect {
+                    runCatching { scheduler.sync(settingsStore.settingsFlow.value) }
+                        .onFailure { Log.e(TAG, "syncHotListScheduler failed", it) }
+                }
+        }
     }
 
     private fun createNotificationChannel() {

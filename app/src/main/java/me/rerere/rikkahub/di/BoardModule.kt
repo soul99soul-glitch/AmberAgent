@@ -11,6 +11,11 @@ import me.rerere.rikkahub.data.agent.board.collector.FeishuDocSignalCollector
 import me.rerere.rikkahub.data.agent.board.collector.FeishuMessageSignalCollector
 import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
 import me.rerere.rikkahub.data.agent.board.collector.TimeAnchorSignalCollector
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListAggregator
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListSafeFetcher
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
+import me.rerere.rikkahub.data.agent.board.hotlist.providers.BuiltInHotListProviders
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.data.agent.office.radar.DocRadar
@@ -33,6 +38,28 @@ import org.koin.dsl.module
 val boardModule = module {
     // Feishu Document Radar (refactored)
     single { FeishuChangeNotifier(get()) }
+
+    single { BuiltInHotListProviders(client = get(), json = get()) }
+
+    single { HotListAggregator() }
+
+    single { HotListSafeFetcher() }
+
+    single {
+        DeepReadAgent(
+            settingsStore = get(),
+            providerManager = get(),
+            hotListRepository = get(),
+            json = get(),
+        )
+    }
+
+    single {
+        HotListScheduler(
+            context = get(),
+            settingsStore = get(),
+        )
+    }
 
     single {
         DocRadar(
@@ -125,8 +152,10 @@ val boardModule = module {
     viewModel {
         BoardViewModel(
             boardRepository = get(),
+            hotListRepository = get(),
             settingsStore = get(),
             scheduler = get(),
+            hotListScheduler = get(),
             appScope = get(),
         )
     }

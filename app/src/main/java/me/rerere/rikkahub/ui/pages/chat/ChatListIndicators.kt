@@ -27,11 +27,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,15 +37,47 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.context.CompactLifecycleState
+import me.rerere.rikkahub.data.context.CompactSummaryPayloads
+import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+
+@Composable
+internal fun TimelineCompactMarkers(
+    timelineEndIndex: Int,
+    completedMarkersByTimelineEndIndex: Map<Int, List<ConversationCompact>>,
+    lifecycleCompletedTimelineEndIndex: Int?,
+    compactLifecycleState: CompactLifecycleState,
+    activeCompactTimelineEndIndex: Int?,
+    activeCompactStreamingSummary: String,
+    modifier: Modifier = Modifier,
+) {
+    completedMarkersByTimelineEndIndex[timelineEndIndex].orEmpty().forEach { compact ->
+        ContextCompactMarker(
+            modifier = modifier,
+            summaryPreview = summaryPreviewOf(compact),
+        )
+    }
+    if (lifecycleCompletedTimelineEndIndex == timelineEndIndex) {
+        ContextCompactMarker(
+            modifier = modifier,
+            summaryPreview = summaryPreviewOf(compactLifecycleState),
+        )
+    }
+    if (activeCompactTimelineEndIndex == timelineEndIndex) {
+        ContextCompactInProgressMarker(
+            modifier = modifier,
+            streamingText = activeCompactStreamingSummary,
+        )
+    }
+}
 
 @Composable
 internal fun TimelineHistoryLoadingIndicator(
@@ -257,55 +286,17 @@ internal fun ContextCompactInProgressMarker(
                 color = workspace.hairline,
             )
         }
-        // 2026-05-15 (1.9.7): show only the PROSE prefix of the streaming
-        // summary (everything before the first `{`), not the raw JSON tail.
-        // buildCompressionPrompt asks the LLM to write a single-sentence
-        // human-readable summary BEFORE the JSON body, so the early tokens
-        // are prose; once the model starts emitting JSON we freeze the
-        // displayed text (no more updates, since `proseOnly` stops growing).
-        // Whitespace-collapsed for stable rendering height; trailing 120 chars
-        // + leading ellipsis once it overflows. When stream hasn't produced
-        // any prose yet (cold start, slow first token), fall back to the
-        // generic subtitle so the marker isn't a void of whitespace.
-        //
-        // 2026-05-18: cut at first `{` (JSON object start) AND scrub any
-        // ```json / ``` / [Summary…] markers from inside the prose — DeepSeek
-        // and several smaller models routinely emit a code fence between
-        // the preamble sentence and the JSON, which without scrubbing
-        // turned the live display into a stream of "```json" gibberish.
-        // Cheap String.replace beats a Regex compile per frame; the
-        // markers are short and case-stable.
         val proseOnly = remember(streamingText) {
-            val cutIndex = streamingText.indexOf('{')
-            val rawPreamble = if (cutIndex >= 0) {
-                streamingText.substring(0, cutIndex)
-            } else {
-                streamingText
-            }
-            val scrubbed = rawPreamble
-                .replace("```json", " ")
-                .replace("```", " ")
-                .replace("[Summary of previous conversation]", " ")
-                .replace("[Summary]", " ")
-            COMPACT_SUMMARY_WHITESPACE_RE.replace(scrubbed, " ").trim()
+            CompactSummaryPayloads.timelineSummary(streamingText).orEmpty()
         }
-        // 2026-05-18 (post-review): take the FIRST 120 chars rather than the
-        // last. buildCompressionPrompt mandates a single ≤100 char preamble
-        // sentence — its meaning lives at the START of the buffer. takeLast
-        // was a holdover from a "scrolling cursor" UX that made sense for an
-        // unbounded build log; here it would surface the prose-near-JSON
-        // transition (e.g. "…goals are deploy, fix bug, ") rather than the
-        // actual sentence head, especially when a misbehaving model rambles
-        // before emitting `{`. JSON-side content stays hidden either way
-        // (cut at `{` happens before this).
         val tailText = remember(proseOnly) {
-            if (proseOnly.length > 120) proseOnly.take(120) + "…" else proseOnly
+            if (proseOnly.length > 220) proseOnly.take(220) + "…" else proseOnly
         }
         Text(
             text = tailText.ifBlank { stringResource(R.string.chat_context_auto_compacting_subtitle) },
             style = MaterialTheme.typography.labelSmall,
             color = workspace.muted,
-            maxLines = 2,
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 24.dp),
         )
@@ -316,19 +307,10 @@ internal fun ContextCompactInProgressMarker(
 internal fun ContextCompactMarker(
     modifier: Modifier = Modifier,
     summaryPreview: String? = null,
+    @Suppress("UNUSED_PARAMETER")
     freshlyCompletedKey: String? = null,
 ) {
     val workspace = workspaceColors()
-    var showFreshCompletion by remember(freshlyCompletedKey) {
-        mutableStateOf(freshlyCompletedKey != null)
-    }
-    LaunchedEffect(freshlyCompletedKey) {
-        if (freshlyCompletedKey != null) {
-            showFreshCompletion = true
-            delay(2_400)
-            showFreshCompletion = false
-        }
-    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -356,11 +338,7 @@ internal fun ContextCompactMarker(
                 tint = workspace.muted,
             )
             Text(
-                text = if (showFreshCompletion) {
-                    stringResource(R.string.chat_context_compact_completed)
-                } else {
-                    stringResource(R.string.chat_context_auto_compacted)
-                },
+                text = stringResource(R.string.chat_context_auto_compacted),
                 style = MaterialTheme.typography.labelLarge,
                 color = workspace.muted,
             )
@@ -370,19 +348,13 @@ internal fun ContextCompactMarker(
             color = workspace.hairline,
         )
         }
-        // 2026-05-15 (1.9.5): when shown as the transient post-compact marker
-        // (bottom of LazyColumn, 8s window), show a short preview of the freshly
-        // generated summary so the user can actually SEE what was compacted —
-        // not just "something happened". Lightweight alternative to a full
-        // streaming view (would have required 200+ lines + new flows). 80 chars
-        // is enough for a sentence + ellipsis on most phone widths.
+        // Show the human timeline summary so the user can see what was
+        // preserved after older messages above the divider are dimmed.
         if (summaryPreview != null) {
             Text(
                 text = summaryPreview,
                 style = MaterialTheme.typography.labelSmall,
                 color = workspace.muted,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 24.dp),
             )
         }

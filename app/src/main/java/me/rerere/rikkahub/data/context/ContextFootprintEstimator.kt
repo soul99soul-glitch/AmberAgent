@@ -86,21 +86,18 @@ object ContextFootprintEstimator {
     ): Int {
         if (activeCompacts.isEmpty()) return estimateMessages(messages)
         val existingMessageIds = messages.map { it.id.toString() }.toSet()
-        val completedCompacts = activeCompacts.filter { compact ->
-            compact.status == "completed" &&
-                compact.sourceMessageIds.isNotEmpty() &&
-                compact.sourceMessageIds.all { it in existingMessageIds }
-        }
+        val completedCompacts = CompactSummaryPayloads.validCompletedCompacts(activeCompacts, existingMessageIds)
         if (completedCompacts.isEmpty()) return estimateMessages(messages)
 
         val coveredMessageIds = completedCompacts.flatMap { it.sourceMessageIds }.toSet()
         val recentMessages = messages.filter { it.id.toString() !in coveredMessageIds }
 
-        // Compact summaries replace covered messages with a much smaller
-        // SYSTEM message. Use the compact's own tokenEstimate as the
-        // authoritative size (it was computed when the summary was written
-        // to the repository).
-        val summaryTokens = completedCompacts.sumOf { it.tokenEstimate }
+        // Mirror ConversationContextPlanner.prepareMessages: old compacts
+        // covered by the latest cumulative handoff are not injected again.
+        val summaryMessages = CompactSummaryPayloads
+            .selectCompactsForInjection(activeCompacts, existingMessageIds)
+            .map { compact -> UIMessage.system(CompactSummaryPayloads.injectionText(compact)) }
+        val summaryTokens = estimateMessages(summaryMessages)
         return summaryTokens + estimateMessages(recentMessages)
     }
 

@@ -4,11 +4,16 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT
 import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_HARD_MUTE_WEIGHT
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListDashboard
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
+import me.rerere.rikkahub.data.agent.board.hotlist.filterEnabledSources
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
@@ -18,8 +23,10 @@ import kotlinx.coroutines.launch
 
 class BoardViewModel(
     private val boardRepository: BoardRepository,
+    private val hotListRepository: HotListRepository,
     private val settingsStore: SettingsAggregator,
     private val scheduler: BoardScheduler,
+    private val hotListScheduler: HotListScheduler,
     private val appScope: AppScope,
 ) : ViewModel() {
 
@@ -37,6 +44,13 @@ class BoardViewModel(
     }
 
     val settings = settingsStore.settingsFlow
+
+    val hotListDashboard: Flow<HotListDashboard> = combine(
+        hotListRepository.observeDashboard(),
+        settings,
+    ) { dashboard, currentSettings ->
+        dashboard.filterEnabledSources(currentSettings.agentRuntime.todayBoard.hotListEnabledSources)
+    }
 
     fun markCompleted(itemId: String) {
         appScope.launch {
@@ -60,8 +74,25 @@ class BoardViewModel(
 
     fun refresh() {
         scheduler.runOnce()
+        hotListScheduler.runOnce()
         // Re-evaluate todayBoardDate in case we crossed the 04:00 cutoff since creation.
         boardDateTick.value = System.currentTimeMillis()
+    }
+
+    fun refreshHotList() {
+        hotListScheduler.runOnce()
+    }
+
+    suspend fun confirmDeepReadCost() {
+        settingsStore.update { current ->
+            current.copy(
+                agentRuntime = current.agentRuntime.copy(
+                    todayBoard = current.agentRuntime.todayBoard.copy(
+                        deepReadFirstUseConfirmed = true,
+                    )
+                )
+            )
+        }
     }
 
     // ---- Feedback Learning ------------------------------------------------------------

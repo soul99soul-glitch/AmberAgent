@@ -25,6 +25,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.CompactLifecycleState
+import me.rerere.rikkahub.data.context.CompactSummaryPayloads
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Conversation
@@ -64,14 +65,6 @@ internal data class TimelineScrollAnchor(
     val offset: Int,
 )
 
-/**
- * Slice a ConversationCompact.summary to a ≤80-char one-line preview suitable
- * for the under-divider label on [ContextCompactMarker]. Strips the structured
- * JSON body (everything from the first `{`), collapses whitespace, ellipsises
- * when too long. Returns null when there's no usable prose preamble — caller
- * should hide the preview line entirely in that case (don't render an empty
- * subtitle).
- */
 internal fun summaryPreviewOf(compact: ConversationCompact): String? {
     val raw = compact.summary.ifBlank { return null }
     return summaryPreviewOf(raw)
@@ -83,11 +76,12 @@ internal fun summaryPreviewOf(state: CompactLifecycleState): String? {
 }
 
 private fun summaryPreviewOf(raw: String): String? {
-    val cutIndex = raw.indexOf('{')
-    val prose = if (cutIndex >= 0) raw.substring(0, cutIndex) else raw
-    val collapsed = COMPACT_SUMMARY_WHITESPACE_RE.replace(prose, " ").trim()
-    if (collapsed.isEmpty()) return null
-    return if (collapsed.length > 80) collapsed.take(80) + "…" else collapsed
+    return CompactSummaryPayloads.timelineSummary(raw)?.compactSummaryPreview()
+}
+
+private fun String.compactSummaryPreview(maxLength: Int = 1_000): String {
+    val collapsed = COMPACT_SUMMARY_WHITESPACE_RE.replace(this, " ").trim()
+    return if (collapsed.length > maxLength) collapsed.take(maxLength) + "…" else collapsed
 }
 internal val TimelineTopPadding = 12.dp
 internal val TimelineBottomSafetyPadding = 28.dp

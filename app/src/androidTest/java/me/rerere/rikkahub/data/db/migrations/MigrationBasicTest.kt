@@ -53,4 +53,15 @@ class MigrationBasicTest {
         db.query("SELECT COUNT(*) FROM conversation_context_event").close()
         db.close()
     }
+
+    @Test
+    fun migrate26To27AddsTodayBoardHotlistTables() {
+        helper.createDatabase(testDb, 26).close()
+        val db = helper.runMigrationsAndValidate(testDb, 27, true, Migration_26_27)
+        db.query("SELECT COUNT(*) FROM hot_list_cache").close()
+        db.query("SELECT COUNT(*) FROM hot_topic_cache").close()
+        db.query("SELECT COUNT(*) FROM deep_read_cache").close()
+        db.query("SELECT COUNT(*) FROM hot_list_source").close()
+        db.close()
+    }
 }
