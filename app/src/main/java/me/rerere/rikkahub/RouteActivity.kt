@@ -104,6 +104,9 @@ import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.live.LiveCompanionPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
+import me.rerere.rikkahub.ui.pages.miniapp.MiniAppListPage
+import me.rerere.rikkahub.ui.pages.miniapp.MiniAppRunnerPage
+import me.rerere.rikkahub.ui.pages.miniapp.MiniAppSettingsPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentExecutionPage
@@ -593,6 +596,18 @@ class RouteActivity : ComponentActivity() {
                                 SettingTodayBoardPage()
                             }
 
+                            entry<Screen.MiniAppList> {
+                                MiniAppListPage()
+                            }
+
+                            entry<Screen.MiniAppRunner> { key ->
+                                MiniAppRunnerPage(appId = key.appId)
+                            }
+
+                            entry<Screen.MiniAppSettings> {
+                                MiniAppSettingsPage()
+                            }
+
                             entry<Screen.SettingSystemAccess> {
                                 SettingSystemAccessPage()
                             }
@@ -891,6 +906,15 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object TodayBoard : Screen
+
+    @Serializable
+    data object MiniAppList : Screen
+
+    @Serializable
+    data class MiniAppRunner(val appId: String) : Screen
+
+    @Serializable
+    data object MiniAppSettings : Screen
 
     @Serializable
     data class DeepRead(val topicId: String, val title: String) : Screen

@@ -5,6 +5,8 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import me.rerere.rikkahub.data.db.AppDatabase
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,6 +64,41 @@ class MigrationBasicTest {
         db.query("SELECT COUNT(*) FROM hot_topic_cache").close()
         db.query("SELECT COUNT(*) FROM deep_read_cache").close()
         db.query("SELECT COUNT(*) FROM hot_list_source").close()
+        db.close()
+    }
+
+    @Test
+    fun migrate27To28AddsMiniAppTable() {
+        helper.createDatabase(testDb, 27).close()
+        val db = helper.runMigrationsAndValidate(testDb, 28, true, Migration_27_28)
+        db.query("SELECT COUNT(*) FROM mini_app").close()
+        db.close()
+    }
+
+    @Test
+    fun migrate28To29AddsMiniAppPermissionAndVersionTables() {
+        val legacy = helper.createDatabase(testDb, 28)
+        legacy.execSQL(
+            """
+            INSERT INTO mini_app (
+                id, title, description, htmlContent, sourceConversationId, sourceMessageId,
+                iconEmoji, category, permissionsJson, pinned, runCount, boardSummary,
+                version, htmlHash, createdAt, updatedAt
+            ) VALUES (
+                'app-1', 'Legacy', 'Old app', '<!DOCTYPE html><html></html>', NULL, NULL,
+                NULL, 'tool', '[]', 0, 0, NULL, 3, 'hash-1', 1000, 1000
+            )
+            """.trimIndent()
+        )
+        legacy.close()
+        val db = helper.runMigrationsAndValidate(testDb, 29, true, Migration_28_29)
+        db.query("SELECT COUNT(*) FROM mini_app_grant").close()
+        db.query("SELECT appId, versionNumber, htmlHash FROM mini_app_version WHERE appId = 'app-1'").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("app-1", cursor.getString(0))
+            assertEquals(3, cursor.getInt(1))
+            assertEquals("hash-1", cursor.getString(2))
+        }
         db.close()
     }
 }

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.di
 
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
+import me.rerere.rikkahub.data.agent.miniapp.MiniAppRepository
 import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
@@ -70,5 +71,9 @@ val repositoryModule = module {
 
     single {
         HotListRepository(get(), get())
+    }
+
+    single {
+        MiniAppRepository(get(), get(), get(), get(), get())
     }
 }

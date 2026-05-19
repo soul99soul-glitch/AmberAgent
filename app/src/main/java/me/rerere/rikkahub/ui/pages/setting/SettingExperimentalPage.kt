@@ -37,6 +37,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Globe02
 import me.rerere.hugeicons.stroke.ServerStack01
+import me.rerere.hugeicons.stroke.SmartPhone01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
@@ -97,6 +98,13 @@ fun SettingExperimentalPage() {
                         icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
                         title = "今日看板",
                         description = "Agent 主动整理每日信号，生成待办与关注项",
+                    )
+                    ExperimentDivider()
+                    ExperimentFeatureRow(
+                        onClick = { navController.navigate(Screen.MiniAppSettings) },
+                        icon = { Icon(HugeIcons.SmartPhone01, contentDescription = null) },
+                        title = "小应用",
+                        description = "让 Amber 生成、保存并运行轻量 HTML 工具",
                     )
                     // Model Council top-level entry removed — it's now reachable from inside the
                     // SubAgent settings page as an "advanced" section (it's effectively a

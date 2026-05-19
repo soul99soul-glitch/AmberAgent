@@ -175,6 +175,7 @@ data class AgentRuntimeSetting(
     val terminalInstallTimeoutMs: Long = 15 * 60_000L,
     val feishuOfficeEnhancement: FeishuOfficeEnhancementSetting = FeishuOfficeEnhancementSetting(),
     val todayBoard: TodayBoardSetting = TodayBoardSetting(),
+    val miniApp: MiniAppSetting = MiniAppSetting(),
     val contextCompaction: ContextCompactionSetting = ContextCompactionSetting(),
     val memoryRecall: MemoryRecallSetting = MemoryRecallSetting(),
     val memoryWorker: MemoryWorkerSetting = MemoryWorkerSetting(),
@@ -185,6 +186,18 @@ data class AgentRuntimeSetting(
     val speculativeToolExecution: SpeculativeToolExecutionSetting = SpeculativeToolExecutionSetting(),
     val generationRetry: GenerationRetrySetting = GenerationRetrySetting(),
     val keepGenerationAliveInBackground: Boolean = true,
+)
+
+@Serializable
+data class MiniAppSetting(
+    val enabled: Boolean = true,
+    val networkEnabled: Boolean = true,
+    val externalImagesEnabled: Boolean = true,
+    val searchEnabled: Boolean = true,
+    val clipboardCopyEnabled: Boolean = true,
+    val boardSummaryUpdateEnabled: Boolean = true,
+    val webViewDebugEnabled: Boolean = false,
+    val showSourceButton: Boolean = true,
 )
 
 @Serializable

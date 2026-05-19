@@ -405,6 +405,20 @@ sealed class UIMessagePart {
     ) : UIMessagePart()
 
     @Serializable
+    @SerialName("mini_app")
+    data class MiniApp(
+        val appId: String,
+        val title: String,
+        val description: String,
+        val iconEmoji: String? = null,
+        val category: String? = null,
+        val permissions: List<String> = emptyList(),
+        val htmlHash: String? = null,
+        val version: Int = 1,
+        override var metadata: JsonObject? = null
+    ) : UIMessagePart()
+
+    @Serializable
     @SerialName("reasoning")
     data class Reasoning(
         val reasoning: String,
@@ -522,6 +536,7 @@ fun List<UIMessagePart>.toSortedMessageParts(): List<UIMessagePart> {
             is UIMessagePart.Video -> 1
             is UIMessagePart.Audio -> 1
             is UIMessagePart.Document -> 1
+            is UIMessagePart.MiniApp -> 1
         }
     }
 }

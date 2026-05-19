@@ -129,6 +129,7 @@ object ContextFootprintEstimator {
         is UIMessagePart.Video -> 4_500
         is UIMessagePart.Audio -> 4_500
         is UIMessagePart.Document -> fileName.weightedTokenChars() + 80
+        is UIMessagePart.MiniApp -> title.weightedTokenChars() + description.weightedTokenChars() + 120
         UIMessagePart.Search -> 20
     }
 
@@ -160,6 +161,7 @@ object ContextFootprintEstimator {
         is UIMessagePart.Video -> 7_000L + url.length
         is UIMessagePart.Audio -> 8_000L + url.length + fileName.length
         is UIMessagePart.Document -> 9_000L + fileName.length + url.length
+        is UIMessagePart.MiniApp -> 9_500L + appId.length + title.length + version
         UIMessagePart.Search -> 10_000L
     }
 

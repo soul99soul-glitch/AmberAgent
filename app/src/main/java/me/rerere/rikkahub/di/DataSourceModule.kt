@@ -20,6 +20,7 @@ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
+import me.rerere.rikkahub.data.agent.miniapp.MiniAppSearchBridge
 import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
 import me.rerere.rikkahub.data.datastore.prefs.AssistantPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
@@ -45,6 +46,8 @@ import me.rerere.rikkahub.data.db.migrations.Migration_21_22
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_25_26
 import me.rerere.rikkahub.data.db.migrations.Migration_26_27
+import me.rerere.rikkahub.data.db.migrations.Migration_27_28
+import me.rerere.rikkahub.data.db.migrations.Migration_28_29
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
@@ -127,6 +130,8 @@ val dataSourceModule = module {
                 Migration_22_23,
                 Migration_25_26,
                 Migration_26_27,
+                Migration_27_28,
+                Migration_28_29,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -176,6 +181,8 @@ val dataSourceModule = module {
     }
 
     single { TemplateTransformer(settingsStore = get()) }
+
+    single { MiniAppSearchBridge(settingsStore = get()) }
 
     single {
         get<AppDatabase>().conversationDao()
@@ -271,6 +278,18 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().docChangeLogDao()
+    }
+
+    single {
+        get<AppDatabase>().miniAppDao()
+    }
+
+    single {
+        get<AppDatabase>().miniAppGrantDao()
+    }
+
+    single {
+        get<AppDatabase>().miniAppVersionDao()
     }
 
     single {

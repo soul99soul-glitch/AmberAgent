@@ -347,6 +347,11 @@ private fun DrawerActions(navController: Navigator, todayBoardEnabled: Boolean =
                 onClick = { navController.navigate(Screen.TodayBoard) },
             )
         }
+        DrawerNavRow(
+            icon = HugeIcons.Folder01,
+            label = "小应用",
+            onClick = { navController.navigate(Screen.MiniAppList) },
+        )
     }
 }
 

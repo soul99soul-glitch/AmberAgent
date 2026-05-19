@@ -52,6 +52,7 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -62,7 +63,9 @@ import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.pages.miniapp.components.MiniAppChatCard
 import kotlin.time.Duration.Companion.milliseconds
 
 @Suppress("UNUSED_PARAMETER")
@@ -84,6 +87,7 @@ internal fun MessagePartsBlock(
     onGenerativeWidgetAction: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val navController = LocalNavController.current
     val workspace = workspaceColors()
 
     // 消息输出HapticFeedback
@@ -452,6 +456,14 @@ internal fun MessagePartsBlock(
                                 }
                             }
                         }
+                    }
+
+                    is UIMessagePart.MiniApp -> {
+                        MiniAppChatCard(
+                            part = part,
+                            onRun = { navController.navigate(Screen.MiniAppRunner(part.appId)) },
+                            onOpenList = { navController.navigate(Screen.MiniAppList) },
+                        )
                     }
 
                     else -> {

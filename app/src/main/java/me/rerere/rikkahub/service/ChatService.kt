@@ -71,6 +71,8 @@ import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
+import me.rerere.rikkahub.data.ai.transformers.MiniAppOutputTransformer
+import me.rerere.rikkahub.data.ai.transformers.MiniAppPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
@@ -163,6 +165,7 @@ private val inputTransformers by lazy {
     listOf(
         TimeReminderTransformer,
         PromptInjectionTransformer,
+        MiniAppPromptTransformer,
         PlaceholderTransformer,
         DocumentAsPromptTransformer,
         OcrTransformer,
@@ -174,6 +177,7 @@ private val outputTransformers by lazy {
         ThinkTagTransformer,
         Base64ImageToLocalFileTransformer,
         SearchImageInjectorTransformer,
+        MiniAppOutputTransformer,
         RegexOutputTransformer,
     )
 }

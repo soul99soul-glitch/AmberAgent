@@ -292,6 +292,7 @@ object ConversationContextPlanner {
         // gets injected as Text by the document-as-prompt transformer, so we
         // only count the inline metadata here.
         is UIMessagePart.Document -> fileName.length + 80
+        is UIMessagePart.MiniApp -> title.weightedTokenChars() + description.weightedTokenChars() + 120
         UIMessagePart.Search -> 20
     }
 
@@ -308,6 +309,7 @@ object ConversationContextPlanner {
         is UIMessagePart.Video -> "video: ${url.takeLast(80)}"
         is UIMessagePart.Audio -> "audio: ${url.takeLast(80)}"
         is UIMessagePart.Document -> "document: $fileName mime=$mime"
+        is UIMessagePart.MiniApp -> "mini_app: $title id=$appId"
         UIMessagePart.Search -> "search_marker"
     }
 }

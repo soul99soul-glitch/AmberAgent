@@ -53,6 +53,7 @@ internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
             is UIMessagePart.Document -> part.url.isNotBlank()
             is UIMessagePart.Video -> part.url.isNotBlank()
             is UIMessagePart.Audio -> part.url.isNotBlank()
+            is UIMessagePart.MiniApp -> part.appId.isNotBlank()
             is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
             is UIMessagePart.Tool -> true
             else -> false

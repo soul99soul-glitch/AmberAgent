@@ -27,6 +27,9 @@ import me.rerere.rikkahub.data.db.dao.MemoryDreamPlanDAO
 import me.rerere.rikkahub.data.db.dao.MemoryEventDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppGrantDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppVersionDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
 import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
@@ -58,6 +61,9 @@ import me.rerere.rikkahub.data.db.entity.MemoryEventEntity
 import me.rerere.rikkahub.data.db.entity.MessageDayStatEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeStatEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppGrantEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppVersionEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
@@ -92,8 +98,11 @@ import me.rerere.rikkahub.utils.JsonInstant
         HotTopicCacheEntity::class,
         DeepReadCacheEntity::class,
         HotListSourceEntity::class,
+        MiniAppEntity::class,
+        MiniAppGrantEntity::class,
+        MiniAppVersionEntity::class,
     ],
-    version = 27,
+    version = 29,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -160,6 +169,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun docSubscriptionDao(): DocSubscriptionDAO
 
     abstract fun docChangeLogDao(): DocChangeLogDAO
+
+    abstract fun miniAppDao(): MiniAppDAO
+
+    abstract fun miniAppGrantDao(): MiniAppGrantDAO
+
+    abstract fun miniAppVersionDao(): MiniAppVersionDAO
 }
 
 object TokenUsageConverter {

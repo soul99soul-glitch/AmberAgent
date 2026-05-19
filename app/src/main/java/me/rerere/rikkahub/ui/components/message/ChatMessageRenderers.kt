@@ -2,15 +2,21 @@ package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -31,6 +37,7 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownTopLevelBlock
 import me.rerere.rikkahub.ui.components.richtext.topLevelBlockCount
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
 
 @Composable
 internal fun VirtualizedAssistantText(
@@ -109,6 +116,15 @@ internal fun AssistantMarkdownBlockOrWidgets(
     onClickCitation: (String) -> Unit,
     onGenerativeWidgetAction: (String) -> Unit,
 ) {
+    if (content.looksLikeMiniAppJsonPayload()) {
+        MiniAppJsonPreview(
+            content = content,
+            streaming = streaming,
+            modifier = modifier,
+        )
+        return
+    }
+
     val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
     if (!generativeUiEnabled || !GenerativeWidgetParser.containsWidgetFence(content)) {
         MarkdownBlock(
@@ -156,6 +172,77 @@ internal fun AssistantMarkdownBlockOrWidgets(
             }
         }
     }
+}
+
+@Composable
+private fun MiniAppJsonPreview(
+    content: String,
+    streaming: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val scrollState = rememberScrollState()
+    val previewText = remember(content) {
+        content.trim().removeSurroundingMiniAppFence()
+    }
+
+    LaunchedEffect(previewText.length, streaming) {
+        if (streaming) {
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(220.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = if (streaming) "正在生成小应用" else "MiniApp JSON",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = previewText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(scrollState),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun String.looksLikeMiniAppJsonPayload(): Boolean {
+    val text = trimStart()
+    if (!text.startsWith("{") && !text.startsWith("```")) return false
+
+    var score = 0
+    if ("\"title\"" in text) score++
+    if ("\"description\"" in text) score++
+    if ("\"html\"" in text || "<html" in text || "<!DOCTYPE html" in text) score += 2
+    if ("\"permissions\"" in text) score++
+    if ("\"category\"" in text) score++
+    return score >= 3
+}
+
+private fun String.removeSurroundingMiniAppFence(): String {
+    val trimmed = trim()
+    if (!trimmed.startsWith("```")) return trimmed
+    val firstLineEnd = trimmed.indexOf('\n')
+    if (firstLineEnd < 0) return trimmed.removePrefix("```").trimStart()
+    val body = trimmed.substring(firstLineEnd + 1)
+    val endFence = body.lastIndexOf("```")
+    return if (endFence >= 0) body.substring(0, endFence).trim() else body.trim()
 }
 
 @Composable
