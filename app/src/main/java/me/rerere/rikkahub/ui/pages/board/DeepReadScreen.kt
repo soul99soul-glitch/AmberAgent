@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.board
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,25 +15,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,12 +36,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -64,11 +60,9 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.font.SlidesFontRepository
-import me.rerere.rikkahub.ui.components.nav.BackButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeepReadScreen(topicId: String, title: String) {
     val agent: DeepReadAgent = koinInject()
@@ -88,12 +82,6 @@ fun DeepReadScreen(topicId: String, title: String) {
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val progress by remember {
-        derivedStateOf {
-            val total = listState.layoutInfo.totalItemsCount.coerceAtLeast(1)
-            (listState.firstVisibleItemIndex + 1).toFloat() / total.toFloat()
-        }
-    }
 
     fun run(force: Boolean = false) {
         if (!confirmed) return
@@ -118,34 +106,10 @@ fun DeepReadScreen(topicId: String, title: String) {
     }
 
     val palette = magazinePalette()
-    Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text("深度阅读", style = MaterialTheme.typography.titleSmall) },
-                    navigationIcon = { BackButton() },
-                    actions = {
-                        if (confirmed) {
-                            TextButton(onClick = { run(force = true) }, enabled = !loading) {
-                                Text("重新生成")
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = palette.background),
-                )
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
-                    color = palette.accent,
-                    trackColor = palette.line,
-                )
-            }
-        },
-        containerColor = palette.background,
-    ) { innerPadding ->
+    Box(Modifier.fillMaxSize().background(palette.background)) {
         when {
             !confirmed -> DeepReadConfirmation(
-                modifier = Modifier.padding(innerPadding),
+                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
                 palette = palette,
                 fontFamily = readingFontFamily,
                 onConfirm = {
@@ -162,14 +126,13 @@ fun DeepReadScreen(topicId: String, title: String) {
                     }
                 },
             )
-            loading -> DeepReadLoading(Modifier.padding(innerPadding), palette)
-            error != null -> DeepReadError(error.orEmpty(), Modifier.padding(innerPadding)) { run(force = true) }
+            loading -> DeepReadLoading(Modifier.statusBarsPadding().navigationBarsPadding(), palette)
+            error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
             output != null -> DeepReadArticle(
                 title = title,
                 output = output!!,
                 palette = palette,
                 fontFamily = readingFontFamily,
-                contentPadding = innerPadding,
                 listState = listState,
             )
         }
@@ -213,19 +176,20 @@ private fun DeepReadArticle(
     output: DeepReadOutput,
     palette: MagazinePalette,
     fontFamily: FontFamily?,
-    contentPadding: PaddingValues,
     listState: androidx.compose.foundation.lazy.LazyListState,
 ) {
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().background(palette.background),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(palette.background)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
         contentPadding = PaddingValues(
-            start = 22.dp,
-            end = 22.dp,
-            top = contentPadding.calculateTopPadding() + 22.dp,
-            bottom = contentPadding.calculateBottomPadding() + 40.dp,
+            top = 8.dp,
+            bottom = 40.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(46.dp),
+        verticalArrangement = Arrangement.spacedBy(48.dp),
     ) {
         item {
             MagazineHero(
@@ -237,18 +201,29 @@ private fun DeepReadArticle(
         }
 
         output.timeline?.takeIf { it.isNotEmpty() }?.let { timeline ->
-            item { TimelineSection(timeline, palette, fontFamily) }
+            item { ArticleInset { TimelineSection(timeline, palette, fontFamily) } }
         }
 
         output.corePoints?.takeIf { it.isNotEmpty() }?.let { points ->
-            item { CorePointsSection(type = output.topicType, points = points, palette = palette, fontFamily = fontFamily) }
+            item { ArticleInset { CorePointsSection(type = output.topicType, points = points, palette = palette, fontFamily = fontFamily) } }
         }
 
-        item { AnalysisSection(output.analysis, palette, fontFamily) }
+        item { ArticleInset { AnalysisSection(output.analysis, palette, fontFamily) } }
 
         if (output.extendedReading.isNotEmpty()) {
-            item { ReadingSection(output.extendedReading, palette, fontFamily) }
+            item { ArticleInset { ReadingSection(output.extendedReading, palette, fontFamily) } }
         }
+    }
+}
+
+@Composable
+private fun ArticleInset(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 30.dp),
+    ) {
+        content()
     }
 }
 
@@ -267,13 +242,13 @@ private fun MagazineHero(
     if (showImage) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(320.dp)
-                    .clip(RoundedCornerShape(2.dp)),
+                    .background(palette.surface)
+                    .height(352.dp),
             ) {
                 AsyncImage(
                     model = image,
@@ -282,12 +257,12 @@ private fun MagazineHero(
                     onError = { imageFailed = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(280.dp)
+                        .height(306.dp)
                         .align(Alignment.TopCenter),
                 )
                 Canvas(Modifier.fillMaxSize()) {
-                    val startY = 224.dp.toPx()
-                    val endY = 310.dp.toPx()
+                    val startY = 248.dp.toPx()
+                    val endY = 326.dp.toPx()
                     val path = Path().apply {
                         moveTo(0f, startY)
                         lineTo(size.width, endY)
@@ -302,14 +277,18 @@ private fun MagazineHero(
                         caption,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = 8.dp, bottom = 8.dp),
+                            .padding(end = 30.dp, bottom = 12.dp),
                         style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily),
                         color = palette.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
             HeroTextBlock(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 30.dp),
                 title = title,
                 output = output,
                 palette = palette,
@@ -317,6 +296,64 @@ private fun MagazineHero(
             )
         }
     } else {
+        TextOnlyHero(
+            title = title,
+            output = output,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TextOnlyHero(
+    title: String,
+    output: DeepReadOutput,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    val sourceCount = remember(output.references, output.extendedReading) {
+        (output.references.ifEmpty { output.extendedReading })
+            .map { it.source ?: it.url }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .size
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 30.dp, top = 36.dp, end = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "DEEP READ",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    letterSpacing = 3.2.sp,
+                    fontWeight = FontWeight.Light,
+                    color = palette.accent,
+                ),
+            )
+            Text(
+                if (sourceCount > 0) "$sourceCount SOURCES" else "CHINESE REWRITE",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    letterSpacing = 2.6.sp,
+                    fontWeight = FontWeight.Light,
+                    color = palette.muted,
+                ),
+            )
+        }
+        Spacer(
+            Modifier
+                .width(126.dp)
+                .height(1.dp)
+                .background(palette.line),
+        )
         HeroTextBlock(
             modifier = Modifier.fillMaxWidth(),
             title = title,
@@ -336,7 +373,7 @@ private fun HeroTextBlock(
     palette: MagazinePalette,
     fontFamily: FontFamily?,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text(
             output.topicType.uppercase(),
             style = MaterialTheme.typography.labelSmall.copy(
@@ -347,16 +384,16 @@ private fun HeroTextBlock(
         )
         Text(
             title,
-            style = MaterialTheme.typography.displaySmall.copy(
+            style = MaterialTheme.typography.displayMedium.copy(
                 fontWeight = FontWeight.Light,
-                letterSpacing = 1.5.sp,
+                lineHeight = 52.sp,
                 color = palette.ink,
             ).withReadingFont(fontFamily),
         )
         Text(
             output.summary,
             style = MaterialTheme.typography.bodyLarge.copy(
-                lineHeight = 26.sp,
+                lineHeight = 31.sp,
                 color = palette.ink,
             ).withReadingFont(fontFamily),
         )
@@ -526,25 +563,47 @@ private fun QuoteBlock(text: String, attribution: String?, palette: MagazinePale
 @Composable
 private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, fontFamily: FontFamily?) {
     val uriHandler = LocalUriHandler.current
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val visibleLinks = links.take(8)
+    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         SectionKicker("扩展阅读", palette)
-        links.take(8).forEach { link ->
-            Column(
-                Modifier
+        Spacer(Modifier.height(14.dp))
+        visibleLinks.forEachIndexed { index, link ->
+            Row(
+                modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(palette.surface)
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                    .clickable { uriHandler.openUri(link.url) }
+                    .padding(vertical = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                TextButton(onClick = { uriHandler.openUri(link.url) }, contentPadding = PaddingValues(0.dp)) {
+                Text(
+                    "%02d".format(index + 1),
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        letterSpacing = 1.5.sp,
+                        color = palette.accent,
+                    ),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
                         link.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(color = palette.ink)
-                            .withReadingFont(fontFamily),
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            lineHeight = 29.sp,
+                            color = palette.ink,
+                        ).withReadingFont(fontFamily),
                     )
+                    Text(link.source ?: link.url, style = MaterialTheme.typography.labelSmall, color = palette.muted)
                 }
-                Text(link.source ?: link.url, style = MaterialTheme.typography.labelSmall, color = palette.muted)
+            }
+            if (index != visibleLinks.lastIndex) {
+                Spacer(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(palette.line.copy(alpha = 0.55f)),
+                )
             }
         }
     }
@@ -577,10 +636,11 @@ private fun SectionKicker(text: String, palette: MagazinePalette) {
 @Composable
 private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
     val stages = remember { listOf("收集来源", "组织脉络", "生成中文深读") }
+    val progressStops = remember { listOf(0.24f, 0.56f, 0.86f) }
     var activeStage by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(1_600L)
+            delay(8_500L)
             activeStage = (activeStage + 1).coerceAtMost(stages.lastIndex)
         }
     }
@@ -620,7 +680,7 @@ private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
                 }
             }
             LinearProgressIndicator(
-                progress = { ((activeStage + 1).toFloat() / stages.size).coerceIn(0f, 1f) },
+                progress = { progressStops.getOrElse(activeStage) { 0.86f } },
                 modifier = Modifier.fillMaxWidth().height(2.dp),
                 color = palette.accent,
                 trackColor = palette.line,

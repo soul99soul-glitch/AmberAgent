@@ -97,25 +97,28 @@ class DeepReadAgent(
             coroutineScope {
                 val enabled = settings.enabledDeepReadSearchServices().take(MAX_SEARCH_SERVICES)
                 if (enabled.isEmpty()) return@coroutineScope seedSources.take(MAX_SOURCES)
+                val queries = buildDeepReadQueries(topicTitle)
 
-                val searchResults = enabled.map { service ->
-                    async {
-                        try {
-                            withTimeoutOrNull(SEARCH_TIMEOUT_MS) {
-                                searchWithService(service, topicTitle).getOrNull()
+                val searchResults = enabled.flatMap { service ->
+                    queries.map { query ->
+                        async {
+                            try {
+                                withTimeoutOrNull(SEARCH_TIMEOUT_MS) {
+                                    searchWithService(service, query, SEARCH_RESULTS_PER_QUERY)
+                                        .getOrNull()
+                                        ?.let { result -> SearchBucket(query, result.items) }
+                                }
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Throwable) {
+                                Log.w(TAG, "deep read search failed: ${service.id} query=$query", error)
+                                null
                             }
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: Throwable) {
-                            Log.w(TAG, "deep read search failed: ${service.id}", error)
-                            null
                         }
                     }
                 }.awaitAll()
                     .filterNotNull()
-                    .flatMap { it.items }
-                    .distinctBy { it.url }
-                    .take(MAX_SEARCH_RESULTS)
+                    .let(::interleaveSearchResults)
 
                 val scrapeService = enabled.firstOrNull()
                 val enriched = searchResults.mapIndexed { index, item ->
@@ -166,6 +169,36 @@ class DeepReadAgent(
             }
         } ?: seedSources.take(MAX_SOURCES)
 
+    private fun interleaveSearchResults(buckets: List<SearchBucket>): List<SearchResult.SearchResultItem> {
+        val queryGroups = buckets
+            .groupBy { it.query }
+            .values
+            .map { group -> group.flatMap { it.items }.distinctBy { it.url } }
+            .filter { it.isNotEmpty() }
+        val merged = mutableListOf<SearchResult.SearchResultItem>()
+        var index = 0
+        while (merged.size < MAX_SEARCH_RESULTS && queryGroups.any { index < it.size }) {
+            queryGroups.forEach { items ->
+                if (merged.size < MAX_SEARCH_RESULTS && index < items.size) {
+                    val item = items[index]
+                    if (merged.none { it.url == item.url }) {
+                        merged += item
+                    }
+                }
+            }
+            index++
+        }
+        return merged
+    }
+
+    private fun buildDeepReadQueries(topicTitle: String): List<String> =
+        listOf(
+            topicTitle,
+            "$topicTitle 前因后果 时间线 背景",
+            "$topicTitle 核心矛盾 争议 影响",
+            "$topicTitle background timeline context controversy",
+        ).distinct()
+
     private fun List<HotTopicSource>.toDeepReadSources(topicTitle: String): List<DeepReadSource> =
         map { source ->
             val url = source.url?.takeIf { it.startsWith("http") }
@@ -197,13 +230,14 @@ class DeepReadAgent(
     private suspend fun searchWithService(
         options: SearchServiceOptions,
         topicTitle: String,
+        resultSize: Int,
     ): Result<SearchResult> {
         val params = buildJsonObject {
             put("query", topicTitle)
             put("topic", "news")
         }
         val service = SearchService.getService(options)
-        return service.search(params, SearchCommonOptions(resultSize = 8), options)
+        return service.search(params, SearchCommonOptions(resultSize = resultSize), options)
     }
 
     private suspend fun scrapeWithService(options: SearchServiceOptions, url: String): String? {
@@ -428,6 +462,7 @@ class DeepReadAgent(
         private const val MODEL_TIMEOUT_MS = 70_000L
         private const val MAX_SEARCH_SERVICES = 2
         private const val MAX_SEARCH_RESULTS = 8
+        private const val SEARCH_RESULTS_PER_QUERY = 3
         private const val MAX_SCRAPE_RESULTS = 4
         private const val MAX_META_IMAGE_RESULTS = 4
         private const val MAX_SEED_SOURCES = 4
@@ -437,6 +472,11 @@ class DeepReadAgent(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
     }
 }
+
+private data class SearchBucket(
+    val query: String,
+    val items: List<SearchResult.SearchResultItem>,
+)
 
 internal fun Settings.enabledDeepReadSearchServices(): List<SearchServiceOptions> =
     searchServices
