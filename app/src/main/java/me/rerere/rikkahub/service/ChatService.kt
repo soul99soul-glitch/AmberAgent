@@ -98,6 +98,8 @@ import me.rerere.rikkahub.data.agent.tools.createToolSearchTool
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import me.rerere.rikkahub.data.context.ActiveCompactBoundary
+import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.datastore.toCompactPolicy
 import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
@@ -348,8 +350,7 @@ class ChatService(
      * flow so the VM doesn't need to take a direct dependency on the engine.
      */
     fun getIsCompactingFlow(conversationId: Uuid): Flow<Boolean> {
-        val key = conversationId.toString()
-        return contextEngine.compactingConversations.map { key in it }
+        return getCompactLifecycleStateFlow(conversationId).map { it.isActive }
     }
 
     /**
@@ -359,13 +360,26 @@ class ChatService(
      * "———正在自动压缩———" shimmer divider.
      */
     fun getStreamingSummaryFlow(conversationId: Uuid): Flow<String> {
-        val key = conversationId.toString()
-        return contextEngine.summaryStreamFlow.map { it[key].orEmpty() }
+        return getCompactLifecycleStateFlow(conversationId).map { it.streamingSummary }
     }
 
-    fun getActiveCompactBoundaryFlow(conversationId: Uuid): Flow<me.rerere.rikkahub.data.context.ActiveCompactBoundary?> {
+    fun getActiveCompactBoundaryFlow(conversationId: Uuid): Flow<ActiveCompactBoundary?> {
+        return getCompactLifecycleStateFlow(conversationId).map { state ->
+            if (state.hasBoundary && state.isActive) {
+                ActiveCompactBoundary(
+                    sourceStartIndex = state.sourceStartIndex,
+                    sourceEndIndex = state.sourceEndIndex,
+                    sourceMessageIds = state.sourceMessageIds,
+                )
+            } else {
+                null
+            }
+        }
+    }
+
+    fun getCompactLifecycleStateFlow(conversationId: Uuid): Flow<CompactLifecycleState> {
         val key = conversationId.toString()
-        return contextEngine.activeCompactBoundaries.map { it[key] }
+        return contextEngine.compactLifecycleStates.map { it[key] ?: CompactLifecycleState.idle() }
     }
 
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
@@ -1438,9 +1452,7 @@ class ChatService(
             conversation
         }
         val settings = settingsStore.settingsFlow.first()
-        if (keepRecentMessages > 0 && fullConversation.currentMessages.size <= keepRecentMessages) {
-            throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages))
-        }
+        val compressionModel = settings.resolveTaskChatModel(settings.compressModelId)
         val result = contextEngine.compactConversation(
             conversation = fullConversation,
             settings = settings,
@@ -1449,13 +1461,17 @@ class ChatService(
                 keepRecentTurns = (keepRecentMessages / 2).coerceAtLeast(1),
                 maxSummaryTokens = targetTokens,
             ),
-            model = settings.resolveTaskChatModel(settings.compressModelId),
+            model = compressionModel,
             reason = "manual_compact_dialog",
             additionalPrompt = additionalPrompt,
             force = true,
         )
         if (result.status != "completed") {
-            throw IllegalStateException(result.error ?: result.status)
+            val reason = result.error ?: result.status
+            if (reason == "not_enough_history" || reason == "not_enough_new_history") {
+                throw IllegalStateException(context.getString(R.string.chat_page_compress_recent_content_too_large))
+            }
+            throw IllegalStateException(reason)
         }
     }
 

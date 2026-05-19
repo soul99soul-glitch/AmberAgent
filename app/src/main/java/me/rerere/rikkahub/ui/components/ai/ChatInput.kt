@@ -103,6 +103,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
+import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -138,6 +139,7 @@ fun ChatInput(
     loading: Boolean,
     conversation: Conversation,
     contextCompacts: List<me.rerere.rikkahub.data.context.ConversationCompact> = emptyList(),
+    compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
     pendingQueueCount: Int = 0,
     settings: Settings,
     hazeState: HazeState,
@@ -565,6 +567,7 @@ fun ChatInput(
                                 ContextUsageIndicator(
                                     conversation = conversation,
                                     contextCompacts = contextCompacts,
+                                    compactLifecycleState = compactLifecycleState,
                                     model = chatModel,
                                     modifier = Modifier.padding(start = 3.dp),
                                 )

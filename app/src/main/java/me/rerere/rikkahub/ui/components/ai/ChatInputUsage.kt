@@ -50,6 +50,8 @@ import me.rerere.ai.provider.providers.openai.OpenAICodexUsageStatus
 import me.rerere.ai.provider.providers.openai.OpenAICodexUsageWindow
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.context.CompactLifecycleState
+import me.rerere.rikkahub.data.context.CompactLifecycleStatus
 import me.rerere.rikkahub.data.context.ContextFootprintEstimator
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
@@ -75,6 +77,7 @@ import java.util.Locale
 internal fun ContextUsageIndicator(
     conversation: Conversation,
     contextCompacts: List<ConversationCompact>,
+    compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
     model: Model?,
     modifier: Modifier = Modifier,
 ) {
@@ -112,7 +115,10 @@ internal fun ContextUsageIndicator(
     } else {
         0f
     }
+    val compactActive = compactLifecycleState.status == CompactLifecycleStatus.PLANNING ||
+        compactLifecycleState.status == CompactLifecycleStatus.COMPACTING
     val ringColor = when {
+        compactActive -> workspace.blue
         ratio >= 0.7f -> workspace.red
         ratio >= 0.5f -> workspace.amber
         else -> workspace.muted.copy(alpha = 0.56f)
@@ -142,7 +148,11 @@ internal fun ContextUsageIndicator(
             )
         }
         Text(
-            text = "Context ${usedTokens.formatContextTokens()} / ${contextWindow?.formatNumber() ?: "--"}",
+            text = if (compactActive) {
+                stringResource(R.string.chat_context_auto_compacting)
+            } else {
+                "Context ${usedTokens.formatContextTokens()} / ${contextWindow?.formatNumber() ?: "--"}"
+            },
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             color = workspace.muted.copy(alpha = 0.72f),
             maxLines = 1,

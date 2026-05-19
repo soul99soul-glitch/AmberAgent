@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.data.datastore.toCompactPolicy
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
 import kotlin.uuid.Uuid
@@ -100,6 +101,10 @@ class ConversationContextEngine(
     // ConversationCompact.summary.
     private val _summaryStreamFlow = MutableStateFlow<Map<String, String>>(emptyMap())
     val summaryStreamFlow: StateFlow<Map<String, String>> = _summaryStreamFlow.asStateFlow()
+
+    private val _compactLifecycleStates = MutableStateFlow<Map<String, CompactLifecycleState>>(emptyMap())
+    val compactLifecycleStates: StateFlow<Map<String, CompactLifecycleState>> =
+        _compactLifecycleStates.asStateFlow()
 
     suspend fun prepareContext(
         conversation: Conversation?,
@@ -298,6 +303,72 @@ class ConversationContextEngine(
         }
     }
 
+    private fun setCompactLifecycle(conversationKey: String, state: CompactLifecycleState) {
+        _compactLifecycleStates.update { map -> map + (conversationKey to state) }
+    }
+
+    private fun updateCompactLifecycle(
+        conversationKey: String,
+        transform: (CompactLifecycleState) -> CompactLifecycleState,
+    ) {
+        _compactLifecycleStates.update { map ->
+            map + (conversationKey to transform(map[conversationKey] ?: CompactLifecycleState.idle()))
+        }
+    }
+
+    private fun planCompactionForRequest(
+        nodes: List<MessageNode>,
+        activeCompacts: List<ConversationCompact>,
+        policy: CompactPolicy,
+        modelContextWindowTokens: Int?,
+        force: Boolean,
+    ): CompactPlan {
+        if (!force) {
+            return ConversationContextPlanner.planCompaction(
+                nodes = nodes,
+                activeCompacts = activeCompacts,
+                policy = policy,
+                modelContextWindowTokens = modelContextWindowTokens,
+            )
+        }
+
+        val turns = buildList {
+            var currentTurns = policy.keepRecentTurns.coerceAtLeast(1)
+            while (currentTurns > 1) {
+                add(currentTurns)
+                currentTurns = (currentTurns / 2).coerceAtLeast(1)
+            }
+            add(1)
+        }.distinct()
+
+        var lastPlan: CompactPlan? = null
+        turns.forEach { keepRecentTurns ->
+            val plan = ConversationContextPlanner.planCompaction(
+                nodes = nodes,
+                activeCompacts = activeCompacts,
+                policy = policy.copy(
+                    enabled = true,
+                    keepRecentTurns = keepRecentTurns,
+                    precompactRatio = 0f,
+                    forceRatio = Float.MAX_VALUE,
+                ),
+                modelContextWindowTokens = modelContextWindowTokens,
+            )
+            if (plan.shouldCompact) return plan
+            lastPlan = plan
+        }
+        return lastPlan ?: ConversationContextPlanner.planCompaction(
+            nodes = nodes,
+            activeCompacts = activeCompacts,
+            policy = policy.copy(
+                enabled = true,
+                precompactRatio = 0f,
+                forceRatio = Float.MAX_VALUE,
+            ),
+            modelContextWindowTokens = modelContextWindowTokens,
+        )
+    }
+
     suspend fun compactConversation(
         conversation: Conversation,
         settings: Settings,
@@ -314,6 +385,14 @@ class ConversationContextEngine(
         // even mutex-acquisition failures (theoretical) reset the flag.
         val conversationKey = conversation.id.toString()
         _compactingConversations.update { it + conversationKey }
+        setCompactLifecycle(
+            conversationKey,
+            CompactLifecycleState(
+                status = CompactLifecycleStatus.PLANNING,
+                reason = reason,
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
         try {
             compactMutex.withLock {
                 compactInternal(conversation, settings, policy, model, reason, additionalPrompt, force)
@@ -321,6 +400,17 @@ class ConversationContextEngine(
         } finally {
             _compactingConversations.update { it - conversationKey }
             _activeCompactBoundaries.update { it - conversationKey }
+            updateCompactLifecycle(conversationKey) { state ->
+                if (state.isActive) {
+                    state.copy(
+                        status = CompactLifecycleStatus.FAILED,
+                        error = "cancelled",
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                } else {
+                    state
+                }
+            }
             // Clear any leftover streaming text — UI swaps to the transient
             // "已自动压缩" marker which reads from ConversationCompact.summary
             // (final, persisted). Leaving a partial in _summaryStreamFlow
@@ -339,8 +429,8 @@ class ConversationContextEngine(
         additionalPrompt: String,
         force: Boolean,
     ): CompactResult {
+        val conversationKey = conversation.id.toString()
         return runCatching {
-                val conversationKey = conversation.id.toString()
                 val compressionModel = model
                     ?: settings.resolveTaskChatModel(settings.compressModelId)
                     ?: error("No model available for compression")
@@ -348,19 +438,24 @@ class ConversationContextEngine(
                     ?: error("Provider not found")
                 val providerHandler = providerManager.getProviderByType(provider)
                 val activeCompacts = contextRepository.getCompacts(conversation.id)
-                val planPolicy = if (force) {
-                    policy.copy(precompactRatio = 0f, forceRatio = Float.MAX_VALUE)
-                } else {
-                    policy
-                }
-                val plan = ConversationContextPlanner.planCompaction(
+                val plan = planCompactionForRequest(
                     nodes = conversation.messageNodes,
                     activeCompacts = activeCompacts,
-                    policy = planPolicy.copy(enabled = true),
+                    policy = policy.copy(enabled = true),
                     modelContextWindowTokens = compressionModel.contextWindowTokens,
+                    force = force,
                 )
                 if (!plan.shouldCompact) {
                     contextRepository.insertEvent(conversation.id, reason, null, "Skipped: ${plan.reason}")
+                    setCompactLifecycle(
+                        conversationKey,
+                        CompactLifecycleState(
+                            status = CompactLifecycleStatus.SKIPPED,
+                            reason = reason,
+                            error = plan.reason,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                    )
                     return@runCatching CompactResult(
                         status = "skipped",
                         estimatedTokensBefore = plan.estimatedTokens,
@@ -376,6 +471,17 @@ class ConversationContextEngine(
                         sourceMessageIds = plan.sourceMessageIds,
                     ))
                 }
+                setCompactLifecycle(
+                    conversationKey,
+                    CompactLifecycleState(
+                        status = CompactLifecycleStatus.COMPACTING,
+                        reason = reason,
+                        sourceStartIndex = plan.sourceStartIndex,
+                        sourceEndIndex = plan.sourceEndIndex,
+                        sourceMessageIds = plan.sourceMessageIds,
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                )
                 val nodes = conversation.messageNodes.subList(plan.sourceStartIndex, plan.sourceEndIndex + 1)
                 val contentToCompress = ConversationContextPlanner.buildCompressionInput(nodes.map { it.currentMessage })
                 val prompt = buildCompressionPrompt(
@@ -411,8 +517,15 @@ class ConversationContextEngine(
                         accumulated.append(deltaText)
                         val now = System.currentTimeMillis()
                         if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_FLUSH_INTERVAL_MS) {
+                            val text = accumulated.toString()
                             _summaryStreamFlow.update { map ->
-                                map + (conversationKey to accumulated.toString())
+                                map + (conversationKey to text)
+                            }
+                            updateCompactLifecycle(conversationKey) { state ->
+                                state.copy(
+                                    streamingSummary = text,
+                                    updatedAt = now,
+                                )
                             }
                             lastFlushAt = now
                         }
@@ -420,8 +533,15 @@ class ConversationContextEngine(
                 }
                 // Final flush — ensure the last partial that landed within the
                 // 33ms window before stream completion makes it to the UI.
+                val finalStreamText = accumulated.toString()
                 _summaryStreamFlow.update { map ->
-                    map + (conversationKey to accumulated.toString())
+                    map + (conversationKey to finalStreamText)
+                }
+                updateCompactLifecycle(conversationKey) { state ->
+                    state.copy(
+                        streamingSummary = finalStreamText,
+                        updatedAt = System.currentTimeMillis(),
+                    )
                 }
                 val summary = accumulated.toString().trim()
                 val normalizedSummary = CompactSummaryNormalizer.normalizeOrNull(
@@ -451,6 +571,19 @@ class ConversationContextEngine(
                 )
                 contextRepository.insertCompact(compact)
                 contextRepository.insertEvent(conversation.id, reason, compact.id, "Compacted ${plan.sourceMessageCount} messages")
+                setCompactLifecycle(
+                    conversationKey,
+                    CompactLifecycleState(
+                        status = CompactLifecycleStatus.COMPLETED,
+                        reason = reason,
+                        sourceStartIndex = plan.sourceStartIndex,
+                        sourceEndIndex = plan.sourceEndIndex,
+                        sourceMessageIds = plan.sourceMessageIds,
+                        streamingSummary = summary.ifBlank { normalizedSummary },
+                        completedCompactId = compact.id,
+                        updatedAt = now,
+                    )
+                )
                 CompactResult(
                     status = "completed",
                     summaryId = compact.id,
@@ -468,6 +601,14 @@ class ConversationContextEngine(
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 Log.e(TAG, "compactConversation failed", error)
                 contextRepository.insertEvent(conversation.id, reason, null, error.message.orEmpty())
+                updateCompactLifecycle(conversationKey) { state ->
+                    state.copy(
+                        status = CompactLifecycleStatus.FAILED,
+                        reason = reason,
+                        error = error.message ?: error::class.java.simpleName,
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                }
                 CompactResult(status = "failed", error = error.message ?: error::class.java.simpleName)
             }
     }
@@ -507,6 +648,7 @@ class ConversationContextEngine(
             conversation = conversation,
             activeCompacts = compacts,
         )
+        val lifecycle = _compactLifecycleStates.value[conversation.id.toString()]
         val rawPressureRatio = plan.estimatedTokens.toFloat() / plan.contextWindowTokens.toFloat()
         val effectivePressureRatio = effectiveTokens.toFloat() / plan.contextWindowTokens.toFloat()
         return buildJsonObject {
@@ -519,6 +661,8 @@ class ConversationContextEngine(
             put("raw_pressure_ratio", rawPressureRatio)
             put("summary_count", compacts.count { it.status == "completed" })
             put("latest_status", compacts.lastOrNull()?.status ?: "none")
+            put("compact_lifecycle_status", lifecycle?.status?.name?.lowercase() ?: "idle")
+            lifecycle?.completedCompactId?.let { put("latest_lifecycle_compact_id", it) }
             put("next_action", effectiveContextNextAction(policy, effectiveTokens, plan.contextWindowTokens))
             put("raw_next_action", plan.reason)
         }

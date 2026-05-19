@@ -95,6 +95,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -128,6 +129,8 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
+import me.rerere.rikkahub.data.context.CompactLifecycleState
+import me.rerere.rikkahub.data.context.CompactLifecycleStatus
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -150,7 +153,6 @@ import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems
 import me.rerere.rikkahub.ui.components.richtext.prewarmMarkdownContent
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
-import me.rerere.rikkahub.ui.components.ui.PigLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -201,6 +203,15 @@ private data class TimelineScrollAnchor(
  */
 private fun summaryPreviewOf(compact: ConversationCompact): String? {
     val raw = compact.summary.ifBlank { return null }
+    return summaryPreviewOf(raw)
+}
+
+private fun summaryPreviewOf(state: CompactLifecycleState): String? {
+    val raw = state.streamingSummary.ifBlank { return null }
+    return summaryPreviewOf(raw)
+}
+
+private fun summaryPreviewOf(raw: String): String? {
     val cutIndex = raw.indexOf('{')
     val prose = if (cutIndex >= 0) raw.substring(0, cutIndex) else raw
     val collapsed = COMPACT_SUMMARY_WHITESPACE_RE.replace(prose, " ").trim()
@@ -209,6 +220,7 @@ private fun summaryPreviewOf(compact: ConversationCompact): String? {
 }
 private val TimelineTopPadding = 12.dp
 private val TimelineBottomSafetyPadding = 28.dp
+private val PostSendWaitingBottomReserve = 156.dp
 private val TimelineItemSpacing = 14.dp
 private val TimelineMessageInnerSpacing = 4.dp
 private val TimelineSelectionToolbarOffset = 56.dp
@@ -283,7 +295,7 @@ private fun TimelineHistoryLoadingIndicator(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PigLoadingIndicator(modifier = Modifier.size(18.dp))
+            AgentWaitingDot(modifier = Modifier.size(18.dp))
             Text(
                 text = if (prefetching) {
                     "正在预取更早消息 $loadedNodeCount/$totalNodeCount"
@@ -300,29 +312,78 @@ private fun TimelineHistoryLoadingIndicator(
 }
 
 @Composable
+private fun AgentWaitingDot(
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    val transition = rememberInfiniteTransition(label = "agent_waiting_dot")
+    val dotScale by transition.animateFloat(
+        initialValue = 0.82f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "agent_waiting_dot_scale",
+    )
+    val haloAlpha by transition.animateFloat(
+        initialValue = 0.08f,
+        targetValue = 0.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "agent_waiting_dot_halo",
+    )
+    val dotAlpha by transition.animateFloat(
+        initialValue = 0.56f,
+        targetValue = 0.94f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "agent_waiting_dot_alpha",
+    )
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .scale(dotScale)
+                .clip(CircleShape)
+                .background(workspace.blue.copy(alpha = haloAlpha))
+        )
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .scale(dotScale)
+                .clip(CircleShape)
+                .background(workspace.blue.copy(alpha = dotAlpha))
+        )
+    }
+}
+
+@Suppress("UNUSED_PARAMETER")
+@Composable
 private fun AgentWorkingIndicator(
     processingStatus: String?,
     modifier: Modifier = Modifier,
 ) {
-    val workspace = workspaceColors()
+    AgentWaitingDot(modifier = modifier.size(28.dp))
+}
+
+@Composable
+private fun PostSendWaitingIndicator(
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = modifier,
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        PigLoadingIndicator(
-            modifier = Modifier.size(28.dp)
-        )
-        if (!processingStatus.isNullOrBlank()) {
-            Text(
-                text = processingStatus,
-                style = MaterialTheme.typography.labelMedium,
-                color = workspace.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 220.dp),
-            )
-        }
+        AgentWaitingDot(modifier = Modifier.size(32.dp))
     }
 }
 
@@ -478,8 +539,19 @@ private fun ContextCompactInProgressMarker(
 private fun ContextCompactMarker(
     modifier: Modifier = Modifier,
     summaryPreview: String? = null,
+    freshlyCompletedKey: String? = null,
 ) {
     val workspace = workspaceColors()
+    var showFreshCompletion by remember(freshlyCompletedKey) {
+        mutableStateOf(freshlyCompletedKey != null)
+    }
+    LaunchedEffect(freshlyCompletedKey) {
+        if (freshlyCompletedKey != null) {
+            showFreshCompletion = true
+            delay(2_400)
+            showFreshCompletion = false
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -507,7 +579,11 @@ private fun ContextCompactMarker(
                 tint = workspace.muted,
             )
             Text(
-                text = stringResource(R.string.chat_context_auto_compacted),
+                text = if (showFreshCompletion) {
+                    stringResource(R.string.chat_context_compact_completed)
+                } else {
+                    stringResource(R.string.chat_context_auto_compacted)
+                },
                 style = MaterialTheme.typography.labelLarge,
                 color = workspace.muted,
             )
@@ -626,6 +702,7 @@ fun ChatList(
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
     contextCompacts: List<ConversationCompact> = emptyList(),
     activeCompactBoundary: ActiveCompactBoundary? = null,
+    compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
     isCompacting: Boolean = false,
     streamingSummary: String = "",
     state: LazyListState,
@@ -680,6 +757,7 @@ fun ChatList(
                 pendingUserMessages = pendingUserMessages,
                 contextCompacts = contextCompacts,
                 activeCompactBoundary = activeCompactBoundary,
+                compactLifecycleState = compactLifecycleState,
                 isCompacting = isCompacting,
                 streamingSummary = streamingSummary,
                 state = state,
@@ -721,6 +799,7 @@ private fun ChatListNormal(
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     activeCompactBoundary: ActiveCompactBoundary?,
+    compactLifecycleState: CompactLifecycleState,
     isCompacting: Boolean,
     streamingSummary: String,
     state: LazyListState,
@@ -801,7 +880,70 @@ private fun ChatListNormal(
         )
     val postSendTailWaitingForAssistant = activeGeneration &&
         (latestIsPreSendTail || latestIsSentUserTail)
-    val timelineLoading = loading && !postSendTailWaitingForAssistant
+    val postSendSentUserMessageId = ChatSendTransitionTracker.sentUserMessageId(conversationId)
+    val postSendSentUserMessageIndex = remember(
+        conversation.messageNodes,
+        postSendSentUserMessageId,
+    ) {
+        if (postSendSentUserMessageId != null) {
+            conversation.messageNodes
+                .indexOfFirst { node -> node.currentMessage.id.toString() == postSendSentUserMessageId }
+                .takeIf { it >= 0 }
+        } else {
+            null
+        }
+    }
+    val postSendAssistantMessageIndex = remember(
+        conversation.messageNodes,
+        postSendSentUserMessageIndex,
+    ) {
+        if (postSendSentUserMessageIndex == null) {
+            null
+        } else {
+            val assistantIndex = postSendSentUserMessageIndex + 1
+            val assistantNode = conversation.messageNodes.getOrNull(assistantIndex)
+            if (assistantNode?.currentMessage?.role == MessageRole.ASSISTANT) {
+                assistantIndex
+            } else {
+                null
+            }
+        }
+    }
+    val postSendAssistantHasVisibleContent = remember(
+        conversation.messageNodes,
+        postSendAssistantMessageIndex,
+    ) {
+        postSendAssistantMessageIndex?.let { index ->
+            conversation.messageNodes
+                .getOrNull(index)
+                ?.currentMessage
+                ?.parts
+                ?.hasVisibleTimelineContent() == true
+        } == true
+    }
+    val postSendHiddenAssistantMessageIndex = remember(
+        conversation.messageNodes,
+        postSendAssistantMessageIndex,
+        postSendAssistantHasVisibleContent,
+    ) {
+        postSendAssistantMessageIndex?.takeIf { index ->
+            index == conversation.messageNodes.lastIndex && !postSendAssistantHasVisibleContent
+        }
+    }
+    val postSendWaitingForAssistantContent = activeGeneration &&
+        postSendSentUserMessageIndex != null &&
+        !postSendAssistantHasVisibleContent &&
+        (postSendTailWaitingForAssistant || postSendAssistantMessageIndex != null)
+    val timelineLoading = loading && !postSendWaitingForAssistantContent
+    val timelineBottomPadding = TimelineBottomSafetyPadding +
+        innerPadding.calculateBottomPadding() +
+        if (postSendWaitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
+
+    LaunchedEffect(conversation.id, activeGeneration) {
+        if (!activeGeneration) {
+            ChatSendTransitionTracker.clear(conversationId)
+        }
+    }
 
     // M0.1 diagnostic helper. Snapshots the follow/scroll state at each
     // transition point so we can correlate "哗哗出字最后没贴底" timeline
@@ -920,25 +1062,59 @@ private fun ChatListNormal(
             }
             .groupBy(keySelector = { it.first }, valueTransform = { it.second })
     }
+    val completedCompactIds = remember(contextCompacts) {
+        contextCompacts
+            .filter { it.status == "completed" }
+            .map { it.id }
+            .toSet()
+    }
+    val lifecycleCompletedCompactId = compactLifecycleState.completedCompactId
+        ?.takeIf { compactLifecycleState.status == CompactLifecycleStatus.COMPLETED }
+    val freshLifecycleCompletedCompactKey = lifecycleCompletedCompactId?.takeIf {
+        System.currentTimeMillis() - compactLifecycleState.updatedAt < 5_000L
+    }
     val activeCompactVisibleEndIndex = remember(
+        compactLifecycleState,
         activeCompactBoundary,
         timelineLoadState.oldestLoadedIndex,
         isCompacting,
     ) {
-        activeCompactBoundary
+        val lifecycleEndIndex = compactLifecycleState
+            .takeIf { it.hasBoundary && it.isActive }
+            ?.sourceEndIndex
+        val fallbackEndIndex = activeCompactBoundary
             ?.takeIf { isCompacting }
+            ?.sourceEndIndex
+        (lifecycleEndIndex ?: fallbackEndIndex)
+            ?.minus(timelineLoadState.oldestLoadedIndex)
+            ?.takeIf { it >= 0 }
+    }
+    val lifecycleCompletedVisibleEndIndex = remember(
+        compactLifecycleState,
+        completedCompactIds,
+        timelineLoadState.oldestLoadedIndex,
+    ) {
+        compactLifecycleState
+            .takeIf {
+                it.status == CompactLifecycleStatus.COMPLETED &&
+                    it.hasBoundary &&
+                    it.completedCompactId != null &&
+                    it.completedCompactId !in completedCompactIds
+            }
             ?.sourceEndIndex
             ?.minus(timelineLoadState.oldestLoadedIndex)
             ?.takeIf { it >= 0 }
     }
-    val activeCompactCoveredMessageIds = remember(activeCompactBoundary, isCompacting) {
-        if (isCompacting) {
-            activeCompactBoundary?.sourceMessageIds.orEmpty().toSet()
-        } else {
-            emptySet()
+    val activeCompactStreamingSummary = compactLifecycleState.streamingSummary.ifBlank { streamingSummary }
+    val lifecycleCoveredMessageIds = remember(compactLifecycleState, activeCompactBoundary, isCompacting) {
+        when {
+            compactLifecycleState.hasBoundary &&
+                (compactLifecycleState.isActive || compactLifecycleState.status == CompactLifecycleStatus.COMPLETED) ->
+                compactLifecycleState.sourceMessageIds.toSet()
+            isCompacting -> activeCompactBoundary?.sourceMessageIds.orEmpty().toSet()
+            else -> emptySet()
         }
     }
-
     // Set of message ids covered by an already-completed compact. ChatMessage
     // container alpha is dimmed for these so the user can VISUALLY tell that
     // "above the '———已自动压缩———' divider is no longer in active context,
@@ -947,15 +1123,15 @@ private fun ChatListNormal(
     // updateConversation() that re-emits a new messageNodes List reference per
     // 33ms chunk does NOT cause this Set to be rebuilt. Per-node containment
     // is checked inline at render time (O(1) HashSet lookup).
-    val coveredMessageIds = remember(contextCompacts, activeCompactCoveredMessageIds) {
+    val coveredMessageIds = remember(contextCompacts, lifecycleCoveredMessageIds) {
         val completedIds = contextCompacts
             .filter { it.status == "completed" }
             .flatMap { it.sourceMessageIds }
             .toSet()
-        if (activeCompactCoveredMessageIds.isEmpty()) {
+        if (lifecycleCoveredMessageIds.isEmpty()) {
             completedIds
         } else {
-            completedIds + activeCompactCoveredMessageIds
+            completedIds + lifecycleCoveredMessageIds
         }
     }
 
@@ -981,6 +1157,8 @@ private fun ChatListNormal(
         chatAssistant,
         showAssistantBubble,
         markdownVirtualizationEpoch,
+        postSendWaitingForAssistantContent,
+        postSendAssistantMessageIndex,
     ) {
         buildLazyItemMessageIndexMap(
             messageNodes = conversation.messageNodes,
@@ -989,6 +1167,8 @@ private fun ChatListNormal(
             loading = timelineLoading,
             hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
             pendingMessageCount = pendingUserMessages.size,
+            hasPostSendWaitingPlaceholder = postSendWaitingForAssistantContent &&
+                postSendAssistantMessageIndex == null,
         )
     }
     // 自动跟随键盘滚动
@@ -1260,7 +1440,7 @@ private fun ChatListNormal(
                 start = TimelineHorizontalPadding,
                 top = TimelineTopPadding,
                 end = TimelineHorizontalPadding,
-                bottom = TimelineBottomSafetyPadding + innerPadding.calculateBottomPadding(),
+                bottom = timelineBottomPadding,
             ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -1307,6 +1487,17 @@ private fun ChatListNormal(
             }
 
             conversation.messageNodes.forEachIndexed { index, node ->
+                if (index == postSendHiddenAssistantMessageIndex) {
+                    item(
+                        key = node.id,
+                        contentType = "post-send-waiting-assistant",
+                    ) {
+                        PostSendWaitingIndicator(
+                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                        )
+                    }
+                    return@forEachIndexed
+                }
                 val isLastMessage = index == conversation.messageNodes.lastIndex
                 val isLoadingMessage = timelineLoading && isLastMessage
                 val isPreCompacted = coveredMessageIds.isNotEmpty() &&
@@ -1324,8 +1515,7 @@ private fun ChatListNormal(
                         contentType = "message-${node.currentMessage.role}",
                     ) {
                         Column(
-                            modifier = Modifier
-                                .padding(bottom = TimelineItemSpacing)
+                            modifier = Modifier.padding(bottom = TimelineItemSpacing)
                         ) {
                             val markers = compactMarkersByEndIndex[index - 1].orEmpty()
                             markers.forEach { compact ->
@@ -1338,12 +1528,20 @@ private fun ChatListNormal(
                                 ContextCompactMarker(
                                     modifier = Modifier.padding(bottom = TimelineItemSpacing),
                                     summaryPreview = summaryPreviewOf(compact),
+                                    freshlyCompletedKey = compact.id.takeIf { it == freshLifecycleCompletedCompactKey },
+                                )
+                            }
+                            if (lifecycleCompletedVisibleEndIndex == index - 1) {
+                                ContextCompactMarker(
+                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                    summaryPreview = summaryPreviewOf(compactLifecycleState),
+                                    freshlyCompletedKey = freshLifecycleCompletedCompactKey,
                                 )
                             }
                             if (activeCompactVisibleEndIndex == index - 1) {
                                 ContextCompactInProgressMarker(
                                     modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                    streamingText = streamingSummary,
+                                    streamingText = activeCompactStreamingSummary,
                                 )
                             }
                             // 2026-05-15 (1.9.5): pass alpha modifier directly to
@@ -1422,9 +1620,10 @@ private fun ChatListNormal(
                                         lastMessage = isLastMessage,
                                     )
                                 }
-                            }
                         }
-                } else {
+                    }
+                }
+                if (virtualItems != null) {
                     virtualItems.forEachIndexed { virtualIndex, virtualItem ->
                         val isFirstVirtualItem = virtualIndex == 0
                         val isLastVirtualItem = virtualIndex == virtualItems.lastIndex
@@ -1454,12 +1653,20 @@ private fun ChatListNormal(
                                         ContextCompactMarker(
                                             modifier = Modifier.padding(bottom = TimelineItemSpacing),
                                             summaryPreview = summaryPreviewOf(compact),
+                                            freshlyCompletedKey = compact.id.takeIf { it == freshLifecycleCompletedCompactKey },
+                                        )
+                                    }
+                                    if (lifecycleCompletedVisibleEndIndex == index - 1) {
+                                        ContextCompactMarker(
+                                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                            summaryPreview = summaryPreviewOf(compactLifecycleState),
+                                            freshlyCompletedKey = freshLifecycleCompletedCompactKey,
                                         )
                                     }
                                     if (activeCompactVisibleEndIndex == index - 1) {
                                         ContextCompactInProgressMarker(
                                             modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                                            streamingText = streamingSummary,
+                                            streamingText = activeCompactStreamingSummary,
                                         )
                                     }
                                 }
@@ -1550,6 +1757,19 @@ private fun ChatListNormal(
                     ContextCompactMarker(
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
                         summaryPreview = summaryPreviewOf(compact),
+                        freshlyCompletedKey = compact.id.takeIf { it == freshLifecycleCompletedCompactKey },
+                    )
+                }
+            }
+            if (lifecycleCompletedVisibleEndIndex == conversation.messageNodes.lastIndex) {
+                item(
+                    key = "compact-boundary-lifecycle-tail-${compactLifecycleState.completedCompactId ?: conversation.id}",
+                    contentType = "compact-boundary-tail",
+                ) {
+                    ContextCompactMarker(
+                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                        summaryPreview = summaryPreviewOf(compactLifecycleState),
+                        freshlyCompletedKey = freshLifecycleCompletedCompactKey,
                     )
                 }
             }
@@ -1560,7 +1780,18 @@ private fun ChatListNormal(
                 ) {
                     ContextCompactInProgressMarker(
                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        streamingText = streamingSummary,
+                        streamingText = activeCompactStreamingSummary,
+                    )
+                }
+            }
+
+            if (postSendWaitingForAssistantContent && postSendAssistantMessageIndex == null) {
+                item(
+                    key = "post-send-waiting-${postSendSentUserMessageId ?: conversation.id}",
+                    contentType = "post-send-waiting-assistant",
+                ) {
+                    PostSendWaitingIndicator(
+                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
                     )
                 }
             }
@@ -1610,16 +1841,6 @@ private fun ChatListNormal(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            if (loading && postSendTailWaitingForAssistant) {
-                AgentWorkingIndicator(
-                    processingStatus = processingStatus,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp)
-                        .zIndex(4f),
-                )
-            }
-
             // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,
@@ -1812,6 +2033,7 @@ internal fun buildLazyItemMessageIndexMap(
     loading: Boolean,
     hasHistoryLoadingItem: Boolean,
     pendingMessageCount: Int,
+    hasPostSendWaitingPlaceholder: Boolean = false,
 ): List<Int?> = buildList {
     if (hasHistoryLoadingItem) add(null)
     messageNodes.forEachIndexed { index, node ->
@@ -1824,9 +2046,25 @@ internal fun buildLazyItemMessageIndexMap(
         )?.size ?: 1
         repeat(itemCount) { add(index) }
     }
+    if (hasPostSendWaitingPlaceholder) add(null)
     repeat(pendingMessageCount) { add(null) }
     if (loading) add(null)
     add(null)
+}
+
+private fun List<UIMessagePart>.hasVisibleTimelineContent(): Boolean {
+    return any { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text.isNotBlank()
+            is UIMessagePart.Image -> part.url.isNotBlank()
+            is UIMessagePart.Document -> part.url.isNotBlank()
+            is UIMessagePart.Video -> part.url.isNotBlank()
+            is UIMessagePart.Audio -> part.url.isNotBlank()
+            is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
+            is UIMessagePart.Tool -> true
+            else -> false
+        }
+    }
 }
 
 internal fun List<Int?>.firstLazyIndexForMessage(messageIndex: Int): Int? {
