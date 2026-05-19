@@ -89,7 +89,7 @@ internal fun TimelineHistoryLoadingIndicator(
 }
 
 @Composable
-internal fun AgentWaitingDot(
+private fun AgentWaitingDot(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
