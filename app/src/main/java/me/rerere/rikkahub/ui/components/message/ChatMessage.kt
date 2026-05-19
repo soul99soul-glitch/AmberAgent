@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.content.Intent
-import android.os.Trace
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -21,14 +20,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,12 +47,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
@@ -65,9 +58,6 @@ import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
@@ -79,7 +69,6 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
@@ -99,20 +88,15 @@ import me.rerere.rikkahub.ui.components.richtext.parseMarkdownContent
 import me.rerere.rikkahub.ui.components.richtext.topLevelBlockCount
 import me.rerere.rikkahub.ui.components.richtext.topLevelBlockKey
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
-import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
-import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
-import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.base64Encode
-import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -1107,120 +1091,6 @@ private fun ChatMessageVirtualFooter(
     }
 }
 
-@Composable
-private fun TraceChatComposable(section: String, content: @Composable () -> Unit) {
-    if (BuildConfig.DEBUG) {
-        Trace.beginSection(section)
-    }
-    content()
-    if (BuildConfig.DEBUG) {
-        Trace.endSection()
-    }
-}
-
-@Composable
-private fun MessageSelectionContainer(
-    content: @Composable () -> Unit,
-) {
-    TraceChatComposable("Amber MessagePartsBlock SelectionContainer") {
-        SelectionContainer {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun rememberClickCitationHandler(parts: List<UIMessagePart>): (String) -> Unit {
-    val context = LocalContext.current
-    val partsState by rememberUpdatedState(parts)
-    return remember {
-        handler@{ citationId ->
-            partsState.forEach { part ->
-                if (part is UIMessagePart.Tool && part.toolName == "search_web" && part.isExecuted) {
-                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-                    val items =
-                        runCatching { JsonInstant.parseToJsonElement(outputText).jsonObject["items"]?.jsonArray }.getOrNull()
-                            ?: return@forEach
-                    items.forEach { item ->
-                        val id = item.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
-                        val url = item.jsonObject["url"]?.jsonPrimitive?.content ?: return@forEach
-                        if (citationId == id) {
-                            context.openUrl(url)
-                            return@handler
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MessageAnnotations(
-    annotations: List<UIMessageAnnotation>,
-    loading: Boolean,
-) {
-    if (annotations.isEmpty()) return
-
-    val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-    // 2026-05-14: dropped `animateContentSizeIf(loading)` here — see
-    // animateContentSizeIf() note in this file. Citations grow during streaming
-    // at the same 200ms flush cadence as the body text; nested spring animations
-    // across MessageAnnotations + ChainOfThought + Surface + Markdown stacked
-    // 4-5 deep and saturated the main thread. Layout still settles correctly
-    // without the per-flush animation; final position is unchanged.
-    Column {
-        var expand by remember { mutableStateOf(false) }
-        if (expand) {
-            ProvideTextStyle(
-                MaterialTheme.typography.labelMedium.copy(
-                    color = MaterialTheme.extendColors.gray8.copy(alpha = 0.65f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .drawWithContent {
-                            drawContent()
-                            drawRoundRect(
-                                color = contentColor.copy(alpha = 0.2f),
-                                size = Size(width = 10f, height = size.height),
-                            )
-                        }
-                        .padding(start = 16.dp)
-                        .padding(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    annotations.fastForEachIndexed { index, annotation ->
-                        when (annotation) {
-                            is UIMessageAnnotation.UrlCitation -> {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Favicon(annotation.url, modifier = Modifier.size(20.dp))
-                                    Text(
-                                        text = buildAnnotatedString {
-                                            append("${index + 1}. ")
-                                            withLink(LinkAnnotation.Url(annotation.url)) {
-                                                append(annotation.title.urlDecode())
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        TextButton(
-            onClick = {
-                expand = !expand
-            }
-        ) {
-            Text(stringResource(R.string.citations_count, annotations.size))
-        }
-    }
-}
 
 @OptIn(FlowPreview::class)
 @Composable
