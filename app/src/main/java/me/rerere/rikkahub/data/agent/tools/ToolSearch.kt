@@ -211,6 +211,11 @@ class ToolSearchIndex(
         if (name.startsWith("wm_") || category.contains("webmount")) {
             addAll(listOf("网页", "浏览器", "webview", "WebView", "webmount", "打开网页", "点击网页", "读取网页"))
         }
+        when (name) {
+            "wm_observe" -> addAll(listOf("观察网页", "页面状态", "网页摘要", "网页节点"))
+            "wm_visual_snapshot", "wm_visual_read" -> addAll(listOf("网页截图", "读图", "视觉读取", "图片识别", "看网页图片"))
+            "wm_network_inspect", "wm_fetch_replay" -> addAll(listOf("网络请求", "接口", "XHR", "fetch", "重放请求"))
+        }
         if (name.startsWith("feishu_docs_") || category.contains("feishu")) {
             addAll(listOf("飞书", "云文档", "飞书云文档", "wiki", "知识库", "文档", "表格", "会议纪要"))
         }

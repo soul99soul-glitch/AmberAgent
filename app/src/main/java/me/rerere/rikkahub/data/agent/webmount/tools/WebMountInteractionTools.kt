@@ -5,6 +5,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
@@ -13,26 +15,29 @@ import me.rerere.rikkahub.data.agent.tools.boolean
 import me.rerere.rikkahub.data.agent.tools.long
 import me.rerere.rikkahub.data.agent.tools.requiredString
 import me.rerere.rikkahub.data.agent.tools.string
+import me.rerere.rikkahub.data.agent.webmount.primitives.SessionHandle
 
 internal fun createWaitTool(deps: WebMountDeps): Tool = Tool(
     name = "wm_wait",
     description = """
-        Block until a condition holds on the current page, or a timeout elapses. Two kinds:
+        Block until a condition holds on the current page, or a timeout elapses. Kinds:
         `selector` (default) waits for at least one element matching the given selector to appear
         (and be visible unless visible_only=false); `ready_state` waits until document.readyState
-        reaches the requested state ('interactive' or 'complete'). Useful after wm_open wait="none"
-        or after clicking a link that triggers an SPA navigation.
+        reaches the requested state ('interactive' or 'complete'); `semantic_idle` / `dom_stable` /
+        `network_idle` wait for a semantic page settle with a hard timeout. Useful after wm_open
+        wait="none" or after clicking a link that triggers an SPA navigation.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("session_id", stringProp("Session id returned by wm_open."))
-                put("until", stringProp("'selector' (default) | 'ready_state'."))
+                put("until", stringProp("'selector' (default) | 'ready_state' | 'semantic_idle' | 'dom_stable' | 'network_idle'."))
                 put("value", stringProp("selector: CSS or 'text=...'/'xpath=...'; ready_state: target state."))
                 put("timeout_ms", integerProp("Max wait in ms. Default 10000, clamped to [200, 60000]."))
+                put("stable_ms", integerProp("semantic waits: required stable duration. Default 700, cap 3000."))
                 put("visible_only", booleanProp("selector: require visible match (default true)."))
             },
-            required = listOf("session_id", "value"),
+            required = listOf("session_id"),
         )
     },
     execute = { input ->
@@ -40,13 +45,16 @@ internal fun createWaitTool(deps: WebMountDeps): Tool = Tool(
             val sessionId = input.requiredString("session_id")
             val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
             val until = input.string("until") ?: "selector"
-            require(until in setOf("selector", "ready_state")) { "until must be 'selector' or 'ready_state'" }
-            val value = input.requiredString("value")
+            require(until in setOf("selector", "ready_state", "semantic_idle", "dom_stable", "network_idle")) {
+                "until must be 'selector', 'ready_state', 'semantic_idle', 'dom_stable', or 'network_idle'"
+            }
+            val value = if (until in setOf("selector", "ready_state")) input.requiredString("value") else null
             val timeout = (input.long("timeout_ms") ?: 10_000L).coerceIn(200L, 60_000L)
             val args = buildJsonObject {
                 put("until", until)
-                put("value", value)
+                value?.let { put("value", it) }
                 put("timeout_ms", timeout)
+                input.long("stable_ms")?.let { put("stable_ms", it.coerceIn(250L, 3_000L)) }
                 input.boolean("visible_only")?.let { put("visible_only", it) }
             }
             // Allow the bridge a small grace window beyond its own JS-side timeout
@@ -56,6 +64,8 @@ internal fun createWaitTool(deps: WebMountDeps): Tool = Tool(
             val merged = buildJsonObject {
                 put("session_id", sessionId)
                 put("ok", true)
+                put("wait_kind", until)
+                put("network_coverage", handle.bridgeInjectionCoverage)
                 put("result", payload)
             }
             listOf(UIMessagePart.Text(merged.toString()))
@@ -82,6 +92,8 @@ internal fun createClickTool(deps: WebMountDeps): Tool = Tool(
         )
     },
     needsApproval = true,
+    allowsAutoApproval = false,
+    mandatoryApproval = true,
     execute = { input ->
         deps.track("wm_click", "WebMount 点击", input) {
             val sessionId = input.requiredString("session_id")
@@ -94,10 +106,47 @@ internal fun createClickTool(deps: WebMountDeps): Tool = Tool(
                 selector?.let { put("selector", it) }
                 input.boolean("visible_only")?.let { put("visible_only", it) }
             }
-            val payload = handle.callBridge("click", args, timeoutMs = 5_000L)
-            val merged = buildJsonObject {
-                put("session_id", sessionId)
-                put("result", payload)
+            val merged = runVerifiedAction(sessionId, handle) {
+                handle.callBridge("click", args, timeoutMs = 5_000L)
+            }
+            listOf(UIMessagePart.Text(merged.toString()))
+        }
+    },
+)
+
+internal fun createTapTool(deps: WebMountDeps): Tool = Tool(
+    name = "wm_tap",
+    description = """
+        Explicit coordinate fallback for visually identified WebMount targets. Taps viewport x/y
+        coordinates only when DOM refs/selectors are unavailable (for example canvas or cross-origin
+        iframe regions). Prefer wm_click with refs whenever possible.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("session_id", stringProp("Session id returned by wm_open."))
+                put("x", integerProp("Viewport x coordinate."))
+                put("y", integerProp("Viewport y coordinate."))
+            },
+            required = listOf("session_id", "x", "y"),
+        )
+    },
+    needsApproval = true,
+    execute = { input ->
+        deps.track("wm_tap", "WebMount 坐标点击", input) {
+            val sessionId = input.requiredString("session_id")
+            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
+            val x = input.long("x") ?: error("x is required")
+            val y = input.long("y") ?: error("y is required")
+            val merged = runVerifiedAction(sessionId, handle) {
+                handle.callBridge(
+                    "tap",
+                    buildJsonObject {
+                        put("x", x)
+                        put("y", y)
+                    },
+                    timeoutMs = 5_000L,
+                )
             }
             listOf(UIMessagePart.Text(merged.toString()))
         }
@@ -128,7 +177,7 @@ internal fun createTypeTool(deps: WebMountDeps): Tool = Tool(
     },
     needsApproval = true,
     execute = { input ->
-        deps.track("wm_type", "WebMount 输入", input) {
+        deps.track("wm_type", "WebMount 输入", input.safeTypePreview()) {
             val sessionId = input.requiredString("session_id")
             val target = input.string("target")
             val selector = input.string("selector")
@@ -142,10 +191,8 @@ internal fun createTypeTool(deps: WebMountDeps): Tool = Tool(
                 input.boolean("clear")?.let { put("clear", it) }
                 input.boolean("press_enter")?.let { put("press_enter", it) }
             }
-            val payload = handle.callBridge("type", args, timeoutMs = 5_000L)
-            val merged = buildJsonObject {
-                put("session_id", sessionId)
-                put("result", payload)
+            val merged = runVerifiedAction(sessionId, handle, includePageDetails = false) {
+                handle.callBridge("type", args, timeoutMs = 5_000L)
             }
             listOf(UIMessagePart.Text(merged.toString()))
         }
@@ -248,6 +295,7 @@ internal fun createScrollTool(deps: WebMountDeps): Tool = Tool(
                 }
             }
             val payload = handle.callBridge("scroll", args, timeoutMs = 5_000L)
+            WebMountPageSnapshotCache.invalidate(sessionId)
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("session_id", sessionId)
                 put("result", payload)
@@ -297,11 +345,10 @@ internal fun createKeysTool(deps: WebMountDeps): Tool = Tool(
                 input.string("selector")?.let { put("selector", it) }
                 put("modifiers", mods)
             }
-            val payload = handle.callBridge("keys", args, timeoutMs = 5_000L)
-            listOf(UIMessagePart.Text(buildJsonObject {
-                put("session_id", sessionId)
-                put("result", payload)
-            }.toString()))
+            val merged = runVerifiedAction(sessionId, handle) {
+                handle.callBridge("keys", args, timeoutMs = 5_000L)
+            }
+            listOf(UIMessagePart.Text(merged.toString()))
         }
     },
 )
@@ -338,11 +385,10 @@ internal fun createSelectTool(deps: WebMountDeps): Tool = Tool(
                 selector?.let { put("selector", it) }
                 put("value", value)
             }
-            val payload = handle.callBridge("select", args, timeoutMs = 5_000L)
-            listOf(UIMessagePart.Text(buildJsonObject {
-                put("session_id", sessionId)
-                put("result", payload)
-            }.toString()))
+            val merged = runVerifiedAction(sessionId, handle) {
+                handle.callBridge("select", args, timeoutMs = 5_000L)
+            }
+            listOf(UIMessagePart.Text(merged.toString()))
         }
     },
 )
@@ -389,3 +435,58 @@ private fun JsonElement.safeEvalPreview(): JsonObject =
         put("session_id", string("session_id"))
         put("expression_chars", string("expression")?.length ?: 0)
     }
+
+private fun JsonElement.safeTypePreview(): JsonObject =
+    buildJsonObject {
+        put("session_id", string("session_id"))
+        put("has_target", string("target") != null)
+        put("has_selector", string("selector") != null)
+        put("text_chars", string("text")?.length ?: 0)
+        put("clear", boolean("clear") ?: false)
+        put("press_enter", boolean("press_enter") ?: false)
+    }
+
+private suspend fun runVerifiedAction(
+    sessionId: String,
+    handle: SessionHandle,
+    includePageDetails: Boolean = true,
+    action: suspend () -> JsonElement,
+): JsonObject {
+    val before = runCatching { handle.callBridge("semantic_state", buildJsonObject {}, timeoutMs = 2_000L) }.getOrNull()
+    val beforeNetwork = handle.networkLog.totalEvents
+    val result = action()
+    WebMountPageSnapshotCache.invalidate(sessionId)
+    val settle = runCatching {
+        handle.callBridge(
+            "wait",
+            buildJsonObject {
+                put("until", "semantic_idle")
+                put("timeout_ms", 1_500)
+                put("stable_ms", 350)
+            },
+            timeoutMs = 2_500L,
+        )
+    }.getOrNull()
+    val after = runCatching { handle.callBridge("semantic_state", buildJsonObject {}, timeoutMs = 2_000L) }.getOrNull()
+    val beforeFingerprint = before.stringField("semantic_fingerprint")
+    val afterFingerprint = after.stringField("semantic_fingerprint")
+    return buildJsonObject {
+        put("session_id", sessionId)
+        put("result", result)
+        put("action_verification", buildJsonObject {
+            put("network_delta", (handle.networkLog.totalEvents - beforeNetwork).coerceAtLeast(0L))
+            put("dom_changed", beforeFingerprint != null && afterFingerprint != null && beforeFingerprint != afterFingerprint)
+            beforeFingerprint?.let { put("before_fingerprint", it) }
+            afterFingerprint?.let { put("after_fingerprint", it) }
+            if (includePageDetails) {
+                settle?.let { put("settle", it) }
+                after?.let { put("after_page", it) }
+            }
+            put("auto_retry_after_event", false)
+            put("network_coverage", handle.bridgeInjectionCoverage)
+        })
+    }
+}
+
+private fun JsonElement?.stringField(name: String): String? =
+    runCatching { this?.jsonObject?.get(name) as? JsonPrimitive }.getOrNull()?.contentOrNull

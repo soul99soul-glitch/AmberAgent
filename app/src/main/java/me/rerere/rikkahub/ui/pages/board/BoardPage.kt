@@ -1,16 +1,13 @@
 package me.rerere.rikkahub.ui.pages.board
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,21 +23,23 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Badge
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,30 +48,37 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Notebook01
 import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.Screen.DeepRead
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListDashboard
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderSnapshot
+import me.rerere.rikkahub.data.agent.board.hotlist.HotTopic
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
-import me.rerere.rikkahub.ui.components.ui.NotionListRow
-import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceBorder
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.navigateToChatPage
-import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,10 +89,13 @@ fun TodayBoardPage() {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val boardEnabled = settings.agentRuntime.todayBoard.enabled
     val items by vm.items.collectAsStateWithLifecycle(initialValue = emptyList())
-    val activeItems = items.filter { it.status == "active" }
+    val dailyReview by vm.dailyReview.collectAsStateWithLifecycle(initialValue = null)
+    val dashboard by vm.hotListDashboard.collectAsStateWithLifecycle(
+        initialValue = HotListDashboard(emptyList(), emptyList(), 0L),
+    )
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
-    var expandedItemId by remember { mutableStateOf<String?>(null) }
+    var pendingDeepRead by remember { mutableStateOf<HotTopic?>(null) }
 
     Scaffold(
         topBar = {
@@ -106,322 +115,306 @@ fun TodayBoardPage() {
                         Icon(HugeIcons.Settings03, contentDescription = "设置")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
         }
     ) { innerPadding ->
         if (!boardEnabled) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "今日看板未启用\n请在实验性功能设置中开启",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
+                Text("今日看板未启用\n请在设置中开启", style = MaterialTheme.typography.bodyLarge)
             }
             return@Scaffold
         }
 
         Column(Modifier.fillMaxSize().padding(innerPadding)) {
-            if (items.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无内容\n稍后会有信号汇入", style = MaterialTheme.typography.bodyMedium)
-                }
-            } else {
-                val dailyReview by vm.dailyReview.collectAsStateWithLifecycle(initialValue = null)
-                val workspace = workspaceColors()
-
-                SecondaryTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                ) {
+            SecondaryTabRow(
+                selectedTabIndex = pagerState.currentPage,
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+                listOf("大看板", "今日回顾").forEachIndexed { index, label ->
                     Tab(
-                        selected = pagerState.currentPage == 0,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                        selected = pagerState.currentPage == index,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
                         text = {
                             Text(
-                                "大看板",
+                                label,
                                 style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (pagerState.currentPage == 0) FontWeight.SemiBold else FontWeight.Normal,
-                                ),
-                            )
-                        },
-                    )
-                    Tab(
-                        selected = pagerState.currentPage == 1,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                        text = {
-                            Text(
-                                "今日回顾",
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (pagerState.currentPage == 1) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontWeight = if (pagerState.currentPage == index) FontWeight.SemiBold else FontWeight.Normal,
                                 ),
                             )
                         },
                     )
                 }
+            }
 
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                ) { page ->
-                    when (page) {
-                        0 -> BoardSectionTab(
-                            items = activeItems,
-                            expandedItemId = expandedItemId,
-                            onToggleExpand = { id ->
-                                expandedItemId = if (expandedItemId == id) null else id
-                            },
-                            onComplete = { vm.markCompleted(it) },
-                            onDismiss = { vm.markDismissed(it) },
-                            onChat = { itemId ->
-                                vm.startChat(itemId)
-                                activeItems.find { it.id == itemId }?.let { item ->
-                                    navigateToChatPage(navController, initText = chatContext(item))
-                                }
-                            },
-                        )
+            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                when (page) {
+                    0 -> HotListTab(
+                        dashboard = dashboard,
+                        onRefresh = vm::refreshHotList,
+                        onDeepRead = { topic ->
+                            if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
+                                navController.navigate(DeepRead(topic.id, topic.title))
+                            } else {
+                                pendingDeepRead = topic
+                            }
+                        },
+                    )
 
-                        1 -> DailyReviewTab(
-                            review = dailyReview,
-                            onRefresh = { vm.refresh() },
-                        )
-                    }
+                    1 -> TodayReviewTab(
+                        todoItems = visibleTodayReviewTodoItems(items),
+                        review = dailyReview,
+                        onRefresh = vm::refresh,
+                        onComplete = vm::markCompleted,
+                        onChat = { item ->
+                            vm.startChat(item.id)
+                            navigateToChatPage(navController, initText = chatContext(item))
+                        },
+                    )
                 }
             }
         }
+    }
+
+    pendingDeepRead?.let { topic ->
+        AlertDialog(
+            onDismissRequest = { pendingDeepRead = null },
+            title = { Text("深度阅读会消耗更多 tokens") },
+            text = { Text("每次生成约消耗 3 万 tokens。后续同一话题 24 小时内会优先使用缓存。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            vm.confirmDeepReadCost()
+                            pendingDeepRead = null
+                            navController.navigate(DeepRead(topic.id, topic.title))
+                        }
+                    }
+                ) {
+                    Text("继续")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeepRead = null }) {
+                    Text("取消")
+                }
+            },
+        )
     }
 }
 
 private fun chatContext(item: BoardItemEntity): String =
-    "看板条目: ${item.title}\n\n原因: ${item.reason}\n建议: ${item.suggestion}\n\n来源内容: ${item.sourceContent.take(1000)}"
+    "看板待办: ${item.title}\n\n原因: ${item.reason}\n建议: ${item.suggestion}\n\n来源内容: ${item.sourceContent.take(1000)}"
 
-// ── Tab 0: Board sections ────────────────────────────────────────────────────
-
-@Composable
-fun BoardSectionTab(
-    items: List<BoardItemEntity>,
-    expandedItemId: String?,
-    onToggleExpand: (String) -> Unit,
-    onComplete: (String) -> Unit,
-    onDismiss: (String) -> Unit,
-    onChat: (String) -> Unit,
-) {
-    LazyColumn(
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        val actions = items.filter { it.category == "action" }
-        val attentions = items.filter { it.category == "attention" }
-        val infos = items.filter { it.category == "info" }
-
-        if (actions.isNotEmpty()) {
-            item { BoardSectionHeader("要做的事", actions.size, "📋") }
-            item { Spacer(Modifier.height(4.dp)) }
-            items(actions, key = { it.id }) { item ->
-                BoardItemRow(item, expandedItemId, onToggleExpand, onComplete, onDismiss, onChat)
-            }
-            item { Spacer(Modifier.height(8.dp)) }
-        }
-        if (attentions.isNotEmpty()) {
-            item { BoardSectionHeader("值得关注", attentions.size, "👀") }
-            item { Spacer(Modifier.height(4.dp)) }
-            items(attentions, key = { it.id }) { item ->
-                BoardItemRow(item, expandedItemId, onToggleExpand, onComplete, onDismiss, onChat)
-            }
-            item { Spacer(Modifier.height(8.dp)) }
-        }
-        if (infos.isNotEmpty()) {
-            item { BoardSectionHeader("今日动态", infos.size, "📰") }
-            item { Spacer(Modifier.height(4.dp)) }
-            items(infos, key = { it.id }) { item ->
-                BoardItemRow(item, expandedItemId, onToggleExpand, onComplete, onDismiss, onChat)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BoardSectionHeader(title: String, count: Int, emoji: String) {
-    val workspace = workspaceColors()
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(emoji, style = MaterialTheme.typography.titleSmall)
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.secondary,
-            ),
-        )
-        Spacer(Modifier.width(4.dp))
-        Badge(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ) {
-            Text("$count", style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun BoardItemRow(
-    item: BoardItemEntity,
-    expandedItemId: String?,
-    onToggleExpand: (String) -> Unit,
-    onComplete: (String) -> Unit,
-    onDismiss: (String) -> Unit,
-    onChat: (String) -> Unit,
-) {
-    val workspace = workspaceColors()
-    val isExpanded = item.id == expandedItemId
-    val (accentColor, accentTone) = urgencyAccent(item.urgency)
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .border(workspaceBorder(), MaterialTheme.shapes.medium),
-    ) {
-        // Left-accent stripe + row
-        Row(Modifier.fillMaxWidth()) {
-            Box(
-                Modifier
-                    .width(3.dp)
-                    .height(56.dp)
-                    .background(accentColor),
-            )
-            NotionListRow(
-                title = item.title,
-                subtitle = item.reason.take(80),
-                modifier = Modifier.weight(1f),
-                trailing = {
-                    // Checkbox affordance: circle with Tick icon
-                    Surface(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape),
-                        shape = CircleShape,
-                        color = workspace.paper,
-                        border = workspaceBorder(),
-                        onClick = { onComplete(item.id) },
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = HugeIcons.Tick01,
-                                contentDescription = "完成",
-                                modifier = Modifier.size(15.dp),
-                                tint = workspace.muted,
-                            )
-                        }
-                    }
-                },
-                onClick = { onToggleExpand(item.id) },
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
-            )
-        }
-
-        // Expandable detail card
-        AnimatedVisibility(
-            visible = isExpanded,
-            enter = expandVertically(tween(150)) + fadeIn(tween(150)),
-            exit = shrinkVertically(tween(120)) + fadeOut(tween(120)),
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(workspace.paper)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (item.suggestion.isNotBlank()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Text("💡", style = MaterialTheme.typography.bodySmall)
-                        Text(
-                            item.suggestion,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = workspace.ink,
-                        )
-                    }
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    WorkspaceTextButton(
-                        text = "忽略",
-                        onClick = { onDismiss(item.id) },
-                        tone = WorkspaceTone.Neutral,
-                    )
-                    WorkspaceTextButton(
-                        text = "聊一下",
-                        onClick = { onChat(item.id) },
-                        tone = WorkspaceTone.Accent,
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ── Tab 1: Daily Review ──────────────────────────────────────────────────────
+internal fun visibleTodayReviewTodoItems(items: List<BoardItemEntity>): List<BoardItemEntity> =
+    items
+        .filter { it.status != "dismissed" && (it.category == "todo" || it.category == "action") }
+        .sortedWith(compareBy<BoardItemEntity> { if (it.status == "active") 0 else 1 })
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DailyReviewTab(
-    review: DailyReviewEntity?,
+private fun HotListTab(
+    dashboard: HotListDashboard,
     onRefresh: () -> Unit,
+    onDeepRead: (HotTopic) -> Unit,
 ) {
-    val workspace = workspaceColors()
     val pullState = rememberPullToRefreshState()
     var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(dashboard.shouldShowSkeleton) {
+        if (dashboard.shouldShowSkeleton) onRefresh()
+    }
+    LaunchedEffect(dashboard.lastUpdatedAt, dashboard.providers.map { it.error to it.fetchedAt }) {
+        if (isRefreshing) isRefreshing = false
+    }
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
-            isRefreshing = false
+            isRefreshing = true
             onRefresh()
+            scope.launch {
+                delay(15_000L)
+                isRefreshing = false
+            }
         },
         state = pullState,
         modifier = Modifier.fillMaxSize(),
     ) {
-        if (review == null) {
-            ReviewEmptyState()
+        if (!dashboard.hasEnabledSources) {
+            Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                EmptyLine("未启用热榜数据源。请在设置中至少开启一个来源。")
+            }
+        } else if (dashboard.isEmpty) {
+            HotListSkeleton()
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 item {
-                    ReviewHeader(review)
+                    SectionTitle(
+                        title = "🔥 综合热点",
+                        subtitle = dashboard.lastUpdatedAt.takeIf { it > 0L }?.let { "${timeAgo(it)}更新" },
+                    )
                 }
-                item(key = "review_${review.id}") {
+                if (dashboard.topics.isEmpty()) {
+                    item { EmptyLine("暂时没有可聚合的综合热点。") }
+                }
+                items(dashboard.topics, key = { it.id }) { topic ->
+                    HotTopicRow(topic = topic, onDeepRead = { onDeepRead(topic) })
+                }
+                dashboard.providers.forEach { provider ->
+                    item(provider.providerId) {
+                        ProviderSection(provider)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HotTopicRow(topic: HotTopic, onDeepRead: () -> Unit) {
+    val ws = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = ws.paper,
+        border = workspaceBorder(),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                Text(
+                    "#${topic.bestRank}",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(topic.title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        topic.sources.take(4).forEach { source ->
+                            WorkspaceStatusPill(
+                                text = "${source.providerName} #${source.rank}",
+                                tone = WorkspaceTone.Neutral,
+                            )
+                        }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                WorkspaceTextButton(
+                    text = "深度阅读 · ~3万字",
+                    onClick = onDeepRead,
+                    tone = WorkspaceTone.Accent,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderSection(provider: HotListProviderSnapshot) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle(
+            title = provider.providerName,
+            subtitle = provider.error?.let { "⚠ 上次更新: ${timeAgo(provider.fetchedAt)}" }
+                ?: provider.fetchedAt.takeIf { it > 0L }?.let { timeAgo(it) },
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = workspaceColors().paper,
+            border = workspaceBorder(),
+        ) {
+            Column(Modifier.padding(vertical = 6.dp)) {
+                if (provider.items.isEmpty()) {
+                    Text(
+                        provider.error ?: "暂无数据",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspaceColors().muted,
+                    )
+                } else {
+                    provider.items.take(12).forEach { item ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text("${item.rank}.", style = MaterialTheme.typography.bodyMedium, color = workspaceColors().muted)
+                            Column(Modifier.weight(1f)) {
+                                Text(item.title, style = MaterialTheme.typography.bodyMedium)
+                                if (!item.heat.isNullOrBlank()) {
+                                    Text(item.heat, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TodayReviewTab(
+    todoItems: List<BoardItemEntity>,
+    review: DailyReviewEntity?,
+    onRefresh: () -> Unit,
+    onComplete: (String) -> Unit,
+    onChat: (BoardItemEntity) -> Unit,
+) {
+    val pullState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(
+        todoItems.map { Triple(it.id, it.status, it.signalTime) },
+        review?.updatedAt,
+    ) {
+        if (isRefreshing) isRefreshing = false
+    }
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            isRefreshing = true
+            onRefresh()
+            scope.launch {
+                delay(15_000L)
+                isRefreshing = false
+            }
+        },
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item { SectionTitle("📋 待办", if (todoItems.isEmpty()) "暂无" else "${todoItems.size.coerceAtMost(5)} 条") }
+            if (todoItems.isEmpty()) {
+                item { EmptyLine("没有新的待办。") }
+            } else {
+                items(todoItems.take(5), key = { it.id }) { item ->
+                    TodoRow(item = item, onComplete = { onComplete(item.id) }, onChat = { onChat(item) })
+                }
+            }
+            item { SectionTitle("📝 今日回顾", review?.let { reviewPhaseLabel(it) }) }
+            item {
+                if (review == null) {
+                    ReviewEmptyState()
+                } else {
                     Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(workspaceBorder(), RoundedCornerShape(16.dp)),
-                        shape = RoundedCornerShape(16.dp),
-                        color = workspace.paper,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = workspaceColors().paper,
+                        border = workspaceBorder(),
                     ) {
-                        MarkdownBlock(
-                            content = review.content,
-                            modifier = Modifier.padding(16.dp),
-                        )
+                        MarkdownBlock(content = review.content, modifier = Modifier.padding(16.dp))
                     }
                 }
             }
@@ -430,96 +423,131 @@ fun DailyReviewTab(
 }
 
 @Composable
-private fun ReviewHeader(review: DailyReviewEntity) {
-    val isEvening = review.phase == "evening"
-    val updatedTime = java.time.Instant.ofEpochMilli(review.updatedAt)
-        .atZone(java.time.ZoneId.systemDefault())
-        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () -> Unit) {
+    val completed = item.status == "completed"
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
     ) {
-        Text(
-            "今日回顾",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            WorkspaceStatusPill(
-                text = if (isEvening) "下午已更新" else "上午版",
-                tone = if (isEvening) WorkspaceTone.Success else WorkspaceTone.Warning,
-            )
-            WorkspaceStatusPill(
-                text = updatedTime,
-                tone = WorkspaceTone.Neutral,
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                modifier = Modifier.size(28.dp),
+                shape = CircleShape,
+                color = if (completed) MaterialTheme.colorScheme.primaryContainer else workspaceColors().paper,
+                border = workspaceBorder(),
+                onClick = { if (!completed) onComplete() },
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (completed) Icon(HugeIcons.Tick01, contentDescription = null, modifier = Modifier.size(14.dp))
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    item.title,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Medium,
+                        fontStyle = if (completed) FontStyle.Italic else FontStyle.Normal,
+                    ),
+                    color = if (completed) workspaceColors().muted else MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    "${sourceLabel(item.sourceType)} · ${timeAgo(item.signalTime)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspaceColors().muted,
+                )
+                if (item.reason.isNotBlank()) {
+                    Text(item.reason, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                }
+            }
+            WorkspaceTextButton(text = "聊一下", onClick = onChat, tone = WorkspaceTone.Neutral)
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, subtitle: String? = null) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+        if (!subtitle.isNullOrBlank()) {
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+        }
+    }
+}
+
+@Composable
+private fun HotListSkeleton() {
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item { SectionTitle("🔥 综合热点", "正在更新") }
+        items(6) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(76.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
             )
         }
+    }
+}
+
+@Composable
+private fun EmptyLine(text: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
+    ) {
+        Text(text, modifier = Modifier.padding(16.dp), color = workspaceColors().muted)
     }
 }
 
 @Composable
 private fun ReviewEmptyState() {
-    val workspace = workspaceColors()
-    Box(
-        Modifier
-            .fillMaxSize()
-            .padding(40.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            // Illustration-like icon cluster
-            Box(contentAlignment = Alignment.Center) {
-                Surface(
-                    modifier = Modifier.size(72.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
-                    border = workspaceBorder(),
-                ) {}
-                Icon(
-                    imageVector = HugeIcons.Notebook01,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp),
-                    tint = MaterialTheme.colorScheme.secondary,
-                )
-            }
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    "今日回顾尚未生成",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = workspace.ink,
-                )
-                Text(
-                    "将在 13:00 生成上午回顾\n19:00 补充下午内容",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
-                )
-            }
+    Box(Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(
+                imageVector = HugeIcons.Notebook01,
+                contentDescription = null,
+                modifier = Modifier.size(34.dp),
+                tint = MaterialTheme.colorScheme.secondary,
+            )
+            Text("今日回顾尚未生成", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+            Text("将在午间和晚间自动补全", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
         }
     }
 }
 
-// ── Urgency helpers ──────────────────────────────────────────────────────────
+private fun reviewPhaseLabel(review: DailyReviewEntity): String {
+    val time = Instant.ofEpochMilli(review.updatedAt)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("HH:mm"))
+    return if (review.phase == "evening") "下午已更新 · $time" else "上午版 · $time"
+}
 
-/**
- * Maps urgency level to a workspace semantic color + its tone enum.
- * Uses [workspaceColors] tokens instead of hardcoded hex values.
- */
-@Composable
-private fun urgencyAccent(urgency: String): Pair<Color, WorkspaceTone> {
-    val workspace = workspaceColors()
-    return when (urgency) {
-        "high" -> workspace.red to WorkspaceTone.Danger
-        "medium" -> workspace.amber to WorkspaceTone.Warning
-        else -> workspace.green to WorkspaceTone.Success
+private fun sourceLabel(sourceType: String): String = when (sourceType) {
+    "notification" -> "系统通知"
+    "calendar" -> "日历"
+    "feishu_msg" -> "飞书消息"
+    "feishu_doc" -> "飞书文档"
+    "chat_history" -> "聊天记录"
+    else -> sourceType
+}
+
+private fun timeAgo(timestamp: Long): String {
+    if (timestamp <= 0L) return "未知时间"
+    val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
+    val minutes = diff / 60_000L
+    return when {
+        minutes < 1 -> "刚刚"
+        minutes < 60 -> "${minutes}分钟前"
+        minutes < 24 * 60 -> "${minutes / 60}小时前"
+        else -> "${minutes / (24 * 60)}天前"
     }
 }

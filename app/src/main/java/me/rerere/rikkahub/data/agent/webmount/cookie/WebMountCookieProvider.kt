@@ -18,23 +18,13 @@ class WebMountCookieProvider {
         endpoints: List<EndpointSpec>,
         extraUrls: List<String> = emptyList(),
     ): WebMountCookieBundle {
-        val cookieManager = CookieManager.getInstance()
         val urls = (endpoints.flatMap { endpoint ->
             endpoint.cookieUrls + endpoint.loginUrl + endpoint.origin + endpoint.apiBase
         } + extraUrls).distinct()
-        val sourceUrls = mutableListOf<String>()
-        val cookiesByName = linkedMapOf<String, String>()
-        urls.forEach { url ->
-            cookieManager.getCookie(url)
-                ?.takeIf { it.isNotBlank() }
-                ?.let { raw ->
-                    sourceUrls.add(url)
-                    mergeCookieHeaderInto(raw, cookiesByName)
-                }
-        }
+        val snapshot = snapshotCookies(urls)
         return WebMountCookieBundle(
-            header = cookiesByName.values.joinToString("; "),
-            sourceUrls = sourceUrls.distinct(),
+            header = snapshot.toHeader(),
+            sourceUrls = snapshot.sourceUrls(),
         )
     }
 
@@ -60,21 +50,56 @@ class WebMountCookieProvider {
      * the post-WebView-login flow to diff cookies set during the dialog
      * lifetime and infer which one represents the session token.
      */
-    fun snapshotCookieEntries(urls: List<String>): Map<String, String> {
+    fun snapshotCookies(urls: List<String>): CookieSnapshot {
         val cookieManager = CookieManager.getInstance()
-        val entries = linkedMapOf<String, String>()
+        val headersByUrl = linkedMapOf<String, String>()
         urls.distinct().forEach { url ->
-            cookieManager.getCookie(url)?.split(";")
-                ?.map { it.trim() }
-                ?.filter { it.contains("=") }
-                ?.forEach { cookie ->
-                    val name = cookie.substringBefore("=").trim()
-                    if (name.isNotBlank()) {
-                        entries[name] = cookie.substringAfter("=").trim()
-                    }
-                }
+            cookieManager.getCookie(url)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { raw -> headersByUrl[url] = raw }
         }
-        return entries
+        return CookieSnapshot.fromRawHeaders(headersByUrl)
+    }
+
+    fun snapshotCookieEntries(urls: List<String>): Map<String, String> {
+        return snapshotCookies(urls).asLastWinsMap()
+    }
+
+    fun injectCookies(
+        urls: List<String>,
+        cookies: Map<String, String>,
+        fieldHints: List<CookieFieldHint>,
+    ) {
+        val cookieManager = CookieManager.getInstance()
+        cookieWritesFor(urls = urls, cookies = cookies, fieldHints = fieldHints).forEach { write ->
+            cookieManager.setCookie(write.url, write.cookie)
+        }
+        cookieManager.flush()
+    }
+
+    fun injectCookiesAsync(
+        urls: List<String>,
+        cookies: Map<String, String>,
+        fieldHints: List<CookieFieldHint>,
+        onComplete: () -> Unit,
+    ) {
+        val cookieManager = CookieManager.getInstance()
+        val writes = cookieWritesFor(urls = urls, cookies = cookies, fieldHints = fieldHints)
+        if (writes.isEmpty()) {
+            cookieManager.flush()
+            onComplete()
+            return
+        }
+        var remaining = writes.size
+        writes.forEach { write ->
+            cookieManager.setCookie(write.url, write.cookie) {
+                remaining--
+                if (remaining == 0) {
+                    cookieManager.flush()
+                    onComplete()
+                }
+            }
+        }
     }
 
     /**
@@ -91,7 +116,7 @@ class WebMountCookieProvider {
         preferredNames: List<String> = emptyList(),
     ): String? {
         pickPresentCookieName(newCookies, preferredNames)?.let { return it }
-        val candidates = newCookies.filter { (_, v) -> v.length >= 8 }
+        val candidates = newCookies.filter { (_, v) -> v.length >= 8 && v.isUsableCookieValue() }
         if (candidates.isEmpty()) return null
         val nameHints = setOf("sess", "auth", "token", "user")
         return candidates.entries
@@ -152,25 +177,76 @@ class WebMountCookieProvider {
     }
 
     companion object {
-        private fun String.isUsableCookieValue(): Boolean {
-            val normalized = trim().lowercase()
-            return normalized.isNotBlank() &&
-                normalized != "deleted" &&
-                normalized != "expired" &&
-                normalized != "null" &&
-                normalized != "none"
+        internal fun mergeCookieHeaderInto(raw: String, target: MutableMap<String, String>) {
+            CookieSnapshot.parseRawHeader(sourceUrl = "", raw = raw)
+                .forEach { entry ->
+                    target[entry.name] = entry.headerValue
+                }
         }
 
-        internal fun mergeCookieHeaderInto(raw: String, target: MutableMap<String, String>) {
-            raw.split(";")
-                .map { it.trim() }
-                .filter { it.contains("=") }
-                .forEach { cookie ->
-                    val name = cookie.substringBefore("=").trim()
-                    if (name.isNotBlank()) {
-                        target[name] = cookie
+        private fun targetUrlsFor(
+            hint: CookieFieldHint,
+            fallbackUrls: List<String>,
+        ): List<CookieWriteTarget> {
+            val hinted = hint.domainHints.mapNotNull { domain ->
+                val host = domain.removePrefix(".").trim()
+                if (host.isBlank()) return@mapNotNull null
+                CookieWriteTarget(
+                    url = "https://$host",
+                    domain = domain.takeIf { it.startsWith(".") },
+                )
+            }
+            val fallback = fallbackUrls.map { CookieWriteTarget(url = it, domain = null) }
+            return (hinted + fallback).distinctBy { it.url + "|" + it.domain.orEmpty() }
+        }
+
+        private fun buildCookieString(
+            name: String,
+            value: String,
+            hint: CookieFieldHint,
+            target: CookieWriteTarget,
+        ): String {
+            return buildString {
+                append(name)
+                append("=")
+                append(value)
+                append("; Path=")
+                append(hint.path.ifBlank { "/" })
+                target.domain?.let { append("; Domain=").append(it) }
+                append("; Secure")
+                hint.sameSite?.takeIf { it.isNotBlank() }?.let { append("; SameSite=").append(it) }
+                if (hint.httpOnly) append("; HttpOnly")
+            }
+        }
+
+        private fun cookieWritesFor(
+            urls: List<String>,
+            cookies: Map<String, String>,
+            fieldHints: List<CookieFieldHint>,
+        ): List<CookieWrite> {
+            val hintsByName = fieldHints.associateBy { it.name }
+            val fallbackUrls = urls.filter { it.startsWith("https://") || it.startsWith("http://") }
+            return cookies
+                .filter { (name, value) -> name.isNotBlank() && value.isUsableCookieValue() }
+                .flatMap { (name, value) ->
+                    val hint = hintsByName[name] ?: CookieFieldHint(name = name, required = false)
+                    targetUrlsFor(hint, fallbackUrls).map { target ->
+                        CookieWrite(
+                            url = target.url,
+                            cookie = buildCookieString(name = name, value = value, hint = hint, target = target),
+                        )
                     }
                 }
         }
     }
 }
+
+private data class CookieWriteTarget(
+    val url: String,
+    val domain: String?,
+)
+
+private data class CookieWrite(
+    val url: String,
+    val cookie: String,
+)

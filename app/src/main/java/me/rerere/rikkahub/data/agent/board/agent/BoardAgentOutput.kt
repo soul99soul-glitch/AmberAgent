@@ -23,7 +23,7 @@ data class BoardAgentItem(
     val source_type: String = "",
     val source_ref: String = "",
     val urgency: String = "medium",
-    val category: String = "attention",
+    val category: String = "todo",
     val reason: String = "",
     val suggestion: String = "",
     val signal_time: Long = 0L,
@@ -46,13 +46,13 @@ fun BoardAgentItem.toEntity(
     boardDate: String,
     nowMs: Long = System.currentTimeMillis(),
 ): BoardItemEntity = BoardItemEntity(
-    id = stableItemId(boardDate, source_ref, category),
+    id = stableItemId(boardDate, source_type, source_ref, "todo"),
     title = title.take(200),
     sourceType = source_type,
     sourceRef = source_ref,
     sourceContent = sourceContent.take(4_000),
     urgency = urgency,
-    category = category,
+    category = "todo",
     reason = reason.take(500),
     suggestion = suggestion.take(500),
     signalTime = signal_time,
@@ -71,8 +71,8 @@ fun BoardAgentItem.toEntity(
  * SHA-256 truncated to 32 hex chars — same convention used elsewhere in the codebase
  * for deterministic ids on TEXT primary-key tables.
  */
-private fun stableItemId(boardDate: String, sourceRef: String, category: String): String {
-    val input = "$boardDate|$sourceRef|$category"
+private fun stableItemId(boardDate: String, sourceType: String, sourceRef: String, category: String): String {
+    val input = "$boardDate|$sourceType|$sourceRef|$category"
     val digest = java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
     return digest.joinToString("") { "%02x".format(it) }.take(32)
 }

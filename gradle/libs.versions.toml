@@ -47,6 +47,7 @@ workmanager = "2.11.2"
 reorderable = "3.1.0"
 mcp = "0.8.4"
 browser = "1.10.0"
+webkit = "1.15.0"
 security-crypto = "1.1.0-alpha07"
 credentials = "1.6.0"
 googleid = "1.1.1"
@@ -141,6 +142,7 @@ reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reo
 commons-text = { module = "org.apache.commons:commons-text", version.ref = "commons-text" }
 modelcontextprotocol-kotlin-sdk = { module = "io.modelcontextprotocol:kotlin-sdk", version.ref = "mcp" }
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }

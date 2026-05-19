@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.board
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderIds
 
 /**
  * Default trigger anchors in 24h local time. Users can toggle these on/off individually.
@@ -103,6 +104,10 @@ data class TodayBoardSetting(
     val enabledSources: Set<String> = BoardSignalSourceType.MVP_SOURCES,
     val triggerHours: List<String> = DEFAULT_TODAY_BOARD_TRIGGER_HOURS,
     val incrementalSignalThreshold: Int = 5,
+    val hotListRefreshIntervalMinutes: Int = 60,
+    val hotListWifiOnly: Boolean = false,
+    val hotListEnabledSources: Set<String> = HotListProviderIds.DEFAULT_ENABLED,
+    val deepReadFirstUseConfirmed: Boolean = false,
     val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
     val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,
     val foregroundCompensationGapMs: Long = 2 * 60 * 60 * 1000L,

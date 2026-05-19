@@ -368,10 +368,74 @@ class ToolRegistryTest {
         assertTrue(!policy.concurrencySafe)
     }
 
+    @Test
+    fun webMountTapUsesClickEquivalentPolicy() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool(
+                    "wm_tap",
+                    needsApproval = true,
+                    allowsAutoApproval = false,
+                    mandatoryApproval = true,
+                )
+            )
+        )
+
+        val metadata = registry.metadata.single()
+        val policy = registry.evaluateInvocation(
+            "wm_tap",
+            Json.parseToJsonElement("""{"session_id":"s1","x":10,"y":20}""")
+        )!!
+
+        assertEquals("webmount", metadata.category)
+        assertTrue(metadata.mutates)
+        assertTrue(metadata.needsApproval)
+        assertTrue(!metadata.autoApprovable)
+        assertTrue(metadata.mandatoryApproval)
+        assertEquals(ToolRisk.Sensitive, metadata.risk)
+        assertTrue(policy.mutates)
+        assertTrue(policy.needsApproval)
+        assertTrue(!policy.autoApprovable)
+        assertTrue(policy.mandatoryApproval)
+        assertEquals(ToolRisk.Sensitive, policy.risk)
+        assertTrue(!policy.concurrencySafe)
+        assertEquals("webmount:s1", policy.parallelGroup)
+    }
+
+    @Test
+    fun webMountFetchReplayRequiresMandatoryApproval() {
+        val registry = ToolRegistry.from(
+            listOf(
+                stubTool(
+                    "wm_fetch_replay",
+                    needsApproval = true,
+                    allowsAutoApproval = false,
+                    mandatoryApproval = true,
+                )
+            )
+        )
+
+        val metadata = registry.metadata.single()
+        val policy = registry.evaluateInvocation(
+            "wm_fetch_replay",
+            Json.parseToJsonElement("""{"session_id":"s1","request_template_id":"wmreq_1"}""")
+        )!!
+
+        assertTrue(metadata.needsApproval)
+        assertTrue(!metadata.autoApprovable)
+        assertTrue(metadata.mandatoryApproval)
+        assertTrue(policy.needsApproval)
+        assertTrue(!policy.autoApprovable)
+        assertTrue(policy.mandatoryApproval)
+        assertTrue(!policy.speculativeEligible)
+        assertEquals("webmount:s1", policy.parallelGroup)
+    }
+
     private fun stubTool(
         name: String,
         needsApproval: Boolean = false,
         allowsAutoApproval: Boolean = true,
+        mandatoryApproval: Boolean = false,
         execute: suspend (kotlinx.serialization.json.JsonElement) -> List<UIMessagePart> = {
             listOf(UIMessagePart.Text("ok"))
         },
@@ -380,6 +444,7 @@ class ToolRegistryTest {
         description = "test tool",
         needsApproval = needsApproval,
         allowsAutoApproval = allowsAutoApproval,
+        mandatoryApproval = mandatoryApproval,
         execute = execute,
     )
 }

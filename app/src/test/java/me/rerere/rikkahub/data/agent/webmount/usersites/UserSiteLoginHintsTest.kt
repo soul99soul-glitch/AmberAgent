@@ -6,7 +6,7 @@ import org.junit.Test
 
 class UserSiteLoginHintsTest {
     @Test
-    fun xComSiteAddsDurableLoginCookieCandidates() {
+    fun xComRequiresAuthTokenAndCt0AndProbesApiDomain() {
         val site = UserSite(
             id = "x_com",
             displayName = "X.com",
@@ -15,95 +15,56 @@ class UserSiteLoginHintsTest {
             loginCookieName = "auth_token",
         )
 
-        assertEquals(
-            listOf("auth_token", "ct0", "twid"),
-            loginCookieCandidatesFor(site),
-        )
+        assertTrue(requiredLoginCookieSetsFor(site).contains(setOf("auth_token", "ct0")))
+        assertEquals(listOf(setOf("auth_token", "ct0")), requiredLoginCookieSetsFor(site))
+        assertTrue(extraLoginProbeUrlsFor(site).contains("https://api.x.com"))
+        assertTrue(manualImportCookieFieldsFor(site).map { it.name }.containsAll(listOf("auth_token", "ct0")))
     }
 
     @Test
-    fun xComSiteAddsSiblingLoginProbeUrls() {
-        val site = UserSite(
+    fun knownSiteKeepsExplicitConfiguredCookieUnlessItWeakensKnownSet() {
+        val customWeibo = UserSite(
+            id = "user_weibo_archive",
+            displayName = "Weibo Archive",
+            homepageUrl = "https://weibo.com/example",
+            authKind = AuthKind.COOKIE,
+            loginCookieName = "MY_SESSION",
+        )
+        val xComSeed = UserSite(
             id = "x_com",
-            displayName = "Twitter",
+            displayName = "X.com",
             homepageUrl = "https://x.com/i/flow/login",
             authKind = AuthKind.COOKIE,
+            loginCookieName = "auth_token",
         )
 
-        val urls = extraLoginProbeUrlsFor(site)
-
-        assertTrue(urls.contains("https://x.com"))
-        assertTrue(urls.contains("https://twitter.com"))
-        assertTrue(urls.contains("https://mobile.twitter.com"))
+        assertEquals(
+            listOf(setOf("SUB"), setOf("MY_SESSION")),
+            requiredLoginCookieSetsFor(customWeibo),
+        )
+        assertEquals(listOf(setOf("auth_token", "ct0")), requiredLoginCookieSetsFor(xComSeed))
     }
 
     @Test
-    fun weiboSiteAddsDurableLoginCookieCandidates() {
-        val site = UserSite(
-            id = "user_weibo",
-            displayName = "新浪微博",
-            homepageUrl = "https://m.weibo.cn/",
+    fun knownNativeSitesExposeRequiredCookieSets() {
+        val bilibili = site("bilibili", "Bilibili", "https://passport.bilibili.com/login", "SESSDATA")
+        val zhihu = site("zhihu", "知乎", "https://www.zhihu.com/signin", "z_c0")
+        val weibo = site("weibo", "微博", "https://m.weibo.cn", "SUB")
+        val juejin = site("juejin", "掘金", "https://juejin.cn/login", "sessionid")
+
+        assertEquals(listOf(setOf("SESSDATA")), requiredLoginCookieSetsFor(bilibili))
+        assertEquals(listOf(setOf("z_c0")), requiredLoginCookieSetsFor(zhihu))
+        assertEquals(listOf(setOf("SUB")), requiredLoginCookieSetsFor(weibo))
+        assertEquals(listOf(setOf("sessionid")), requiredLoginCookieSetsFor(juejin))
+    }
+
+    private fun site(id: String, name: String, url: String, cookie: String): UserSite {
+        return UserSite(
+            id = id,
+            displayName = name,
+            homepageUrl = url,
             authKind = AuthKind.COOKIE,
-            loginCookieName = "custom_cookie",
+            loginCookieName = cookie,
         )
-
-        assertEquals(
-            listOf("custom_cookie", "SUB", "SUBP", "SSOLoginState", "ALF", "MLOGIN"),
-            loginCookieCandidatesFor(site),
-        )
-    }
-
-    @Test
-    fun weiboSiteAddsSiblingLoginProbeUrls() {
-        val site = UserSite(
-            id = "user_weibo",
-            displayName = "Weibo",
-            homepageUrl = "https://weibo.com/login.php",
-            authKind = AuthKind.COOKIE,
-        )
-
-        val urls = extraLoginProbeUrlsFor(site)
-
-        assertTrue(urls.contains("https://m.weibo.cn"))
-        assertTrue(urls.contains("https://passport.weibo.cn"))
-        assertTrue(urls.contains("https://login.sina.com.cn"))
-    }
-
-    @Test
-    fun seedAutoAddSignatureDeduplicatesCustomWeiboAndXComSites() {
-        assertEquals(
-            "weibo",
-            UserSite(
-                id = "user_weibo",
-                displayName = "新浪微博",
-                homepageUrl = "https://m.weibo.cn",
-                authKind = AuthKind.COOKIE,
-            ).seedAutoAddSignature(),
-        )
-        assertEquals(
-            "x_com",
-            UserSite(
-                id = "user_twitter",
-                displayName = "Twitter",
-                homepageUrl = "https://twitter.com/home",
-                authKind = AuthKind.COOKIE,
-            ).seedAutoAddSignature(),
-        )
-    }
-
-    @Test
-    fun feishuDocsAddsWikiLoginProbeUrls() {
-        val site = UserSite(
-            id = "feishu_docs",
-            displayName = "飞书云文档",
-            homepageUrl = "https://www.feishu.cn/wiki",
-            authKind = AuthKind.OAUTH,
-        )
-
-        val urls = extraLoginProbeUrlsFor(site)
-
-        assertTrue(urls.contains("https://www.feishu.cn/wiki"))
-        assertTrue(urls.contains("https://feishu.cn/wiki"))
-        assertTrue(urls.contains("https://accounts.feishu.cn"))
     }
 }

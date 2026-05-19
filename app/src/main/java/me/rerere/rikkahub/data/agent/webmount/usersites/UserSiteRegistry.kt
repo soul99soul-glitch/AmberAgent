@@ -163,6 +163,12 @@ class UserSiteRegistry(context: Context) {
                 ) {
                     next = next.copy(homepageUrl = FEISHU_DOCS_HOME)
                 }
+                // Migration D: Juejin's native adapter probes for sessionid.
+                // Older seed rows used passport_csrf_token, which made the UI
+                // badge disagree with the adapter's real login requirement.
+                if (next.id == "juejin" && next.loginCookieName == "passport_csrf_token") {
+                    next = next.copy(loginCookieName = "sessionid")
+                }
                 next
             }.let { sites ->
                 val seedVersion = prefs.getInt(KEY_SEED_VERSION, if (seeded) 1 else 0)
@@ -217,7 +223,7 @@ class UserSiteRegistry(context: Context) {
         private const val KEY_SITES = "sites"
         private const val KEY_SEEDED = "seeded"
         private const val KEY_SEED_VERSION = "seed_version"
-        private const val CURRENT_SEED_VERSION = 2
+        private const val CURRENT_SEED_VERSION = 3
         private val AUTO_ADD_SEED_IDS = setOf("x_com", "weibo")
 
         /**
@@ -281,7 +287,7 @@ class UserSiteRegistry(context: Context) {
                 displayName = "掘金",
                 homepageUrl = "https://juejin.cn/login",
                 authKind = AuthKind.COOKIE,
-                loginCookieName = "passport_csrf_token",
+                loginCookieName = "sessionid",
                 nativeAdapterId = "juejin",
                 iconKey = "juejin",
             ),

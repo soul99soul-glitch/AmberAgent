@@ -11,6 +11,7 @@
 (function () {
   if (window.__amberWmReady) return;
   window.__amberWmReady = true;
+  window.__amberWmDocumentStart = window.__amberWmDocumentStart === true || document.readyState === 'loading';
   window.__amberWmSnapshotSeq = window.__amberWmSnapshotSeq || 0;
   window.__amberWmSnapshot = window.__amberWmSnapshot || { id: 0, entries: {} };
 
@@ -27,9 +28,28 @@
     };
   }
 
+  function redactedUrl(url) {
+    try {
+      var u = new URL(String(url || ''), location.href);
+      var out = u.protocol + '//' + u.host + u.pathname;
+      var keys = [];
+      u.searchParams.forEach(function (_, key) {
+        if (keys.indexOf(key) < 0) keys.push(key);
+      });
+      if (keys.length > 0) {
+        out += '?' + keys.map(function (key) {
+          return encodeURIComponent(key) + '=<redacted>';
+        }).join('&');
+      }
+      return out;
+    } catch (_) {
+      return String(url || '').split('#')[0].split('?')[0];
+    }
+  }
+
   function snapshotState() {
     return {
-      url: location.href,
+      url: redactedUrl(location.href),
       title: document.title || '',
       ready_state: document.readyState,
       viewport: getViewport(),
@@ -39,6 +59,50 @@
         max_y: (document.documentElement.scrollHeight - window.innerHeight) | 0,
       },
     };
+  }
+
+  function hashString(s) {
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  function semanticText(maxChars) {
+    var raw = (document.body && (document.body.innerText || document.body.textContent)) || '';
+    return raw.replace(/\s+/g, ' ').trim().substring(0, maxChars || 4000);
+  }
+
+  function semanticState(args) {
+    args = args || {};
+    var text = semanticText(args.text_fingerprint_chars || 4000);
+    var interactive = Array.prototype.slice.call(document.querySelectorAll(
+      'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick]'
+    )).filter(isVisible);
+    var main = snapshotState();
+    var signalSeq = window.__amberWmNetSignalSeq || 0;
+    var fpParts = [
+      location.href,
+      document.title || '',
+      document.readyState,
+      text,
+      interactive.slice(0, 80).map(function (el) {
+        return [roleOf(el), accessibleName(el, 80), nodePath(el)].join(':');
+      }).join('|'),
+      window.scrollX | 0,
+      window.scrollY | 0,
+      args.ignore_network_signal === true ? 0 : signalSeq,
+    ];
+    main.semantic_fingerprint = hashString(fpParts.join('\n'));
+    main.main_text_chars = ((document.body && (document.body.innerText || document.body.textContent)) || '').length;
+    main.visible_text_sample = text.substring(0, args.text_sample_chars || 1200);
+    main.interactive_count = interactive.length;
+    main.network_signal_seq = signalSeq;
+    main.network_pending = window.__amberWmNetPending || 0;
+    main.network_coverage = window.__amberWmDocumentStart ? 'document_start' : 'page_finished';
+    return main;
   }
 
   // Console capture — buffer recent messages so wm_state can return a tail.
@@ -175,7 +239,7 @@
 
   function fingerprintOf(el) {
     var r = rectOf(el);
-    var href = el && el.tagName === 'A' ? (el.href || '') : '';
+    var href = el && el.tagName === 'A' ? redactedUrl(el.href || '') : '';
     var inputType = el && el.tagName === 'INPUT' ? (el.type || '') : '';
     var name = accessibleName(el) || '';
     var text = textPreview(el);
@@ -203,9 +267,9 @@
     return id;
   }
 
-  function rememberSnapshotNode(el, node) {
+  function rememberSnapshotNode(el, node, forcedRef) {
     var snapshot = window.__amberWmSnapshot;
-    var ref = String(Object.keys(snapshot.entries).length + 1);
+    var ref = forcedRef != null ? String(forcedRef) : String(Object.keys(snapshot.entries).length + 1);
     var fp = fingerprintOf(el);
     node.ref = ref;
     node.css = node.path;
@@ -243,6 +307,14 @@
 
   function candidateSummary(el, ref) {
     var node = describeNode(el, { text: true });
+    if (ref) node.ref = ref;
+    node.css = node.path;
+    node.fingerprint = fingerprintOf(el);
+    return node;
+  }
+
+  function candidateSummaryNoText(el, ref) {
+    var node = describeNode(el, { text: false });
     if (ref) node.ref = ref;
     node.css = node.path;
     node.fingerprint = fingerprintOf(el);
@@ -328,10 +400,19 @@
       rect: rectOf(el),
       visible: isVisible(el),
     };
-    if (el.tagName === 'A' && el.href) node.href = el.href;
+    if (el.tagName === 'A' && el.href) node.href = redactedUrl(el.href);
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
-      try { node.value = el.value; } catch (_) {}
+      var rawValue = '';
+      try { rawValue = el.value || ''; } catch (_) {}
+      node.value_chars = rawValue.length;
       if (el.type) node.input_type = el.type;
+      if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
+        node.checked = !!el.checked;
+      }
+      if (el.tagName === 'SELECT') {
+        node.selected_index = el.selectedIndex;
+        node.option_count = el.options ? el.options.length : 0;
+      }
       if (el.disabled) node.disabled = true;
     }
     if (opts && opts.text !== false) {
@@ -356,11 +437,11 @@
       seen[href] = true;
       var label = accessibleName(a);
       if (!label) continue;
-      links.push({ href: href, text: label });
+      links.push({ href: redactedUrl(href), text: label });
     }
     return {
       mode: 'readable',
-      url: location.href,
+      url: redactedUrl(location.href),
       title: document.title || '',
       text: text,
       text_chars: text.length,
@@ -377,7 +458,9 @@
     var els = Array.prototype.slice.call(document.querySelectorAll(selector));
     var visible = args.visible_only !== false;
     var nodes = [];
-    var snapshotId = startSnapshot();
+    var snapshotId = args.snapshot_id && window.__amberWmSnapshot && window.__amberWmSnapshot.id === args.snapshot_id
+      ? args.snapshot_id
+      : startSnapshot();
     for (var i = 0; i < els.length && nodes.length < maxNodes; i++) {
       var el = els[i];
       if (visible && !isVisible(el)) continue;
@@ -386,7 +469,7 @@
     return {
       mode: 'interactive',
       snapshot_id: snapshotId,
-      url: location.href,
+      url: redactedUrl(location.href),
       title: document.title || '',
       nodes: nodes,
       truncated: nodes.length >= maxNodes && els.length > maxNodes,
@@ -421,7 +504,7 @@
     return {
       mode: 'snapshot',
       snapshot_id: snapshotId,
-      url: location.href,
+      url: redactedUrl(location.href),
       title: document.title || '',
       viewport: getViewport(),
       root_selector: rootSel || 'body',
@@ -439,11 +522,168 @@
     var truncated = html.length > maxChars;
     return {
       mode: 'html',
-      url: location.href,
+      url: redactedUrl(location.href),
       selector: sel || ':root',
       html: truncated ? html.substring(0, maxChars) : html,
       total_chars: html.length,
       truncated: truncated,
+    };
+  }
+
+  // --------------------------------------------------------------- visual
+
+  function nearestText(el) {
+    var node = el;
+    for (var i = 0; node && i < 3; i++, node = node.parentElement) {
+      var t = cleanText(node.innerText || node.textContent || '', 220);
+      if (t) return t;
+    }
+    return '';
+  }
+
+  function backgroundImageUrl(el) {
+    try {
+      var bg = getComputedStyle(el).backgroundImage || '';
+      if (!bg || bg === 'none') return '';
+      var m = bg.match(/url\(["']?([^"')]+)["']?\)/);
+      return m ? m[1] : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function visualCandidate(el, source, ref) {
+    var node = describeNode(el, { text: false });
+    node.ref = ref || node.ref;
+    node.source = source;
+    node.alt = (el.getAttribute && (el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('aria-label'))) || '';
+    node.near_text = nearestText(el);
+    if (el.tagName === 'IMG' && el.currentSrc) node.src_host = safeHost(el.currentSrc);
+    if (source === 'background') node.background_host = safeHost(backgroundImageUrl(el));
+    if (el.tagName === 'IFRAME') {
+      node.frame_host = safeHost(el.src || '');
+      node.cross_origin = !canReadFrame(el);
+    }
+    return node;
+  }
+
+  function safeHost(url) {
+    try { return new URL(url, location.href).host; }
+    catch (_) { return ''; }
+  }
+
+  function absoluteUrl(url) {
+    try { return new URL(String(url || ''), location.href).href; }
+    catch (_) { return String(url || ''); }
+  }
+
+  function canReadFrame(frame) {
+    try {
+      return !!(frame.contentWindow && frame.contentWindow.document && frame.contentWindow.document.body);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function extractVisualSnapshot(args) {
+    args = args || {};
+    var maxCandidates = Math.min(((args.max_candidates | 0) || 30), 120);
+    var nodes = [];
+    var snapshotId = args.snapshot_id && window.__amberWmSnapshot && window.__amberWmSnapshot.id === args.snapshot_id
+      ? args.snapshot_id
+      : startSnapshot();
+    var selector = 'img,canvas,svg,video,iframe,picture,[style*="background-image"]';
+    var els = Array.prototype.slice.call(document.querySelectorAll(selector));
+    for (var i = 0; i < els.length && nodes.length < maxCandidates; i++) {
+      var el = els[i];
+      if (!isVisible(el)) continue;
+      var tag = (el.tagName || '').toLowerCase();
+      var source = tag;
+      if (tag !== 'img' && tag !== 'canvas' && tag !== 'svg' && tag !== 'video' && tag !== 'iframe') {
+        if (!backgroundImageUrl(el)) continue;
+        source = 'background';
+      }
+      var remembered = rememberSnapshotNode(el, visualCandidate(el, source));
+      nodes.push(remembered);
+    }
+    return {
+      mode: 'visual_snapshot',
+      snapshot_id: snapshotId,
+      url: redactedUrl(location.href),
+      title: document.title || '',
+      viewport: getViewport(),
+      candidates: nodes,
+      truncated: nodes.length >= maxCandidates && els.length > nodes.length,
+      total_candidates: els.length,
+      blind_spots: nodes.filter(function (n) { return n.source === 'canvas' || n.cross_origin === true; }).length,
+    };
+  }
+
+  function targetRegion(args) {
+    var resolved = resolveTarget(args, { requireUnique: true, allowFingerprintFallback: false, requireStableRect: true });
+    if (!resolved.ok) return resolved;
+    return {
+      ok: true,
+      target: candidateSummary(resolved.el, resolved.ref),
+      rect: rectOf(resolved.el),
+      matches_n: resolved.matches_n,
+      match_level: resolved.match_level,
+    };
+  }
+
+  function restoreSnapshotRefs(args) {
+    args = args || {};
+    var snapshotId = startSnapshot();
+    var restored = 0;
+    var missing = 0;
+    function restoreList(nodes) {
+      if (!Array.isArray(nodes)) return;
+      for (var i = 0; i < nodes.length; i++) {
+        var node = nodes[i] || {};
+        if (!node.ref || !node.css) {
+          missing++;
+          continue;
+        }
+        var matches = resolveSelector(node.css).filter(isVisible);
+        var expected = node.fingerprint || null;
+        var chosen = null;
+        for (var j = 0; j < matches.length; j++) {
+          if (!expected || sameFingerprint(fingerprintOf(matches[j]), expected, true)) {
+            chosen = matches[j];
+            break;
+          }
+        }
+        if (chosen) {
+          rememberSnapshotNode(chosen, describeNode(chosen, { text: true }), node.ref);
+          restored++;
+        } else {
+          missing++;
+        }
+      }
+    }
+    restoreList(args.interactive && args.interactive.nodes);
+    restoreList(args.visual && args.visual.candidates);
+    return {
+      ok: true,
+      snapshot_id: snapshotId,
+      restored: restored,
+      missing: missing,
+    };
+  }
+
+  function observePage(args) {
+    args = args || {};
+    var maxText = Math.min(((args.max_text_chars | 0) || 12000), 60000);
+    var maxNodes = Math.min(((args.max_nodes | 0) || 80), 300);
+    var maxVisual = Math.min(((args.max_visual_candidates | 0) || 30), 120);
+    var snapshotId = startSnapshot();
+    return {
+      mode: 'observe',
+      refs_shared: true,
+      page: semanticState({ text_sample_chars: Math.min(maxText, 2000) }),
+      readable: extractReadable({ max_chars: maxText, max_links: 40 }),
+      interactive: extractInteractive({ max_nodes: maxNodes, visible_only: true, snapshot_id: snapshotId }),
+      visual: extractVisualSnapshot({ max_candidates: maxVisual, snapshot_id: snapshotId }),
     };
   }
 
@@ -610,7 +850,7 @@
       ok: true,
       mode: 'feishu_docs_snapshot',
       session_scope: 'current_webview_session',
-      url: location.href,
+      url: redactedUrl(location.href),
       doc_type: info.doc_type,
       doc_token: info.doc_token,
       title: cleanText(document.title || '', 300),
@@ -663,6 +903,46 @@
     check();
   }
 
+  function waitForSemanticIdle(args, reqId) {
+    var timeoutMs = (args.timeout_ms | 0) || 10000;
+    var stableMs = Math.max(250, Math.min((args.stable_ms | 0) || 700, 3000));
+    var deadline = Date.now() + timeoutMs;
+    var requireNetworkIdle = args.until === 'network_idle';
+    var ignoreNetworkSignal = args.until === 'dom_stable';
+    var lastFingerprint = null;
+    var stableSince = 0;
+    function check() {
+      var stateArgs = {};
+      for (var k in args) if (Object.prototype.hasOwnProperty.call(args, k)) stateArgs[k] = args[k];
+      stateArgs.ignore_network_signal = ignoreNetworkSignal;
+      var state = semanticState(stateArgs);
+      var readyEnough = document.readyState === 'interactive' || document.readyState === 'complete';
+      var networkReady = !requireNetworkIdle || (state.network_pending | 0) === 0;
+      if (readyEnough && networkReady && state.semantic_fingerprint === lastFingerprint) {
+        if (!stableSince) stableSince = Date.now();
+        if (Date.now() - stableSince >= stableMs) {
+          state.waited_ms = timeoutMs - (deadline - Date.now());
+          state.stable_ms = Date.now() - stableSince;
+          state.ok = true;
+          AmberWM.resolve(reqId, safeJson(state));
+          return;
+        }
+      } else {
+        lastFingerprint = state.semantic_fingerprint;
+        stableSince = readyEnough && networkReady ? Date.now() : 0;
+      }
+      if (Date.now() >= deadline) {
+        state.ok = false;
+        state.timeout = true;
+        state.fallback_reason = 'semantic_idle_timeout';
+        AmberWM.resolve(reqId, safeJson(state));
+        return;
+      }
+      setTimeout(check, 120);
+    }
+    check();
+  }
+
   // --------------------------------------------------------------- mutations
 
   function dispatchMouseEvent(el, type) {
@@ -699,7 +979,25 @@
       target: candidateSummary(target, resolved.ref),
       matches_n: resolved.matches_n,
       match_level: resolved.match_level,
-      url: location.href,
+      url: redactedUrl(location.href),
+    };
+  }
+
+  function performTap(args) {
+    var x = args.x | 0;
+    var y = args.y | 0;
+    var target = document.elementFromPoint(x, y);
+    if (!target) return targetError('target_not_found', 'no element at viewport coordinate', 'Use wm_visual_snapshot or wm_observe to inspect visible regions.');
+    if (target.focus) try { target.focus(); } catch (_) {}
+    dispatchMouseEvent(target, 'mousedown');
+    dispatchMouseEvent(target, 'mouseup');
+    try { target.click(); } catch (_) {}
+    return {
+      ok: true,
+      x: x,
+      y: y,
+      target: candidateSummary(target),
+      url: redactedUrl(location.href),
     };
   }
 
@@ -733,7 +1031,7 @@
     }
     return {
       ok: true,
-      target: candidateSummary(el, resolved.ref),
+      target: candidateSummaryNoText(el, resolved.ref),
       matches_n: resolved.matches_n,
       match_level: resolved.match_level,
       value_chars: (el.isContentEditable ? (el.textContent || '') : (el.value || '')).length,
@@ -806,14 +1104,15 @@
 
   // --------------------------------------------------------------- network
 
-  // Monkey-patch XMLHttpRequest and fetch so the agent can replay POST bodies
-  // and inspect response payloads — Android's WebViewClient.shouldInterceptRequest
-  // can't see POST bodies, so we capture them client-side. Best effort: the
-  // shim is injected on every page load via reinjectBridge, but page bundle JS
-  // may fire requests *before* our re-injection — those early requests are
-  // missed. Documented in the M1.4 plan.
+  // Monkey-patch XMLHttpRequest and fetch so Kotlin can build redacted request
+  // templates and semantic network signals. Android's WebViewClient cannot see
+  // POST bodies, so the raw event stays process-local and is sanitized before
+  // any tool output reaches the model. Best effort: page bundle JS may fire
+  // requests before fallback re-injection; the Kotlin side reports coverage.
   if (!window.__amberWmNetShimInstalled) {
     window.__amberWmNetShimInstalled = true;
+    window.__amberWmNetPending = window.__amberWmNetPending || 0;
+    window.__amberWmNetSignalSeq = window.__amberWmNetSignalSeq || 0;
     var netSeq = { n: 0 };
 
     function bodyToString(body) {
@@ -848,8 +1147,27 @@
       return t.length > 65536 ? (t.substring(0, 65536) + '…[truncated]') : t;
     }
 
+    function isSignalRequest(url) {
+      var u = String(url || '').toLowerCase();
+      return !(
+        u.indexOf('google-analytics') >= 0 ||
+        u.indexOf('/analytics') >= 0 ||
+        u.indexOf('/beacon') >= 0 ||
+        u.indexOf('doubleclick') >= 0 ||
+        u.indexOf('googletagmanager') >= 0 ||
+        u.indexOf('sentry') >= 0 ||
+        u.indexOf('log.') >= 0 ||
+        u.indexOf('/log') >= 0 ||
+        u.indexOf('/metrics') >= 0 ||
+        u.indexOf('/collect') >= 0
+      );
+    }
+
     function sendNet(evt) {
       try {
+        if (evt && evt.url && isSignalRequest(evt.url)) {
+          window.__amberWmNetSignalSeq = (window.__amberWmNetSignalSeq || 0) + 1;
+        }
         AmberWM.onNetworkEvent(JSON.stringify(evt));
       } catch (e) { /* bridge gone — ignore */ }
     }
@@ -861,7 +1179,7 @@
       this.__amberWm = {
         id: ++netSeq.n,
         method: String(method).toUpperCase(),
-        url: String(url),
+        url: absoluteUrl(url),
         ts: Date.now(),
       };
       return XHR_OPEN.apply(this, arguments);
@@ -870,12 +1188,14 @@
       var meta = this.__amberWm;
       if (meta) {
         meta.body_preview = bodyToString(body);
+        window.__amberWmNetPending = (window.__amberWmNetPending || 0) + 1;
         sendNet({
           type: 'xhr_send', req_id: meta.id, method: meta.method, url: meta.url,
           ts: meta.ts, body_preview: meta.body_preview,
         });
         var self = this;
         this.addEventListener('loadend', function () {
+          window.__amberWmNetPending = Math.max(0, (window.__amberWmNetPending || 0) - 1);
           sendNet({
             type: 'xhr_done', req_id: meta.id, method: meta.method, url: meta.url,
             status: self.status, response_preview: trimResponse(self.responseText),
@@ -884,7 +1204,18 @@
           });
         });
       }
-      return XHR_SEND.apply(this, arguments);
+      try {
+        return XHR_SEND.apply(this, arguments);
+      } catch (err) {
+        if (meta) {
+          window.__amberWmNetPending = Math.max(0, (window.__amberWmNetPending || 0) - 1);
+          sendNet({
+            type: 'xhr_error', req_id: meta.id, method: meta.method, url: meta.url,
+            error: String(err && err.message || err), ts: Date.now(),
+          });
+        }
+        throw err;
+      }
     };
 
     // ---- fetch ----
@@ -892,33 +1223,46 @@
     if (typeof ORIG_FETCH === 'function') {
       window.fetch = function (input, init) {
         var reqId = ++netSeq.n;
-        var url = (typeof input === 'string') ? input : (input && input.url) || '';
+        var url = absoluteUrl((typeof input === 'string') ? input : (input && input.url) || '');
         var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
         var body = init && init.body ? bodyToString(init.body) : null;
+        window.__amberWmNetPending = (window.__amberWmNetPending || 0) + 1;
         sendNet({
           type: 'fetch_send', req_id: reqId, method: method, url: String(url),
           body_preview: body, ts: Date.now(),
         });
-        return ORIG_FETCH.apply(this, arguments).then(function (resp) {
+        var fetchPromise;
+        try {
+          fetchPromise = ORIG_FETCH.apply(this, arguments);
+        } catch (err) {
+          window.__amberWmNetPending = Math.max(0, (window.__amberWmNetPending || 0) - 1);
+          sendNet({
+            type: 'fetch_error', req_id: reqId, method: method, url: String(url),
+            error: String(err && err.message || err), ts: Date.now(),
+          });
+          throw err;
+        }
+        return fetchPromise.then(function (resp) {
+          window.__amberWmNetPending = Math.max(0, (window.__amberWmNetPending || 0) - 1);
+          sendNet({
+            type: 'fetch_done', req_id: reqId, method: method, url: String(url),
+            status: resp.status, response_preview: null, response_chars: 0, ts: Date.now(),
+          });
           // Tee the response so the page still gets it.
           var clone;
           try { clone = resp.clone(); } catch (_) { clone = null; }
           if (clone) {
             clone.text().then(function (t) {
               sendNet({
-                type: 'fetch_done', req_id: reqId, method: method, url: String(url),
+                type: 'fetch_preview', req_id: reqId, method: method, url: String(url),
                 status: resp.status, response_preview: trimResponse(t),
                 response_chars: t ? t.length : 0, ts: Date.now(),
               });
             }).catch(function () { /* body already consumed; ignore */ });
-          } else {
-            sendNet({
-              type: 'fetch_done', req_id: reqId, method: method, url: String(url),
-              status: resp.status, response_preview: null, response_chars: 0, ts: Date.now(),
-            });
           }
           return resp;
         }, function (err) {
+          window.__amberWmNetPending = Math.max(0, (window.__amberWmNetPending || 0) - 1);
           sendNet({
             type: 'fetch_error', req_id: reqId, method: method, url: String(url),
             error: String(err && err.message || err), ts: Date.now(),
@@ -927,6 +1271,48 @@
         });
       };
     }
+  }
+
+  function performFetchReplay(args, reqId) {
+    var method = String(args.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      AmberWM.reject(reqId, 'fetch_replay only supports GET/HEAD');
+      return;
+    }
+    var url = String(args.url || '');
+    if (!url) {
+      AmberWM.reject(reqId, 'fetch_replay requires url');
+      return;
+    }
+    var maxChars = Math.max(0, Math.min((args.max_chars | 0) || 60000, 200000));
+    fetch(url, { method: method, credentials: 'include', cache: 'no-store' }).then(function (resp) {
+      var headers = {};
+      try {
+        resp.headers.forEach(function (value, key) {
+          var lower = String(key).toLowerCase();
+          if (lower === 'set-cookie' || lower === 'cookie' || lower === 'authorization') return;
+          if (lower.indexOf('token') >= 0 || lower.indexOf('secret') >= 0) return;
+          headers[key] = value;
+        });
+      } catch (_) {}
+      return resp.text().then(function (text) {
+        AmberWM.resolve(reqId, safeJson({
+          ok: true,
+          url: redactedUrl(resp.url || url),
+          status: resp.status,
+          content_type: resp.headers.get('content-type') || '',
+          headers: headers,
+          text: text.substring(0, maxChars),
+          text_chars: text.length,
+          truncated: text.length > maxChars,
+        }));
+      });
+    }, function (err) {
+      AmberWM.resolve(reqId, safeJson({
+        ok: false,
+        error: String(err && err.message || err),
+      }));
+    });
   }
 
   // --------------------------------------------------------------- navigation
@@ -967,7 +1353,7 @@
   }
 
   function performHistory(direction) {
-    var before = location.href;
+    var before = redactedUrl(location.href);
     if (direction === 'back') window.history.back();
     else if (direction === 'forward') window.history.forward();
     else throw new Error('history requires direction=back|forward');
@@ -1116,6 +1502,21 @@
           AmberWM.resolve(reqId, safeJson(payload));
           return;
         }
+        case 'semantic_state':
+          AmberWM.resolve(reqId, safeJson(semanticState(args)));
+          return;
+        case 'observe':
+          AmberWM.resolve(reqId, safeJson(observePage(args)));
+          return;
+        case 'visual_snapshot':
+          AmberWM.resolve(reqId, safeJson(extractVisualSnapshot(args)));
+          return;
+        case 'restore_snapshot_refs':
+          AmberWM.resolve(reqId, safeJson(restoreSnapshotRefs(args)));
+          return;
+        case 'target_region':
+          AmberWM.resolve(reqId, safeJson(targetRegion(args)));
+          return;
         case 'extract': {
           var mode = args.mode || 'readable';
           var payload;
@@ -1143,10 +1544,15 @@
             waitForReadyState(args.value || 'complete', timeout, reqId);
             return;
           }
+          if (until === 'semantic_idle' || until === 'dom_stable' || until === 'network_idle') {
+            waitForSemanticIdle(args, reqId);
+            return;
+          }
           AmberWM.reject(reqId, 'unknown wait kind: ' + until);
           return;
         }
         case 'click':    AmberWM.resolve(reqId, safeJson(actionResult(function () { return performClick(args); }))); return;
+        case 'tap':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performTap(args); }))); return;
         case 'type':     AmberWM.resolve(reqId, safeJson(actionResult(function () { return performType(args); }))); return;
         case 'get':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performGet(args); }))); return;
         case 'feishu_snapshot':
@@ -1159,6 +1565,9 @@
         case 'keys':     AmberWM.resolve(reqId, safeJson(actionResult(function () { return performKeys(args); }))); return;
         case 'select':   AmberWM.resolve(reqId, safeJson(actionResult(function () { return performSelect(args); }))); return;
         case 'find':     AmberWM.resolve(reqId, safeJson(performFind(args))); return;
+        case 'fetch_replay':
+          performFetchReplay(args, reqId);
+          return;
         default:
           AmberWM.reject(reqId, 'unknown method: ' + method);
       }

@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.db.dao.FeishuDocSnapshotDAO
 import me.rerere.rikkahub.data.db.dao.FeishuWatchedDocDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
+import me.rerere.rikkahub.data.db.dao.HotListDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
 import me.rerere.rikkahub.data.db.dao.MemoryCandidateDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
@@ -45,6 +46,10 @@ import me.rerere.rikkahub.data.db.entity.FeishuDocSnapshotEntity
 import me.rerere.rikkahub.data.db.entity.FeishuWatchedDocEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
+import me.rerere.rikkahub.data.db.entity.DeepReadCacheEntity
+import me.rerere.rikkahub.data.db.entity.HotListCacheEntity
+import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
+import me.rerere.rikkahub.data.db.entity.HotTopicCacheEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryCandidateEntity
 import me.rerere.rikkahub.data.db.entity.MemoryDreamPlanEntity
@@ -83,8 +88,12 @@ import me.rerere.rikkahub.utils.JsonInstant
         DocChangeLogEntity::class,
         MessageNodeStatEntity::class,
         MessageDayStatEntity::class,
+        HotListCacheEntity::class,
+        HotTopicCacheEntity::class,
+        DeepReadCacheEntity::class,
+        HotListSourceEntity::class,
     ],
-    version = 26,
+    version = 27,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -145,6 +154,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun boardWeightDao(): BoardWeightDAO
 
     abstract fun dailyReviewDao(): DailyReviewDAO
+
+    abstract fun hotListDao(): HotListDAO
 
     abstract fun docSubscriptionDao(): DocSubscriptionDAO
 

@@ -188,7 +188,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = false
         }
 
-        "wm_click", "wm_type", "wm_keys", "wm_select" -> {
+        "wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select" -> {
             // DOM mutation on a logged-in page — Sensitive by default; the
             // adapter system can pre-approve known-origin tools later.
             mutates = true
@@ -363,8 +363,9 @@ private fun Tool.mutatesState(): Boolean {
         name in setOf("cron_task_create", "cron_task_update", "cron_task_delete") ||
         name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") ||
         name.startsWith("memory_") && name != "memory_list" ||
-    name == "conversation_compact" ||
-    name in setOf("subagent_start", "subagent_cancel") ||
+        name == "conversation_compact" ||
+        name in setOf("subagent_start", "subagent_cancel") ||
+        name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") ||
         name.startsWith("skill_enable") ||
         name.startsWith("skill_disable")
 }
@@ -373,6 +374,8 @@ private fun Tool.risk(): ToolRisk = when {
     name == "http_request" -> ToolRisk.High
     name == "memory_tool" -> ToolRisk.High
     name == "mcp_call_tool" -> ToolRisk.Sensitive
+    name == "wm_eval" -> ToolRisk.High
+    name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") -> ToolRisk.Sensitive
     name in setOf("session_read", "session_expand") -> ToolRisk.Sensitive
     name == "pdf_render_page" -> ToolRisk.High
     name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> ToolRisk.Sensitive
@@ -452,6 +455,8 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
     // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
     // are best taken as JPEG.
     "wm_screenshot" -> 1_200_000
+    "wm_observe" -> 180_000
+    "wm_fetch_replay" -> 220_000
     // Phase 2 M2.2: signed_fetch bodies can be ~1MB (cap in the shim).
     // Add headroom for the JSON envelope.
     "wm_signed_fetch" -> 1_100_000

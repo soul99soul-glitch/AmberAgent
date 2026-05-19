@@ -745,6 +745,9 @@ class SyncArchiveManager(
             "board_item",
             "board_focus_rule",
             "board_weight",
+            // Hot-list/provider caches and deep-read article caches are ephemeral;
+            // only user-authored custom source configuration belongs in sync.
+            "hot_list_source",
         )
 
         private val SYNC_FILE_ROOTS = listOf(
