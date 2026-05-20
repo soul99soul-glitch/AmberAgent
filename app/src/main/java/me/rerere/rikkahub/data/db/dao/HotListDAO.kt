@@ -49,6 +49,16 @@ interface HotListDAO {
     @Query("SELECT * FROM deep_read_cache WHERE topic_id = :topicId")
     suspend fun getDeepRead(topicId: String): DeepReadCacheEntity?
 
+    @Query(
+        """
+        SELECT * FROM deep_read_cache
+        WHERE title = :title AND expires_at >= :now
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getFreshDeepReadByTitle(title: String, now: Long): DeepReadCacheEntity?
+
     @Query("SELECT * FROM deep_read_cache WHERE topic_id = :topicId")
     fun observeDeepRead(topicId: String): Flow<DeepReadCacheEntity?>
 

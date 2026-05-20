@@ -19,6 +19,8 @@ data class DeepReadTemplatePackage(
     val html: String,
     val createdByAi: Boolean = false,
     val schemaVersion: Int = 1,
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
 )
 
 data class DeepReadTemplateValidationResult(

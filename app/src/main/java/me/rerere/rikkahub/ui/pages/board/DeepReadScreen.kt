@@ -72,6 +72,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.font.FontPackCategory
@@ -88,8 +89,11 @@ fun DeepReadScreen(topicId: String, title: String) {
     val agent: DeepReadAgent = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val fontRepository: SlidesFontRepository = koinInject()
+    val templateRepository: DeepReadTemplateRepository = koinInject()
     val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
+    val customTemplates by templateRepository.observeTemplates().collectAsStateWithLifecycle()
+    val invalidTemplateCount by templateRepository.observeInvalidTemplateCount().collectAsStateWithLifecycle()
     val confirmed = settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed
     val board = settings.agentRuntime.todayBoard
     val readingFontFamily = rememberBoardReadingFontFamily(
@@ -130,6 +134,10 @@ fun DeepReadScreen(topicId: String, title: String) {
         }
     }
 
+    LaunchedEffect(Unit) {
+        templateRepository.reload()
+    }
+
     val palette = magazinePalette()
     Box(Modifier.fillMaxSize().background(palette.background)) {
         when {
@@ -154,12 +162,16 @@ fun DeepReadScreen(topicId: String, title: String) {
             loading -> DeepReadLoading(Modifier.statusBarsPadding().navigationBarsPadding(), palette)
             error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
             output != null -> {
-                if (board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT) {
+                val customTemplate = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
+                val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
+                    customTemplate == null
+                if (board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null) {
                     DeepReadTemplateArticle(
                         title = title,
                         output = output!!,
                         palette = palette,
                         fontCss = templateFontCss,
+                        customTemplateHtml = customTemplate?.html,
                         fontRepository = fontRepository,
                         fallback = {
                             DeepReadArticle(
@@ -171,6 +183,27 @@ fun DeepReadScreen(topicId: String, title: String) {
                             )
                         },
                     )
+                } else if (selectedCustomMissing || invalidTemplateCount > 0) {
+                    Box(Modifier.fillMaxSize()) {
+                        DeepReadArticle(
+                            title = title,
+                            output = output!!,
+                            palette = palette,
+                            fontFamily = readingFontFamily,
+                            listState = listState,
+                        )
+                        TemplateFallbackNotice(
+                            message = if (selectedCustomMissing) {
+                                "模板不可用，已回退默认排版"
+                            } else {
+                                "$invalidTemplateCount 个模板不可用，已回退默认排版"
+                            },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
+                    }
                 } else {
                     DeepReadArticle(
                         title = title,
@@ -185,6 +218,22 @@ fun DeepReadScreen(topicId: String, title: String) {
     }
 }
 
+@Composable
+private fun TemplateFallbackNotice(message: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.errorContainer,
+    ) {
+        Text(
+            message,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+    }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun DeepReadTemplateArticle(
@@ -192,12 +241,19 @@ private fun DeepReadTemplateArticle(
     output: DeepReadOutput,
     palette: MagazinePalette,
     fontCss: String,
+    customTemplateHtml: String? = null,
     fontRepository: SlidesFontRepository,
     fallback: @Composable () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
-    val rendered = remember(title, output, fontCss) {
-        runCatching { DeepReadTemplateRenderer.renderEditorialSlant(title, output, fontCss) }.getOrNull()
+    val rendered = remember(title, output, fontCss, customTemplateHtml) {
+        runCatching {
+            if (customTemplateHtml != null) {
+                DeepReadTemplateRenderer.renderCustom(title, output, customTemplateHtml, fontCss)
+            } else {
+                DeepReadTemplateRenderer.renderEditorialSlant(title, output, fontCss)
+            }
+        }.getOrNull()
     }
     var failed by remember(rendered) { mutableStateOf(rendered == null) }
     if (failed || rendered == null) {
@@ -242,7 +298,7 @@ private fun DeepReadTemplateArticle(
                             val url = request?.url?.toString().orEmpty()
                             if (url == DEEP_READ_TEMPLATE_BASE_URL) return false
                             val scheme = request?.url?.scheme
-                            if (scheme == "http" || scheme == "https") {
+                            if ((scheme == "http" || scheme == "https") && url in rendered.allowedLinkUrls) {
                                 runCatching { uriHandler.openUri(url) }
                                 return true
                             }
@@ -403,6 +459,9 @@ private fun MagazineHero(
     val image = output.heroImageUrl?.takeIf { it in verifiedImageUrls }
     var imageFailed by remember(image) { mutableStateOf(false) }
     val showImage = image != null && !imageFailed
+    val sourceLabel = remember(output.references, output.extendedReading) {
+        deepReadSourceLabel(output)
+    }
 
     if (showImage) {
         Column(
@@ -413,7 +472,7 @@ private fun MagazineHero(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(palette.surface)
-                    .height(352.dp),
+                    .height(414.dp),
             ) {
                 AsyncImage(
                     model = image,
@@ -422,12 +481,12 @@ private fun MagazineHero(
                     onError = { imageFailed = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(306.dp)
+                        .height(342.dp)
                         .align(Alignment.TopCenter),
                 )
                 Canvas(Modifier.fillMaxSize()) {
-                    val startY = 248.dp.toPx()
-                    val endY = 326.dp.toPx()
+                    val startY = 268.dp.toPx()
+                    val endY = 346.dp.toPx()
                     val path = Path().apply {
                         moveTo(0f, startY)
                         lineTo(size.width, endY)
@@ -437,6 +496,14 @@ private fun MagazineHero(
                     }
                     drawPath(path, palette.background)
                 }
+                SlantedHeroMeta(
+                    type = output.topicType,
+                    sourceLabel = sourceLabel,
+                    palette = palette,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 30.dp, bottom = 38.dp, end = 30.dp),
+                )
                 output.heroCaption?.takeIf { it.isNotBlank() }?.let { caption ->
                     Text(
                         caption,
@@ -458,6 +525,7 @@ private fun MagazineHero(
                 output = output,
                 palette = palette,
                 fontFamily = fontFamily,
+                showKicker = false,
             )
         }
     } else {
@@ -479,11 +547,7 @@ private fun TextOnlyHero(
     fontFamily: FontFamily?,
 ) {
     val sourceCount = remember(output.references, output.extendedReading) {
-        (output.references.ifEmpty { output.extendedReading })
-            .map { it.source ?: it.url }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .size
+        deepReadSourceCount(output)
     }
     Column(
         modifier = Modifier
@@ -537,16 +601,19 @@ private fun HeroTextBlock(
     output: DeepReadOutput,
     palette: MagazinePalette,
     fontFamily: FontFamily?,
+    showKicker: Boolean = true,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Text(
-            output.topicType.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(
-                letterSpacing = 3.sp,
-                fontWeight = FontWeight.Light,
-                color = palette.muted,
-            ),
-        )
+        if (showKicker) {
+            Text(
+                output.topicType.uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    letterSpacing = 3.sp,
+                    fontWeight = FontWeight.Light,
+                    color = palette.muted,
+                ),
+            )
+        }
         Text(
             title,
             style = MaterialTheme.typography.displayMedium.copy(
@@ -574,6 +641,53 @@ private fun HeroTextBlock(
         }
     }
 }
+
+@Composable
+private fun SlantedHeroMeta(
+    type: String,
+    sourceLabel: String,
+    palette: MagazinePalette,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            type.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                letterSpacing = 3.2.sp,
+                fontWeight = FontWeight.Light,
+                color = palette.accent,
+            ),
+            maxLines = 1,
+        )
+        Text(
+            sourceLabel,
+            style = MaterialTheme.typography.labelSmall.copy(
+                letterSpacing = 2.4.sp,
+                fontWeight = FontWeight.Light,
+                color = palette.muted,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun deepReadSourceCount(output: DeepReadOutput): Int =
+    (output.references.ifEmpty { output.extendedReading })
+        .map { it.source ?: it.url }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .size
+
+private fun deepReadSourceLabel(output: DeepReadOutput): String =
+    deepReadSourceCount(output)
+        .takeIf { it > 0 }
+        ?.let { "$it SOURCES" }
+        ?: "DEEP READ"
 
 @Composable
 private fun EditorialSection(title: String, body: String, palette: MagazinePalette, fontFamily: FontFamily?) {

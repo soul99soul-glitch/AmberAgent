@@ -54,10 +54,14 @@ class BoardViewModel(
     val hotListDashboard: Flow<HotListDashboard> = combine(
         hotListRepository.observeDashboard(),
         settings,
-    ) { dashboard, currentSettings ->
+        hotListRepository.observeSources(),
+    ) { dashboard, currentSettings, customSources ->
         val board = currentSettings.agentRuntime.todayBoard
+        val enabledSources = board.hotListEnabledSources + customSources
+            .filter { it.enabled }
+            .map { it.id }
         dashboard
-            .filterEnabledSources(board.hotListEnabledSources)
+            .filterEnabledSources(enabledSources)
             .applyInterestFilter(board.hotListFocusKeywords, board.hotListFilterMode)
     }
 

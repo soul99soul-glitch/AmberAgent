@@ -38,22 +38,27 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.DEFAULT_HOT_LIST_FOCUS_KEYWORDS
-import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
 import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderIds
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.normalizeHotListFocusKeywords
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
+import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateAgent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.font.FontPackCategory
 import me.rerere.rikkahub.data.font.FontPackState
 import me.rerere.rikkahub.data.font.SlidesFontRepository
@@ -74,21 +79,35 @@ import kotlin.uuid.Uuid
 @Composable
 fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
     val boardRepository: BoardRepository = koinInject()
+    val hotListRepository: HotListRepository = koinInject()
+    val hotListScheduler: HotListScheduler = koinInject()
+    val deepReadTemplateRepository: DeepReadTemplateRepository = koinInject()
+    val deepReadTemplateAgent: DeepReadTemplateAgent = koinInject()
     val fontRepository: SlidesFontRepository = koinInject()
+    val json: Json = koinInject()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val focusRules by boardRepository.observeFocusRules().collectAsStateWithLifecycle(initialValue = emptyList())
+    val customHotListSources by hotListRepository.observeSources().collectAsStateWithLifecycle(initialValue = emptyList())
+    val customDeepReadTemplates by deepReadTemplateRepository.observeTemplates().collectAsStateWithLifecycle()
+    val invalidDeepReadTemplateCount by deepReadTemplateRepository.observeInvalidTemplateCount().collectAsStateWithLifecycle()
     val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
     val board = settings.agentRuntime.todayBoard
     var sourceWeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var weightReloadKey by remember { mutableIntStateOf(0) }
     var showAdvanced by rememberSaveable { mutableStateOf(false) }
+    var templateGenerating by rememberSaveable { mutableStateOf(false) }
+    var templateGenerationError by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(weightReloadKey) {
         sourceWeights = boardRepository.getAllWeights()
             .filter { it.keyword == BoardWeightEntity.WHOLE_SOURCE }
             .associate { it.sourceType to it.weight }
+    }
+
+    LaunchedEffect(Unit) {
+        deepReadTemplateRepository.reload()
     }
 
     fun update(block: (TodayBoardSetting) -> TodayBoardSetting) {
@@ -142,6 +161,54 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
         }
     }
 
+    fun saveCustomHotListSource(draft: CustomHotListSourceDraft) {
+        val now = System.currentTimeMillis()
+        scope.launch {
+            hotListRepository.upsertSource(
+                HotListSourceEntity(
+                    id = "custom:${Uuid.random()}",
+                    displayName = draft.name.trim(),
+                    sourceType = draft.sourceType,
+                    url = draft.url.trim(),
+                    enabled = true,
+                    fieldMappingJson = json.encodeToString(draft.mapping),
+                    sortOrder = (customHotListSources.maxOfOrNull { it.sortOrder } ?: 0) + 1,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+            hotListScheduler.runOnce()
+        }
+    }
+
+    fun toggleCustomHotListSource(source: HotListSourceEntity) {
+        scope.launch {
+            hotListRepository.upsertSource(source.copy(enabled = !source.enabled, updatedAt = System.currentTimeMillis()))
+            hotListScheduler.runOnce()
+        }
+    }
+
+    fun deleteCustomHotListSource(source: HotListSourceEntity) {
+        scope.launch {
+            hotListRepository.deleteSource(source.id)
+            hotListScheduler.runOnce()
+        }
+    }
+
+    fun generateDeepReadTemplate(name: String, brief: String) {
+        templateGenerating = true
+        templateGenerationError = null
+        scope.launch {
+            val result = deepReadTemplateAgent.generate(name, brief)
+            templateGenerating = false
+            result.onSuccess { template ->
+                update { it.copy(deepReadTemplateId = template.id) }
+            }.onFailure { error ->
+                templateGenerationError = error.message ?: "模板生成失败"
+            }
+        }
+    }
+
     ExperimentalSettingsScaffold(title = "今日看板设置") { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -158,17 +225,25 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                         update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
                     }
                     ExperimentDivider()
-                    HotListSourceGrid(board.hotListEnabledSources) { source ->
-                        update {
-                            it.copy(
-                                hotListEnabledSources = if (source in it.hotListEnabledSources) {
-                                    it.hotListEnabledSources - source
-                                } else {
-                                    it.hotListEnabledSources + source
-                                }
-                            )
-                        }
-                    }
+                    HotListSourceSettings(
+                        enabledBuiltIns = board.hotListEnabledSources,
+                        customSources = customHotListSources,
+                        onToggleBuiltIn = { source ->
+                            update {
+                                it.copy(
+                                    hotListEnabledSources = if (source in it.hotListEnabledSources) {
+                                        it.hotListEnabledSources - source
+                                    } else {
+                                        it.hotListEnabledSources + source
+                                    }
+                                )
+                            }
+                            hotListScheduler.runOnce()
+                        },
+                        onToggleCustom = ::toggleCustomHotListSource,
+                        onDeleteCustom = ::deleteCustomHotListSource,
+                        onSaveCustom = ::saveCustomHotListSource,
+                    )
                     ExperimentDivider()
                     HotListFocusKeywordEditor(
                         keywords = board.hotListFocusKeywords,
@@ -257,7 +332,23 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                     ExperimentDivider()
                     ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
                     ExperimentDivider()
-                    DeepReadTemplateRow(board = board, update = ::update)
+                    DeepReadTemplateSettingsRow(
+                        board = board,
+                        customTemplates = customDeepReadTemplates,
+                        invalidTemplateCount = invalidDeepReadTemplateCount,
+                        generating = templateGenerating,
+                        generationError = templateGenerationError,
+                        onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
+                        onDelete = { template ->
+                            scope.launch {
+                                deepReadTemplateRepository.deleteTemplate(template.id)
+                                if (board.deepReadTemplateId == template.id) {
+                                    update { it.copy(deepReadTemplateId = me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds.COMPOSE_MAGAZINE) }
+                                }
+                            }
+                        },
+                        onGenerate = ::generateDeepReadTemplate,
+                    )
                     ExperimentDivider()
                     BackgroundStrategyRow(board.backgroundStrategy) { value ->
                         update { it.copy(backgroundStrategy = value) }
@@ -322,34 +413,6 @@ private fun HotListFocusKeywordEditor(
                     Text("+${keywords.size - 16}", style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
                 }
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun DeepReadTemplateRow(
-    board: TodayBoardSetting,
-    update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
-) {
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("深度阅读模板", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "HTML 模板为静态安全模板；不可联网、不可运行脚本，异常时自动回退默认排版。",
-            style = MaterialTheme.typography.bodySmall,
-            color = workspaceColors().muted,
-        )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChoiceChip(
-                selected = board.deepReadTemplateId == DeepReadTemplateIds.COMPOSE_MAGAZINE,
-                label = "默认杂志",
-                onClick = { update { it.copy(deepReadTemplateId = DeepReadTemplateIds.COMPOSE_MAGAZINE) } },
-            )
-            ChoiceChip(
-                selected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT,
-                label = "斜切图文",
-                onClick = { update { it.copy(deepReadTemplateId = DeepReadTemplateIds.EDITORIAL_SLANT) } },
-            )
         }
     }
 }
@@ -451,29 +514,6 @@ private fun IntervalRow(current: Int, onChange: (Int) -> Unit) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(30 to "30 分钟", 60 to "1 小时", 120 to "2 小时", 240 to "4 小时").forEach { (value, label) ->
                 ChoiceChip(selected = current == value, label = label, onClick = { onChange(value) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun HotListSourceGrid(enabled: Set<String>, onToggle: (String) -> Unit) {
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("数据源", style = MaterialTheme.typography.titleSmall)
-        HOT_LIST_SOURCE_OPTIONS.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { source ->
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Switch(checked = source.id in enabled, onCheckedChange = { onToggle(source.id) })
-                        Spacer(Modifier.width(6.dp))
-                        Column {
-                            Text(source.label, style = MaterialTheme.typography.bodyMedium)
-                            if (!source.verified) {
-                                Text("默认关闭", style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -651,24 +691,6 @@ private fun FontPackCategory.label(): String =
         FontPackCategory.HANDWRITING -> "手写"
         FontPackCategory.MONO -> "等宽"
     }
-
-private data class HotListSourceOption(
-    val id: String,
-    val label: String,
-    val verified: Boolean,
-)
-
-private val HOT_LIST_SOURCE_OPTIONS = listOf(
-    HotListSourceOption(HotListProviderIds.BILIBILI, "B站热门", true),
-    HotListSourceOption(HotListProviderIds.HACKER_NEWS, "HackerNews", true),
-    HotListSourceOption(HotListProviderIds.ARXIV_AI, "arXiv AI", true),
-    HotListSourceOption(HotListProviderIds.INFOQ_AI, "InfoQ AI", true),
-    HotListSourceOption(HotListProviderIds.WEIBO, "微博热搜", false),
-    HotListSourceOption(HotListProviderIds.ZHIHU, "知乎热榜", false),
-    HotListSourceOption(HotListProviderIds.KR36, "36Kr", false),
-    HotListSourceOption(HotListProviderIds.HUGGINGFACE_PAPERS, "HF Papers", false),
-    HotListSourceOption(HotListProviderIds.GITHUB_TRENDING_AI, "GitHub AI", false),
-)
 
 private data class BoardWeightSource(
     val sourceType: String,

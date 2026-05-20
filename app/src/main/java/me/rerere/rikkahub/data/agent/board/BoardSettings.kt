@@ -123,6 +123,9 @@ enum class TodayBoardReadingFontMode(val wireName: String) {
 object DeepReadTemplateIds {
     const val COMPOSE_MAGAZINE = "compose_magazine"
     const val EDITORIAL_SLANT = "editorial_slant"
+    const val CUSTOM_PREFIX = "custom:"
+
+    fun custom(id: String): String = if (id.startsWith(CUSTOM_PREFIX)) id else "$CUSTOM_PREFIX$id"
 }
 
 /**

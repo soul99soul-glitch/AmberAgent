@@ -51,7 +51,7 @@ class DeepReadAgent(
             .orEmpty()
             .toDeepReadSources(topicTitle)
         if (!force) {
-            hotListRepository.getFreshDeepRead(topicId)?.let { cached ->
+            hotListRepository.getFreshDeepRead(topicId, title = topicTitle)?.let { cached ->
                 val sanitized = DeepReadSanitizer.sanitize(cached, seedSources, topicTitle)
                 if (sanitized.hasReadableArticle() && sanitized.hasEnoughChinese()) {
                     return Result.success(sanitized)

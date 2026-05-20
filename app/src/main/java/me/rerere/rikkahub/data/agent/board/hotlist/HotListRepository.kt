@@ -41,6 +41,8 @@ class HotListRepository(
     suspend fun getProviderCache(providerId: String): HotListProviderSnapshot? =
         dao.getProviderCache(providerId)?.toSnapshot(json)
 
+    suspend fun getEnabledSources(): List<HotListSourceEntity> = dao.getEnabledSources()
+
     suspend fun saveProviderResult(
         providerId: String,
         providerName: String,
@@ -113,9 +115,15 @@ class HotListRepository(
 
     suspend fun getHotTopic(topicId: String): HotTopic? = dao.getHotTopic(topicId)?.toTopic(json)
 
-    suspend fun getFreshDeepRead(topicId: String, now: Long = System.currentTimeMillis()): DeepReadOutput? {
-        val entity = dao.getDeepRead(topicId) ?: return null
-        return entity.toFreshDeepRead(json, now)
+    suspend fun getFreshDeepRead(
+        topicId: String,
+        now: Long = System.currentTimeMillis(),
+        title: String? = null,
+    ): DeepReadOutput? {
+        return dao.getDeepRead(topicId)?.toFreshDeepRead(json, now)
+            ?: title
+                ?.takeIf { it.isNotBlank() }
+                ?.let { dao.getFreshDeepReadByTitle(it, now)?.toFreshDeepRead(json, now) }
     }
 
     suspend fun saveDeepRead(

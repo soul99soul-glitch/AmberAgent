@@ -16,10 +16,13 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.data.agent.board.hotlist.providers.BuiltInHotListProviders
+import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListProvider
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.util.concurrent.TimeUnit
@@ -91,9 +94,18 @@ class HotListWorker(
         if (!board.enabled) return Result.success()
 
         val repository = get<HotListRepository>()
-        val providers = get<BuiltInHotListProviders>()
+        val builtInProviders = get<BuiltInHotListProviders>()
             .all()
             .filter { it.id in board.hotListEnabledSources }
+        val customProviders = repository.getEnabledSources()
+            .map { source ->
+                CustomHotListProvider(
+                    source = source,
+                    client = get<OkHttpClient>(),
+                    json = get<Json>(),
+                )
+            }
+        val providers = builtInProviders + customProviders
         if (providers.isEmpty()) {
             repository.replaceTopics(emptyList())
             return Result.success()

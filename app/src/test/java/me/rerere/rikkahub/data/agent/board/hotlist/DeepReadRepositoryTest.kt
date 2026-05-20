@@ -51,6 +51,22 @@ class DeepReadRepositoryTest {
 
         assertNull(repo.getFreshDeepRead("bad", now = 1_500L))
     }
+
+    @Test
+    fun getFreshDeepReadFallsBackToFreshTitleWhenTopicIdChanges() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val output = DeepReadOutput(summary = "这是缓存正文。")
+
+        repo.saveDeepRead("old-topic-id", "同一个热榜话题", output, now = 1_000L)
+
+        val cached = repo.getFreshDeepRead(
+            topicId = "new-topic-id",
+            title = "同一个热榜话题",
+            now = 1_000L + HotListRepository.DEEP_READ_TTL_MS - 1,
+        )
+
+        assertEquals("这是缓存正文。", cached?.summary)
+    }
 }
 
 private class FakeHotListDao : HotListDAO {
@@ -84,6 +100,11 @@ private class FakeHotListDao : HotListDAO {
     }
 
     override suspend fun getDeepRead(topicId: String): DeepReadCacheEntity? = deepReads[topicId]
+
+    override suspend fun getFreshDeepReadByTitle(title: String, now: Long): DeepReadCacheEntity? =
+        deepReads.values
+            .filter { it.title == title && it.expiresAt >= now }
+            .maxByOrNull { it.updatedAt }
 
     override fun observeDeepRead(topicId: String): Flow<DeepReadCacheEntity?> =
         deepReadFlows.getOrPut(topicId) { MutableStateFlow(deepReads[topicId]) }
