@@ -120,6 +120,11 @@ enum class TodayBoardReadingFontMode(val wireName: String) {
     }
 }
 
+object DeepReadTemplateIds {
+    const val COMPOSE_MAGAZINE = "compose_magazine"
+    const val EDITORIAL_SLANT = "editorial_slant"
+}
+
 /**
  * Canonical source types for BoardSignalEntity.sourceType. Kept as string constants rather
  * than an enum to allow future collectors (mail / github / rss) to be added without DB
@@ -170,6 +175,7 @@ data class TodayBoardSetting(
     val deepReadFirstUseConfirmed: Boolean = false,
     val boardReadingFontMode: TodayBoardReadingFontMode = TodayBoardReadingFontMode.SERIF,
     val boardReadingFontPackId: String? = null,
+    val deepReadTemplateId: String = DeepReadTemplateIds.COMPOSE_MAGAZINE,
     val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
     val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,
     val foregroundCompensationGapMs: Long = 2 * 60 * 60 * 1000L,

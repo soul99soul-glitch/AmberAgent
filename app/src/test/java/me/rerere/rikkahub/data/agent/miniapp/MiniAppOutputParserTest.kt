@@ -49,14 +49,32 @@ class MiniAppOutputParserTest {
     }
 
     @Test
+    fun acceptsV3Permissions() {
+        val output = parser.parse(
+            """
+            {
+              "title": "上下文助手",
+              "description": "读取摘要并调用 AI",
+              "category": "tool",
+              "permissions": ["host.context", "host.sendToConversation", "host.createArtifact", "ai.generate", "sharedStore", "eventBus", "launch", "sensor", "location", "clipboard.read"],
+              "html": "<!DOCTYPE html><html><body><script>Amber.host.getConversationContext({mode:'summary'}); Amber.ai.generate({prompt:'hi'});</script></body></html>"
+            }
+            """.trimIndent()
+        )
+
+        assertEquals("host.context", output.permissions.first())
+        assertEquals("clipboard.read", output.permissions.last())
+    }
+
+    @Test
     fun rejectsUnknownPermissions() {
         val output = parser.parseOrNull(
             """
             {
               "title": "定位工具",
-              "description": "V2 不开放定位",
+              "description": "不开放联系人",
               "category": "tool",
-              "permissions": ["location"],
+              "permissions": ["contacts.read"],
               "html": "<!DOCTYPE html><html><body>ok</body></html>"
             }
             """.trimIndent()

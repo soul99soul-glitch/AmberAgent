@@ -22,6 +22,8 @@ data class DeepReadOutput(
     val heroImageUrl: String? = null,
     @SerialName("hero_caption")
     val heroCaption: String? = null,
+    @SerialName("image_assets")
+    val imageAssets: List<DeepReadImageAsset> = emptyList(),
     val references: List<ReadingLink> = emptyList(),
 )
 
@@ -31,12 +33,20 @@ data class TimelineEvent(
     val event: String,
     @SerialName("is_highlight")
     val isHighlight: Boolean = false,
+    @SerialName("image_url")
+    val imageUrl: String? = null,
+    @SerialName("image_caption")
+    val imageCaption: String? = null,
 )
 
 @Serializable
 data class CorePoint(
     val point: String,
     val supporting: String? = null,
+    @SerialName("image_url")
+    val imageUrl: String? = null,
+    @SerialName("image_caption")
+    val imageCaption: String? = null,
 )
 
 @Serializable
@@ -65,6 +75,19 @@ data class ReadingLink(
     val title: String,
     val url: String,
     val source: String? = null,
+)
+
+@Serializable
+data class DeepReadImageAsset(
+    val url: String,
+    val caption: String? = null,
+    val source: String? = null,
+    @SerialName("related_entities")
+    val relatedEntities: List<String> = emptyList(),
+    @SerialName("related_timeline_index")
+    val relatedTimelineIndex: Int? = null,
+    @SerialName("quality_hint")
+    val qualityHint: String? = null,
 )
 
 data class DeepReadState(
@@ -107,5 +130,6 @@ private fun DeepReadOutput.visibleTextForLanguageCheck(): String =
         analysis.quotes.forEach { append(it.text).append(' ').append(it.attribution).append(' ') }
         extendedReading.forEach { append(it.title).append(' ') }
         append(heroCaption).append(' ')
+        imageAssets.forEach { append(it.caption).append(' ') }
         references.forEach { append(it.title).append(' ') }
     }

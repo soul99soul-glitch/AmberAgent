@@ -14,24 +14,12 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,10 +34,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -58,16 +44,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.Clock02
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.agent.miniapp.AndroidMiniAppUserConfirmation
+import me.rerere.rikkahub.data.agent.miniapp.MiniAppAiBridge
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppHttpClient
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppImageProxy
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppRepository
@@ -76,6 +55,7 @@ import me.rerere.rikkahub.data.agent.miniapp.MiniAppSearchBridge
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppShell
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppStorage
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppPermission
+import me.rerere.rikkahub.data.agent.miniapp.MiniAppSystemBridge
 import me.rerere.rikkahub.data.agent.miniapp.bridge.MiniAppBridge
 import me.rerere.rikkahub.data.agent.miniapp.bridge.MiniAppTheme
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
@@ -91,20 +71,10 @@ import kotlin.uuid.Uuid
 fun MiniAppRunnerPage(
     appId: String,
     repository: MiniAppRepository = koinInject(),
-    settingsStore: SettingsAggregator = koinInject(),
 ) {
-    val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
-    val appSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
-    val miniAppSetting = appSettings.agentRuntime.miniApp
-    val exportMiniApp = rememberMiniAppHtmlExporter()
     var state by remember(appId) { mutableStateOf<MiniAppRunnerState>(MiniAppRunnerState.Loading) }
     var reloadKey by remember(appId) { mutableStateOf(0) }
-    var menuExpanded by remember { mutableStateOf(false) }
-    var renameTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
-    var deleteTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
-    var sourceTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
-    var versionTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
 
     LaunchedEffect(appId) {
         state = MiniAppRunnerState.Loading
@@ -158,214 +128,13 @@ fun MiniAppRunnerPage(
                     app = current.app,
                     reloadKey = reloadKey,
                     onError = { message -> state = MiniAppRunnerState.Error(message) },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding(),
                 )
             }
         }
-
-        val readyApp = (state as? MiniAppRunnerState.Ready)?.app
-        MiniAppFloatingControls(
-            readyApp = readyApp,
-            menuExpanded = menuExpanded,
-            onMenuExpandedChange = { menuExpanded = it },
-            onBack = { navController.popBackStack() },
-            onRefresh = { reloadKey++ },
-            showSourceButton = miniAppSetting.showSourceButton,
-            onShowSource = { readyApp?.let { sourceTarget = it } },
-            onExport = { readyApp?.let(exportMiniApp) },
-            onVersions = { readyApp?.let { versionTarget = it } },
-            onRename = { readyApp?.let { renameTarget = it } },
-            onDelete = { readyApp?.let { deleteTarget = it } },
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
     }
-
-    renameTarget?.let { target ->
-        MiniAppRenameDialog(
-            app = target,
-            onDismiss = { renameTarget = null },
-            onConfirm = { title, description ->
-                scope.launch {
-                    repository.rename(target.id, title, description)
-                    repository.getById(target.id)?.let { state = MiniAppRunnerState.Ready(it) }
-                    renameTarget = null
-                }
-            },
-        )
-    }
-
-    deleteTarget?.let { target ->
-        MiniAppDeleteDialog(
-            app = target,
-            onDismiss = { deleteTarget = null },
-            onConfirm = {
-                scope.launch {
-                    repository.delete(target.id)
-                    deleteTarget = null
-                    navController.navigate(Screen.MiniAppList) {
-                        popUpTo(Screen.MiniAppList) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
-            },
-        )
-    }
-
-    sourceTarget?.let { target ->
-        MiniAppSourceDialog(
-            app = target,
-            onDismiss = { sourceTarget = null },
-        )
-    }
-
-    versionTarget?.let { target ->
-        val versions by repository.observeVersions(target.id).collectAsStateWithLifecycle(initialValue = emptyList())
-        MiniAppVersionHistoryDialog(
-            app = target,
-            versions = versions,
-            onDismiss = { versionTarget = null },
-            onRestore = { version ->
-                scope.launch {
-                    repository.restoreVersion(target.id, version.versionNumber)?.let {
-                        state = MiniAppRunnerState.Ready(it)
-                        reloadKey++
-                    }
-                    versionTarget = null
-                }
-            },
-        )
-    }
-}
-
-@Composable
-private fun MiniAppFloatingControls(
-    readyApp: MiniAppEntity?,
-    menuExpanded: Boolean,
-    onMenuExpandedChange: (Boolean) -> Unit,
-    onBack: () -> Unit,
-    onRefresh: () -> Unit,
-    showSourceButton: Boolean,
-    onShowSource: () -> Unit,
-    onExport: () -> Unit,
-    onVersions: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .displayCutoutPadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        FloatingControlSurface {
-            MiniAppIconAction(
-                icon = HugeIcons.ArrowLeft01,
-                contentDescription = "返回",
-                onClick = onBack,
-            )
-        }
-        Spacer(modifier = Modifier.weight(1f))
-        if (readyApp != null) {
-            FloatingControlSurface {
-                MiniAppIconAction(
-                    icon = HugeIcons.Refresh01,
-                    contentDescription = "刷新",
-                    onClick = onRefresh,
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Box {
-                FloatingControlSurface {
-                    MiniAppIconAction(
-                        icon = HugeIcons.MoreVertical,
-                        contentDescription = "更多操作",
-                        onClick = { onMenuExpandedChange(true) },
-                    )
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { onMenuExpandedChange(false) },
-                ) {
-                    if (showSourceButton) {
-                        DropdownMenuItem(
-                            text = { Text("查看源码") },
-                            leadingIcon = { Icon(HugeIcons.Code, contentDescription = null) },
-                            onClick = {
-                                onMenuExpandedChange(false)
-                                onShowSource()
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("版本历史") },
-                        leadingIcon = { Icon(HugeIcons.Clock02, contentDescription = null) },
-                        onClick = {
-                            onMenuExpandedChange(false)
-                            onVersions()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("导出 HTML") },
-                        leadingIcon = { Icon(HugeIcons.Download01, contentDescription = null) },
-                        onClick = {
-                            onMenuExpandedChange(false)
-                            onExport()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("重命名") },
-                        leadingIcon = { Icon(HugeIcons.Edit01, contentDescription = null) },
-                        onClick = {
-                            onMenuExpandedChange(false)
-                            onRename()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("删除") },
-                        leadingIcon = { Icon(HugeIcons.Delete01, contentDescription = null) },
-                        onClick = {
-                            onMenuExpandedChange(false)
-                            onDelete()
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiniAppIconAction(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(19.dp),
-        )
-    }
-}
-
-@Composable
-private fun FloatingControlSurface(content: @Composable () -> Unit) {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        tonalElevation = 3.dp,
-        shadowElevation = 2.dp,
-        content = content,
-    )
 }
 
 @Composable
@@ -394,7 +163,8 @@ private fun MiniAppImmersiveWindowEffect() {
             }
             WindowInsetsControllerCompat(window, window.decorView).apply {
                 systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                hide(WindowInsetsCompat.Type.systemBars())
+                show(WindowInsetsCompat.Type.statusBars())
+                hide(WindowInsetsCompat.Type.navigationBars())
             }
             onDispose {
                 WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
@@ -456,8 +226,10 @@ private fun MiniAppWebView(
     repository: MiniAppRepository = koinInject(),
     settingsStore: SettingsAggregator = koinInject(),
     searchBridge: MiniAppSearchBridge = koinInject(),
+    aiBridge: MiniAppAiBridge = koinInject(),
 ) {
     val context = LocalContext.current
+    val navController = LocalNavController.current
     val appSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val miniAppSetting = appSettings.agentRuntime.miniApp
     val json = remember { Json { ignoreUnknownKeys = true } }
@@ -479,6 +251,7 @@ private fun MiniAppWebView(
     val primary = MaterialTheme.colorScheme.primary
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     var webViewRef by remember(app.id) { mutableStateOf<WebView?>(null) }
+    var bridgeRef by remember(app.id) { mutableStateOf<MiniAppBridge?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -512,7 +285,7 @@ private fun MiniAppWebView(
                                     MiniAppSandbox(
                                         appId = app.id,
                                         declaredPermissions = permissions,
-                                        setting = miniAppSetting,
+                                        settingProvider = { settingsStore.settingsFlow.value.agentRuntime.miniApp },
                                         grantDecision = { permission ->
                                             runBlocking { repository.grantDecision(app.id, permission) }
                                         },
@@ -549,22 +322,31 @@ private fun MiniAppWebView(
                 val sandbox = MiniAppSandbox(
                     appId = app.id,
                     declaredPermissions = permissions,
-                    setting = miniAppSetting,
+                    settingProvider = { settingsStore.settingsFlow.value.agentRuntime.miniApp },
                     grantDecision = { permission -> runBlocking { repository.grantDecision(app.id, permission) } },
                 )
                 addJavascriptInterface(
                     MiniAppBridge(
+                        context = ctx,
                         webViewProvider = { webViewRef },
                         appId = app.id,
                         sessionToken = sessionToken,
+                        appProvider = { app },
                         sandbox = sandbox,
+                        repository = repository,
                         storage = storage,
                         httpClient = httpClient,
                         searchBridge = searchBridge,
+                        aiBridge = aiBridge,
+                        confirmation = AndroidMiniAppUserConfirmation(ctx),
+                        systemBridge = MiniAppSystemBridge(ctx.applicationContext),
                         toast = { message -> Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show() },
                         clipboardCopy = { text -> ctx.writeClipboardText(text) },
                         updateBoardSummary = { summary ->
                             runBlocking { repository.updateBoardSummary(app.id, summary) }
+                        },
+                        launchApp = { targetAppId ->
+                            navController.navigate(Screen.MiniAppRunner(targetAppId))
                         },
                         themeProvider = {
                             MiniAppTheme(
@@ -574,7 +356,7 @@ private fun MiniAppWebView(
                                 primary = "#${primary.toArgb().toUInt().toString(16).takeLast(6)}",
                             )
                         },
-                    ),
+                    ).also { bridgeRef = it },
                     "AmberNative",
                 )
             }
@@ -590,6 +372,8 @@ private fun MiniAppWebView(
 
     DisposableEffect(app.id) {
         onDispose {
+            bridgeRef?.close()
+            bridgeRef = null
             webViewRef?.destroy()
             webViewRef = null
         }

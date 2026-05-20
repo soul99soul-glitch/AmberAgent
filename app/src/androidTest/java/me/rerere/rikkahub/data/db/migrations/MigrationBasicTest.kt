@@ -101,4 +101,13 @@ class MigrationBasicTest {
         }
         db.close()
     }
+
+    @Test
+    fun migrate29To30AddsMiniAppV3Tables() {
+        helper.createDatabase(testDb, 29).close()
+        val db = helper.runMigrationsAndValidate(testDb, 30, true, Migration_29_30)
+        db.query("SELECT COUNT(*) FROM mini_app_audit_log").close()
+        db.query("SELECT COUNT(*) FROM mini_app_shared_data").close()
+        db.close()
+    }
 }

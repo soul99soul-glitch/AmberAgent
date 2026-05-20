@@ -117,6 +117,87 @@ fun MiniAppSettingsPage(
             }
             item {
                 MiniAppSwitchRow(
+                    title = "读取最小上下文",
+                    description = "允许声明 host.context 权限的小应用在确认后读取最小化会话上下文",
+                    checked = miniApp.hostContextEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(hostContextEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "写回宿主",
+                    description = "允许声明 host.sendToConversation / host.createArtifact 的小应用在确认后写回",
+                    checked = miniApp.hostWriteEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(hostWriteEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "Amber.ai",
+                    description = "允许声明 ai.generate 权限的小应用在确认后调用当前聊天模型",
+                    checked = miniApp.aiEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(aiEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "共享存储",
+                    description = "允许声明 sharedStore 权限的小应用访问隔离 namespace KV",
+                    checked = miniApp.sharedStoreEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(sharedStoreEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "事件总线",
+                    description = "允许声明 eventBus 权限的小应用在同 namespace 内收发临时事件",
+                    checked = miniApp.eventBusEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(eventBusEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "小应用跳转",
+                    description = "允许声明 launch 权限的小应用在确认后打开已保存的小应用",
+                    checked = miniApp.launchEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(launchEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "传感器",
+                    description = "允许声明 sensor 权限的小应用在确认后订阅加速度/陀螺仪/光照",
+                    checked = miniApp.sensorEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(sensorEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "定位",
+                    description = "允许声明 location 权限的小应用在确认后读取位置",
+                    checked = miniApp.locationEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(locationEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
+                    title = "读取剪贴板",
+                    description = "允许声明 clipboard.read 权限的小应用在确认后读取剪贴板文本",
+                    checked = miniApp.clipboardReadEnabled,
+                    enabled = miniApp.enabled,
+                    onCheckedChange = { enabled -> updateMiniApp { it.copy(clipboardReadEnabled = enabled) } },
+                )
+            }
+            item {
+                MiniAppSwitchRow(
                     title = "显示源码入口",
                     description = "在 Runner 菜单里显示只读源码查看",
                     checked = miniApp.showSourceButton,

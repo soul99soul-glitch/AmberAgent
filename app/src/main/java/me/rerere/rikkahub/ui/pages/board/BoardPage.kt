@@ -64,6 +64,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Notebook01
+import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Tick01
@@ -109,17 +110,17 @@ fun TodayBoardPage() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
-    var pendingDeepRead by remember { mutableStateOf<HotTopic?>(null) }
+    var pendingDeepRead by remember { mutableStateOf<PendingDeepReadRequest?>(null) }
     var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
 
-    fun requestDeepRead(topic: HotTopic) {
+    fun requestDeepRead(topic: HotTopic, forceRegenerate: Boolean = false) {
         if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
             scope.launch {
-                val prepared = vm.prepareDeepReadTopic(topic)
+                val prepared = vm.prepareDeepReadTopic(topic, forceRegenerate = forceRegenerate)
                 navController.navigate(DeepRead(prepared.id, prepared.title))
             }
         } else {
-            pendingDeepRead = topic
+            pendingDeepRead = PendingDeepReadRequest(topic, forceRegenerate)
         }
     }
 
@@ -218,7 +219,7 @@ fun TodayBoardPage() {
         }
     }
 
-    pendingDeepRead?.let { topic ->
+    pendingDeepRead?.let { request ->
         AlertDialog(
             onDismissRequest = { pendingDeepRead = null },
             title = { Text("深度阅读会消耗更多 tokens") },
@@ -228,7 +229,10 @@ fun TodayBoardPage() {
                     onClick = {
                         scope.launch {
                             vm.confirmDeepReadCost()
-                            val prepared = vm.prepareDeepReadTopic(topic)
+                            val prepared = vm.prepareDeepReadTopic(
+                                request.topic,
+                                forceRegenerate = request.forceRegenerate,
+                            )
                             pendingDeepRead = null
                             navController.navigate(DeepRead(prepared.id, prepared.title))
                         }
@@ -253,6 +257,10 @@ fun TodayBoardPage() {
                 selectedTopic = null
                 requestDeepRead(topic)
             },
+            onRegenerate = {
+                selectedTopic = null
+                requestDeepRead(topic, forceRegenerate = true)
+            },
             onOpenOriginal = {
                 selectedTopic = null
                 topic.primaryUrl()?.let { url ->
@@ -273,6 +281,7 @@ private fun HotListActionSheet(
     topic: HotTopic,
     onDismiss: () -> Unit,
     onDeepRead: () -> Unit,
+    onRegenerate: () -> Unit,
     onOpenOriginal: () -> Unit,
     onShare: () -> Unit,
 ) {
@@ -309,6 +318,11 @@ private fun HotListActionSheet(
                 onClick = onDeepRead,
             )
             TopicActionRow(
+                label = "重新生成",
+                icon = HugeIcons.Refresh03,
+                onClick = onRegenerate,
+            )
+            TopicActionRow(
                 label = "打开原文",
                 icon = HugeIcons.ArrowRight01,
                 enabled = topic.primaryUrl() != null,
@@ -323,6 +337,11 @@ private fun HotListActionSheet(
         }
     }
 }
+
+private data class PendingDeepReadRequest(
+    val topic: HotTopic,
+    val forceRegenerate: Boolean,
+)
 
 @Composable
 private fun TopicActionRow(

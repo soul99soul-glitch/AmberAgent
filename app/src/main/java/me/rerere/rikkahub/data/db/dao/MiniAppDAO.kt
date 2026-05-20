@@ -6,8 +6,10 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
+import me.rerere.rikkahub.data.db.entity.MiniAppAuditLogEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppGrantEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppSharedDataEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppVersionEntity
 
 @Dao
@@ -119,5 +121,42 @@ interface MiniAppVersionDAO {
     suspend fun pruneOldVersions(appId: String, keep: Int)
 
     @Query("DELETE FROM mini_app_version WHERE appId = :appId")
+    suspend fun deleteForApp(appId: String)
+}
+
+@Dao
+interface MiniAppAuditLogDAO {
+    @Query(
+        """
+        SELECT * FROM mini_app_audit_log
+        WHERE appId = :appId
+        ORDER BY createdAt DESC
+        LIMIT :limit
+        """
+    )
+    fun observeForApp(appId: String, limit: Int = 100): Flow<List<MiniAppAuditLogEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: MiniAppAuditLogEntity)
+
+    @Query("DELETE FROM mini_app_audit_log WHERE appId = :appId")
+    suspend fun deleteForApp(appId: String)
+}
+
+@Dao
+interface MiniAppSharedDataDAO {
+    @Query("SELECT * FROM mini_app_shared_data WHERE namespace = :namespace AND `key` = :key")
+    suspend fun get(namespace: String, key: String): MiniAppSharedDataEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: MiniAppSharedDataEntity)
+
+    @Query("DELETE FROM mini_app_shared_data WHERE namespace = :namespace AND `key` = :key")
+    suspend fun delete(namespace: String, key: String)
+
+    @Query("SELECT COALESCE(SUM(LENGTH(value)), 0) FROM mini_app_shared_data WHERE namespace = :namespace")
+    suspend fun namespaceBytes(namespace: String): Int
+
+    @Query("DELETE FROM mini_app_shared_data WHERE lastWriterId = :appId OR namespace = :appId")
     suspend fun deleteForApp(appId: String)
 }

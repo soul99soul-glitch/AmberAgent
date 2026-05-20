@@ -61,3 +61,36 @@ data class MiniAppVersionEntity(
     val changeNote: String? = null,
     val createdAt: Long,
 )
+
+@Entity(
+    tableName = "mini_app_audit_log",
+    indices = [
+        Index(value = ["appId"]),
+        Index(value = ["createdAt"]),
+    ],
+)
+data class MiniAppAuditLogEntity(
+    @PrimaryKey val id: String,
+    val appId: String,
+    val method: String,
+    val permission: String,
+    val summary: String,
+    val payloadHash: String,
+    val createdAt: Long,
+)
+
+@Entity(
+    tableName = "mini_app_shared_data",
+    primaryKeys = ["namespace", "key"],
+    indices = [
+        Index(value = ["namespace"]),
+        Index(value = ["updatedAt"]),
+    ],
+)
+data class MiniAppSharedDataEntity(
+    val namespace: String,
+    val key: String,
+    val value: String,
+    val lastWriterId: String,
+    val updatedAt: Long,
+)

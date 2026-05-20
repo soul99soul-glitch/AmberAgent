@@ -16,11 +16,17 @@ object MiniAppHtmlValidator {
         Regex("""(?is)\bimport\s*\(""") to "dynamic import() is not allowed",
         Regex("""(?is)\bimport\s+['"]""") to "static import is not allowed",
         Regex("""(?is)\bWebSocket\b""") to "WebSocket is not allowed",
+        Regex("""(?is)\bEventSource\b""") to "EventSource is not allowed",
         Regex("""(?is)\bXMLHttpRequest\b""") to "XMLHttpRequest is not allowed",
         Regex("""(?is)\blocalStorage\b""") to "localStorage is not allowed",
         Regex("""(?is)\bsessionStorage\b""") to "sessionStorage is not allowed",
+        Regex("""(?is)\bindexedDB\b""") to "indexedDB is not allowed",
         Regex("""(?is)\bnavigator\s*\.\s*geolocation\b""") to "geolocation is not allowed",
+        Regex("""(?is)\bnavigator\s*\.\s*mediaDevices\b""") to "mediaDevices is not allowed",
+        Regex("""(?is)\bnavigator\s*\.\s*clipboard\b""") to "native clipboard is not allowed",
+        Regex("""(?is)\bnavigator\s*\[\s*['"]\s*(geolocation|mediaDevices|clipboard)\s*['"]\s*\]""") to "computed access to blocked navigator APIs is not allowed",
         Regex("""(?is)\bwindow\s*\[\s*['"]\s*(fetch|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB)\s*['"]\s*\]""") to "computed access to blocked browser APIs is not allowed",
+        Regex("""(?is)\bglobalThis\s*\[\s*['"]\s*(fetch|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB)\s*['"]\s*\]""") to "computed access to blocked browser APIs is not allowed",
         Regex("""(?is)(^|[^A-Za-z0-9_$\.])fetch\s*\(""") to "native fetch() is not allowed",
     )
     private val quotedImageResourcePattern =

@@ -30,6 +30,7 @@ class DeepReadAgentSupportTest {
 
         assertNotNull(parsed)
         assertEquals("这是一个足够长的摘要文本", parsed?.summary)
+        assertEquals(0, parsed?.imageAssets?.size)
     }
 
     @Test

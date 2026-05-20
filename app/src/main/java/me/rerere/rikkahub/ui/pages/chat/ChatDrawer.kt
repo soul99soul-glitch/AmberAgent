@@ -54,6 +54,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
@@ -342,13 +343,13 @@ private fun DrawerActions(navController: Navigator, todayBoardEnabled: Boolean =
         )
         if (todayBoardEnabled) {
             DrawerNavRow(
-                icon = HugeIcons.DashboardSquare01,
+                icon = HugeIcons.News01,
                 label = "今日看板",
                 onClick = { navController.navigate(Screen.TodayBoard) },
             )
         }
         DrawerNavRow(
-            icon = HugeIcons.Folder01,
+            icon = HugeIcons.DashboardSquare01,
             label = "小应用",
             onClick = { navController.navigate(Screen.MiniAppList) },
         )

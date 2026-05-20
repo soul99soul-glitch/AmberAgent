@@ -16,7 +16,19 @@ val MiniAppV2Permissions = setOf(
     "clipboard.copy",
     "host.updateBoardSummary",
 )
-val MiniAppV1Permissions = MiniAppV2Permissions
+val MiniAppV3Permissions = MiniAppV2Permissions + setOf(
+    "host.context",
+    "host.sendToConversation",
+    "host.createArtifact",
+    "ai.generate",
+    "sharedStore",
+    "eventBus",
+    "launch",
+    "sensor",
+    "location",
+    "clipboard.read",
+)
+val MiniAppV1Permissions = MiniAppV3Permissions
 val MiniAppCategories = setOf("tool", "game", "info", "custom")
 
 @Serializable
@@ -81,6 +93,36 @@ enum class MiniAppPermission(val value: String) {
 
     @SerialName("host.updateBoardSummary")
     BoardSummaryUpdate("host.updateBoardSummary"),
+
+    @SerialName("host.context")
+    HostContext("host.context"),
+
+    @SerialName("host.sendToConversation")
+    HostSendToConversation("host.sendToConversation"),
+
+    @SerialName("host.createArtifact")
+    HostCreateArtifact("host.createArtifact"),
+
+    @SerialName("ai.generate")
+    AiGenerate("ai.generate"),
+
+    @SerialName("sharedStore")
+    SharedStore("sharedStore"),
+
+    @SerialName("eventBus")
+    EventBus("eventBus"),
+
+    @SerialName("launch")
+    Launch("launch"),
+
+    @SerialName("sensor")
+    Sensor("sensor"),
+
+    @SerialName("location")
+    Location("location"),
+
+    @SerialName("clipboard.read")
+    ClipboardRead("clipboard.read"),
 }
 
 enum class MiniAppGrantDecision {

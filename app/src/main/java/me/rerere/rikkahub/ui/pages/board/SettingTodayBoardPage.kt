@@ -44,6 +44,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.DEFAULT_HOT_LIST_FOCUS_KEYWORDS
+import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
 import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
 import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
 import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
@@ -256,6 +257,8 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                     ExperimentDivider()
                     ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
                     ExperimentDivider()
+                    DeepReadTemplateRow(board = board, update = ::update)
+                    ExperimentDivider()
                     BackgroundStrategyRow(board.backgroundStrategy) { value ->
                         update { it.copy(backgroundStrategy = value) }
                     }
@@ -319,6 +322,34 @@ private fun HotListFocusKeywordEditor(
                     Text("+${keywords.size - 16}", style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DeepReadTemplateRow(
+    board: TodayBoardSetting,
+    update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
+) {
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("深度阅读模板", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "HTML 模板为静态安全模板；不可联网、不可运行脚本，异常时自动回退默认排版。",
+            style = MaterialTheme.typography.bodySmall,
+            color = workspaceColors().muted,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceChip(
+                selected = board.deepReadTemplateId == DeepReadTemplateIds.COMPOSE_MAGAZINE,
+                label = "默认杂志",
+                onClick = { update { it.copy(deepReadTemplateId = DeepReadTemplateIds.COMPOSE_MAGAZINE) } },
+            )
+            ChoiceChip(
+                selected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT,
+                label = "斜切图文",
+                onClick = { update { it.copy(deepReadTemplateId = DeepReadTemplateIds.EDITORIAL_SLANT) } },
+            )
         }
     }
 }

@@ -127,8 +127,11 @@ class BoardViewModel(
         return topic
     }
 
-    suspend fun prepareDeepReadTopic(topic: HotTopic): HotTopic {
+    suspend fun prepareDeepReadTopic(topic: HotTopic, forceRegenerate: Boolean = false): HotTopic {
         hotListRepository.upsertTopic(topic)
+        if (forceRegenerate) {
+            hotListRepository.clearDeepRead(topic.id)
+        }
         return topic
     }
 

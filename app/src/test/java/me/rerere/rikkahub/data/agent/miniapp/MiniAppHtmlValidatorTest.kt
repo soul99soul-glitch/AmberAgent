@@ -21,6 +21,9 @@ class MiniAppHtmlValidatorTest {
         MiniAppHtmlValidator.validate(
             """<!DOCTYPE html><html><body><img src="https://example.com/a.png"><script>Amber.fetch({url:'https://example.com/api'}); Amber.search({query:'AI', limit:3});</script></body></html>"""
         )
+        MiniAppHtmlValidator.validate(
+            """<!DOCTYPE html><html><body><script>Amber.ai.generate({prompt:'hi'}); Amber.host.getConversationContext({mode:'summary'}); Amber.clipboard.read(); Amber.location.getCurrent({accuracy:'coarse'});</script></body></html>"""
+        )
     }
 
     @Test
@@ -37,7 +40,14 @@ class MiniAppHtmlValidatorTest {
             """<!DOCTYPE html><html><script>fetch('/x')</script></html>""",
             """<!DOCTYPE html><html><script>window['fetch']('/x')</script></html>""",
             """<!DOCTYPE html><html><script>XMLHttpRequest</script></html>""",
+            """<!DOCTYPE html><html><script>EventSource</script></html>""",
             """<!DOCTYPE html><html><script>localStorage.setItem('a','b')</script></html>""",
+            """<!DOCTYPE html><html><script>indexedDB.open('x')</script></html>""",
+            """<!DOCTYPE html><html><script>navigator.mediaDevices.getUserMedia({audio:true})</script></html>""",
+            """<!DOCTYPE html><html><script>navigator['geolocation'].getCurrentPosition(()=>{})</script></html>""",
+            """<!DOCTYPE html><html><script>navigator['mediaDevices'].getUserMedia({audio:true})</script></html>""",
+            """<!DOCTYPE html><html><script>navigator.clipboard.readText()</script></html>""",
+            """<!DOCTYPE html><html><script>globalThis['fetch']('/x')</script></html>""",
         ).forEach { html ->
             val failed = runCatching { MiniAppHtmlValidator.validate(html) }.isFailure
             assertTrue("Expected validation failure for $html", failed)

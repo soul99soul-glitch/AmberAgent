@@ -1,10 +1,17 @@
 package me.rerere.rikkahub.ui.pages.board
 
+import android.annotation.SuppressLint
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -30,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,9 +56,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
@@ -58,10 +68,12 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
+import java.io.ByteArrayInputStream
 
 @Composable
 fun DeepReadScreen(topicId: String, title: String) {
@@ -128,16 +140,103 @@ fun DeepReadScreen(topicId: String, title: String) {
             )
             loading -> DeepReadLoading(Modifier.statusBarsPadding().navigationBarsPadding(), palette)
             error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
-            output != null -> DeepReadArticle(
-                title = title,
-                output = output!!,
-                palette = palette,
-                fontFamily = readingFontFamily,
-                listState = listState,
-            )
+            output != null -> {
+                if (board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT) {
+                    DeepReadTemplateArticle(
+                        title = title,
+                        output = output!!,
+                        palette = palette,
+                        fallback = {
+                            DeepReadArticle(
+                                title = title,
+                                output = output!!,
+                                palette = palette,
+                                fontFamily = readingFontFamily,
+                                listState = listState,
+                            )
+                        },
+                    )
+                } else {
+                    DeepReadArticle(
+                        title = title,
+                        output = output!!,
+                        palette = palette,
+                        fontFamily = readingFontFamily,
+                        listState = listState,
+                    )
+                }
+            }
         }
     }
 }
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun DeepReadTemplateArticle(
+    title: String,
+    output: DeepReadOutput,
+    palette: MagazinePalette,
+    fallback: @Composable () -> Unit,
+) {
+    val rendered = remember(title, output) {
+        runCatching { DeepReadTemplateRenderer.renderEditorialSlant(title, output) }.getOrNull()
+    }
+    var failed by remember(rendered) { mutableStateOf(rendered == null) }
+    if (failed || rendered == null) {
+        fallback()
+        return
+    }
+    key(rendered.html.hashCode()) {
+        AndroidView(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(palette.background)
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            factory = { context ->
+                WebView(context).apply {
+                    settings.javaScriptEnabled = false
+                    settings.domStorageEnabled = false
+                    settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.loadsImagesAutomatically = true
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): WebResourceResponse? {
+                            val url = request?.url?.toString().orEmpty()
+                            if (url.startsWith("https://amberagent.deepread.local")) return null
+                            if (url in rendered.allowedImageUrls) return null
+                            return emptyWebResponse()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            if (request?.isForMainFrame == true) failed = true
+                        }
+                    }
+                    loadDataWithBaseURL(
+                        "https://amberagent.deepread.local/",
+                        rendered.html,
+                        "text/html",
+                        "utf-8",
+                        null,
+                    )
+                }
+            },
+            update = {},
+        )
+    }
+}
+
+private fun emptyWebResponse(): WebResourceResponse =
+    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
 
 @Composable
 private fun DeepReadConfirmation(
@@ -436,6 +535,14 @@ private fun TimelineSection(events: List<TimelineEvent>, palette: MagazinePalett
                         style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
                             .withReadingFont(fontFamily),
                     )
+                    event.imageUrl?.takeIf { it.startsWith("http") }?.let { image ->
+                        EditorialImage(
+                            imageUrl = image,
+                            caption = event.imageCaption,
+                            palette = palette,
+                            fontFamily = fontFamily,
+                        )
+                    }
                 }
             }
         }
@@ -492,8 +599,53 @@ private fun CorePointsSection(type: String, points: List<CorePoint>, palette: Ma
                             color = palette.muted,
                         )
                     }
+                    point.imageUrl?.takeIf { it.startsWith("http") }?.let { image ->
+                        EditorialImage(
+                            imageUrl = image,
+                            caption = point.imageCaption,
+                            palette = palette,
+                            fontFamily = fontFamily,
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EditorialImage(
+    imageUrl: String,
+    caption: String?,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    var failed by remember(imageUrl) { mutableStateOf(false) }
+    if (failed) return
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = caption,
+            contentScale = ContentScale.Crop,
+            onError = { failed = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(palette.surface),
+        )
+        caption?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily),
+                color = palette.muted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

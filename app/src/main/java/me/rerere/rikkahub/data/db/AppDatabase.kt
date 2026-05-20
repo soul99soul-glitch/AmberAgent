@@ -27,8 +27,10 @@ import me.rerere.rikkahub.data.db.dao.MemoryDreamPlanDAO
 import me.rerere.rikkahub.data.db.dao.MemoryEventDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppAuditLogDAO
 import me.rerere.rikkahub.data.db.dao.MiniAppDAO
 import me.rerere.rikkahub.data.db.dao.MiniAppGrantDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppSharedDataDAO
 import me.rerere.rikkahub.data.db.dao.MiniAppVersionDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
@@ -61,8 +63,10 @@ import me.rerere.rikkahub.data.db.entity.MemoryEventEntity
 import me.rerere.rikkahub.data.db.entity.MessageDayStatEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeStatEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppAuditLogEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppGrantEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppSharedDataEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppVersionEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
@@ -101,8 +105,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         MiniAppEntity::class,
         MiniAppGrantEntity::class,
         MiniAppVersionEntity::class,
+        MiniAppAuditLogEntity::class,
+        MiniAppSharedDataEntity::class,
     ],
-    version = 29,
+    version = 30,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -175,6 +181,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun miniAppGrantDao(): MiniAppGrantDAO
 
     abstract fun miniAppVersionDao(): MiniAppVersionDAO
+
+    abstract fun miniAppAuditLogDao(): MiniAppAuditLogDAO
+
+    abstract fun miniAppSharedDataDao(): MiniAppSharedDataDAO
 }
 
 object TokenUsageConverter {

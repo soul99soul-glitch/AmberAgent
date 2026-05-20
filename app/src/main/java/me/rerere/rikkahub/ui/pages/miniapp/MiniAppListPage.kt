@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -23,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.miniapp.MiniAppRepository
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
@@ -49,6 +53,11 @@ fun MiniAppListPage(
             TopAppBar(
                 title = { Text("小应用") },
                 navigationIcon = { BackButton() },
+                actions = {
+                    IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
+                        Icon(HugeIcons.Settings03, contentDescription = "小应用设置")
+                    }
+                },
             )
         }
     ) { padding ->

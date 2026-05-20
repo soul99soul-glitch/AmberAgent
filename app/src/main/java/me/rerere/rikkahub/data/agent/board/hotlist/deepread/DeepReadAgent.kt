@@ -362,6 +362,20 @@ class DeepReadAgent(
             .distinctBy { it.url }
             .take(8)
         val sourceNames = cleanedSources.mapNotNull { it.source }.distinct().take(4)
+        val imageAssets = cleanedSources
+            .flatMap { source ->
+                source.images.map { image ->
+                    DeepReadImageAsset(
+                        url = image,
+                        caption = "与「$topicTitle」相关的来源图片",
+                        source = source.source,
+                        qualityHint = "context",
+                    )
+                }
+            }
+            .filter { it.url.startsWith("http") }
+            .distinctBy { it.url }
+            .take(6)
         val summary = buildString {
             append("围绕「")
             append(topicTitle)
@@ -387,6 +401,9 @@ class DeepReadAgent(
             summary = summary,
             keyEntities = sourceNames,
             corePoints = points,
+            heroImageUrl = imageAssets.firstOrNull()?.url,
+            heroCaption = imageAssets.firstOrNull()?.caption,
+            imageAssets = imageAssets,
             analysis = DeepAnalysis(
                 coreDispute = "当前信息仍以热榜标题和可抓取摘要为主，完整背景需要等待更多稳定来源补齐。",
                 perspectives = cleanedSources.take(3).map { source ->

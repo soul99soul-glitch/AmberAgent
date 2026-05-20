@@ -4,13 +4,18 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.db.dao.MiniAppDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppAuditLogDAO
 import me.rerere.rikkahub.data.db.dao.MiniAppGrantDAO
+import me.rerere.rikkahub.data.db.dao.MiniAppSharedDataDAO
 import me.rerere.rikkahub.data.db.dao.MiniAppVersionDAO
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.entity.MiniAppAuditLogEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppGrantEntity
+import me.rerere.rikkahub.data.db.entity.MiniAppSharedDataEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppVersionEntity
 import java.security.MessageDigest
 import kotlin.uuid.Uuid
@@ -20,6 +25,8 @@ class MiniAppRepository(
     private val dao: MiniAppDAO,
     private val grantDao: MiniAppGrantDAO,
     private val versionDao: MiniAppVersionDAO,
+    private val auditLogDao: MiniAppAuditLogDAO,
+    private val sharedDataDao: MiniAppSharedDataDAO,
     private val json: Json,
 ) {
     fun observeAll(): Flow<List<MiniAppEntity>> = dao.observeAll()
@@ -87,6 +94,8 @@ class MiniAppRepository(
             dao.deleteById(id)
             grantDao.deleteForApp(id)
             versionDao.deleteForApp(id)
+            auditLogDao.deleteForApp(id)
+            sharedDataDao.deleteForApp(id)
         }
     }
 
@@ -163,6 +172,65 @@ class MiniAppRepository(
         dao.updateBoardSummary(id, summary.trim().take(500), System.currentTimeMillis())
     }
 
+    fun observeAuditLogs(appId: String, limit: Int = 100): Flow<List<MiniAppAuditLogEntity>> =
+        auditLogDao.observeForApp(appId, limit)
+
+    suspend fun audit(
+        appId: String,
+        method: String,
+        permission: MiniAppPermission,
+        summary: String,
+        payload: String,
+    ) {
+        auditLogDao.insert(
+            MiniAppAuditLogEntity(
+                id = Uuid.random().toString(),
+                appId = appId,
+                method = method,
+                permission = permission.value,
+                summary = summary.take(180),
+                payloadHash = sha256(payload),
+                createdAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    suspend fun sharedGet(appId: String, namespace: String, key: String): JsonElement? {
+        val normalized = validateSharedNamespace(appId, namespace)
+        val safeKey = validateSharedKey(key)
+        return sharedDataDao.get(normalized, safeKey)?.value?.let {
+            runCatching { json.parseToJsonElement(it) }.getOrNull()
+        }
+    }
+
+    suspend fun sharedSet(appId: String, namespace: String, key: String, value: JsonElement) {
+        val normalized = validateSharedNamespace(appId, namespace)
+        val safeKey = validateSharedKey(key)
+        val encoded = json.encodeToString(JsonElement.serializer(), value)
+        val valueBytes = encoded.encodeToByteArray().size
+        if (valueBytes > MINI_APP_SHARED_VALUE_BYTES) {
+            throw MiniAppValidationException("SharedStore value is too large")
+        }
+        val currentBytes = sharedDataDao.namespaceBytes(normalized)
+        val oldBytes = sharedDataDao.get(normalized, safeKey)?.value?.encodeToByteArray()?.size ?: 0
+        if (currentBytes - oldBytes + valueBytes > MINI_APP_SHARED_NAMESPACE_BYTES) {
+            throw MiniAppValidationException("SharedStore namespace is full")
+        }
+        sharedDataDao.upsert(
+            MiniAppSharedDataEntity(
+                namespace = normalized,
+                key = safeKey,
+                value = encoded,
+                lastWriterId = appId,
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    suspend fun sharedRemove(appId: String, namespace: String, key: String) {
+        sharedDataDao.delete(validateSharedNamespace(appId, namespace), validateSharedKey(key))
+    }
+
     fun toCardRef(entity: MiniAppEntity): MiniAppCardRef {
         val permissions = runCatching {
             json.decodeFromString<List<String>>(entity.permissionsJson)
@@ -182,5 +250,27 @@ class MiniAppRepository(
     fun sha256(input: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun validateSharedNamespace(appId: String, namespace: String): String {
+        val normalized = namespace.trim().ifBlank { appId }
+        if (normalized != appId) {
+            throw MiniAppValidationException("Cross-app SharedStore namespaces are not granted yet")
+        }
+        return normalized
+    }
+
+    private fun validateSharedKey(key: String): String {
+        val normalized = key.trim()
+        if (normalized.length !in 1..64 || !SHARED_KEY_REGEX.matches(normalized)) {
+            throw MiniAppValidationException("Invalid SharedStore key")
+        }
+        return normalized
+    }
+
+    private companion object {
+        val SHARED_KEY_REGEX = Regex("""[a-zA-Z0-9._:-]+""")
+        const val MINI_APP_SHARED_VALUE_BYTES = 32 * 1024
+        const val MINI_APP_SHARED_NAMESPACE_BYTES = 2 * 1024 * 1024
     }
 }

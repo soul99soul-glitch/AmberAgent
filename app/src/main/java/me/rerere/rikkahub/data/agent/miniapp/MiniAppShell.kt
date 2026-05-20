@@ -27,6 +27,7 @@ object MiniAppShell {
               block('indexedDB');
               try { Object.defineProperty(navigator, 'geolocation', { value: undefined, writable: false, configurable: false }); } catch (_) {}
               try { Object.defineProperty(navigator, 'mediaDevices', { value: undefined, writable: false, configurable: false }); } catch (_) {}
+              try { Object.defineProperty(navigator, 'clipboard', { value: undefined, writable: false, configurable: false }); } catch (_) {}
               const makeOfflineImage = function (label) {
                 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f3f4f6"/><stop offset="1" stop-color="#e5e7eb"/></linearGradient></defs><rect width="800" height="480" fill="url(#g)"/><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="#6b7280" font-size="28" font-family="sans-serif">' + label + '</text></svg>';
                 return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);

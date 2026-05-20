@@ -44,7 +44,7 @@ class MiniAppOutputParser(
         if (output.category !in MiniAppCategories) {
             throw MiniAppValidationException("Unsupported category: ${output.category}")
         }
-        val unknown = output.permissions.filterNot { it in MiniAppV2Permissions }
+        val unknown = output.permissions.filterNot { it in MiniAppV3Permissions }
         if (unknown.isNotEmpty()) {
             throw MiniAppValidationException("Unsupported MiniApp permissions: ${unknown.joinToString()}")
         }

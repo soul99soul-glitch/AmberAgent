@@ -2,6 +2,8 @@
   const token = window.__AMBER_MINIAPP_SESSION_TOKEN__;
   let nextId = 1;
   const pending = new Map();
+  const eventHandlers = new Map();
+  const sensorHandlers = new Map();
 
   function call(method, params, timeoutMs) {
     return new Promise(function (resolve, reject) {
@@ -32,6 +34,17 @@
       } else {
         entry.reject(new Error(response.error || 'MiniApp bridge error'));
       }
+    },
+    _emitNativeEvent: function (event) {
+      if (!event || !event.type) return;
+      if (event.type === 'eventBus') {
+        const handler = eventHandlers.get(event.subscriptionId);
+        if (handler) handler(event.payload);
+      }
+      if (event.type === 'sensor') {
+        const handler = sensorHandlers.get(event.subscriptionId);
+        if (handler) handler(event.payload);
+      }
     }
   });
 
@@ -43,13 +56,56 @@
     }),
     fetch: function (options) { return call('fetch', options || {}, 15000); },
     search: function (options) { return call('search', options || {}, 15000); },
+    ai: Object.freeze({
+      generate: function (options) { return call('ai.generate', options || {}, 65000); }
+    }),
+    sharedStore: Object.freeze({
+      get: function (options) { return call('sharedStore.get', options || {}); },
+      set: function (options) { return call('sharedStore.set', options || {}); },
+      remove: function (options) { return call('sharedStore.remove', options || {}); }
+    }),
+    eventBus: Object.freeze({
+      subscribe: async function (options, handler) {
+        const result = await call('eventBus.subscribe', options || {});
+        eventHandlers.set(result.subscriptionId, typeof handler === 'function' ? handler : function () {});
+        return Object.freeze({
+          subscriptionId: result.subscriptionId,
+          unsubscribe: function () {
+            eventHandlers.delete(result.subscriptionId);
+            return call('eventBus.unsubscribe', { subscriptionId: result.subscriptionId });
+          }
+        });
+      },
+      publish: function (options) { return call('eventBus.publish', options || {}); }
+    }),
+    launch: function (options) { return call('launch', options || {}); },
+    sensor: Object.freeze({
+      subscribe: async function (options, handler) {
+        const result = await call('sensor.subscribe', options || {});
+        sensorHandlers.set(result.subscriptionId, typeof handler === 'function' ? handler : function () {});
+        return Object.freeze({
+          subscriptionId: result.subscriptionId,
+          unsubscribe: function () {
+            sensorHandlers.delete(result.subscriptionId);
+            return call('sensor.unsubscribe', { subscriptionId: result.subscriptionId });
+          }
+        });
+      }
+    }),
+    location: Object.freeze({
+      getCurrent: function (options) { return call('location.getCurrent', options || {}); }
+    }),
     clipboard: Object.freeze({
-      copy: function (text) { return call('clipboard.copy', { text: String(text || '') }); }
+      copy: function (text) { return call('clipboard.copy', { text: String(text || '') }); },
+      read: function () { return call('clipboard.read', {}); }
     }),
     toast: function (message) { return call('toast', { message: String(message || '') }); },
     host: Object.freeze({
       getTheme: function () { return call('host.getTheme', {}); },
-      updateBoardSummary: function (summary) { return call('host.updateBoardSummary', { summary: String(summary || '') }); }
+      updateBoardSummary: function (summary) { return call('host.updateBoardSummary', { summary: String(summary || '') }); },
+      getConversationContext: function (options) { return call('host.getConversationContext', options || {}); },
+      sendToConversation: function (options) { return call('host.sendToConversation', options || {}); },
+      createArtifact: function (options) { return call('host.createArtifact', options || {}); }
     })
   });
 })();
