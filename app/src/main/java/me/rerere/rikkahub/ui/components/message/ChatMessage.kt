@@ -83,6 +83,7 @@ fun ChatMessage(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onMiniAppModify: (String) -> Boolean = { false },
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalSettings.current.displaySetting
@@ -136,6 +137,7 @@ fun ChatMessage(
                 onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
+                onMiniAppModify = onMiniAppModify,
             )
 
             message.translation?.let { translation ->

@@ -139,6 +139,7 @@ internal fun ChatListNormal(
     onOpenQueue: () -> Unit = {},
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onMiniAppModify: (String) -> Boolean = { false },
     onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
@@ -898,6 +899,7 @@ internal fun ChatListNormal(
                                         onToolAnswer = onToolAnswer,
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                        onMiniAppModify = onMiniAppModify,
                                         lastMessage = isLastMessage,
                                     )
                                 }

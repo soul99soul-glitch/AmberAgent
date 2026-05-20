@@ -85,6 +85,7 @@ internal fun MessagePartsBlock(
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onMiniAppModify: (String) -> Boolean = { false },
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
@@ -463,6 +464,7 @@ internal fun MessagePartsBlock(
                             part = part,
                             onRun = { navController.navigate(Screen.MiniAppRunner(part.appId)) },
                             onOpenList = { navController.navigate(Screen.MiniAppList) },
+                            onModify = onMiniAppModify,
                         )
                     }
 

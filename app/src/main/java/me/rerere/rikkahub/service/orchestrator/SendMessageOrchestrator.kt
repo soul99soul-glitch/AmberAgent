@@ -25,9 +25,9 @@ class SendMessageOrchestrator(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
-    ) {
-        if (content.isEmptyInputMessage()) return
+    ): Boolean {
+        if (content.isEmptyInputMessage()) return false
         analytics.logEvent("ai_send_message", null)
-        chatService.sendMessage(conversationId, content, answer, queueMode)
+        return chatService.sendMessage(conversationId, content, answer, queueMode)
     }
 }

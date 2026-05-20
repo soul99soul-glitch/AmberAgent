@@ -574,8 +574,8 @@ class ChatService(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
-    ) {
-        if (content.isEmptyInputMessage()) return
+    ): Boolean {
+        if (content.isEmptyInputMessage()) return false
 
         val session = getOrCreateSession(conversationId)
         val processedContent = userInputPreprocessor.process(content)
@@ -594,6 +594,7 @@ class ChatService(
                     conversationId = conversationId,
                     title = "消息未加入队列"
                 )
+                return false
             } else {
                 pendingMessageStore.recordEvent(
                     conversationId = conversationId,
@@ -602,10 +603,11 @@ class ChatService(
                     detail = pendingMessage.mode.name.lowercase(),
                 )
             }
-            return
+            return true
         }
 
         launchPendingMessageLoop(conversationId, pendingMessage)
+        return true
     }
 
     private fun launchPendingMessageLoop(

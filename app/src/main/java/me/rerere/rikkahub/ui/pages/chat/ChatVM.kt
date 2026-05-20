@@ -219,9 +219,7 @@ class ChatVM(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
-    ) {
-        sendMessageOrchestrator.send(_conversationId, content, answer, queueMode)
-    }
+    ): Boolean = sendMessageOrchestrator.send(_conversationId, content, answer, queueMode)
 
     fun cancelPendingUserMessage(messageId: String) {
         chatService.cancelPendingUserMessage(_conversationId, messageId)

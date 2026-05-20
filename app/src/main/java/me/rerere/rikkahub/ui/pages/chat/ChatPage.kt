@@ -761,6 +761,20 @@ private fun ChatPageContent(
                         }
                     }
                 },
+                onMiniAppModify = { instruction ->
+                    val text = instruction.trim()
+                    if (text.isEmpty()) {
+                        false
+                    } else if (currentChatModel == null) {
+                        toaster.show("请先选择模型", type = ToastType.Error)
+                        false
+                    } else {
+                        vm.handleMessageSend(
+                            content = listOf(UIMessagePart.Text(text)),
+                            queueMode = PendingUserMessageMode.FOLLOWUP,
+                        )
+                    }
+                },
                 onLoadOlderTimeline = {
                     vm.loadOlderTimelinePage()
                 },

@@ -71,6 +71,50 @@ class MiniAppRepository(
         return entity
     }
 
+    suspend fun saveRevision(
+        appId: String,
+        output: MiniAppGeneratedOutput,
+        expectedBaseVersion: Int? = null,
+        sourceMessageId: String? = null,
+        changeNote: String? = null,
+    ): MiniAppEntity? {
+        MiniAppHtmlValidator.validate(output.html)
+        val now = System.currentTimeMillis()
+        return database.withTransaction {
+            val app = dao.getById(appId) ?: return@withTransaction null
+            if (expectedBaseVersion != null && app.version != expectedBaseVersion) {
+                return@withTransaction null
+            }
+            val nextVersion = versionDao.maxVersionNumber(app.id) + 1
+            val htmlHash = sha256(output.html)
+            val updated = app.copy(
+                title = output.title.trim(),
+                description = output.description.trim(),
+                htmlContent = output.html,
+                sourceMessageId = sourceMessageId ?: app.sourceMessageId,
+                iconEmoji = output.icon?.trim()?.ifBlank { null },
+                category = output.category,
+                permissionsJson = json.encodeToString(output.permissions),
+                htmlHash = htmlHash,
+                version = nextVersion,
+                updatedAt = now,
+            )
+            dao.upsert(updated)
+            versionDao.upsert(
+                MiniAppVersionEntity(
+                    appId = updated.id,
+                    versionNumber = nextVersion,
+                    htmlContent = updated.htmlContent,
+                    htmlHash = htmlHash,
+                    changeNote = changeNote?.trim()?.take(240) ?: "MiniApp revision",
+                    createdAt = now,
+                )
+            )
+            versionDao.pruneOldVersions(updated.id, MINI_APP_VERSION_KEEP_LIMIT)
+            updated
+        }
+    }
+
     suspend fun upsert(entity: MiniAppEntity) {
         MiniAppHtmlValidator.validate(entity.htmlContent)
         database.withTransaction {

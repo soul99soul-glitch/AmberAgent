@@ -9,14 +9,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +52,7 @@ fun MiniAppChatCard(
     part: UIMessagePart.MiniApp,
     onRun: () -> Unit,
     onOpenList: () -> Unit,
+    onModify: (String) -> Boolean,
     modifier: Modifier = Modifier,
     repository: MiniAppRepository = koinInject(),
     settingsStore: SettingsAggregator = koinInject(),
@@ -61,6 +65,8 @@ fun MiniAppChatCard(
     var menuExpanded by remember { mutableStateOf(false) }
     var sourceTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
     var versionTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
+    var modifyTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
+    var modifyRequest by remember { mutableStateOf("") }
 
     fun withCurrentApp(action: (MiniAppEntity) -> Unit) {
         scope.launch {
@@ -102,8 +108,15 @@ fun MiniAppChatCard(
                 Button(onClick = onRun) {
                     Text("运行")
                 }
-                OutlinedButton(onClick = onOpenList) {
-                    Text("已保存")
+                OutlinedButton(
+                    onClick = {
+                        withCurrentApp {
+                            modifyTarget = it
+                            modifyRequest = ""
+                        }
+                    },
+                ) {
+                    Text("修改")
                 }
                 Box(
                     modifier = Modifier
@@ -131,6 +144,13 @@ fun MiniAppChatCard(
                                 },
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("打开列表") },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenList()
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text("导出 HTML") },
                             leadingIcon = { Icon(HugeIcons.Download01, contentDescription = null) },
@@ -182,4 +202,56 @@ fun MiniAppChatCard(
             },
         )
     }
+
+    modifyTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { modifyTarget = null },
+            title = { Text("修改小应用") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "基于「${target.title}」v${target.version} 继续迭代。写下你想改什么，Amber 会生成新版并写入版本历史。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = modifyRequest,
+                        onValueChange = { modifyRequest = it },
+                        placeholder = { Text("例如：把按钮改小一点，增加今日统计，并支持联网刷新新闻") },
+                        minLines = 3,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = modifyRequest.isNotBlank(),
+                    onClick = {
+                        if (onModify(target.toRevisionPrompt(modifyRequest))) {
+                            modifyTarget = null
+                            modifyRequest = ""
+                        }
+                    },
+                ) {
+                    Text("发送修改")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { modifyTarget = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
 }
+
+private fun MiniAppEntity.toRevisionPrompt(request: String): String = """
+    修改小应用
+    appId: $id
+    currentVersion: $version
+    title: $title
+
+    用户修改意见：
+    ${request.trim()}
+
+    请基于这个已保存小应用生成新版，并保留适合的能力声明。
+""".trimIndent()

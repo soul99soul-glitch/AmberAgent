@@ -175,6 +175,7 @@ fun ChatList(
     onOpenQueue: () -> Unit = {},
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onMiniAppModify: (String) -> Boolean = { false },
     onLoadOlderTimeline: suspend () -> Unit = {},
 ) {
     AnimatedContent(
@@ -229,6 +230,7 @@ fun ChatList(
                 onOpenQueue = onOpenQueue,
                 onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
+                onMiniAppModify = onMiniAppModify,
                 onLoadOlderTimeline = onLoadOlderTimeline,
             )
         }

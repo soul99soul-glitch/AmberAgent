@@ -34,16 +34,33 @@ object MiniAppOutputTransformer : OutputMessageTransformer, KoinComponent {
         val textPart = message.parts[textPartIndex] as UIMessagePart.Text
         if (!mightContainMiniApp(textPart.text)) return messages
         val output = parser.parseOrNull(textPart.text) ?: return messages
-        val entity = repository.saveGenerated(
-            output = output,
-            sourceMessageId = message.id.toString(),
-        )
+        val revisionAppId = MiniAppPromptTransformer.revisionAppId(lastUserText)
+        val revisionVersion = MiniAppPromptTransformer.revisionVersion(lastUserText)
+        val entity = if (revisionAppId != null) {
+            repository.saveRevision(
+                appId = revisionAppId,
+                output = output,
+                expectedBaseVersion = revisionVersion,
+                sourceMessageId = message.id.toString(),
+                changeNote = revisionChangeNote(lastUserText),
+            ) ?: return revisionFailed(messages, assistantIndex, message, textPartIndex, textPart)
+        } else {
+            repository.saveGenerated(
+                output = output,
+                sourceMessageId = message.id.toString(),
+            )
+        }
         val ref = repository.toCardRef(entity)
+        val statusText = if (revisionAppId != null) {
+            "已更新小应用：${entity.title} v${entity.version}"
+        } else {
+            "已生成小应用：${entity.title}"
+        }
         val updated = message.copy(
             parts = buildList {
                 message.parts.forEachIndexed { index, part ->
                     if (index == textPartIndex) {
-                        add(UIMessagePart.Text("已生成小应用：${entity.title}", metadata = textPart.metadata))
+                        add(UIMessagePart.Text(statusText, metadata = textPart.metadata))
                         add(
                             UIMessagePart.MiniApp(
                                 appId = ref.appId,
@@ -67,5 +84,38 @@ object MiniAppOutputTransformer : OutputMessageTransformer, KoinComponent {
 
     private fun mightContainMiniApp(text: String): Boolean {
         return "\"html\"" in text && "\"title\"" in text && "\"description\"" in text
+    }
+
+    private fun revisionChangeNote(text: String): String {
+        val marker = "用户修改意见："
+        return text.substringAfter(marker, text)
+            .lineSequence()
+            .takeWhile { !it.startsWith("请基于") }
+            .joinToString("\n")
+            .trim()
+            .ifBlank { "MiniApp revision" }
+            .take(240)
+    }
+
+    private fun revisionFailed(
+        messages: List<UIMessage>,
+        assistantIndex: Int,
+        message: UIMessage,
+        textPartIndex: Int,
+        textPart: UIMessagePart.Text,
+    ): List<UIMessage> {
+        val updated = message.copy(
+            parts = message.parts.mapIndexed { index, part ->
+                if (index == textPartIndex) {
+                    UIMessagePart.Text(
+                        text = "小应用更新失败：目标小应用不存在，或已经被更新。请打开最新的小应用卡片后重新点击「修改」。",
+                        metadata = textPart.metadata,
+                    )
+                } else {
+                    part
+                }
+            }
+        )
+        return messages.toMutableList().also { it[assistantIndex] = updated }
     }
 }
