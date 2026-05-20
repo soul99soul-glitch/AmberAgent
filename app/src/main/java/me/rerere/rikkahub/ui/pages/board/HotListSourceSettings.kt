@@ -19,6 +19,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderIds
 import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListFieldMapping
 import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListSourceTypes
+import me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPreset
+import me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPresets
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -41,13 +44,26 @@ fun HotListSourceSettings(
     onToggleCustom: (HotListSourceEntity) -> Unit,
     onDeleteCustom: (HotListSourceEntity) -> Unit,
     onSaveCustom: (CustomHotListSourceDraft) -> Unit,
+    onAddNewsNowPresets: (List<NewsNowPreset>) -> Unit,
 ) {
     var showDialog by rememberSaveable { mutableStateOf(false) }
+    var showNewsNowDialog by rememberSaveable { mutableStateOf(false) }
+    val existingNewsNowIds = remember(customSources) {
+        customSources.asSequence()
+            .filter { it.id.startsWith(NewsNowPresets.ID_PREFIX) }
+            .map { it.id.removePrefix(NewsNowPresets.ID_PREFIX) }
+            .toSet()
+    }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("数据源", style = MaterialTheme.typography.titleSmall)
-            TextButton(onClick = { showDialog = true }) {
-                Text("+ 自定义")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { showNewsNowDialog = true }) {
+                    Text("+ NewsNow")
+                }
+                TextButton(onClick = { showDialog = true }) {
+                    Text("+ 自定义")
+                }
             }
         }
         HOT_LIST_SOURCE_OPTIONS.chunked(2).forEach { row ->
@@ -100,6 +116,76 @@ fun HotListSourceSettings(
             },
         )
     }
+    if (showNewsNowDialog) {
+        NewsNowPresetDialog(
+            existingIds = existingNewsNowIds,
+            onDismiss = { showNewsNowDialog = false },
+            onConfirm = { selected ->
+                onAddNewsNowPresets(selected)
+                showNewsNowDialog = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NewsNowPresetDialog(
+    existingIds: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<NewsNowPreset>) -> Unit,
+) {
+    var selectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+    val confirmable = selectedIds.isNotEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("一键添加 NewsNow 源") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "通过 newsnow.busiyi.world 聚合接入第三方热榜（知乎、微博、抖音等），保存后会作为自定义 JSON 源参与下次刷新。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspaceColors().muted,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NewsNowPresets.ALL.forEach { preset ->
+                        val alreadyAdded = preset.id in existingIds
+                        val checked = preset.id in selectedIds
+                        SourceChip(
+                            selected = checked || alreadyAdded,
+                            label = if (alreadyAdded) "${preset.displayName} ·已加" else preset.displayName,
+                            onClick = {
+                                if (!alreadyAdded) {
+                                    selectedIds = if (checked) selectedIds - preset.id else selectedIds + preset.id
+                                }
+                            },
+                        )
+                    }
+                }
+                Text(
+                    "已加入的源不会重复添加；如需调整请到下方的「自定义源」开关或删除。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspaceColors().muted,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = confirmable,
+                onClick = {
+                    val picked = NewsNowPresets.ALL.filter { it.id in selectedIds && it.id !in existingIds }
+                    onConfirm(picked)
+                },
+            ) {
+                Text("添加 ${selectedIds.size} 个")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

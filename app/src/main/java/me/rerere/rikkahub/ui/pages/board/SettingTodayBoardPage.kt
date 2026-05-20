@@ -181,6 +181,24 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
         }
     }
 
+    fun addNewsNowPresets(presets: List<me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPreset>) {
+        if (presets.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val baseOrder = (customHotListSources.maxOfOrNull { it.sortOrder } ?: 0) + 1
+        scope.launch {
+            presets.forEachIndexed { index, preset ->
+                hotListRepository.upsertSource(
+                    me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPresets.entityFor(
+                        preset = preset,
+                        now = now,
+                        sortOrder = baseOrder + index,
+                    )
+                )
+            }
+            hotListScheduler.runOnce()
+        }
+    }
+
     fun toggleCustomHotListSource(source: HotListSourceEntity) {
         scope.launch {
             hotListRepository.upsertSource(source.copy(enabled = !source.enabled, updatedAt = System.currentTimeMillis()))
@@ -242,6 +260,7 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                         },
                         onToggleCustom = ::toggleCustomHotListSource,
                         onDeleteCustom = ::deleteCustomHotListSource,
+                        onAddNewsNowPresets = ::addNewsNowPresets,
                         onSaveCustom = ::saveCustomHotListSource,
                     )
                     ExperimentDivider()
