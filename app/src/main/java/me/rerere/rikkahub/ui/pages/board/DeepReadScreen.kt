@@ -61,16 +61,24 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
 import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
+import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.isComplete
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.errorOf
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.hasAnyReadySection
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.withInferredSectionStates
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
@@ -88,6 +96,7 @@ import java.io.File
 fun DeepReadScreen(topicId: String, title: String) {
     val agent: DeepReadAgent = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
+    val hotListRepository: HotListRepository = koinInject()
     val fontRepository: SlidesFontRepository = koinInject()
     val templateRepository: DeepReadTemplateRepository = koinInject()
     val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
@@ -106,48 +115,47 @@ fun DeepReadScreen(topicId: String, title: String) {
         fontPackId = board.boardReadingFontPackId,
         fontStates = fontStates,
     )
-    var loading by remember { mutableStateOf(true) }
-    var generating by remember { mutableStateOf(false) }
-    var generationStage by remember { mutableStateOf(DeepReadGenerationStage.OVERVIEW) }
-    var output by remember { mutableStateOf<DeepReadOutput?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+
+    val outputFlow = remember(topicId) {
+        hotListRepository.observeDeepRead(topicId).map { it?.withInferredSectionStates() }
+    }
+    val output by outputFlow.collectAsStateWithLifecycle(initialValue = null)
+    var runError by remember(topicId) { mutableStateOf<String?>(null) }
+    var fullRunInFlight by remember(topicId) { mutableStateOf(false) }
+    var retryingStages by remember(topicId) { mutableStateOf<Set<DeepReadGenerationStage>>(emptySet()) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    fun run(force: Boolean = false) {
+    val anySectionRunning = output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
+    val generating = fullRunInFlight || anySectionRunning || retryingStages.isNotEmpty()
+    val complete = output?.isComplete() == true
+
+    fun runAll(force: Boolean = false) {
         if (!confirmed) return
-        loading = true
-        generating = true
-        generationStage = DeepReadGenerationStage.OVERVIEW
-        error = null
+        if (fullRunInFlight) return
+        fullRunInFlight = true
+        runError = null
         scope.launch {
-            val result = agent.run(
-                topicId = topicId,
-                topicTitle = title,
-                force = force,
-                onProgress = { stage, partial ->
-                    generationStage = stage
-                    if (partial != null) {
-                        output = partial
-                        loading = false
-                    }
-                },
-            )
-            output = result.getOrNull() ?: output
-            error = result.exceptionOrNull()?.message
-            loading = false
-            generating = false
+            val result = agent.run(topicId = topicId, topicTitle = title, force = force)
+            runError = result.exceptionOrNull()?.message
+            fullRunInFlight = false
+        }
+    }
+
+    fun runOne(stage: DeepReadGenerationStage) {
+        if (stage in retryingStages) return
+        retryingStages = retryingStages + stage
+        scope.launch {
+            try {
+                agent.runSection(topicId = topicId, topicTitle = title, stage = stage)
+            } finally {
+                retryingStages = retryingStages - stage
+            }
         }
     }
 
     LaunchedEffect(topicId, confirmed) {
-        if (confirmed) {
-            run(force = false)
-        } else {
-            loading = false
-            output = null
-            error = null
-        }
+        if (confirmed) runAll(force = false)
     }
 
     LaunchedEffect(Unit) {
@@ -155,6 +163,11 @@ fun DeepReadScreen(topicId: String, title: String) {
     }
 
     val palette = magazinePalette()
+    val customTemplate = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
+    val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
+        customTemplate == null
+    val templateSelected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
+
     Box(Modifier.fillMaxSize().background(palette.background)) {
         when {
             !confirmed -> DeepReadConfirmation(
@@ -175,20 +188,36 @@ fun DeepReadScreen(topicId: String, title: String) {
                     }
                 },
             )
-            loading && output == null -> DeepReadLoading(
-                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
-                palette = palette,
-                stage = generationStage,
-            )
-            output != null -> {
-                val customTemplate = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
-                val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
-                    customTemplate == null
-                if (board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null) {
-                    Box(Modifier.fillMaxSize()) {
+
+            // Nothing usable yet — only initial fetch banner before first section persists.
+            output == null || !output!!.hasAnyReadySection() -> {
+                val firstFailureMessage = output?.sectionStates
+                    ?.values
+                    ?.firstOrNull { it.status == DeepReadSectionStatus.FAILED }
+                    ?.errorMessage
+                val displayError = runError ?: firstFailureMessage?.takeIf { !generating }
+                if (displayError != null) {
+                    DeepReadError(
+                        error = displayError,
+                        modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                        onRetry = { runAll(force = true) },
+                    )
+                } else {
+                    DeepReadLoading(
+                        modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                        palette = palette,
+                        output = output,
+                    )
+                }
+            }
+
+            else -> {
+                val data = output!!
+                Box(Modifier.fillMaxSize()) {
+                    if (complete && templateSelected) {
                         DeepReadTemplateArticle(
                             title = title,
-                            output = output!!,
+                            output = data,
                             palette = palette,
                             fontCss = templateFontCss,
                             customTemplateHtml = customTemplate?.html,
@@ -196,107 +225,65 @@ fun DeepReadScreen(topicId: String, title: String) {
                             fallback = {
                                 DeepReadArticle(
                                     title = title,
-                                    output = output!!,
+                                    output = data,
                                     palette = palette,
                                     fontFamily = readingFontFamily,
                                     listState = listState,
+                                    onRetrySection = ::runOne,
                                 )
                             },
                         )
-                        DeepReadGenerationOverlay(
-                            generating = generating,
-                            error = error,
-                            stage = generationStage,
-                            onRetry = { run(force = true) },
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .statusBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 10.dp),
-                        )
-                    }
-                } else if (selectedCustomMissing || invalidTemplateCount > 0) {
-                    Box(Modifier.fillMaxSize()) {
+                    } else {
                         DeepReadArticle(
                             title = title,
-                            output = output!!,
+                            output = data,
                             palette = palette,
                             fontFamily = readingFontFamily,
                             listState = listState,
+                            onRetrySection = ::runOne,
                         )
-                        TemplateFallbackNotice(
-                            message = if (selectedCustomMissing) {
-                                "模板不可用，已回退默认排版"
-                            } else {
-                                "$invalidTemplateCount 个模板不可用，已回退默认排版"
-                            },
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .statusBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 10.dp),
-                        )
-                        if (generating) {
-                            DeepReadProgressNotice(
-                                stage = generationStage,
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 18.dp, vertical = 52.dp),
-                            )
-                        }
-                        if (error != null) {
-                            DeepReadPartialErrorNotice(
-                                error = error.orEmpty(),
-                                onRetry = { run(force = true) },
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 18.dp, vertical = 52.dp),
-                            )
-                        }
                     }
-                } else {
-                    Box(Modifier.fillMaxSize()) {
-                        DeepReadArticle(
-                            title = title,
-                            output = output!!,
-                            palette = palette,
-                            fontFamily = readingFontFamily,
-                            listState = listState,
+
+                    val noticeModifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
+
+                    when {
+                        selectedCustomMissing -> TemplateFallbackNotice(
+                            message = "模板不可用，已回退默认排版",
+                            modifier = noticeModifier,
                         )
-                        DeepReadGenerationOverlay(
-                            generating = generating,
-                            error = error,
-                            stage = generationStage,
-                            onRetry = { run(force = true) },
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .statusBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        invalidTemplateCount > 0 && !templateSelected -> TemplateFallbackNotice(
+                            message = "$invalidTemplateCount 个模板不可用，已回退默认排版",
+                            modifier = noticeModifier,
+                        )
+                        generating -> RunningStageNotice(
+                            stages = data.sectionStates,
+                            modifier = noticeModifier,
+                        )
+                        runError != null && !complete -> DeepReadPartialErrorNotice(
+                            error = runError.orEmpty(),
+                            onRetry = { runAll(force = true) },
+                            modifier = noticeModifier,
                         )
                     }
                 }
             }
-            error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
         }
     }
 }
 
 @Composable
-private fun DeepReadGenerationOverlay(
-    generating: Boolean,
-    error: String?,
-    stage: DeepReadGenerationStage,
-    onRetry: () -> Unit,
+private fun RunningStageNotice(
+    stages: Map<DeepReadGenerationStage, me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState>,
     modifier: Modifier = Modifier,
 ) {
-    when {
-        error != null -> DeepReadPartialErrorNotice(error = error, onRetry = onRetry, modifier = modifier)
-        generating -> DeepReadProgressNotice(stage = stage, modifier = modifier)
-    }
-}
-
-@Composable
-private fun DeepReadProgressNotice(stage: DeepReadGenerationStage, modifier: Modifier = Modifier) {
+    val activeStage = DeepReadGenerationStage.entries.firstOrNull { stage ->
+        stages[stage]?.status == DeepReadSectionStatus.RUNNING
+    } ?: DeepReadGenerationStage.entries.firstOrNull { stage ->
+        stages[stage]?.status != DeepReadSectionStatus.READY
+    } ?: return
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(50),
@@ -304,7 +291,7 @@ private fun DeepReadProgressNotice(stage: DeepReadGenerationStage, modifier: Mod
         shadowElevation = 4.dp,
     ) {
         Text(
-            "正在生成：${stage.label}",
+            "正在生成：${activeStage.label}",
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
@@ -511,6 +498,7 @@ private fun DeepReadArticle(
     palette: MagazinePalette,
     fontFamily: FontFamily?,
     listState: androidx.compose.foundation.lazy.LazyListState,
+    onRetrySection: (DeepReadGenerationStage) -> Unit,
 ) {
     val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
     LazyColumn(
@@ -527,37 +515,347 @@ private fun DeepReadArticle(
         verticalArrangement = Arrangement.spacedBy(48.dp),
     ) {
         item {
-            MagazineHero(
+            MagazineHeroFrame(
                 title = title,
                 output = output,
+                status = output.statusOf(DeepReadGenerationStage.OVERVIEW),
+                errorMessage = output.errorOf(DeepReadGenerationStage.OVERVIEW),
+                onRetry = { onRetrySection(DeepReadGenerationStage.OVERVIEW) },
                 palette = palette,
                 fontFamily = fontFamily,
             )
         }
 
-        output.timeline?.takeIf { it.isNotEmpty() }?.let { timeline ->
-            item { ArticleInset { TimelineSection(timeline, verifiedImageUrls, palette, fontFamily) } }
-        }
-
-        output.corePoints?.takeIf { it.isNotEmpty() }?.let { points ->
-            item {
-                ArticleInset {
-                    CorePointsSection(
-                        type = output.topicType,
-                        points = points,
-                        verifiedImageUrls = verifiedImageUrls,
-                        palette = palette,
-                        fontFamily = fontFamily,
-                    )
-                }
+        item {
+            ArticleInset {
+                NarrativeFrame(
+                    output = output,
+                    verifiedImageUrls = verifiedImageUrls,
+                    status = output.statusOf(DeepReadGenerationStage.NARRATIVE),
+                    errorMessage = output.errorOf(DeepReadGenerationStage.NARRATIVE),
+                    onRetry = { onRetrySection(DeepReadGenerationStage.NARRATIVE) },
+                    palette = palette,
+                    fontFamily = fontFamily,
+                )
             }
         }
 
-        item { ArticleInset { AnalysisSection(output.analysis, palette, fontFamily) } }
-
-        if (output.extendedReading.isNotEmpty()) {
-            item { ArticleInset { ReadingSection(output.extendedReading, palette, fontFamily) } }
+        item {
+            ArticleInset {
+                AnalysisFrame(
+                    analysis = output.analysis,
+                    status = output.statusOf(DeepReadGenerationStage.ANALYSIS),
+                    errorMessage = output.errorOf(DeepReadGenerationStage.ANALYSIS),
+                    onRetry = { onRetrySection(DeepReadGenerationStage.ANALYSIS) },
+                    palette = palette,
+                    fontFamily = fontFamily,
+                )
+            }
         }
+
+        item {
+            ArticleInset {
+                ReadingFrame(
+                    links = output.extendedReading,
+                    status = output.statusOf(DeepReadGenerationStage.EXTENDED_READING),
+                    errorMessage = output.errorOf(DeepReadGenerationStage.EXTENDED_READING),
+                    onRetry = { onRetrySection(DeepReadGenerationStage.EXTENDED_READING) },
+                    palette = palette,
+                    fontFamily = fontFamily,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MagazineHeroFrame(
+    title: String,
+    output: DeepReadOutput,
+    status: DeepReadSectionStatus,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    when (status) {
+        DeepReadSectionStatus.READY -> MagazineHero(
+            title = title,
+            output = output,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+        DeepReadSectionStatus.RUNNING -> HeroSkeleton(
+            title = title,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+        DeepReadSectionStatus.FAILED -> SectionErrorCard(
+            label = "概览生成失败",
+            errorMessage = errorMessage,
+            onRetry = onRetry,
+            palette = palette,
+            fontFamily = fontFamily,
+            modifier = Modifier.padding(horizontal = 30.dp, vertical = 36.dp),
+        )
+        DeepReadSectionStatus.PENDING -> SectionPlaceholder(
+            label = "概览待生成",
+            palette = palette,
+            modifier = Modifier.padding(horizontal = 30.dp, vertical = 36.dp),
+        )
+    }
+}
+
+@Composable
+private fun NarrativeFrame(
+    output: DeepReadOutput,
+    verifiedImageUrls: Set<String>,
+    status: DeepReadSectionStatus,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    when (status) {
+        DeepReadSectionStatus.READY -> Column(verticalArrangement = Arrangement.spacedBy(40.dp)) {
+            output.timeline?.takeIf { it.isNotEmpty() }?.let { timeline ->
+                TimelineSection(timeline, verifiedImageUrls, palette, fontFamily)
+            }
+            output.corePoints?.takeIf { it.isNotEmpty() }?.let { points ->
+                CorePointsSection(
+                    type = output.topicType,
+                    points = points,
+                    verifiedImageUrls = verifiedImageUrls,
+                    palette = palette,
+                    fontFamily = fontFamily,
+                )
+            }
+        }
+        DeepReadSectionStatus.RUNNING -> SectionSkeleton(
+            label = "时间轴叙事",
+            palette = palette,
+            fontFamily = fontFamily,
+            lineCount = 4,
+        )
+        DeepReadSectionStatus.FAILED -> SectionErrorCard(
+            label = "时间轴叙事生成失败",
+            errorMessage = errorMessage,
+            onRetry = onRetry,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+        DeepReadSectionStatus.PENDING -> SectionPlaceholder(
+            label = "时间轴叙事待生成",
+            palette = palette,
+        )
+    }
+}
+
+@Composable
+private fun AnalysisFrame(
+    analysis: DeepAnalysis,
+    status: DeepReadSectionStatus,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    when (status) {
+        DeepReadSectionStatus.READY -> AnalysisSection(analysis, palette, fontFamily)
+        DeepReadSectionStatus.RUNNING -> SectionSkeleton(
+            label = "深度分析",
+            palette = palette,
+            fontFamily = fontFamily,
+            lineCount = 3,
+        )
+        DeepReadSectionStatus.FAILED -> SectionErrorCard(
+            label = "深度分析生成失败",
+            errorMessage = errorMessage,
+            onRetry = onRetry,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+        DeepReadSectionStatus.PENDING -> SectionPlaceholder(
+            label = "深度分析待生成",
+            palette = palette,
+        )
+    }
+}
+
+@Composable
+private fun ReadingFrame(
+    links: List<ReadingLink>,
+    status: DeepReadSectionStatus,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    when (status) {
+        DeepReadSectionStatus.READY -> if (links.isNotEmpty()) {
+            ReadingSection(links, palette, fontFamily)
+        } else {
+            SectionPlaceholder(label = "暂无扩展阅读", palette = palette)
+        }
+        DeepReadSectionStatus.RUNNING -> SectionSkeleton(
+            label = "扩展阅读",
+            palette = palette,
+            fontFamily = fontFamily,
+            lineCount = 3,
+        )
+        DeepReadSectionStatus.FAILED -> SectionErrorCard(
+            label = "扩展阅读生成失败",
+            errorMessage = errorMessage,
+            onRetry = onRetry,
+            palette = palette,
+            fontFamily = fontFamily,
+        )
+        DeepReadSectionStatus.PENDING -> SectionPlaceholder(
+            label = "扩展阅读待生成",
+            palette = palette,
+        )
+    }
+}
+
+@Composable
+private fun HeroSkeleton(
+    title: String,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 30.dp, top = 36.dp, end = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Text(
+            "DEEP READ",
+            style = MaterialTheme.typography.labelSmall.copy(
+                letterSpacing = 3.2.sp,
+                fontWeight = FontWeight.Light,
+                color = palette.accent,
+            ),
+        )
+        Spacer(
+            Modifier
+                .width(126.dp)
+                .height(1.dp)
+                .background(palette.line),
+        )
+        Text(
+            title,
+            style = MaterialTheme.typography.displayMedium.copy(
+                fontWeight = FontWeight.Light,
+                lineHeight = 52.sp,
+                color = palette.ink,
+            ).withReadingFont(fontFamily),
+        )
+        SkeletonLine(palette = palette, widthFraction = 1f)
+        SkeletonLine(palette = palette, widthFraction = 0.92f)
+        SkeletonLine(palette = palette, widthFraction = 0.75f)
+        Text(
+            "正在写入概览…",
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.muted,
+        )
+    }
+}
+
+@Composable
+private fun SectionSkeleton(
+    label: String,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+    lineCount: Int = 3,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionKicker(label, palette)
+        repeat(lineCount) { index ->
+            val fraction = when (index) {
+                lineCount - 1 -> 0.6f
+                else -> 0.94f - index * 0.05f
+            }
+            SkeletonLine(palette = palette, widthFraction = fraction)
+        }
+        Text(
+            "正在写入${label}…",
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.muted,
+        )
+    }
+}
+
+@Composable
+private fun SkeletonLine(palette: MagazinePalette, widthFraction: Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(widthFraction)
+            .height(14.dp)
+            .background(palette.surface, RoundedCornerShape(7.dp)),
+    )
+}
+
+@Composable
+private fun SectionErrorCard(
+    label: String,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall.withReadingFont(fontFamily),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            if (!errorMessage.isNullOrBlank()) {
+                Text(
+                    errorMessage,
+                    style = MaterialTheme.typography.bodySmall.withReadingFont(fontFamily),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Button(
+                onClick = onRetry,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                Text("仅重试这一段")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionPlaceholder(
+    label: String,
+    palette: MagazinePalette,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = palette.surface.copy(alpha = 0.5f),
+    ) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.muted,
+        )
     }
 }
 
@@ -1107,11 +1405,16 @@ private fun SectionKicker(text: String, palette: MagazinePalette) {
 private fun DeepReadLoading(
     modifier: Modifier,
     palette: MagazinePalette,
-    stage: DeepReadGenerationStage,
+    output: DeepReadOutput?,
 ) {
     val stages = remember { DeepReadGenerationStage.entries }
-    val activeStage = stages.indexOf(stage).coerceAtLeast(0)
-    val progress = ((activeStage + 1).toFloat() / stages.size).coerceIn(0.18f, 0.92f)
+    val states = output?.sectionStates.orEmpty()
+    val readyCount = stages.count { states[it]?.status == DeepReadSectionStatus.READY }
+    val activeStage = stages.firstOrNull { states[it]?.status == DeepReadSectionStatus.RUNNING }
+        ?: stages.firstOrNull { (states[it]?.status ?: DeepReadSectionStatus.PENDING) != DeepReadSectionStatus.READY }
+        ?: stages.first()
+    val activeIndex = stages.indexOf(activeStage).coerceAtLeast(0)
+    val progress = ((readyCount + 0.4f) / stages.size).coerceIn(0.12f, 0.92f)
     Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.padding(horizontal = 38.dp),
@@ -1128,12 +1431,15 @@ private fun DeepReadLoading(
             )
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 stages.forEachIndexed { index, stage ->
-                    val active = index == activeStage
-                    val done = index < activeStage
+                    val status = states[stage]?.status ?: DeepReadSectionStatus.PENDING
+                    val active = stage == activeStage
+                    val done = status == DeepReadSectionStatus.READY
+                    val failed = status == DeepReadSectionStatus.FAILED
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         color = when {
+                            failed -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
                             active -> palette.surface
                             done -> palette.surface.copy(alpha = 0.72f)
                             else -> palette.surface.copy(alpha = 0.44f)
@@ -1145,16 +1451,17 @@ private fun DeepReadLoading(
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            TimelineMarker(highlight = index <= activeStage, palette = palette)
+                            TimelineMarker(highlight = done || active, palette = palette)
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     when {
                                         done -> "${stage.label} · 已写入"
+                                        failed -> "${stage.label} · 失败"
                                         active -> "${stage.label} · 正在写入"
                                         else -> "${stage.label} · 排队中"
                                     },
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light),
-                                    color = if (index <= activeStage) palette.ink else palette.muted,
+                                    color = if (done || active) palette.ink else palette.muted,
                                 )
                                 Text(
                                     when (index) {

@@ -7,6 +7,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -40,94 +42,183 @@ class DeepReadAgent(
     private val json: Json,
     private val client: OkHttpClient,
 ) {
+    private val topicMutexes = mutableMapOf<String, Mutex>()
+    private val mutexRegistryLock = Any()
+
+    private fun mutexFor(topicId: String): Mutex = synchronized(mutexRegistryLock) {
+        topicMutexes.getOrPut(topicId) { Mutex() }
+    }
+
     suspend fun run(
         topicId: String,
         topicTitle: String,
         force: Boolean = false,
-        onProgress: (DeepReadGenerationStage, DeepReadOutput?) -> Unit = { _, _ -> },
+    ): Result<DeepReadOutput> = mutexFor(topicId).withLock {
+        runUnlocked(topicId, topicTitle, force)
+    }
+
+    suspend fun runSection(
+        topicId: String,
+        topicTitle: String,
+        stage: DeepReadGenerationStage,
+    ): Result<DeepReadOutput> = mutexFor(topicId).withLock {
+        runSectionUnlocked(topicId, topicTitle, stage)
+    }
+
+    private suspend fun runUnlocked(
+        topicId: String,
+        topicTitle: String,
+        force: Boolean,
     ): Result<DeepReadOutput> {
         val seedSources = hotListRepository.getHotTopic(topicId)
             ?.sources
-                .orEmpty()
-                .toDeepReadSources(topicTitle)
-        if (!force) {
-            hotListRepository.getFreshDeepRead(topicId, title = topicTitle)?.let { cached ->
-                val sanitized = DeepReadSanitizer.sanitize(cached, seedSources, topicTitle)
-                if (sanitized.generationComplete && sanitized.hasReadableArticle() && sanitized.hasEnoughChinese()) {
-                    return Result.success(sanitized)
-                }
-                Log.i(TAG, "ignored cached deep read because it no longer passes quality gates")
-            }
+            .orEmpty()
+            .toDeepReadSources(topicTitle)
+
+        val starting = if (force) {
+            hotListRepository.clearDeepRead(topicId)
+            DeepReadOutput()
+        } else {
+            hotListRepository.getFreshDeepRead(topicId, title = topicTitle)
+                ?.let { DeepReadSanitizer.sanitize(it, seedSources, topicTitle) }
+                ?.withInferredSectionStates()
+                ?: DeepReadOutput()
+        }
+        if (!force && starting.isComplete()) {
+            return Result.success(starting)
         }
 
         val settings = settingsStore.settingsFlow.value
-        onProgress(DeepReadGenerationStage.OVERVIEW, null)
         val sources = collectSources(settings, topicTitle, seedSources)
         if (sources.isEmpty()) {
-            return Result.failure(IllegalStateException("没有抓到足够的正文来源，无法生成合格深度阅读。请检查搜索源或稍后重试。"))
+            val message = "没有抓到足够的正文来源，无法生成深度阅读。请检查搜索源或稍后重试。"
+            val firstPending = DeepReadGenerationStage.entries
+                .firstOrNull { starting.statusOf(it) != DeepReadSectionStatus.READY }
+                ?: DeepReadGenerationStage.OVERVIEW
+            val marked = starting.withSectionStatus(firstPending, DeepReadSectionStatus.FAILED, message)
+            hotListRepository.saveDeepRead(topicId, topicTitle, marked)
+            return Result.failure(IllegalStateException(message))
         }
 
-        var output: DeepReadOutput? = null
+        var output = starting
+        var firstFailure: Throwable? = null
         DeepReadGenerationStage.entries.forEach { stage ->
-            onProgress(stage, output)
-            val previousJson = output?.let { json.encodeToString(it) }
-            val raw = callStageModel(
+            if (output.statusOf(stage) == DeepReadSectionStatus.READY) return@forEach
+            val stageResult = runStage(
                 settings = settings,
+                topicId = topicId,
                 topicTitle = topicTitle,
                 sources = sources,
                 stage = stage,
-                previousJson = previousJson,
-            ) ?: return Result.failure(
-                IllegalStateException(
-                    if (output == null) {
-                        lastCallFailureReason ?: "深度阅读生成失败，请稍后重试"
-                    } else {
-                        "${stage.label}生成中断，已保留前面生成的段落，可重试重新生成。"
-                    }
-                )
+                existing = output,
             )
-            val parsed = DeepReadOutputParser.parse(raw, json)
-                ?: repairJson(settings, topicTitle, raw)
-                ?: return Result.failure(
-                    IllegalStateException(
-                        if (output == null) {
-                            "模型输出格式不稳定，未能解析为深度阅读正文。请重试或切换模型。"
-                        } else {
-                            "${stage.label}输出格式不稳定，已保留前面生成的段落，可重试重新生成。"
-                        }
-                    )
-                )
-            output = DeepReadSanitizer.sanitize(output.mergeWith(parsed), sources, topicTitle)
-                .copy(generationComplete = stage == DeepReadGenerationStage.EXTENDED_READING)
-            savePartialIfUsable(topicId, topicTitle, output)
-            onProgress(stage, output)
+            when (stageResult) {
+                is StageOutcome.Success -> output = stageResult.output
+                is StageOutcome.Failure -> {
+                    output = stageResult.output
+                    if (firstFailure == null) firstFailure = IllegalStateException(stageResult.message)
+                }
+            }
         }
 
-        var finalOutput = output ?: return Result.failure(IllegalStateException("深度阅读生成失败，请稍后重试"))
-        finalOutput = finalOutput.copy(generationComplete = true)
-        if (!finalOutput.hasReadableArticle()) {
-            return Result.failure(IllegalStateException("模型没有生成可用的深度阅读正文，请重试或切换模型。"))
+        val failure = firstFailure
+        if (failure != null) {
+            return Result.failure(failure)
         }
-        if (!finalOutput.hasEnoughChinese()) {
-            finalOutput = repairChinese(settings, topicTitle, sources, finalOutput)
-                ?: return Result.failure(IllegalStateException("模型输出中文深读质量不足，未通过中文化修复。请重试或切换模型。"))
+
+        // Best-effort Chinese repair only when all sections READY but content is mostly English.
+        if (output.isComplete() && !output.hasEnoughChinese()) {
+            repairChinese(settings, topicTitle, sources, output)?.let { repaired ->
+                val finalized = repaired.copy(sectionStates = output.sectionStates)
+                    .let { it.copy(generationComplete = it.isComplete()) }
+                hotListRepository.saveDeepRead(topicId, topicTitle, finalized)
+                output = finalized
+            }
         }
-        if (!finalOutput.hasReadableArticle()) {
-            return Result.failure(IllegalStateException("深度阅读内容不足，请稍后重试"))
-        }
-        hotListRepository.saveDeepRead(topicId, topicTitle, finalOutput)
-        return Result.success(finalOutput)
+
+        return Result.success(output)
     }
 
-    private suspend fun savePartialIfUsable(
+    private suspend fun runSectionUnlocked(
         topicId: String,
         topicTitle: String,
-        output: DeepReadOutput?,
-    ) {
-        if (output == null) return
-        if (!output.hasReadableArticle() || !output.hasEnoughChinese()) return
-        hotListRepository.saveDeepRead(topicId, topicTitle, output)
+        stage: DeepReadGenerationStage,
+    ): Result<DeepReadOutput> {
+        val seedSources = hotListRepository.getHotTopic(topicId)
+            ?.sources
+            .orEmpty()
+            .toDeepReadSources(topicTitle)
+        val current = hotListRepository.getFreshDeepRead(topicId, title = topicTitle)
+            ?.let { DeepReadSanitizer.sanitize(it, seedSources, topicTitle) }
+            ?.withInferredSectionStates()
+            ?: DeepReadOutput()
+        val settings = settingsStore.settingsFlow.value
+        val sources = collectSources(settings, topicTitle, seedSources)
+        if (sources.isEmpty()) {
+            val message = "没有抓到足够的正文来源，无法重试该段。"
+            val marked = current.withSectionStatus(stage, DeepReadSectionStatus.FAILED, message)
+            hotListRepository.saveDeepRead(topicId, topicTitle, marked)
+            return Result.failure(IllegalStateException(message))
+        }
+        return when (val outcome = runStage(settings, topicId, topicTitle, sources, stage, current)) {
+            is StageOutcome.Success -> Result.success(outcome.output)
+            is StageOutcome.Failure -> Result.failure(IllegalStateException(outcome.message))
+        }
     }
+
+    private suspend fun runStage(
+        settings: Settings,
+        topicId: String,
+        topicTitle: String,
+        sources: List<DeepReadSource>,
+        stage: DeepReadGenerationStage,
+        existing: DeepReadOutput,
+    ): StageOutcome {
+        val running = existing.withSectionStatus(stage, DeepReadSectionStatus.RUNNING)
+        hotListRepository.saveDeepRead(topicId, topicTitle, running)
+
+        val previousJson = if (existing.hasAnyReadySection()) {
+            json.encodeToString(existing.copy(sectionStates = emptyMap(), generationComplete = false))
+        } else {
+            null
+        }
+        val callOutcome = callStageModel(
+            settings = settings,
+            topicTitle = topicTitle,
+            sources = sources,
+            stage = stage,
+            previousJson = previousJson,
+        )
+        if (callOutcome.raw == null) {
+            val message = callOutcome.errorMessage ?: "${stage.label}生成失败，请稍后重试。"
+            val failed = existing.withSectionStatus(stage, DeepReadSectionStatus.FAILED, message)
+            hotListRepository.saveDeepRead(topicId, topicTitle, failed)
+            return StageOutcome.Failure(failed, message)
+        }
+
+        val raw = callOutcome.raw
+        val parsed = DeepReadOutputParser.parse(raw, json)
+            ?: repairJson(settings, topicTitle, raw)
+        if (parsed == null) {
+            val message = "${stage.label}输出格式不稳定，请重试或切换模型。"
+            val failed = existing.withSectionStatus(stage, DeepReadSectionStatus.FAILED, message)
+            hotListRepository.saveDeepRead(topicId, topicTitle, failed)
+            return StageOutcome.Failure(failed, message)
+        }
+
+        val merged = DeepReadSanitizer.sanitize(existing.mergeWith(parsed), sources, topicTitle)
+            .withSectionStatus(stage, DeepReadSectionStatus.READY)
+        hotListRepository.saveDeepRead(topicId, topicTitle, merged)
+        return StageOutcome.Success(merged)
+    }
+
+    private sealed interface StageOutcome {
+        val output: DeepReadOutput
+        data class Success(override val output: DeepReadOutput) : StageOutcome
+        data class Failure(override val output: DeepReadOutput, val message: String) : StageOutcome
+    }
+
+    private data class StageCallResult(val raw: String?, val errorMessage: String?)
 
     private suspend fun collectSources(
         settings: Settings,
@@ -371,15 +462,13 @@ class DeepReadAgent(
             }
         }
 
-    private var lastCallFailureReason: String? = null
-
     private suspend fun callStageModel(
         settings: Settings,
         topicTitle: String,
         sources: List<DeepReadSource>,
         stage: DeepReadGenerationStage,
         previousJson: String?,
-    ): String? {
+    ): StageCallResult {
         val prompt = DeepReadPrompt.buildStage(
             topicTitle = topicTitle,
             sources = sources,
@@ -387,12 +476,12 @@ class DeepReadAgent(
             previousJson = previousJson,
         )
         Log.i(TAG, "deep read stage ${stage.name} start sources=${sources.size} promptChars=${prompt.length}")
-        val raw = callModel(
+        val initial = callModel(
             settings = settings,
             prompt = prompt,
             maxTokens = stage.maxTokens(),
         )
-        if (raw != null || stage != DeepReadGenerationStage.OVERVIEW) return raw
+        if (initial.raw != null || stage != DeepReadGenerationStage.OVERVIEW) return initial
 
         val compactPrompt = DeepReadPrompt.buildStage(
             topicTitle = topicTitle,
@@ -414,18 +503,11 @@ class DeepReadAgent(
         prompt: String,
         systemInstruction: String = "你是 AmberAgent 的新闻深读编辑。仅输出合法 JSON。",
         maxTokens: Int = DEEP_READ_MODEL_MAX_TOKENS,
-    ): String? {
+    ): StageCallResult {
         val model = resolveModel(settings)
-        if (model == null) {
-            lastCallFailureReason = "请先配置聊天模型（设置 → 模型）"
-            return null
-        }
+            ?: return StageCallResult(null, "请先配置聊天模型（设置 → 模型）")
         val provider = model.findProvider(settings.providers)
-        if (provider == null) {
-            lastCallFailureReason = "模型 ${model.displayName} 的提供商不可用"
-            return null
-        }
-        lastCallFailureReason = null
+            ?: return StageCallResult(null, "模型 ${model.displayName} 的提供商不可用")
         return try {
             val response = try {
                 generateDeepReadText(provider, model, systemInstruction, prompt, maxTokens)
@@ -437,17 +519,20 @@ class DeepReadAgent(
                     throw error
                 }
             }
-            response.choices.firstOrNull()?.message?.toText()
+            val text = response.choices.firstOrNull()?.message?.toText()
+            if (text.isNullOrBlank()) {
+                StageCallResult(null, "模型返回空内容，请重试或切换模型")
+            } else {
+                StageCallResult(text, null)
+            }
         } catch (error: TimeoutCancellationException) {
             Log.w(TAG, "deep read model call timed out")
-            lastCallFailureReason = "模型生成超时，请稍后重试"
-            null
+            StageCallResult(null, "模型生成超时，请稍后重试")
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
             Log.e(TAG, "deep read model call failed", error)
-            lastCallFailureReason = formatDeepReadModelFailure(error)
-            null
+            StageCallResult(null, formatDeepReadModelFailure(error))
         }
     }
 
@@ -497,10 +582,10 @@ class DeepReadAgent(
             prompt = DeepReadPrompt.repairChinese(topicTitle, json.encodeToString(output)),
             systemInstruction = "你是 AmberAgent 的中文深度阅读修稿编辑。仅输出合法 JSON。",
             maxTokens = DEEP_READ_REPAIR_MAX_TOKENS,
-        ) ?: return null
+        ).raw ?: return null
         return DeepReadOutputParser.parse(raw, json)
             ?.let { DeepReadSanitizer.sanitize(it, sources, topicTitle) }
-            ?.takeIf { it.hasReadableArticle() && it.hasEnoughChinese() }
+            ?.takeIf { it.hasEnoughChinese() }
     }
 
     private suspend fun repairJson(
@@ -513,7 +598,7 @@ class DeepReadAgent(
             prompt = DeepReadPrompt.repairJson(topicTitle, rawOutput.take(RAW_REPAIR_LIMIT)),
             systemInstruction = "你是 AmberAgent 的 JSON 修复器。仅输出合法 JSON。",
             maxTokens = DEEP_READ_REPAIR_MAX_TOKENS,
-        ) ?: return null
+        ).raw ?: return null
         return DeepReadOutputParser.parse(raw, json)
     }
 
@@ -567,7 +652,6 @@ class DeepReadAgent(
         val cleaned = update.withoutPromptPlaceholders()
         return base.copy(
             topicType = cleaned.topicType.takeIf { it.isRealStageContent() } ?: base.topicType,
-            generationComplete = false,
             summary = cleaned.summary.takeIf { it.isRealStageContent() } ?: base.summary,
             keyEntities = cleaned.keyEntities.ifEmpty { base.keyEntities },
             timeline = cleaned.timeline?.takeIf { it.isNotEmpty() } ?: base.timeline,
