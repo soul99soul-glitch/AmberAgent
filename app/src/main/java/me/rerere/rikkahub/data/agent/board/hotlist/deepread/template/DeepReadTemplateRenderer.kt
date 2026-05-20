@@ -1,12 +1,13 @@
 package me.rerere.rikkahub.data.agent.board.hotlist.deepread.template
 
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 
 object DeepReadTemplateRenderer {
     fun renderEditorialSlant(title: String, output: DeepReadOutput): DeepReadRenderedTemplate {
         val safeImages = output.safeImageUrls()
         val hero = output.heroImageUrl?.takeIf { it in safeImages }
-            ?: output.imageAssets.firstOrNull()?.url
+            ?: output.imageAssets.firstOrNull { it.url in safeImages }?.url
         val body = buildString {
             appendLine("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>")
             appendLine(BASE_CSS)
@@ -58,10 +59,7 @@ object DeepReadTemplateRenderer {
         return DeepReadRenderedTemplate(html = body, allowedImageUrls = safeImages)
     }
 
-    private fun DeepReadOutput.safeImageUrls(): Set<String> =
-        (imageAssets.map { it.url } + listOfNotNull(heroImageUrl) + timeline.orEmpty().mapNotNull { it.imageUrl } + corePoints.orEmpty().mapNotNull { it.imageUrl })
-            .filter { it.startsWith("http") }
-            .toSet()
+    private fun DeepReadOutput.safeImageUrls(): Set<String> = verifiedImageUrls()
 
     private fun String.escapeHtml(): String =
         replace("&", "&amp;")

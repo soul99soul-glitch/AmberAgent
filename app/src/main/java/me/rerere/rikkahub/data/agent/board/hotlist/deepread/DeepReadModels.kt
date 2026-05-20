@@ -117,6 +117,12 @@ fun DeepReadOutput.hasEnoughChinese(): Boolean {
     return cjk.toDouble() / denominator >= 0.35
 }
 
+fun DeepReadOutput.verifiedImageUrls(): Set<String> =
+    imageAssets
+        .map { it.url }
+        .filter { it.startsWith("http") }
+        .toSet()
+
 private fun DeepReadOutput.visibleTextForLanguageCheck(): String =
     buildString {
         append(summary)

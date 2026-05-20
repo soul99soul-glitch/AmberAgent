@@ -6,7 +6,7 @@ object DeepReadTemplateValidator {
     private val requiredHtmlPattern = Regex("""(?is)<\s*(html\b|!doctype\s+html)""")
     private val blockedPatterns = listOf(
         Regex("""(?is)<\s*script\b""") to "Deep Read templates do not allow JavaScript",
-        Regex("""(?is)\son[a-z]+\s*=""") to "Event handlers are not allowed",
+        Regex("""(?is)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""") to "Event handlers are not allowed",
         Regex("""(?is)<\s*(iframe|object|embed|form|input|button|textarea|select)\b""") to "Interactive or embedded elements are not allowed",
         Regex("""(?is)<\s*link\b[^>]*\bhref\s*=\s*['"]?\s*(https?:|//|file:|content:)""") to "External stylesheets are not allowed",
         Regex("""(?is)@import\b""") to "CSS imports are not allowed",

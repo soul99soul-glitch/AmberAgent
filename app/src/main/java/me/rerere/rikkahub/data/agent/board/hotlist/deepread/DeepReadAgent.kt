@@ -46,15 +46,17 @@ class DeepReadAgent(
         topicTitle: String,
         force: Boolean = false,
     ): Result<DeepReadOutput> {
-        if (!force) {
-            hotListRepository.getFreshDeepRead(topicId)?.let { return Result.success(it) }
-        }
-
-        val settings = settingsStore.settingsFlow.value
         val seedSources = hotListRepository.getHotTopic(topicId)
             ?.sources
             .orEmpty()
             .toDeepReadSources(topicTitle)
+        if (!force) {
+            hotListRepository.getFreshDeepRead(topicId)?.let { cached ->
+                return Result.success(DeepReadSanitizer.sanitize(cached, seedSources, topicTitle))
+            }
+        }
+
+        val settings = settingsStore.settingsFlow.value
         val sources = collectSources(settings, topicTitle, seedSources)
         if (sources.isEmpty()) {
             return Result.failure(IllegalStateException("没有可用搜索服务或搜索结果为空"))

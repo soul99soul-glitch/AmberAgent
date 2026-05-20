@@ -69,6 +69,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -207,8 +208,9 @@ private fun DeepReadTemplateArticle(
                             request: WebResourceRequest?,
                         ): WebResourceResponse? {
                             val url = request?.url?.toString().orEmpty()
-                            if (url.startsWith("https://amberagent.deepread.local")) return null
-                            if (url in rendered.allowedImageUrls) return null
+                            val mainFrame = request?.isForMainFrame == true
+                            if (mainFrame && url == DEEP_READ_TEMPLATE_BASE_URL) return null
+                            if (!mainFrame && url in rendered.allowedImageUrls) return null
                             return emptyWebResponse()
                         }
 
@@ -222,7 +224,7 @@ private fun DeepReadTemplateArticle(
                         }
                     }
                     loadDataWithBaseURL(
-                        "https://amberagent.deepread.local/",
+                        DEEP_READ_TEMPLATE_BASE_URL,
                         rendered.html,
                         "text/html",
                         "utf-8",
@@ -237,6 +239,8 @@ private fun DeepReadTemplateArticle(
 
 private fun emptyWebResponse(): WebResourceResponse =
     WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+
+private const val DEEP_READ_TEMPLATE_BASE_URL = "https://amberagent.deepread.local/"
 
 @Composable
 private fun DeepReadConfirmation(
@@ -277,6 +281,7 @@ private fun DeepReadArticle(
     fontFamily: FontFamily?,
     listState: androidx.compose.foundation.lazy.LazyListState,
 ) {
+    val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -300,11 +305,21 @@ private fun DeepReadArticle(
         }
 
         output.timeline?.takeIf { it.isNotEmpty() }?.let { timeline ->
-            item { ArticleInset { TimelineSection(timeline, palette, fontFamily) } }
+            item { ArticleInset { TimelineSection(timeline, verifiedImageUrls, palette, fontFamily) } }
         }
 
         output.corePoints?.takeIf { it.isNotEmpty() }?.let { points ->
-            item { ArticleInset { CorePointsSection(type = output.topicType, points = points, palette = palette, fontFamily = fontFamily) } }
+            item {
+                ArticleInset {
+                    CorePointsSection(
+                        type = output.topicType,
+                        points = points,
+                        verifiedImageUrls = verifiedImageUrls,
+                        palette = palette,
+                        fontFamily = fontFamily,
+                    )
+                }
+            }
         }
 
         item { ArticleInset { AnalysisSection(output.analysis, palette, fontFamily) } }
@@ -334,7 +349,8 @@ private fun MagazineHero(
     palette: MagazinePalette,
     fontFamily: FontFamily?,
 ) {
-    val image = output.heroImageUrl?.takeIf { it.startsWith("http") }
+    val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
+    val image = output.heroImageUrl?.takeIf { it in verifiedImageUrls }
     var imageFailed by remember(image) { mutableStateOf(false) }
     val showImage = image != null && !imageFailed
 
@@ -522,7 +538,12 @@ private fun EditorialSection(title: String, body: String, palette: MagazinePalet
 }
 
 @Composable
-private fun TimelineSection(events: List<TimelineEvent>, palette: MagazinePalette, fontFamily: FontFamily?) {
+private fun TimelineSection(
+    events: List<TimelineEvent>,
+    verifiedImageUrls: Set<String>,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         SectionKicker("时间轴", palette)
         events.forEach { event ->
@@ -535,7 +556,7 @@ private fun TimelineSection(events: List<TimelineEvent>, palette: MagazinePalett
                         style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
                             .withReadingFont(fontFamily),
                     )
-                    event.imageUrl?.takeIf { it.startsWith("http") }?.let { image ->
+                    event.imageUrl?.takeIf { it in verifiedImageUrls }?.let { image ->
                         EditorialImage(
                             imageUrl = image,
                             caption = event.imageCaption,
@@ -569,7 +590,13 @@ private fun TimelineMarker(highlight: Boolean, palette: MagazinePalette) {
 }
 
 @Composable
-private fun CorePointsSection(type: String, points: List<CorePoint>, palette: MagazinePalette, fontFamily: FontFamily?) {
+private fun CorePointsSection(
+    type: String,
+    points: List<CorePoint>,
+    verifiedImageUrls: Set<String>,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
     val title = when (type) {
         "product" -> "功能亮点"
         "person" -> "人物背景"
@@ -599,7 +626,7 @@ private fun CorePointsSection(type: String, points: List<CorePoint>, palette: Ma
                             color = palette.muted,
                         )
                     }
-                    point.imageUrl?.takeIf { it.startsWith("http") }?.let { image ->
+                    point.imageUrl?.takeIf { it in verifiedImageUrls }?.let { image ->
                         EditorialImage(
                             imageUrl = image,
                             caption = point.imageCaption,
