@@ -35,30 +35,34 @@ pub fn pack(tree: &Tree) -> Vec<u8> {
         flags |= FLAG_HAS_HTML_BLOCKS;
     }
     out.push(flags);
-    out.push(0); // reserved
-    out.push(0);
+    out.push(0); // reserved (lo byte of u16 reserved field per SPIKE_PLAN §4.2)
+    out.push(0); // reserved (hi byte)
 
-    pack_node(&tree.root, &mut out);
+    pack_tree(&tree.root, &mut out);
     out
 }
 
-fn pack_node(node: &Node, out: &mut Vec<u8>) {
-    out.push(node.type_code.as_byte());
-
-    // start_offset as varint
-    write_varint(node.start as u64, out);
-    // end_offset stored as delta from start to keep varint short
-    let delta = node.end.saturating_sub(node.start) as u64;
-    write_varint(delta, out);
-
-    // extras
-    write_varint(node.extras.len() as u64, out);
-    out.extend_from_slice(&node.extras);
-
-    // children
-    write_varint(node.children.len() as u64, out);
-    for child in &node.children {
-        pack_node(child, out);
+/// Iterative depth-first packer. Adversarial deeply-nested markdown
+/// (e.g. `>>>>>>>...>` blockquotes) would blow a recursive call stack;
+/// the iterative walk runs in O(node_count) time and O(tree_depth) heap.
+fn pack_tree(root: &Node, out: &mut Vec<u8>) {
+    // Use an explicit work stack where each frame is "node about to be
+    // emitted". We push children in reverse so that depth-first order
+    // mirrors the prior recursive impl.
+    let mut stack: Vec<&Node> = Vec::with_capacity(64);
+    stack.push(root);
+    while let Some(node) = stack.pop() {
+        out.push(node.type_code.as_byte());
+        write_varint(node.start as u64, out);
+        let delta = node.end.saturating_sub(node.start) as u64;
+        write_varint(delta, out);
+        write_varint(node.extras.len() as u64, out);
+        out.extend_from_slice(&node.extras);
+        write_varint(node.children.len() as u64, out);
+        // Push children in reverse so the first child is popped next.
+        for child in node.children.iter().rev() {
+            stack.push(child);
+        }
     }
 }
 

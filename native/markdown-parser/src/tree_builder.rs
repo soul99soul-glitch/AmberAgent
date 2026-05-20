@@ -121,6 +121,18 @@ pub fn build_tree(text: &str) -> Tree {
                 leaf.extras.push(if checked { 1u8 } else { 0u8 });
                 stack.last_mut().expect("no parent").children.push(leaf);
             }
+            // ENABLE_MATH is on in make_options(); pulldown-cmark emits these
+            // as **leaf** events (not Start/End pairs). We map them straight
+            // to MathInline / MathBlock node types so the renderer can do
+            // LaTeX dispatch. Was being silently dropped before — review P2 fix.
+            Event::InlineMath(_cow) => {
+                let leaf = Node::new(NodeTypeCode::MathInline, range.start, range.end);
+                stack.last_mut().expect("no parent").children.push(leaf);
+            }
+            Event::DisplayMath(_cow) => {
+                let leaf = Node::new(NodeTypeCode::MathBlock, range.start, range.end);
+                stack.last_mut().expect("no parent").children.push(leaf);
+            }
             // pulldown-cmark may emit other events in extension builds; ignore
             // for now (spec-conformant set covers our app's needs).
             _ => {}
@@ -174,7 +186,10 @@ fn make_block_or_inline_type(tag: &Tag<'_>) -> NodeTypeCode {
         Tag::Strikethrough => NodeTypeCode::Strikethrough,
         Tag::Link { .. } => NodeTypeCode::Link,
         Tag::Image { .. } => NodeTypeCode::Image,
-        Tag::MetadataBlock(_) => NodeTypeCode::HtmlBlock, // best-effort
+        // MetadataBlock: TOML/YAML front-matter. Map to Paragraph (plain
+        // text container) rather than HtmlBlock — mapping to HtmlBlock would
+        // incorrectly set the renderer's "raw HTML" rendering path (review P2 fix).
+        Tag::MetadataBlock(_) => NodeTypeCode::Paragraph,
         // pulldown-cmark adds tags over time; map unknown to Paragraph as a
         // safe block container — the renderer treats unknown types as plain.
         _ => NodeTypeCode::Paragraph,

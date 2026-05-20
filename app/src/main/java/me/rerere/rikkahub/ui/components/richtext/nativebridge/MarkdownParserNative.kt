@@ -151,10 +151,27 @@ class PackedAstNode internal constructor(
         return p.children[nextIdx]
     }
 
+    /**
+     * Iterative **DFS pre-order** search through descendants (mirrors the
+     * original recursive impl's traversal: check each child, recurse, then
+     * next sibling). BFS would have been a behaviour change vs JetBrains'
+     * `ASTNode.findChildOfTypeRecursive` (review Round 3 P2 fix).
+     *
+     * Depth budget caps both stack growth and worst-case work.
+     */
     fun findChildOfTypeRecursive(vararg types: NodeType): PackedAstNode? {
-        for (child in children) {
-            if (child.type in types) return child
-            child.findChildOfTypeRecursive(*types)?.let { return it }
+        val maxDepth = MAX_TRAVERSAL_DEPTH
+        // Stack of (node, depth-from-this). Push children in reverse so the
+        // first child ends up on top → popped next.
+        val stack: ArrayDeque<Pair<PackedAstNode, Int>> = ArrayDeque()
+        for (child in children.asReversed()) stack.addLast(child to 1)
+        while (stack.isNotEmpty()) {
+            val (node, depth) = stack.removeLast()
+            if (node.type in types) return node
+            if (depth >= maxDepth) continue
+            for (grandchild in node.children.asReversed()) {
+                stack.addLast(grandchild to depth + 1)
+            }
         }
         return null
     }
@@ -186,19 +203,31 @@ class PackedAstNode internal constructor(
     )
 
     companion object {
+        const val MAX_TRAVERSAL_DEPTH: Int = 200
+
         /**
          * Walk a node and its descendants and return the byte offset just past
-         * the final child. Used to position the cursor at the next sibling.
+         * the final child. Iterative impl so deeply-nested markdown can't
+         * blow the JVM stack (review P2 fix).
          */
         internal fun skipNode(blob: ByteArray, start: Int): Int {
-            var cursor = start + 1               // skip tag byte
-            val (_, c1) = readVarint(blob, cursor); cursor = c1
-            val (_, c2) = readVarint(blob, cursor); cursor = c2
-            val (extrasLen, c3) = readVarint(blob, cursor); cursor = c3
-            cursor += extrasLen.toInt()
-            val (childCount, c4) = readVarint(blob, cursor); cursor = c4
-            repeat(childCount.toInt()) {
-                cursor = skipNode(blob, cursor)
+            var cursor = start
+            // Stack of "children left to skip" at each open frame. We start
+            // with a synthetic frame of 1 so the outer loop processes exactly
+            // one node + all its descendants.
+            val remaining: ArrayDeque<Long> = ArrayDeque()
+            remaining.addLast(1L)
+            while (remaining.isNotEmpty()) {
+                val top = remaining.removeLast() - 1L
+                if (top > 0) remaining.addLast(top)
+
+                cursor += 1                                      // tag byte
+                val (_, c1) = readVarint(blob, cursor); cursor = c1   // start
+                val (_, c2) = readVarint(blob, cursor); cursor = c2   // end_delta
+                val (extrasLen, c3) = readVarint(blob, cursor); cursor = c3
+                cursor += extrasLen.toInt()
+                val (childCount, c4) = readVarint(blob, cursor); cursor = c4
+                if (childCount > 0L) remaining.addLast(childCount)
             }
             return cursor
         }
