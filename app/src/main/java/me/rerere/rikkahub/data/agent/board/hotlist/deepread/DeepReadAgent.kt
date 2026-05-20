@@ -52,34 +52,38 @@ class DeepReadAgent(
             .toDeepReadSources(topicTitle)
         if (!force) {
             hotListRepository.getFreshDeepRead(topicId)?.let { cached ->
-                return Result.success(DeepReadSanitizer.sanitize(cached, seedSources, topicTitle))
+                val sanitized = DeepReadSanitizer.sanitize(cached, seedSources, topicTitle)
+                if (sanitized.hasReadableArticle() && sanitized.hasEnoughChinese()) {
+                    return Result.success(sanitized)
+                }
+                Log.i(TAG, "ignored cached deep read because it no longer passes quality gates")
             }
         }
 
         val settings = settingsStore.settingsFlow.value
         val sources = collectSources(settings, topicTitle, seedSources)
         if (sources.isEmpty()) {
-            return Result.failure(IllegalStateException("没有可用搜索服务或搜索结果为空"))
+            return Result.failure(IllegalStateException("没有抓到足够的正文来源，无法生成合格深度阅读。请检查搜索源或稍后重试。"))
         }
 
         val prompt = DeepReadPrompt.build(topicTitle, sources)
         val raw = callModel(settings, prompt)
             ?: return Result.failure(IllegalStateException(lastCallFailureReason ?: "深度阅读生成失败，请稍后重试"))
         val parsed = DeepReadOutputParser.parse(raw, json)
+            ?: repairJson(settings, topicTitle, raw)
         if (parsed == null) {
-            Log.w(TAG, "deep read JSON parse failed; using source fallback")
+            Log.w(TAG, "deep read JSON parse failed after repair")
+            return Result.failure(IllegalStateException("模型输出格式不稳定，未能解析为深度阅读正文。请重试或切换模型。"))
         }
-        var shouldCache = parsed != null
-        var output = parsed
-            ?.let { DeepReadSanitizer.sanitize(it, sources, topicTitle) }
-            ?.takeIf { it.hasReadableArticle() }
-            ?: run {
-                shouldCache = false
-                fallbackOutput(topicTitle, sources, if (parsed == null) "模型输出格式不稳定，已切换为来源兜底稿" else null)
-            }
+        var shouldCache = true
+        var output = DeepReadSanitizer.sanitize(parsed, sources, topicTitle)
+        if (!output.hasReadableArticle()) {
+            return Result.failure(IllegalStateException("模型没有生成可用的深度阅读正文，请重试或切换模型。"))
+        }
         if (!output.hasEnoughChinese()) {
             output = repairChinese(settings, topicTitle, sources, output)
-                ?: output.withChineseFallback(topicTitle, sources).also { shouldCache = false }
+                ?: return Result.failure(IllegalStateException("模型输出中文深读质量不足，未通过中文化修复。请重试或切换模型。"))
+            shouldCache = true
         }
         if (!output.hasReadableArticle()) {
             return Result.failure(IllegalStateException("深度阅读内容不足，请稍后重试"))
@@ -98,7 +102,7 @@ class DeepReadAgent(
         withTimeoutOrNull(SOURCE_COLLECTION_TIMEOUT_MS) {
             coroutineScope {
                 val enabled = settings.enabledDeepReadSearchServices().take(MAX_SEARCH_SERVICES)
-                if (enabled.isEmpty()) return@coroutineScope seedSources.take(MAX_SOURCES)
+                if (enabled.isEmpty()) return@coroutineScope emptyList()
                 val queries = buildDeepReadQueries(topicTitle)
 
                 val searchResults = enabled.flatMap { service ->
@@ -165,11 +169,15 @@ class DeepReadAgent(
                 }.awaitAll()
                     .filter { it.title.isNotBlank() && it.url.isNotBlank() && it.content.isNotBlank() }
 
-                (seedSources + enriched)
-                    .distinctBy { source -> source.url.ifBlank { source.title } }
-                    .take(MAX_SOURCES)
+                if (enriched.isEmpty()) {
+                    emptyList()
+                } else {
+                    (enriched + seedSources)
+                        .distinctBy { source -> source.url.ifBlank { source.title } }
+                        .take(MAX_SOURCES)
+                }
             }
-        } ?: seedSources.take(MAX_SOURCES)
+        } ?: emptyList()
 
     private fun interleaveSearchResults(buckets: List<SearchBucket>): List<SearchResult.SearchResultItem> {
         val queryGroups = buckets
@@ -193,13 +201,26 @@ class DeepReadAgent(
         return merged
     }
 
-    private fun buildDeepReadQueries(topicTitle: String): List<String> =
-        listOf(
+    private fun buildDeepReadQueries(topicTitle: String): List<String> {
+        val lower = topicTitle.lowercase()
+        val queries = mutableListOf(
             topicTitle,
             "$topicTitle 前因后果 时间线 背景",
             "$topicTitle 核心矛盾 争议 影响",
             "$topicTitle background timeline context controversy",
-        ).distinct()
+        )
+        if (listOf("gemini", "google", "openai", "claude", "deepseek", "gpt", "llm", "大模型", "模型", "flash").any { it in lower }) {
+            queries += "$topicTitle 发布 价格 跑分 性能 评价"
+            queries += "$topicTitle pricing benchmark performance model card"
+            queries += "$topicTitle official announcement availability API pricing"
+        }
+        if ("gemini" in lower || "google" in lower) {
+            queries += "Google I/O 2026 $topicTitle Gemini announcement pricing benchmarks"
+            queries += "$topicTitle site:blog.google"
+            queries += "$topicTitle site:deepmind.google model card"
+        }
+        return queries.distinct()
+    }
 
     private fun List<HotTopicSource>.toDeepReadSources(topicTitle: String): List<DeepReadSource> =
         map { source ->
@@ -278,7 +299,7 @@ class DeepReadAgent(
         settings: Settings,
         prompt: String,
         systemInstruction: String = "你是 AmberAgent 的新闻深读编辑。仅输出合法 JSON。",
-        maxTokens: Int = 1_800,
+        maxTokens: Int = DEEP_READ_MODEL_MAX_TOKENS,
     ): String? {
         val model = resolveModel(settings)
         if (model == null) {
@@ -292,21 +313,15 @@ class DeepReadAgent(
         }
         lastCallFailureReason = null
         return try {
-            val response = withTimeout(MODEL_TIMEOUT_MS) {
-                providerManager.getProviderByType(provider).generateText(
-                    providerSetting = provider,
-                    messages = listOf(
-                        UIMessage.system(systemInstruction),
-                        UIMessage.user(prompt),
-                    ),
-                    params = TextGenerationParams(
-                        model = model,
-                        temperature = 0.2f,
-                        maxTokens = maxTokens,
-                        customHeaders = model.customHeaders,
-                        customBody = model.customBodies,
-                    ),
-                )
+            val response = try {
+                generateDeepReadText(provider, model, systemInstruction, prompt, maxTokens)
+            } catch (error: Throwable) {
+                if (maxTokens > DEEP_READ_PROVIDER_SAFE_MAX_TOKENS && error.looksLikeMaxTokenRejection()) {
+                    Log.w(TAG, "deep read model rejected maxTokens=$maxTokens; retrying with $DEEP_READ_PROVIDER_SAFE_MAX_TOKENS", error)
+                    generateDeepReadText(provider, model, systemInstruction, prompt, DEEP_READ_PROVIDER_SAFE_MAX_TOKENS)
+                } else {
+                    throw error
+                }
             }
             response.choices.firstOrNull()?.message?.toText()
         } catch (error: TimeoutCancellationException) {
@@ -322,6 +337,41 @@ class DeepReadAgent(
         }
     }
 
+    private suspend fun generateDeepReadText(
+        provider: me.rerere.ai.provider.ProviderSetting,
+        model: me.rerere.ai.provider.Model,
+        systemInstruction: String,
+        prompt: String,
+        maxTokens: Int,
+    ) = withTimeout(MODEL_TIMEOUT_MS) {
+        providerManager.getProviderByType(provider).generateText(
+            providerSetting = provider,
+            messages = listOf(
+                UIMessage.system(systemInstruction),
+                UIMessage.user(prompt),
+            ),
+            params = TextGenerationParams(
+                model = model,
+                temperature = 0.2f,
+                maxTokens = maxTokens,
+                customHeaders = model.customHeaders,
+                customBody = model.customBodies,
+            ),
+        )
+    }
+
+    private fun Throwable.looksLikeMaxTokenRejection(): Boolean {
+        val text = message.orEmpty().lowercase()
+        return listOf(
+            "max_tokens",
+            "max output",
+            "maxoutputtokens",
+            "output token",
+            "maximum token",
+            "too many tokens",
+        ).any { it in text }
+    }
+
     private suspend fun repairChinese(
         settings: Settings,
         topicTitle: String,
@@ -332,11 +382,25 @@ class DeepReadAgent(
             settings = settings,
             prompt = DeepReadPrompt.repairChinese(topicTitle, json.encodeToString(output)),
             systemInstruction = "你是 AmberAgent 的中文深度阅读修稿编辑。仅输出合法 JSON。",
-            maxTokens = 1_600,
+            maxTokens = DEEP_READ_REPAIR_MAX_TOKENS,
         ) ?: return null
         return DeepReadOutputParser.parse(raw, json)
             ?.let { DeepReadSanitizer.sanitize(it, sources, topicTitle) }
             ?.takeIf { it.hasReadableArticle() && it.hasEnoughChinese() }
+    }
+
+    private suspend fun repairJson(
+        settings: Settings,
+        topicTitle: String,
+        rawOutput: String,
+    ): DeepReadOutput? {
+        val raw = callModel(
+            settings = settings,
+            prompt = DeepReadPrompt.repairJson(topicTitle, rawOutput.take(RAW_REPAIR_LIMIT)),
+            systemInstruction = "你是 AmberAgent 的 JSON 修复器。仅输出合法 JSON。",
+            maxTokens = DEEP_READ_REPAIR_MAX_TOKENS,
+        ) ?: return null
+        return DeepReadOutputParser.parse(raw, json)
     }
 
     private fun resolveModel(settings: Settings): me.rerere.ai.provider.Model? {
@@ -349,142 +413,6 @@ class DeepReadAgent(
 
     private fun domainOf(url: String): String? =
         runCatching { URI(url).host?.removePrefix("www.") }.getOrNull()
-
-    private fun fallbackOutput(
-        topicTitle: String,
-        sources: List<DeepReadSource>,
-        reason: String? = null,
-    ): DeepReadOutput {
-        val cleanedSources = sources
-            .filter { it.title.isNotBlank() || it.content.isNotBlank() }
-            .take(MAX_SOURCES)
-        val reading = cleanedSources
-            .filter { it.url.startsWith("http") }
-            .mapIndexed { index, source -> ReadingLink(source.chineseSafeTitle(topicTitle, index), source.url, source.source) }
-            .distinctBy { it.url }
-            .take(8)
-        val sourceNames = cleanedSources.mapNotNull { it.source }.distinct().take(4)
-        val imageAssets = cleanedSources
-            .flatMap { source ->
-                source.images.map { image ->
-                    DeepReadImageAsset(
-                        url = image,
-                        caption = "与「$topicTitle」相关的来源图片",
-                        source = source.source,
-                        qualityHint = "context",
-                    )
-                }
-            }
-            .filter { it.url.startsWith("http") }
-            .distinctBy { it.url }
-            .take(6)
-        val summary = buildString {
-            append("围绕「")
-            append(topicTitle)
-            append("」，当前深度阅读已先基于")
-            append(if (sourceNames.isEmpty()) "热榜和搜索来源" else sourceNames.joinToString("、"))
-            append("整理出基础脉络。")
-            if (!reason.isNullOrBlank()) {
-                append(reason)
-                append("。")
-            }
-            append("当前页面会优先呈现可确认的中文脉络，来源链接统一收在扩展阅读中。")
-        }
-        val points = buildFallbackCorePoints(topicTitle, cleanedSources, sourceNames)
-        return DeepReadOutput(
-            topicType = "event",
-            summary = summary,
-            keyEntities = sourceNames,
-            corePoints = points,
-            heroImageUrl = imageAssets.firstOrNull()?.url,
-            heroCaption = imageAssets.firstOrNull()?.caption,
-            imageAssets = imageAssets,
-            analysis = DeepAnalysis(
-                coreDispute = "当前可抓取信息仍偏薄，暂时只能确认话题热度和若干来源线索，尚不足以支撑完整因果链判断。",
-                perspectives = cleanedSources.take(3).map { source ->
-                    Perspective(
-                        holder = source.source ?: domainOf(source.url),
-                        viewpoint = source.content.toChineseReadableSnippet().ifBlank {
-                            "该来源提供了与话题相关的线索，但当前摘要不足以单独形成明确判断。"
-                        },
-                    )
-                },
-                implications = "如果需要更完整的深读，系统需要抓到更多正文级材料；在此之前，页面会把来源保留在扩展阅读中，避免用占位文字伪装成分析。",
-                quotes = emptyList(),
-            ),
-            extendedReading = reading,
-            references = reading,
-        )
-    }
-
-    private fun buildFallbackCorePoints(
-        topicTitle: String,
-        sources: List<DeepReadSource>,
-        sourceNames: List<String>,
-    ): List<CorePoint> {
-        if (sources.isEmpty()) {
-            return listOf(
-                CorePoint(
-                    point = "可用信息不足以形成稳定脉络",
-                    supporting = "当前还没有抓到足够的来源正文，因此先保留话题入口，避免把来源列表误写成深度分析。",
-                )
-            )
-        }
-        val sourceText = if (sourceNames.isEmpty()) "热榜和搜索来源" else sourceNames.joinToString("、")
-        return listOf(
-            CorePoint(
-                point = "这个话题已经进入多来源关注区",
-                supporting = "系统已从$sourceText 捕捉到相关线索，但现有摘要仍偏碎片化，需要进一步抽取正文才能形成完整时间轴。",
-            ),
-            CorePoint(
-                point = "当前最重要的是分辨事实、背景与评论",
-                supporting = "页面会把可追溯链接放在扩展阅读中；关键脉络只保留已经能被中文消化的判断，避免把英文标题或来源域名当作正文。",
-            ),
-            CorePoint(
-                point = "后续深读应围绕「$topicTitle」补齐因果链",
-                supporting = "更理想的稿件需要回答：事件从哪里开始、为什么现在被关注、各方争议是什么、后续可能影响谁。",
-            ),
-        )
-    }
-
-    private fun String.toReadableSnippet(maxLength: Int = 180): String =
-        replace(Regex("\\s+"), " ")
-            .trim()
-            .take(maxLength)
-
-    private fun String.toChineseReadableSnippet(maxLength: Int = 180): String {
-        val snippet = toReadableSnippet(maxLength)
-        if (snippet.hasCjk() || snippet.count { it in 'a'..'z' || it in 'A'..'Z' } < 50) return snippet
-        return "该来源提供了相关背景线索，但当前抓取摘要不足以直接改写成可靠中文正文。"
-    }
-
-    private fun DeepReadOutput.withChineseFallback(topicTitle: String, sources: List<DeepReadSource>): DeepReadOutput =
-        copy(
-            summary = summary.takeIf { it.hasCjk() } ?: "围绕「$topicTitle」，当前深度阅读已整理出主要来源，页面正文会优先以中文脉络呈现。",
-            corePoints = corePoints.orEmpty().mapIndexed { index, point ->
-                CorePoint(
-                    point = point.point.takeIf { it.hasCjk() } ?: "关于「$topicTitle」的关键线索 ${index + 1}",
-                    supporting = point.supporting?.toChineseReadableSnippet()
-                        ?: "这条线索需要继续结合来源正文来判断，不能只按原文标题复述。",
-                )
-            },
-            analysis = analysis.copy(
-                coreDispute = analysis.coreDispute?.takeIf { it.hasCjk() }
-                    ?: "当前信息仍以外部来源摘要为主，完整背景需要等待更多稳定来源补齐。",
-                perspectives = analysis.perspectives.mapIndexed { index, perspective ->
-                    perspective.copy(
-                        viewpoint = perspective.viewpoint.takeIf { it.hasCjk() }
-                            ?: sources.getOrNull(index)?.content?.toChineseReadableSnippet()
-                            ?: "来源显示这是值得继续跟进的技术和产业话题。",
-                    )
-                },
-                implications = analysis.implications?.takeIf { it.hasCjk() }
-                    ?: "这份内容优先保证中文可读和来源可追溯；点击扩展阅读仍会跳转到原始页面。",
-            ),
-        )
-
-    private fun DeepReadSource.chineseSafeTitle(topicTitle: String, index: Int): String =
-        title.takeIf { it.hasCjk() } ?: "关于「$topicTitle」的相关报道（${source ?: domainOf(url) ?: "外部站点"}）"
 
     private fun String.extractOpenGraphImage(): String? =
         listOf(
@@ -499,20 +427,24 @@ class DeepReadAgent(
 
     companion object {
         private const val TAG = "DeepReadAgent"
-        private const val SOURCE_COLLECTION_TIMEOUT_MS = 18_000L
+        private const val SOURCE_COLLECTION_TIMEOUT_MS = 24_000L
         private const val SEARCH_TIMEOUT_MS = 7_000L
         private const val SCRAPE_TIMEOUT_MS = 4_000L
         private const val OG_IMAGE_TIMEOUT_MS = 2_000L
         private const val OG_IMAGE_HTML_CHAR_LIMIT = 192_000
         private const val MODEL_TIMEOUT_MS = 70_000L
+        private const val DEEP_READ_MODEL_MAX_TOKENS = 40_000
+        private const val DEEP_READ_REPAIR_MAX_TOKENS = 40_000
+        private const val DEEP_READ_PROVIDER_SAFE_MAX_TOKENS = 12_000
         private const val MAX_SEARCH_SERVICES = 2
-        private const val MAX_SEARCH_RESULTS = 8
+        private const val MAX_SEARCH_RESULTS = 10
         private const val SEARCH_RESULTS_PER_QUERY = 3
-        private const val MAX_SCRAPE_RESULTS = 4
+        private const val MAX_SCRAPE_RESULTS = 6
         private const val MAX_META_IMAGE_RESULTS = 4
         private const val MAX_SEED_SOURCES = 4
-        private const val MAX_SOURCES = 8
-        private const val SOURCE_EXCERPT_LIMIT = 900
+        private const val MAX_SOURCES = 10
+        private const val SOURCE_EXCERPT_LIMIT = 1_600
+        private const val RAW_REPAIR_LIMIT = 18_000
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
     }

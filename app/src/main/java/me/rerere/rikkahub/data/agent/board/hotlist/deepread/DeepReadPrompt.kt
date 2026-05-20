@@ -9,11 +9,14 @@ object DeepReadPrompt {
         appendLine("- 判断 topic_type：event / opinion / product / person。")
         appendLine("- 基于给定来源写简体中文深读，不要编造来源之外的事实。")
         appendLine("- 你的首要目标是补齐读者不知道的来龙去脉：起因、背景、关键转折、核心矛盾、当前进展、后续影响。")
+        appendLine("- 信息量必须达到深度阅读标准：不能只说「多个来源关注」「仍需更多材料」「链接见扩展阅读」；如果只能写这些，说明生成不合格。")
+        appendLine("- 对产品/模型发布类话题，必须尽量覆盖：发布场景、官方定位、可用入口、价格/成本、性能或跑分、与前代/竞品差异、外界评价和争议。")
         appendLine("- 对事件/诉讼/争议/人物关系类话题，timeline 必须覆盖「早期背景 → 直接导火索 → 当前事件 → 后续影响」，不要只复述当天新闻。")
         appendLine("- 如果来源不足以还原某段历史，明确写成「目前来源未覆盖」或在分析中保守处理，不要脑补。")
         appendLine("- analysis.core_dispute 要回答「各方到底在争什么」；perspectives 要区分不同当事方/利益方。")
         appendLine("- core_points 是你消化来源后的中文关键脉络，不是来源清单。每条必须是一个被综合后的判断、转折或背景信息，并用中文解释为什么重要。")
         appendLine("- 绝对禁止在 summary、timeline、core_points、analysis 中写「原文来源 1/2/3」「这条来源主要是英文内容」「已保留原文链接」「重新生成时会继续尝试」这类占位话术。")
+        appendLine("- 绝对禁止把来源域名列表、热榜排名、搜索命中本身当成关键脉络；这些只能出现在 extended_reading/references。")
         appendLine("- 不要按来源逐条复述；先读懂多个来源，再合并同类信息，输出读者真正需要的中文解释。")
         appendLine("- references 和 extended_reading 才能承载来源列表；正文区域只承载消化后的内容。")
         appendLine("- summary、timeline、core_points、analysis、extended_reading.title、hero_caption、references.title 全部必须是中文；原始英文页面只保留在 url。")
@@ -75,6 +78,21 @@ object DeepReadPrompt {
         appendLine("- 仅输出合法 JSON，不要解释、不要代码围栏。")
         appendLine()
         appendLine(outputJson)
+    }
+
+    fun repairJson(topicTitle: String, rawOutput: String): String = buildString {
+        appendLine("你是 AmberAgent 的深度阅读 JSON 修复器。")
+        appendLine("话题：$topicTitle")
+        appendLine()
+        appendLine("下面是一次深度阅读生成的原始输出，可能被截断、包含代码围栏、尾逗号或前后解释。")
+        appendLine("请尽最大可能修复为一个完整、合法、可解析的 JSON 对象，并保持原有事实与中文正文。")
+        appendLine("- 只输出 JSON，不要代码围栏、不要解释。")
+        appendLine("- 不要新增来源外事实。")
+        appendLine("- 如果某个数组最后一项被截断，删除该残缺项，而不是编造补齐。")
+        appendLine("- 不要输出低信息量兜底文案，不要写「当前信息不足」「来源见扩展阅读」来冒充正文。")
+        appendLine("- 保持字段名与 DeepRead schema 一致。")
+        appendLine()
+        appendLine(rawOutput)
     }
 }
 

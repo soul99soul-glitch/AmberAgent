@@ -54,7 +54,7 @@ object DeepReadTemplateRenderer {
             if (output.extendedReading.isNotEmpty()) {
                 appendLine("<section><p class=\"section\">扩展阅读</p>")
                 output.extendedReading.take(8).forEachIndexed { index, link ->
-                    appendLine("<div class=\"reading\"><span>${(index + 1).toString().padStart(2, '0')}</span><div><p>${link.title.escapeHtml()}</p><small>${(link.source ?: link.url).escapeHtml()}</small></div></div>")
+                    appendLine("<a class=\"reading\" href=\"${link.url.escapeHtml()}\"><span>${(index + 1).toString().padStart(2, '0')}</span><div><p>${link.title.escapeHtml()}</p><small>${(link.source ?: link.url).escapeHtml()}</small></div></a>")
                 }
                 appendLine("</section>")
             }
@@ -81,27 +81,28 @@ object DeepReadTemplateRenderer {
 
     private const val BASE_CSS = """
         html,body{margin:0;padding:0;background:#fafaf8;color:#191919;font-family:var(--deep-read-serif);}
-        article{padding-bottom:42px;}
-        .hero{margin:0 0 20px 0;position:relative;background:#f0f0ec;}
-        .hero img{display:block;width:100%;height:282px;object-fit:cover;}
-        .hero:after{content:"";display:block;height:70px;background:#fafaf8;clip-path:polygon(0 30%,100% 0,100% 100%,0 100%);margin-top:-50px;position:relative;}
-        figcaption{font-size:10px;color:#6b7280;line-height:1.55;margin:6px 26px 0;text-align:right;}
-        .headline,section{padding:0 26px;}
+        article{padding-bottom:34px;}
+        .hero{margin:0 0 14px 0;position:relative;background:#f0f0ec;}
+        .hero img{display:block;width:100%;height:238px;object-fit:cover;}
+        .hero:after{content:"";display:block;height:56px;background:#fafaf8;clip-path:polygon(0 34%,100% 0,100% 100%,0 100%);margin-top:-40px;position:relative;}
+        figcaption{font-size:9px;color:#6b7280;line-height:1.45;margin:5px 22px 0;text-align:right;}
+        .headline,section{padding:0 22px;}
         .kicker,.section,.date,.holder,small{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:#6b7280;font-size:10px;}
-        h1{font-weight:500;font-size:36px;line-height:1.15;margin:14px 0 18px;}
-        h2{font-weight:500;font-size:20px;line-height:1.36;margin:0 0 7px;}
-        p{font-size:16px;line-height:1.72;margin:0 0 14px;}
-        .summary{font-size:16px;line-height:1.72;}
-        section{margin-top:34px;}
-        .timeline{display:grid;grid-template-columns:36px 1fr;gap:12px;padding:15px 0;border-top:1px solid #ddd;}
+        h1{font-weight:500;font-size:32px;line-height:1.13;margin:12px 0 16px;}
+        h2{font-weight:500;font-size:18px;line-height:1.34;margin:0 0 6px;}
+        p{font-size:15px;line-height:1.68;margin:0 0 13px;}
+        .summary{font-size:15px;line-height:1.68;}
+        section{margin-top:28px;}
+        .timeline{display:grid;grid-template-columns:32px 1fr;gap:10px;padding:11px 0;border-top:1px solid #ddd;}
         .num{font-family:var(--deep-read-sans);color:#ef4444;letter-spacing:.12em;font-size:12px;padding-top:4px;}
         .inline{margin:12px 0 4px;background:#f0f0ec;}
         .inline img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
         .inline figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-        blockquote{font-size:20px;line-height:1.52;margin:0 0 20px;padding-left:14px;border-left:3px solid #ef4444;}
-        .reading{display:grid;grid-template-columns:36px 1fr;gap:12px;border-top:1px solid #ddd;padding:15px 0;}
+        blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid #ef4444;}
+        .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid #ddd;padding:10px 0;text-decoration:none;color:inherit;}
         .reading span{font-family:var(--deep-read-sans);color:#ef4444;font-size:12px;letter-spacing:.12em;}
-        .reading p{margin-bottom:4px;}
+        .reading p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+        .reading small{letter-spacing:.08em;font-size:9px;}
     """
 }
 

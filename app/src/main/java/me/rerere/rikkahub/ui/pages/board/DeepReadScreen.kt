@@ -195,6 +195,7 @@ private fun DeepReadTemplateArticle(
     fontRepository: SlidesFontRepository,
     fallback: @Composable () -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
     val rendered = remember(title, output, fontCss) {
         runCatching { DeepReadTemplateRenderer.renderEditorialSlant(title, output, fontCss) }.getOrNull()
     }
@@ -234,6 +235,20 @@ private fun DeepReadTemplateArticle(
                             return emptyWebResponse()
                         }
 
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean {
+                            val url = request?.url?.toString().orEmpty()
+                            if (url == DEEP_READ_TEMPLATE_BASE_URL) return false
+                            val scheme = request?.url?.scheme
+                            if (scheme == "http" || scheme == "https") {
+                                runCatching { uriHandler.openUri(url) }
+                                return true
+                            }
+                            return true
+                        }
+
                         override fun onReceivedError(
                             view: WebView?,
                             request: WebResourceRequest?,
@@ -259,6 +274,13 @@ private fun DeepReadTemplateArticle(
 
 private fun emptyWebResponse(): WebResourceResponse =
     WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+
+private fun openHttpUrl(uriHandler: androidx.compose.ui.platform.UriHandler, url: String) {
+    val scheme = runCatching { android.net.Uri.parse(url).scheme }.getOrNull()
+    if (scheme == "http" || scheme == "https") {
+        runCatching { uriHandler.openUri(url) }
+    }
+}
 
 private const val DEEP_READ_TEMPLATE_BASE_URL = "https://amberagent.deepread.local/"
 private const val DEEP_READ_BUILTIN_SERIF_FONT_URL = "https://amberagent.deepread.local/fonts/noto_serif_sc.otf"
@@ -778,28 +800,30 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { uriHandler.openUri(link.url) }
-                    .padding(vertical = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .clickable { openHttpUrl(uriHandler, link.url) }
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.Top,
             ) {
                 Text(
                     "%02d".format(index + 1),
-                    style = MaterialTheme.typography.labelLarge.copy(
+                    style = MaterialTheme.typography.labelSmall.copy(
                         letterSpacing = 1.5.sp,
                         color = palette.accent,
                     ),
                 )
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Text(
                         link.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            lineHeight = 29.sp,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            lineHeight = 20.sp,
                             color = palette.ink,
                         ).withReadingFont(fontFamily),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(link.source ?: link.url, style = MaterialTheme.typography.labelSmall, color = palette.muted)
                 }

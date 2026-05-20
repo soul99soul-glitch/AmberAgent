@@ -98,17 +98,22 @@ data class DeepReadState(
 )
 
 fun DeepReadOutput.hasReadableArticle(): Boolean {
-    if (summary.trim().length < 10) return false
-    return timeline.orEmpty().any { it.event.isNotBlank() } ||
-        corePoints.orEmpty().any { it.point.isNotBlank() } ||
-        !analysis.coreDispute.isNullOrBlank() ||
-        !analysis.implications.isNullOrBlank() ||
-        analysis.perspectives.any { it.viewpoint.isNotBlank() } ||
-        analysis.quotes.any { it.text.isNotBlank() }
+    if (summary.trim().length < 80) return false
+    if (lowInformationFallbackPhrases.any { it in visibleTextForLanguageCheck() }) return false
+    val hasTimeline = timeline.orEmpty().count { it.event.trim().length >= 20 } >= 2
+    val hasCorePoints = corePoints.orEmpty().count {
+        it.point.trim().length >= 10 && it.supporting.orEmpty().trim().length >= 30
+    } >= 2
+    val hasAnalysis = listOfNotNull(
+        analysis.coreDispute,
+        analysis.implications,
+    ).any { it.trim().length >= 40 } ||
+        analysis.perspectives.count { it.viewpoint.trim().length >= 30 } >= 2
+    return hasTimeline && hasCorePoints && hasAnalysis
 }
 
 fun DeepReadOutput.hasEnoughChinese(): Boolean {
-    val text = visibleTextForLanguageCheck()
+    val text = articleTextForQualityCheck()
     val cjk = text.count { it in '\u4e00'..'\u9fff' }
     val latin = text.count { it in 'a'..'z' || it in 'A'..'Z' }
     if (cjk >= 80) return true
@@ -123,7 +128,9 @@ fun DeepReadOutput.verifiedImageUrls(): Set<String> =
         .filter { it.startsWith("http") }
         .toSet()
 
-private fun DeepReadOutput.visibleTextForLanguageCheck(): String =
+private fun DeepReadOutput.visibleTextForLanguageCheck(): String = articleTextForQualityCheck()
+
+private fun DeepReadOutput.articleTextForQualityCheck(): String =
     buildString {
         append(summary)
         append(' ')
@@ -134,8 +141,19 @@ private fun DeepReadOutput.visibleTextForLanguageCheck(): String =
         analysis.perspectives.forEach { append(it.holder).append(' ').append(it.viewpoint).append(' ') }
         append(analysis.implications).append(' ')
         analysis.quotes.forEach { append(it.text).append(' ').append(it.attribution).append(' ') }
-        extendedReading.forEach { append(it.title).append(' ') }
-        append(heroCaption).append(' ')
-        imageAssets.forEach { append(it.caption).append(' ') }
-        references.forEach { append(it.title).append(' ') }
     }
+
+private val lowInformationFallbackPhrases = listOf(
+    "当前可抓取信息仍偏薄",
+    "可用信息不足以形成稳定脉络",
+    "抓取摘要不足",
+    "来源提供了相关背景线索",
+    "来源链接统一收在扩展阅读",
+    "避免把来源列表误写成深度分析",
+    "后续深读应围绕",
+    "模型输出格式不稳定",
+    "目前来源未覆盖",
+    "更多材料",
+    "链接见扩展阅读",
+    "来源见扩展阅读",
+)
