@@ -18,6 +18,8 @@ internal object HighlighterNative {
 
     private const val TAG = "HighlighterNative"
     private const val LIB_NAME = "highlight_parser"
+    /** Wire-format version we know how to read. Bump when wire format changes. */
+    private const val SUPPORTED_WIRE_VERSION = 1
 
     private val loaded = AtomicBoolean(false)
     private var loadError: Throwable? = null
@@ -103,6 +105,12 @@ internal object HighlighterNative {
         if (blob[0] != 'P'.code.toByte() || blob[1] != 'H'.code.toByte()
             || blob[2] != 'L'.code.toByte() || blob[3] != 'T'.code.toByte()
         ) return emptyList()
+        // Reject wire-format versions we don't know how to read so a future
+        // v2 .so with a Kotlin client on this version silently falls back
+        // instead of mis-decoding (cross-component review P2 fix; mirrors the
+        // PackedAstReader.isValid check in MarkdownParserNative).
+        val rawVersion = blob[4].toInt() and 0xFF
+        if (rawVersion != SUPPORTED_WIRE_VERSION) return emptyList()
         var cursor = 8
 
         // Cache the UTF-8 byte representation **once** per decode call so

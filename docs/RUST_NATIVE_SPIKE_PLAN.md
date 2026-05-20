@@ -447,14 +447,30 @@ ROUND <N> COMPONENT <NAME> — <APPROVE | NITS | REQUEST CHANGES>
 
 ## 8. 总体退出条件
 
-整个 spike 完成意味着：
-- ✅ 3 个组件都过了 sub-agent Round N APPROVE（0 P2+ 风险）
-- ✅ 加速比 / binary 增量都在阈值内
-- ✅ Spike branch 跑过 3-variant assemble + testDebugUnitTest baseline 保持
-- ✅ 全面 review（跨组件 design review + bug sweep）通过
-- ✅ 写一份 SPIKE_REPORT.md 给到决策会，判断是否进 Phase 2（生产化）
+Spike 工作分两层 gate：
 
-**不达标的部分**：单独 abandon 该组件，不影响其他组件。
+### 8.1 Phase 1（结构性 spike）— 当前阶段
+
+完成意味着：
+- ✅ 3 个组件都过了 sub-agent Round N APPROVE（0 P2+ 风险）
+- ✅ `cargo check --workspace` clean
+- ✅ `cargo test --workspace` 全 pass（host 端）
+- ✅ 跨组件全面 review 完成；找到的 cross-cutting 问题已修
+- ✅ 3 个 Android module（`document/` / `highlight/` / `app/`）都接了 rust-android-gradle plugin（即每个 .so 都会跟着 module assemble 入 APK）
+
+Phase 1 关心**代码与架构正确性**：JNI 安全、fallback 完整、wire format 一致、生产无崩、向后兼容路径清晰。
+
+### 8.2 Phase 2（acceptance gate）— 后续阶段
+
+数据/性能/真实运行验证：
+- ⏳ 真实 corpus（`native/<component>/tests/corpus/`）建库：每组件 5-10 个真实样本
+- ⏳ JVM/Rust 输出 diff harness：office 输出字符串等价 / markdown AST 节点 N 对得上 / highlight scope ≥80% 一致
+- ⏳ benchmark harness：单 device 真实测速，验证 SPIKE_PLAN §3.3/§4.4/§5.4 的加速比阈值
+- ⏳ 3-variant Android assemble (Debug/Notion/Refactortest) + testDebugUnitTest baseline 保持
+- ⏳ APK size 增量在 `arm64-v8a` 上量出来跟预期匹配
+- ⏳ SPIKE_REPORT.md：决策会用
+
+**不达标的部分**：单独 abandon 该组件，不影响其他组件。如果 Phase 2 acceptance 不过，**spike 也不会自动落地到生产**——所有 Kotlin adapter 写法都 lazy load + fallback to JVM，即使 `.so` 缺失也不崩。
 
 ---
 
@@ -472,17 +488,30 @@ ROUND <N> COMPONENT <NAME> — <APPROVE | NITS | REQUEST CHANGES>
 
 ## 10. 状态跟踪
 
+### Phase 1 (结构性 spike) — 完成
+
 | 节点 | 状态 | 备注 |
 |---|---|---|
-| 0. 用户环境安装 Rust toolchain + NDK | ⏳ 进行中 | 用户操作 |
-| 1. Plan doc + 项目结构 | 🟡 进行中 | 当前文档 |
-| 2. native/ Cargo workspace | ⏳ pending | |
-| 3. Component #1: office-parsers | ⏳ pending | 风险最低，先做 |
-| 4. Component #2: markdown-parser | ⏳ pending | |
-| 5. Component #3: highlight-parser | ⏳ pending | |
-| 6. Kotlin adapters | ⏳ pending | |
-| 7. Gradle plugin 集成 | ⏳ pending | 用 mozilla rust-android-gradle |
-| 8. Bench harness | ⏳ pending | |
-| 9. Sub-agent review × 3 组件 | ⏳ pending | 每组件循环到 0 P2+ |
-| 10. 跨组件全面 review | ⏳ pending | 最后一步 |
-| 11. SPIKE_REPORT.md | ⏳ pending | 决策会用 |
+| 0. 环境（NDK 27.0.12077973 / Rust 1.95 / 3 targets / cargo-ndk 4.1.2）| ✅ | |
+| 1. Plan doc + 项目结构 | ✅ | 本文档 |
+| 2. native/ Cargo workspace + 3 crate 骨架 | ✅ | |
+| 3. Component #1: office-parsers | ✅ | Round 2 NITS（0 P2+）|
+| 4. Component #2: markdown-parser | ✅ | Round 4 APPROVE（0 P2+）|
+| 5. Component #3: highlight-parser | ✅ | Round 2 APPROVE（0 P2+）|
+| 6. Kotlin adapters × 3 | ✅ | nativebridge 子包，lazy load + fallback |
+| 7. Gradle plugin 集成（3 module）| ✅ | document / highlight / app 都接了 rust-android |
+| 8. Sub-agent review × 3 组件 | ✅ | 循环到 0 P2+ |
+| 9. 跨组件全面 review | ✅ | 1 P1 + 2 P2 cross-cutting → 全 fix |
+| 10. `cargo test --workspace` 全 pass | ✅ | 28/28（highlight 6 + markdown 9 + office 13）|
+
+### Phase 2 (acceptance gate) — 待开
+
+| 节点 | 状态 | 备注 |
+|---|---|---|
+| A. corpus（每组件 5-10 真实样本） | ⏳ pending | |
+| B. JVM/Rust 等价性 diff harness | ⏳ pending | 跑 corpus 比对输出 |
+| C. benchmark harness（真机测速）| ⏳ pending | 验证 §3.3/§4.4/§5.4 阈值 |
+| D. 3-variant Android assemble 验证 | ⏳ pending | Debug/Notion/Refactortest |
+| E. APK size 增量量化 | ⏳ pending | arm64-v8a 真实数据 |
+| F. SPIKE_REPORT.md | ⏳ pending | 决策会输出 |
+| G. 接入生产渲染层（feature flag）| ⏳ pending | 仅在 Phase 2 数据达标后 |

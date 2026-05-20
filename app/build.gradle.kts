@@ -64,6 +64,11 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
+    // Rust JNI integration for the markdown-parser crate. Stages
+    // libmarkdown_parser.so into the APK's jniLibs. See
+    // docs/RUST_NATIVE_SPIKE_PLAN.md §2.3 and the matching block in
+    // document/build.gradle.kts.
+    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
 }
 
 android {
@@ -246,6 +251,31 @@ android {
         compilerOptions.optIn.add("kotlin.uuid.ExperimentalUuidApi")
         compilerOptions.optIn.add("kotlin.time.ExperimentalTime")
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+    }
+
+    // Bring the cargo-built .so files (libmarkdown_parser.so) into the APK's
+    // jniLibs. See cargo { } block below + docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDirs("${layout.buildDirectory.get()}/rustJniLibs/android")
+        }
+    }
+}
+
+cargo {
+    module = "../native/markdown-parser"
+    libname = "markdown_parser"
+    targets = listOf("arm64", "arm", "x86_64")
+    profile = "release"
+    apiLevel = 26
+    extraCargoBuildArguments = listOf("--package", "markdown-parser")
+    targetDirectory = "../native/target"
+    verbose = true
+}
+
+afterEvaluate {
+    tasks.named("preBuild").configure {
+        dependsOn("cargoBuild")
     }
 }
 
