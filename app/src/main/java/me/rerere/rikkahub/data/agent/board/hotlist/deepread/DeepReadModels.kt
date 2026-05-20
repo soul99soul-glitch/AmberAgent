@@ -8,7 +8,7 @@ data class DeepReadOutput(
     @SerialName("topic_type")
     val topicType: String = "event",
     @SerialName("generation_complete")
-    val generationComplete: Boolean = true,
+    val generationComplete: Boolean = false,
     val summary: String = "",
     @SerialName("key_entities")
     val keyEntities: List<String> = emptyList(),
@@ -27,7 +27,70 @@ data class DeepReadOutput(
     @SerialName("image_assets")
     val imageAssets: List<DeepReadImageAsset> = emptyList(),
     val references: List<ReadingLink> = emptyList(),
+    @SerialName("section_states")
+    val sectionStates: Map<DeepReadGenerationStage, DeepReadSectionState> = emptyMap(),
 )
+
+@Serializable
+enum class DeepReadSectionStatus { PENDING, RUNNING, READY, FAILED }
+
+@Serializable
+data class DeepReadSectionState(
+    val status: DeepReadSectionStatus = DeepReadSectionStatus.PENDING,
+    @SerialName("error_message")
+    val errorMessage: String? = null,
+)
+
+fun DeepReadOutput.statusOf(stage: DeepReadGenerationStage): DeepReadSectionStatus =
+    sectionStates[stage]?.status ?: DeepReadSectionStatus.PENDING
+
+fun DeepReadOutput.errorOf(stage: DeepReadGenerationStage): String? =
+    sectionStates[stage]?.errorMessage
+
+fun DeepReadOutput.withSectionStatus(
+    stage: DeepReadGenerationStage,
+    status: DeepReadSectionStatus,
+    errorMessage: String? = null,
+): DeepReadOutput {
+    val nextStates = sectionStates.toMutableMap()
+    nextStates[stage] = DeepReadSectionState(status, errorMessage)
+    val merged = copy(sectionStates = nextStates)
+    return merged.copy(generationComplete = merged.isComplete())
+}
+
+fun DeepReadOutput.isComplete(): Boolean =
+    DeepReadGenerationStage.entries.all { sectionStates[it]?.status == DeepReadSectionStatus.READY }
+
+fun DeepReadOutput.hasAnyReadySection(): Boolean =
+    sectionStates.values.any { it.status == DeepReadSectionStatus.READY }
+
+fun DeepReadOutput.withInferredSectionStates(): DeepReadOutput {
+    if (sectionStates.isNotEmpty()) return this
+    val inferred = mutableMapOf<DeepReadGenerationStage, DeepReadSectionState>()
+    val legacyComplete = generationComplete
+    val overviewReady = summary.trim().isNotBlank()
+    val narrativeReady = (timeline.orEmpty().count { it.event.isNotBlank() } >= 1) ||
+        (corePoints.orEmpty().count { it.point.isNotBlank() } >= 1)
+    val analysisReady = !analysis.coreDispute.isNullOrBlank() ||
+        !analysis.implications.isNullOrBlank() ||
+        analysis.perspectives.any { it.viewpoint.isNotBlank() } ||
+        analysis.quotes.any { it.text.isNotBlank() }
+    val readingReady = extendedReading.isNotEmpty() || references.isNotEmpty()
+    if (overviewReady || legacyComplete) {
+        inferred[DeepReadGenerationStage.OVERVIEW] = DeepReadSectionState(DeepReadSectionStatus.READY)
+    }
+    if (narrativeReady || legacyComplete) {
+        inferred[DeepReadGenerationStage.NARRATIVE] = DeepReadSectionState(DeepReadSectionStatus.READY)
+    }
+    if (analysisReady || legacyComplete) {
+        inferred[DeepReadGenerationStage.ANALYSIS] = DeepReadSectionState(DeepReadSectionStatus.READY)
+    }
+    if (readingReady || legacyComplete) {
+        inferred[DeepReadGenerationStage.EXTENDED_READING] = DeepReadSectionState(DeepReadSectionStatus.READY)
+    }
+    val merged = copy(sectionStates = inferred)
+    return merged.copy(generationComplete = merged.isComplete())
+}
 
 @Serializable
 data class TimelineEvent(
