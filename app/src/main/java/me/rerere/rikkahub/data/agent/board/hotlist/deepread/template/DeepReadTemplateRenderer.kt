@@ -4,12 +4,17 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 
 object DeepReadTemplateRenderer {
-    fun renderEditorialSlant(title: String, output: DeepReadOutput): DeepReadRenderedTemplate {
+    fun renderEditorialSlant(
+        title: String,
+        output: DeepReadOutput,
+        fontCss: String = DEFAULT_FONT_CSS,
+    ): DeepReadRenderedTemplate {
         val safeImages = output.safeImageUrls()
         val hero = output.heroImageUrl?.takeIf { it in safeImages }
             ?: output.imageAssets.firstOrNull { it.url in safeImages }?.url
         val body = buildString {
             appendLine("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>")
+            appendLine(fontCss)
             appendLine(BASE_CSS)
             appendLine("</style></head><body>")
             appendLine("<article>")
@@ -55,7 +60,6 @@ object DeepReadTemplateRenderer {
             }
             appendLine("</article></body></html>")
         }
-        DeepReadTemplateValidator.validateOrThrow(body)
         return DeepReadRenderedTemplate(html = body, allowedImageUrls = safeImages)
     }
 
@@ -68,28 +72,35 @@ object DeepReadTemplateRenderer {
             .replace("\"", "&quot;")
             .replace("'", "&#39;")
 
+    private const val DEFAULT_FONT_CSS = """
+        :root{
+          --deep-read-serif:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;
+          --deep-read-sans:"PingFang SC","Source Han Sans SC","Noto Sans SC",system-ui,sans-serif;
+        }
+    """
+
     private const val BASE_CSS = """
-        html,body{margin:0;padding:0;background:#fafaf8;color:#191919;font-family:serif;}
-        article{padding-bottom:48px;}
+        html,body{margin:0;padding:0;background:#fafaf8;color:#191919;font-family:var(--deep-read-serif);}
+        article{padding-bottom:42px;}
         .hero{margin:0 0 20px 0;position:relative;background:#f0f0ec;}
-        .hero img{display:block;width:100%;height:320px;object-fit:cover;}
-        .hero:after{content:"";display:block;height:80px;background:#fafaf8;clip-path:polygon(0 28%,100% 0,100% 100%,0 100%);margin-top:-58px;position:relative;}
-        figcaption{font-size:12px;color:#6b7280;line-height:1.7;margin:8px 30px 0;text-align:right;}
-        .headline,section{padding:0 30px;}
-        .kicker,.section,.date,.holder,small{font-family:sans-serif;letter-spacing:.22em;text-transform:uppercase;color:#6b7280;font-size:12px;}
-        h1{font-weight:400;font-size:46px;line-height:1.12;margin:18px 0 22px;}
-        h2{font-weight:400;font-size:24px;line-height:1.35;margin:0 0 8px;}
-        p{font-size:19px;line-height:1.82;margin:0 0 18px;}
-        .summary{font-size:20px;line-height:1.75;}
-        section{margin-top:46px;}
-        .timeline{display:grid;grid-template-columns:42px 1fr;gap:14px;padding:18px 0;border-top:1px solid #ddd;}
-        .num{font-family:sans-serif;color:#ef4444;letter-spacing:.12em;font-size:13px;padding-top:5px;}
-        .inline{margin:16px 0 6px;background:#f0f0ec;}
+        .hero img{display:block;width:100%;height:282px;object-fit:cover;}
+        .hero:after{content:"";display:block;height:70px;background:#fafaf8;clip-path:polygon(0 30%,100% 0,100% 100%,0 100%);margin-top:-50px;position:relative;}
+        figcaption{font-size:10px;color:#6b7280;line-height:1.55;margin:6px 26px 0;text-align:right;}
+        .headline,section{padding:0 26px;}
+        .kicker,.section,.date,.holder,small{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:#6b7280;font-size:10px;}
+        h1{font-weight:500;font-size:36px;line-height:1.15;margin:14px 0 18px;}
+        h2{font-weight:500;font-size:20px;line-height:1.36;margin:0 0 7px;}
+        p{font-size:16px;line-height:1.72;margin:0 0 14px;}
+        .summary{font-size:16px;line-height:1.72;}
+        section{margin-top:34px;}
+        .timeline{display:grid;grid-template-columns:36px 1fr;gap:12px;padding:15px 0;border-top:1px solid #ddd;}
+        .num{font-family:var(--deep-read-sans);color:#ef4444;letter-spacing:.12em;font-size:12px;padding-top:4px;}
+        .inline{margin:12px 0 4px;background:#f0f0ec;}
         .inline img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
-        .inline figcaption{text-align:left;margin:8px 10px 10px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-        blockquote{font-size:25px;line-height:1.55;margin:0 0 24px;padding-left:18px;border-left:3px solid #ef4444;}
-        .reading{display:grid;grid-template-columns:42px 1fr;gap:14px;border-top:1px solid #ddd;padding:18px 0;}
-        .reading span{font-family:sans-serif;color:#ef4444;font-size:13px;letter-spacing:.12em;}
+        .inline figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+        blockquote{font-size:20px;line-height:1.52;margin:0 0 20px;padding-left:14px;border-left:3px solid #ef4444;}
+        .reading{display:grid;grid-template-columns:36px 1fr;gap:12px;border-top:1px solid #ddd;padding:15px 0;}
+        .reading span{font-family:var(--deep-read-sans);color:#ef4444;font-size:12px;letter-spacing:.12em;}
         .reading p{margin-bottom:4px;}
     """
 }

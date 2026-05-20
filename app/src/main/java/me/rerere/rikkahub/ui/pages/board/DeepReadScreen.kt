@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,6 +63,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
+import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
@@ -71,10 +74,14 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import me.rerere.rikkahub.data.font.FontPackCategory
+import me.rerere.rikkahub.data.font.FontPackState
 import me.rerere.rikkahub.data.font.SlidesFontRepository
+import me.rerere.rikkahub.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
 import java.io.ByteArrayInputStream
+import java.io.File
 
 @Composable
 fun DeepReadScreen(topicId: String, title: String) {
@@ -86,6 +93,11 @@ fun DeepReadScreen(topicId: String, title: String) {
     val confirmed = settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed
     val board = settings.agentRuntime.todayBoard
     val readingFontFamily = rememberBoardReadingFontFamily(
+        mode = board.boardReadingFontMode,
+        fontPackId = board.boardReadingFontPackId,
+        fontStates = fontStates,
+    )
+    val templateFontCss = rememberDeepReadTemplateFontCss(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
         fontStates = fontStates,
@@ -147,6 +159,8 @@ fun DeepReadScreen(topicId: String, title: String) {
                         title = title,
                         output = output!!,
                         palette = palette,
+                        fontCss = templateFontCss,
+                        fontRepository = fontRepository,
                         fallback = {
                             DeepReadArticle(
                                 title = title,
@@ -177,10 +191,12 @@ private fun DeepReadTemplateArticle(
     title: String,
     output: DeepReadOutput,
     palette: MagazinePalette,
+    fontCss: String,
+    fontRepository: SlidesFontRepository,
     fallback: @Composable () -> Unit,
 ) {
-    val rendered = remember(title, output) {
-        runCatching { DeepReadTemplateRenderer.renderEditorialSlant(title, output) }.getOrNull()
+    val rendered = remember(title, output, fontCss) {
+        runCatching { DeepReadTemplateRenderer.renderEditorialSlant(title, output, fontCss) }.getOrNull()
     }
     var failed by remember(rendered) { mutableStateOf(rendered == null) }
     if (failed || rendered == null) {
@@ -210,7 +226,11 @@ private fun DeepReadTemplateArticle(
                             val url = request?.url?.toString().orEmpty()
                             val mainFrame = request?.isForMainFrame == true
                             if (mainFrame && url == DEEP_READ_TEMPLATE_BASE_URL) return null
-                            if (!mainFrame && url in rendered.allowedImageUrls) return null
+                            if (!mainFrame) {
+                                interceptBuiltInDeepReadFont(view, url)?.let { return it }
+                                fontRepository.interceptFontRequest(request)?.let { return it }
+                                if (url in rendered.allowedImageUrls) return null
+                            }
                             return emptyWebResponse()
                         }
 
@@ -241,6 +261,14 @@ private fun emptyWebResponse(): WebResourceResponse =
     WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
 
 private const val DEEP_READ_TEMPLATE_BASE_URL = "https://amberagent.deepread.local/"
+private const val DEEP_READ_BUILTIN_SERIF_FONT_URL = "https://amberagent.deepread.local/fonts/noto_serif_sc.otf"
+private const val DEEP_READ_SLIDES_FONT_HOST = "amberagent.local"
+
+private fun interceptBuiltInDeepReadFont(view: WebView?, url: String): WebResourceResponse? {
+    if (url != DEEP_READ_BUILTIN_SERIF_FONT_URL) return null
+    val input = view?.context?.resources?.openRawResource(R.font.noto_serif_sc) ?: return emptyWebResponse()
+    return WebResourceResponse("font/otf", null, input)
+}
 
 @Composable
 private fun DeepReadConfirmation(
@@ -870,16 +898,206 @@ private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
 
 @Composable
 private fun DeepReadError(error: String, modifier: Modifier, onRetry: () -> Unit) {
+    val ui = remember(error) { formatDeepReadError(error) }
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(error.ifBlank { "生成失败，请稍后重试" }, style = MaterialTheme.typography.bodyMedium)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 28.dp)
+                .widthIn(max = 420.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                ui.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            ui.reason?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (ui.detail.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            ui.detail,
+                            modifier = Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            ui.suggestion?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Button(onClick = onRetry) { Text("重试") }
         }
     }
 }
 
+private data class DeepReadErrorUi(
+    val title: String,
+    val reason: String?,
+    val detail: String,
+    val suggestion: String?,
+)
+
+private fun formatDeepReadError(error: String): DeepReadErrorUi {
+    val normalized = error.replace(Regex("\\s+"), " ").trim()
+    if (normalized.isBlank()) {
+        return DeepReadErrorUi(
+            title = "深度阅读生成失败",
+            reason = null,
+            detail = "没有收到具体错误信息。",
+            suggestion = "可以重试一次，或切换模型后再生成。",
+        )
+    }
+    val lines = error.trim().lines().map { it.trim() }.filter { it.isNotBlank() }
+    val firstLine = lines.firstOrNull().orEmpty()
+    val httpCode = Regex("""HTTP\s*(\d{3})""", RegexOption.IGNORE_CASE)
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?: Regex("""response\D{0,12}(\d{3})""", RegexOption.IGNORE_CASE)
+            .find(normalized)
+            ?.groupValues
+            ?.getOrNull(1)
+    val title = when {
+        "被拒绝" in firstLine || httpCode == "400" -> "模型请求被拒绝"
+        httpCode in setOf("401", "403") -> "模型鉴权失败"
+        httpCode == "429" -> "模型额度或频率受限"
+        httpCode in setOf("500", "502", "503", "504") -> "模型服务异常"
+        else -> "深度阅读生成失败"
+    }
+    val detail = lines
+        .drop(1)
+        .takeWhile { !it.startsWith("可能") && !it.startsWith("请") && !it.startsWith("当前") && !it.startsWith("这是") && !it.startsWith("请求") }
+        .joinToString("\n")
+        .ifBlank { normalized }
+        .take(900)
+    val suggestion = lines
+        .lastOrNull()
+        ?.takeIf { it != firstLine && it != detail && looksLikeSuggestion(it) }
+        ?: defaultDeepReadErrorSuggestion(httpCode, normalized)
+    return DeepReadErrorUi(
+        title = title,
+        reason = httpCode?.let { "HTTP $it" },
+        detail = detail,
+        suggestion = suggestion,
+    )
+}
+
+private fun looksLikeSuggestion(text: String): Boolean =
+    listOf("可以", "建议", "请", "可能", "稍后", "切换").any { it in text }
+
+private fun defaultDeepReadErrorSuggestion(httpCode: String?, message: String): String? {
+    val lower = message.lowercase()
+    return when {
+        httpCode == "400" && listOf("reject", "rejected", "safety", "policy", "blocked").any { it in lower } ->
+            "可能是来源正文或提示词触发了模型安全策略。可以换一个模型，或减少来源正文后重试。"
+        httpCode == "400" -> "请求被模型服务判定为无效。建议换模型或重新生成一次。"
+        httpCode in setOf("401", "403") -> "请检查这个模型的 API Key、Base URL、模型名和账号权限。"
+        httpCode == "429" -> "当前模型可能达到额度或频率限制，稍后重试或切换模型。"
+        httpCode in setOf("500", "502", "503", "504") -> "这是模型服务端错误，稍后重试通常可以恢复。"
+        else -> null
+    }
+}
+
 private fun TextStyle.withReadingFont(fontFamily: FontFamily?): TextStyle =
     if (fontFamily == null) this else copy(fontFamily = fontFamily)
+
+@Composable
+private fun rememberDeepReadTemplateFontCss(
+    mode: TodayBoardReadingFontMode,
+    fontPackId: String?,
+    fontStates: List<FontPackState>,
+): String = remember(mode, fontPackId, fontStates) {
+    when (mode) {
+        TodayBoardReadingFontMode.SYSTEM -> deepReadFontVars(
+            serif = "\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif",
+            sans = "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif",
+        )
+
+        TodayBoardReadingFontMode.SERIF -> """
+            @font-face{
+              font-family:"AmberDeepReadSerif";
+              src:url("$DEEP_READ_BUILTIN_SERIF_FONT_URL") format("opentype");
+              font-weight:400;
+              font-style:normal;
+              font-display:swap;
+            }
+            ${deepReadFontVars(
+            serif = "\"AmberDeepReadSerif\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif",
+            sans = "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif",
+        )}
+        """.trimIndent()
+
+        TodayBoardReadingFontMode.SLIDES_PACK -> {
+            val state = fontStates
+                .firstOrNull { it.pack.id == fontPackId && it.installed }
+                ?.takeIf { File(it.installedPath.orEmpty()).isFile }
+            if (state == null) {
+                deepReadFontVars(
+                    serif = "\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif",
+                    sans = "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif",
+                )
+            } else {
+                val family = "AmberDeepRead-${state.pack.id}"
+                val format = when (state.pack.fileName.substringAfterLast('.', "").lowercase()) {
+                    "otf" -> "opentype"
+                    "ttf" -> "truetype"
+                    "woff" -> "woff"
+                    "woff2" -> "woff2"
+                    else -> "truetype"
+                }
+                val source = "https://$DEEP_READ_SLIDES_FONT_HOST/fonts/${state.pack.id}/${state.pack.fileName}"
+                val serif = when (state.pack.category) {
+                    FontPackCategory.SERIF, FontPackCategory.HANDWRITING ->
+                        "\"$family\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif"
+
+                    else -> "\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif"
+                }
+                val sans = when (state.pack.category) {
+                    FontPackCategory.SANS ->
+                        "\"$family\",\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif"
+
+                    else -> "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif"
+                }
+                """
+                    @font-face{
+                      font-family:"$family";
+                      src:url("$source") format("$format");
+                      font-weight:400;
+                      font-style:normal;
+                      font-display:swap;
+                    }
+                    ${deepReadFontVars(serif = serif, sans = sans)}
+                """.trimIndent()
+            }
+        }
+    }
+}
+
+private fun deepReadFontVars(serif: String, sans: String): String =
+    """
+        :root{
+          --deep-read-serif:$serif;
+          --deep-read-sans:$sans;
+        }
+    """.trimIndent()
 
 @Composable
 private fun magazinePalette(): MagazinePalette {

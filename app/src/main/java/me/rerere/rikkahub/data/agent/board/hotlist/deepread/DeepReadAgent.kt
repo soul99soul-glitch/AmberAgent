@@ -317,7 +317,7 @@ class DeepReadAgent(
             throw error
         } catch (error: Throwable) {
             Log.e(TAG, "deep read model call failed", error)
-            lastCallFailureReason = error.message?.take(100) ?: error::class.simpleName
+            lastCallFailureReason = formatDeepReadModelFailure(error)
             null
         }
     }
@@ -388,16 +388,9 @@ class DeepReadAgent(
                 append(reason)
                 append("。")
             }
-            append("下面保留主要来源和可继续阅读的线索，稍后重新生成可获得更完整的杂志式分析。")
+            append("当前页面会优先呈现可确认的中文脉络，来源链接统一收在扩展阅读中。")
         }
-        val points = cleanedSources.take(4).mapIndexed { index, source ->
-            CorePoint(
-                point = source.chineseSafeTitle(topicTitle, index),
-                supporting = source.content.toChineseReadableSnippet(),
-            )
-        }.ifEmpty {
-            listOf(CorePoint(point = topicTitle, supporting = "暂无更多来源正文，建议稍后重新生成。"))
-        }
+        val points = buildFallbackCorePoints(topicTitle, cleanedSources, sourceNames)
         return DeepReadOutput(
             topicType = "event",
             summary = summary,
@@ -407,18 +400,50 @@ class DeepReadAgent(
             heroCaption = imageAssets.firstOrNull()?.caption,
             imageAssets = imageAssets,
             analysis = DeepAnalysis(
-                coreDispute = "当前信息仍以热榜标题和可抓取摘要为主，完整背景需要等待更多稳定来源补齐。",
+                coreDispute = "当前可抓取信息仍偏薄，暂时只能确认话题热度和若干来源线索，尚不足以支撑完整因果链判断。",
                 perspectives = cleanedSources.take(3).map { source ->
                     Perspective(
                         holder = source.source ?: domainOf(source.url),
-                        viewpoint = source.content.toChineseReadableSnippet().ifBlank { source.chineseSafeTitle(topicTitle, 0) },
+                        viewpoint = source.content.toChineseReadableSnippet().ifBlank {
+                            "该来源提供了与话题相关的线索，但当前摘要不足以单独形成明确判断。"
+                        },
                     )
                 },
-                implications = "这份兜底稿优先保证可读和可追溯：先给出来源脉络，避免因模型 JSON 格式波动导致页面不可用；后续重新生成会尝试补充更完整的分析。",
+                implications = "如果需要更完整的深读，系统需要抓到更多正文级材料；在此之前，页面会把来源保留在扩展阅读中，避免用占位文字伪装成分析。",
                 quotes = emptyList(),
             ),
             extendedReading = reading,
             references = reading,
+        )
+    }
+
+    private fun buildFallbackCorePoints(
+        topicTitle: String,
+        sources: List<DeepReadSource>,
+        sourceNames: List<String>,
+    ): List<CorePoint> {
+        if (sources.isEmpty()) {
+            return listOf(
+                CorePoint(
+                    point = "可用信息不足以形成稳定脉络",
+                    supporting = "当前还没有抓到足够的来源正文，因此先保留话题入口，避免把来源列表误写成深度分析。",
+                )
+            )
+        }
+        val sourceText = if (sourceNames.isEmpty()) "热榜和搜索来源" else sourceNames.joinToString("、")
+        return listOf(
+            CorePoint(
+                point = "这个话题已经进入多来源关注区",
+                supporting = "系统已从$sourceText 捕捉到相关线索，但现有摘要仍偏碎片化，需要进一步抽取正文才能形成完整时间轴。",
+            ),
+            CorePoint(
+                point = "当前最重要的是分辨事实、背景与评论",
+                supporting = "页面会把可追溯链接放在扩展阅读中；关键脉络只保留已经能被中文消化的判断，避免把英文标题或来源域名当作正文。",
+            ),
+            CorePoint(
+                point = "后续深读应围绕「$topicTitle」补齐因果链",
+                supporting = "更理想的稿件需要回答：事件从哪里开始、为什么现在被关注、各方争议是什么、后续可能影响谁。",
+            ),
         )
     }
 
@@ -430,16 +455,17 @@ class DeepReadAgent(
     private fun String.toChineseReadableSnippet(maxLength: Int = 180): String {
         val snippet = toReadableSnippet(maxLength)
         if (snippet.hasCjk() || snippet.count { it in 'a'..'z' || it in 'A'..'Z' } < 50) return snippet
-        return "这条来源主要是英文内容，已保留原文链接；重新生成时会继续尝试转写为中文。"
+        return "该来源提供了相关背景线索，但当前抓取摘要不足以直接改写成可靠中文正文。"
     }
 
     private fun DeepReadOutput.withChineseFallback(topicTitle: String, sources: List<DeepReadSource>): DeepReadOutput =
         copy(
-            summary = summary.takeIf { it.hasCjk() } ?: "围绕「$topicTitle」，当前深度阅读已整理出主要来源。英文来源会保留原文链接，页面正文优先以中文呈现。",
+            summary = summary.takeIf { it.hasCjk() } ?: "围绕「$topicTitle」，当前深度阅读已整理出主要来源，页面正文会优先以中文脉络呈现。",
             corePoints = corePoints.orEmpty().mapIndexed { index, point ->
                 CorePoint(
-                    point = point.point.takeIf { it.hasCjk() } ?: sources.getOrNull(index)?.chineseSafeTitle(topicTitle, index) ?: "关键线索 ${index + 1}",
-                    supporting = point.supporting?.toChineseReadableSnippet(),
+                    point = point.point.takeIf { it.hasCjk() } ?: "关于「$topicTitle」的关键线索 ${index + 1}",
+                    supporting = point.supporting?.toChineseReadableSnippet()
+                        ?: "这条线索需要继续结合来源正文来判断，不能只按原文标题复述。",
                 )
             },
             analysis = analysis.copy(
@@ -458,7 +484,7 @@ class DeepReadAgent(
         )
 
     private fun DeepReadSource.chineseSafeTitle(topicTitle: String, index: Int): String =
-        title.takeIf { it.hasCjk() } ?: "原文来源 ${index + 1}：${source ?: domainOf(url) ?: "外部站点"} 关于「$topicTitle」的内容"
+        title.takeIf { it.hasCjk() } ?: "关于「$topicTitle」的相关报道（${source ?: domainOf(url) ?: "外部站点"}）"
 
     private fun String.extractOpenGraphImage(): String? =
         listOf(
@@ -501,3 +527,74 @@ internal fun Settings.enabledDeepReadSearchServices(): List<SearchServiceOptions
     searchServices
         .filter { service -> searchEnabledServiceIds.any { it == service.id } }
         .take(4)
+
+internal fun formatDeepReadModelFailure(error: Throwable): String =
+    normalizeDeepReadFailureMessage(error.message.orEmpty())
+        .ifBlank { error::class.simpleName ?: "模型请求失败" }
+
+internal fun normalizeDeepReadFailureMessage(rawMessage: String): String {
+    val message = rawMessage.replace(Regex("\\s+"), " ").trim()
+    if (message.isBlank()) return ""
+    val httpCode = Regex("""(?i)(?:response|http)\D{0,12}(\d{3})""")
+        .find(message)
+        ?.groupValues
+        ?.getOrNull(1)
+    val providerMessage = extractJsonStringField(message, "message")
+        ?: extractJsonStringField(message, "error")
+        ?: message
+    val status = extractJsonStringField(message, "status")
+    val reason = when (httpCode) {
+        "400" -> "模型请求被拒绝"
+        "401", "403" -> "模型鉴权或权限失败"
+        "408" -> "模型请求超时"
+        "429" -> "模型额度或频率受限"
+        in setOf("500", "502", "503", "504") -> "模型服务暂时不可用"
+        else -> "深度阅读生成失败"
+    }
+    val suggestion = deepReadFailureSuggestion(httpCode, providerMessage, status)
+    return buildString {
+        append(reason)
+        if (httpCode != null) append("（HTTP ").append(httpCode).append("）")
+        if (status != null) append("：").append(status)
+        append("\n")
+        append(providerMessage.take(800))
+        if (suggestion.isNotBlank()) {
+            append("\n\n")
+            append(suggestion)
+        }
+    }
+}
+
+private fun deepReadFailureSuggestion(httpCode: String?, providerMessage: String, status: String?): String {
+    val lower = "$providerMessage $status".lowercase()
+    return when {
+        httpCode == "400" && listOf("reject", "rejected", "safety", "policy", "blocked", "unsafe").any { it in lower } ->
+            "可能是来源正文或提示词触发了模型安全策略。可以换一个模型，或减少来源正文后重试。"
+        httpCode == "400" ->
+            "请求被模型服务判定为无效。建议换模型或重新生成一次。"
+        httpCode in setOf("401", "403") ->
+            "请检查这个模型的 API Key、Base URL、模型名和账号权限。"
+        httpCode == "429" ->
+            "当前模型可能达到额度或频率限制，稍后重试或切换模型。"
+        httpCode in setOf("500", "502", "503", "504") ->
+            "这是模型服务端错误，稍后重试通常可以恢复。"
+        else -> ""
+    }
+}
+
+private fun extractJsonStringField(text: String, field: String): String? {
+    val pattern = Regex(""""${Regex.escape(field)}"\s*:\s*"((?:\\.|[^"\\])*)"""")
+    return pattern.find(text)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.jsonUnescape()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+}
+
+private fun String.jsonUnescape(): String =
+    replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")

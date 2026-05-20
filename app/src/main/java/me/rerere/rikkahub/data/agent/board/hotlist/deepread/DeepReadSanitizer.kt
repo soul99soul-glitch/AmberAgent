@@ -97,7 +97,7 @@ object DeepReadSanitizer {
     private fun fallbackReadingTitle(topicTitle: String, source: String?, url: String, index: Int): String {
         val sourceName = source?.takeIf { it.isNotBlank() }
             ?: url.substringAfter("://", url).substringBefore('/').removePrefix("www.")
-        return "原文来源 ${index + 1}：$sourceName 关于「$topicTitle」的报道"
+        return "关于「$topicTitle」的相关报道（$sourceName）"
     }
 
     private fun String.hasCjk(): Boolean = any { it in '\u4e00'..'\u9fff' }
