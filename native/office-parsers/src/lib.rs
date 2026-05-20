@@ -11,6 +11,7 @@
 
 mod docx;
 mod pptx;
+mod epub;
 mod error;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -112,6 +113,21 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
         Err(e) => return rust_to_jstring(&mut env, &format!("Error parsing PPTX file: bad path — {}", e)),
     };
     safe_parse(&mut env, "PPTX", || pptx::parse_to_markdown(&path_str))
+}
+
+/// JNI entry: `OfficeParserNative.parseEpubNative(path: String): String`.
+#[no_mangle]
+pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_parseEpubNative<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    path: JString<'local>,
+) -> jstring {
+    init_logger_once();
+    let path_str = match jstring_to_rust(&mut env, path) {
+        Ok(p) => p,
+        Err(e) => return rust_to_jstring(&mut env, &format!("Error parsing EPUB file: bad path — {}", e)),
+    };
+    safe_parse(&mut env, "EPUB", || epub::parse_to_markdown(&path_str))
 }
 
 fn init_logger_once() {

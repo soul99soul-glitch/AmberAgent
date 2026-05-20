@@ -74,9 +74,19 @@ internal object OfficeParserNative {
         return Result.Success(output)
     }
 
+    fun parseEpub(file: File): Result {
+        ensureLoaded()
+        if (!loaded.get()) return Result.NativeUnavailable
+        val output = parseEpubNative(file.absolutePath) ?: return Result.NativeUnavailable
+        return Result.Success(output)
+    }
+
     @JvmStatic
     private external fun parseDocxNative(path: String): String?
 
     @JvmStatic
     private external fun parsePptxNative(path: String): String?
+
+    @JvmStatic
+    private external fun parseEpubNative(path: String): String?
 }

@@ -51,8 +51,22 @@ internal object MarkdownParserNative {
         return parseMarkdownNative(text)
     }
 
+    /**
+     * Single-pass markdown → HTML conversion (Component #8). Replaces the
+     * MarkdownNew.kt JetBrains HtmlGenerator path. Returns `null` if native
+     * is unavailable / errored — caller MUST fall back to the JVM HtmlGenerator.
+     */
+    fun renderHtml(text: String): String? {
+        ensureLoaded()
+        if (!loaded.get()) return null
+        return parseMarkdownToHtmlNative(text)
+    }
+
     @JvmStatic
     private external fun parseMarkdownNative(text: String): ByteArray
+
+    @JvmStatic
+    private external fun parseMarkdownToHtmlNative(text: String): String?
 }
 
 /**

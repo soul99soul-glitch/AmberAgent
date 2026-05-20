@@ -4,6 +4,8 @@ members = [
     "office-parsers",
     "markdown-parser",
     "highlight-parser",
+    "regex-transformer",
+    "generative-widget-parser",
 ]
 
 [workspace.package]
@@ -29,6 +31,12 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Component #2 — markdown parser
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+# Component #6 — regex transformer
+regex = "1"
+
+# Component #7 — generative widget parser
+serde_json = "1"
 
 # Component #3 — highlight parser
 tree-sitter = "0.26"

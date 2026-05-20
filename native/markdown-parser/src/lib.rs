@@ -6,6 +6,10 @@
 //!   - JNI returns ByteArray; Kotlin side has `PackedAstNode` lazy view that
 //!     mimics the org.intellij.markdown.ast.ASTNode interface
 //!
+//! Also exposes `parseMarkdownToHtmlNative` (Component #8) — direct
+//! pulldown-cmark events → HTML emit, replacing MarkdownNew.kt's
+//! HtmlGenerator + Jsoup-reparse two-pass pipeline.
+//!
 //! See `docs/RUST_NATIVE_SPIKE_PLAN.md` §4 for full design.
 
 mod packed_ast;
@@ -67,6 +71,70 @@ fn empty_array<'local>(env: &mut JNIEnv<'local>) -> jbyteArray {
 fn parse_to_packed(text: &str) -> Vec<u8> {
     let tree = tree_builder::build_tree(text);
     packed_ast::pack(&tree)
+}
+
+/// JNI entry for Component #8: `MarkdownParserNative.parseMarkdownToHtmlNative(text): String?`.
+///
+/// Single-pass markdown → HTML conversion via `pulldown_cmark::html::push_html`.
+/// Replaces the JVM `MarkdownNew.kt` path which currently does:
+///   text → JetBrains MarkdownParser → HtmlGenerator → Jsoup-like reparse → Compose
+/// We collapse the first two steps into one Rust call so MarkdownNew only needs
+/// to do `Jsoup.parse(html)` once instead of running both a JVM markdown parser
+/// AND a JVM html generator.
+///
+/// Returns `null` on JString conversion failure / panic — Kotlin adapter then
+/// falls back to the JVM HtmlGenerator path.
+#[no_mangle]
+pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownToHtmlNative<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    text: JString<'local>,
+) -> jni::sys::jstring {
+    init_logger_once();
+
+    let text_str: String = match env.get_string(&text) {
+        Ok(s) => String::from(s),
+        Err(e) => {
+            log::error!("markdown-parser (to-html): failed to get JString: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
+
+    let result = catch_unwind(AssertUnwindSafe(|| render_to_html(&text_str)));
+    match result {
+        Ok(html) => match env.new_string(html) {
+            Ok(jstr) => jstr.into_raw(),
+            Err(e) => {
+                log::error!("markdown-parser (to-html): new_string failed: {}", e);
+                std::ptr::null_mut()
+            }
+        },
+        Err(panic) => {
+            log::error!(
+                "markdown-parser (to-html): native panic: {:?}",
+                panic_to_string(&panic)
+            );
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Pure-Rust markdown → HTML emit. Uses the SAME `Options` set as
+/// `tree_builder::make_options` so the packed-AST path and the HTML path
+/// agree on which GFM extensions are enabled.
+fn render_to_html(text: &str) -> String {
+    use pulldown_cmark::{html, Options, Parser};
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TASKLISTS);
+    opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    opts.insert(Options::ENABLE_MATH);
+    let parser = Parser::new_ext(text, opts);
+    let mut html_out = String::with_capacity(text.len() + (text.len() / 4));
+    html::push_html(&mut html_out, parser);
+    html_out
 }
 
 fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {

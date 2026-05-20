@@ -26,6 +26,9 @@ pub enum OfficeParseError {
 
     #[error("no slides found in PPTX file")]
     PptxNoSlides,
+
+    #[error("unable to find OPF file in EPUB")]
+    EpubOpfMissing,
 }
 
 impl OfficeParseError {
@@ -41,6 +44,13 @@ impl OfficeParseError {
         match self {
             Self::PptxNoSlides => "No slides found in PPTX file".to_string(),
             other => format!("Error parsing PPTX file: {}", other),
+        }
+    }
+
+    pub fn to_epub_message(&self) -> String {
+        match self {
+            Self::EpubOpfMissing => "Unable to find OPF file in EPUB".to_string(),
+            other => format!("Error parsing EPUB file: {}", other),
         }
     }
 }
