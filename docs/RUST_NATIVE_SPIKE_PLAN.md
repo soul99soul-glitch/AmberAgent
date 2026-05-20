@@ -488,21 +488,27 @@ Phase 1 关心**代码与架构正确性**：JNI 安全、fallback 完整、wire
 
 ## 10. 状态跟踪
 
-### Phase 1 (结构性 spike) — 完成
+### Phase 1 (结构性 spike) — 完成（含扩张）
+
+第一波 3 组件 + 第二波 4 组件（其中 1 abandoned）= 共 7 组件提议；4 active + 1 abandoned + 2 extension (epub 并入 office、HTML emit 并入 markdown)。
 
 | 节点 | 状态 | 备注 |
 |---|---|---|
 | 0. 环境（NDK 27.0.12077973 / Rust 1.95 / 3 targets / cargo-ndk 4.1.2）| ✅ | |
 | 1. Plan doc + 项目结构 | ✅ | 本文档 |
-| 2. native/ Cargo workspace + 3 crate 骨架 | ✅ | |
-| 3. Component #1: office-parsers | ✅ | Round 2 NITS（0 P2+）|
-| 4. Component #2: markdown-parser | ✅ | Round 4 APPROVE（0 P2+）|
-| 5. Component #3: highlight-parser | ✅ | Round 2 APPROVE（0 P2+）|
-| 6. Kotlin adapters × 3 | ✅ | nativebridge 子包，lazy load + fallback |
-| 7. Gradle plugin 集成（3 module）| ✅ | document / highlight / app 都接了 rust-android |
-| 8. Sub-agent review × 3 组件 | ✅ | 循环到 0 P2+ |
-| 9. 跨组件全面 review | ✅ | 1 P1 + 2 P2 cross-cutting → 全 fix |
-| 10. `cargo test --workspace` 全 pass | ✅ | 28/28（highlight 6 + markdown 9 + office 13）|
+| 2. native/ Cargo workspace | ✅ | 5 crate（4 active + 1 abandoned）|
+| 3. Component #1 office-parsers (Docx+Pptx) | ✅ | Round 2 NITS |
+| 4. Component #2 markdown-parser (packed AST) | ✅ | Round 4 APPROVE |
+| 5. Component #3 highlight-parser | ✅ | Round 2 APPROVE |
+| 6. **Component #4 EPUB**（合入 office-parsers）| ✅ | Round 3 APPROVE，含 CJK round-trip test |
+| 7. **Component #6 regex-transformer**（新 crate）| ✅ | Round 2 NITS，含 Java↔Rust 正则方言文档 |
+| 8. **Component #7 generative-widget-parser**（新 crate）| ❌ **ABANDONED** | Round 1 P0 结构 mismatch（见 native/generative-widget-parser/ABANDONED.md）|
+| 9. **Component #8 Markdown→HTML**（合入 markdown-parser）| ✅ | Round 2 APPROVE，含 GFM autolink + safelink |
+| 10. Kotlin adapters × 4 | ✅ | nativebridge 子包，lazy load + fallback to JVM；nullable T? 统一 unavailability sentinel |
+| 11. Gradle plugin 集成 | ✅ | document / highlight / app 接 Mozilla rust-android-gradle；app 额外 hand-rolled `cargoBuildRegexTransformer` task 给 regex-transformer 用 |
+| 12. Sub-agent review × 5 entry points | ✅ | 循环到 0 P2+ |
+| 13. 跨组件全面 review | ✅ V1 + V2 都过 |
+| 14. `cargo test --workspace` 全 pass | ✅ | 55/55（office 26 + markdown 16 + highlight 6 + regex 7）|
 
 ### Phase 2 (acceptance gate) — 待开
 

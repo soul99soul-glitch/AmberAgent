@@ -42,13 +42,16 @@ internal object MarkdownParserNative {
     }
 
     /**
-     * @return packed AST byte array; empty if native failed or unavailable.
-     *         Caller should fall back to JVM JetBrains-markdown when result is empty.
+     * @return packed AST byte array, or `null` if native is unavailable / errored.
+     *         Aligns with the other nativebridge adapters' `T?` convention so
+     *         callers can do `parse(text) ?: return jvmFallback(text)`
+     *         (cross-component review V2 P2 fix).
      */
-    fun parse(text: String): ByteArray {
+    fun parse(text: String): ByteArray? {
         ensureLoaded()
-        if (!loaded.get()) return ByteArray(0)
-        return parseMarkdownNative(text)
+        if (!loaded.get()) return null
+        val blob = parseMarkdownNative(text)
+        return if (blob.isEmpty()) null else blob
     }
 
     /**
