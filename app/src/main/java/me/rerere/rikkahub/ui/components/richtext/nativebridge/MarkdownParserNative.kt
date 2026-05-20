@@ -1,0 +1,245 @@
+package me.rerere.rikkahub.ui.components.richtext.nativebridge
+
+import android.util.Log
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Bridge to the `markdown-parser` Rust crate.
+ *
+ * Returns a packed binary AST blob (see SPIKE_PLAN §4.2 for wire format).
+ * Decode via [PackedAstReader].
+ *
+ * Spike-phase: NOT wired into [me.rerere.rikkahub.ui.components.richtext.Markdown]
+ * — benchmarks/tests call directly.
+ */
+internal object MarkdownParserNative {
+
+    private const val TAG = "MarkdownParserNative"
+    private const val LIB_NAME = "markdown_parser"
+
+    private val loaded = AtomicBoolean(false)
+    private var loadError: Throwable? = null
+
+    val available: Boolean
+        get() {
+            ensureLoaded()
+            return loaded.get()
+        }
+
+    private fun ensureLoaded() {
+        if (loaded.get() || loadError != null) return
+        synchronized(this) {
+            if (loaded.get() || loadError != null) return
+            try {
+                System.loadLibrary(LIB_NAME)
+                loaded.set(true)
+                Log.i(TAG, "loaded native library: $LIB_NAME")
+            } catch (t: Throwable) {
+                loadError = t
+                Log.w(TAG, "failed to load native library $LIB_NAME — will fall back to JVM", t)
+            }
+        }
+    }
+
+    /**
+     * @return packed AST byte array; empty if native failed or unavailable.
+     *         Caller should fall back to JVM JetBrains-markdown when result is empty.
+     */
+    fun parse(text: String): ByteArray {
+        ensureLoaded()
+        if (!loaded.get()) return ByteArray(0)
+        return parseMarkdownNative(text)
+    }
+
+    @JvmStatic
+    private external fun parseMarkdownNative(text: String): ByteArray
+}
+
+/**
+ * Decoder for the packed AST format. Lazy: decoding a child only happens when
+ * the consumer touches it. The wire format is described in SPIKE_PLAN §4.2.
+ *
+ * Wire layout recap:
+ * ```
+ * header: 'PMDA' + u8 version + u8 flags + u16 reserved   (8 bytes)
+ * body:   depth-first nodes; each = u8 tag + varint start + varint endDelta
+ *         + varint extrasLen + extras + varint childCount + children
+ * ```
+ */
+class PackedAstReader(private val blob: ByteArray) {
+
+    val isValid: Boolean
+    val version: Int
+    val hasHtmlBlocks: Boolean
+
+    init {
+        if (blob.size < 8 || blob[0] != 'P'.code.toByte() || blob[1] != 'M'.code.toByte()
+            || blob[2] != 'D'.code.toByte() || blob[3] != 'A'.code.toByte()
+        ) {
+            isValid = false
+            version = -1
+            hasHtmlBlocks = false
+        } else {
+            isValid = true
+            version = blob[4].toInt() and 0xFF
+            hasHtmlBlocks = (blob[5].toInt() and 0x01) != 0
+        }
+    }
+
+    /** Root node, or null if [isValid] is false / blob truncated. */
+    fun root(): PackedAstNode? {
+        if (!isValid || blob.size < 9) return null
+        return PackedAstNode(blob, offset = 8, parent = null)
+    }
+}
+
+/**
+ * Lazy view onto a single node in the packed blob. Constructs child nodes
+ * on-demand by re-scanning the blob from this node's offset — that's O(N)
+ * worst case per traversal but each value is computed only once via the
+ * `by lazy` properties.
+ */
+class PackedAstNode internal constructor(
+    private val blob: ByteArray,
+    private val offset: Int,
+    val parent: PackedAstNode?,
+) {
+
+    /** Raw tag byte; map to [NodeType] for typed access. */
+    val typeCode: Int by lazy { (blob[offset].toInt() and 0xFF) }
+
+    val type: NodeType by lazy { NodeType.fromCode(typeCode) }
+
+    private val header: NodeHeader by lazy { readHeader() }
+
+    /** Byte offset into the original markdown text. */
+    val startOffset: Int by lazy { header.start }
+
+    /** Byte offset into the original markdown text. */
+    val endOffset: Int by lazy { header.start + header.endDelta }
+
+    val extras: ByteArray by lazy { header.extras }
+
+    val children: List<PackedAstNode> by lazy {
+        val list = ArrayList<PackedAstNode>(header.childCount)
+        var cursor = header.bodyStart
+        repeat(header.childCount) {
+            list.add(PackedAstNode(blob, cursor, this))
+            cursor = skipNode(blob, cursor)
+        }
+        list
+    }
+
+    fun nextSibling(): PackedAstNode? {
+        val p = parent ?: return null
+        val idx = p.children.indexOfFirst { it.offset == offset }
+        if (idx < 0 || idx + 1 >= p.children.size) return null
+        return p.children[idx + 1]
+    }
+
+    fun findChildOfTypeRecursive(vararg types: NodeType): PackedAstNode? {
+        for (child in children) {
+            if (child.type in types) return child
+            child.findChildOfTypeRecursive(*types)?.let { return it }
+        }
+        return null
+    }
+
+    private fun readHeader(): NodeHeader {
+        var cursor = offset + 1
+        val (start, c1) = readVarint(blob, cursor); cursor = c1
+        val (delta, c2) = readVarint(blob, cursor); cursor = c2
+        val (extrasLen, c3) = readVarint(blob, cursor); cursor = c3
+        val extrasStart = cursor
+        cursor += extrasLen.toInt()
+        val (childCount, c4) = readVarint(blob, cursor); cursor = c4
+        val extras = ByteArray(extrasLen.toInt()) { i -> blob[extrasStart + i] }
+        return NodeHeader(
+            start = start.toInt(),
+            endDelta = delta.toInt(),
+            extras = extras,
+            childCount = childCount.toInt(),
+            bodyStart = cursor,
+        )
+    }
+
+    private data class NodeHeader(
+        val start: Int,
+        val endDelta: Int,
+        val extras: ByteArray,
+        val childCount: Int,
+        val bodyStart: Int,
+    )
+
+    companion object {
+        /**
+         * Walk a node and its descendants and return the byte offset just past
+         * the final child. Used to position the cursor at the next sibling.
+         */
+        internal fun skipNode(blob: ByteArray, start: Int): Int {
+            var cursor = start + 1               // skip tag byte
+            val (_, c1) = readVarint(blob, cursor); cursor = c1
+            val (_, c2) = readVarint(blob, cursor); cursor = c2
+            val (extrasLen, c3) = readVarint(blob, cursor); cursor = c3
+            cursor += extrasLen.toInt()
+            val (childCount, c4) = readVarint(blob, cursor); cursor = c4
+            repeat(childCount.toInt()) {
+                cursor = skipNode(blob, cursor)
+            }
+            return cursor
+        }
+
+        private fun readVarint(blob: ByteArray, start: Int): Pair<Long, Int> {
+            var value = 0L
+            var shift = 0
+            var cursor = start
+            while (true) {
+                val byte = blob[cursor].toInt() and 0xFF
+                value = value or ((byte and 0x7F).toLong() shl shift)
+                cursor++
+                if (byte and 0x80 == 0) return value to cursor
+                shift += 7
+                if (shift > 63) error("varint too long at offset $start")
+            }
+        }
+    }
+}
+
+/** Symbolic names for the u8 tag codes in the wire format. */
+enum class NodeType(val code: Int) {
+    Root(0),
+    Paragraph(1),
+    Heading(2),
+    Blockquote(3),
+    CodeBlock(4),
+    ListOrdered(5),
+    ListUnordered(6),
+    ListItem(7),
+    Table(8),
+    TableHead(9),
+    TableRow(10),
+    TableCell(11),
+    HorizontalRule(12),
+    HtmlBlock(13),
+    ThematicBreak(14),
+    Emphasis(30),
+    Strong(31),
+    Strikethrough(32),
+    Link(33),
+    Image(34),
+    InlineCode(35),
+    InlineHtml(36),
+    MathInline(37),
+    MathBlock(38),
+    FootnoteRef(39),
+    FootnoteDef(40),
+    TaskListMarker(41),
+    Text(100),
+    SoftBreak(101),
+    HardBreak(102),
+    Unknown(-1);
+
+    companion object {
+        fun fromCode(code: Int): NodeType = entries.firstOrNull { it.code == code } ?: Unknown
+    }
+}

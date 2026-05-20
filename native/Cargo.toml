@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = [
+    "office-parsers",
+    "markdown-parser",
+    "highlight-parser",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+# JNI bindings — kept aligned across all 3 crates so they can share helpers
+jni = "0.21"
+
+# Common error / log
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+android_logger = "0.14"
+
+# Component #1 — office parsers
+quick-xml = { version = "0.36", features = ["serialize"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Component #2 — markdown parser
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+# Component #3 — highlight parser
+tree-sitter = "0.24"
+tree-sitter-highlight = "0.24"
+
+# All released tree-sitter language grammars — bundle the most useful ones.
+# Each adds ~150-500KB to the .so. We deliberately exclude rare languages
+# to keep binary size in check; see SPIKE_PLAN §5.4 binary budget.
+tree-sitter-rust = "0.23"
+tree-sitter-kotlin-ng = "1"
+tree-sitter-java = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-bash = "0.23"
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7"
+tree-sitter-md = "0.3"
+tree-sitter-html = "0.23"
+tree-sitter-css = "0.23"
+tree-sitter-sql = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"      # full LTO bloats compile time too much; thin gives ~80% of full LTO benefit
+codegen-units = 1
+strip = "symbols" # strip debug symbols from .so — major APK size savings
+panic = "abort"   # smaller binary; we panic-catch at JNI boundary anyway
+overflow-checks = false
+
+[profile.release-with-debug]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+[profile.dev]
+opt-level = 0
+debug = true

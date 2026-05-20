@@ -1,0 +1,35 @@
+[package]
+name = "highlight-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "highlight_parser"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni.workspace = true
+tree-sitter.workspace = true
+tree-sitter-highlight.workspace = true
+thiserror.workspace = true
+log.workspace = true
+android_logger.workspace = true
+
+# Grammar bundle. Each ~150-500KB. Total ~5-7MB stripped.
+tree-sitter-rust.workspace = true
+tree-sitter-kotlin-ng.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-bash.workspace = true
+tree-sitter-json.workspace = true
+tree-sitter-yaml.workspace = true
+tree-sitter-md.workspace = true
+tree-sitter-html.workspace = true
+tree-sitter-css.workspace = true
+tree-sitter-sql.workspace = true
