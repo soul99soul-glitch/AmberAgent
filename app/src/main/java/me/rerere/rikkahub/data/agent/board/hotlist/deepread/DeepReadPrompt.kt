@@ -6,6 +6,7 @@ object DeepReadPrompt {
         sources: List<DeepReadSource>,
         stage: DeepReadGenerationStage,
         previousJson: String? = null,
+        compact: Boolean = false,
     ): String = buildString {
         appendLine("你是 AmberAgent 的深度阅读编辑。请分阶段生成高端 News 杂志 App 的结构化深读稿。")
         appendLine("话题：$topicTitle")
@@ -39,11 +40,15 @@ object DeepReadPrompt {
         appendLine()
         previousJson?.takeIf { it.isNotBlank() }?.let {
             appendLine("## 上一阶段 JSON")
-            appendLine(it)
+            appendLine(it.take(stage.previousJsonLimit()))
             appendLine()
         }
-        appendSchema()
-        appendSources(sources)
+        appendStageSchema(stage)
+        appendSources(
+            sources = sources,
+            sourceLimit = if (compact) stage.compactSourceLimit() else stage.sourceLimit(),
+            excerptLimit = if (compact) stage.compactExcerptLimit() else stage.excerptLimit(),
+        )
     }
 
     fun build(topicTitle: String, sources: List<DeepReadSource>): String = buildString {
@@ -135,15 +140,69 @@ object DeepReadPrompt {
         appendLine()
     }
 
-    private fun StringBuilder.appendSources(sources: List<DeepReadSource>) {
+    private fun StringBuilder.appendStageSchema(stage: DeepReadGenerationStage) {
+        appendLine("## 本阶段 JSON 字段")
+        appendLine(
+            when (stage) {
+                DeepReadGenerationStage.OVERVIEW -> """
+                    {
+                      "topic_type": "event|opinion|product|person",
+                      "summary": "120-200字中文杂志导语",
+                      "key_entities": ["关键实体"],
+                      "hero_image_url": "只能使用来源 images 中的 URL，可为空",
+                      "hero_caption": "中文图注，可为空",
+                      "image_assets": [{"url":"来源图片URL","caption":"中文图注","source":"来源","related_entities":["实体"],"related_timeline_index":0,"quality_hint":"hero|timeline|context"}],
+                      "references": [{"title":"中文标题","url":"URL","source":"来源"}],
+                      "extended_reading": [{"title":"中文标题","url":"URL","source":"来源"}]
+                    }
+                """.trimIndent()
+                DeepReadGenerationStage.NARRATIVE -> """
+                    {
+                      "timeline": [{"date":"日期或时间","event":"连贯叙事事件","is_highlight":true,"image_url":"可为空","image_caption":"可为空"}],
+                      "core_points": [{"point":"关键脉络","supporting":"为什么重要","image_url":"可为空","image_caption":"可为空"}],
+                      "references": [{"title":"中文标题","url":"URL","source":"来源"}]
+                    }
+                """.trimIndent()
+                DeepReadGenerationStage.ANALYSIS -> """
+                    {
+                      "analysis": {
+                        "core_dispute": "核心分歧，可为空",
+                        "perspectives": [{"viewpoint":"观点","holder":"持有方"}],
+                        "implications": "影响分析，可为空",
+                        "quotes": [{"text":"短引用，不超过40字","attribution":"来源或人物"}]
+                      },
+                      "references": [{"title":"中文标题","url":"URL","source":"来源"}]
+                    }
+                """.trimIndent()
+                DeepReadGenerationStage.EXTENDED_READING -> """
+                    {
+                      "extended_reading": [{"title":"中文标题","url":"URL","source":"来源"}],
+                      "hero_image_query": "适合查找真实新闻配图的搜索词",
+                      "hero_image_url": "只能使用来源 images 中的 URL，可为空",
+                      "hero_caption": "图片说明，可为空",
+                      "image_assets": [],
+                      "references": [{"title":"中文标题","url":"URL","source":"来源"}]
+                    }
+                """.trimIndent()
+            }
+        )
+        appendLine()
+        appendLine()
+    }
+
+    private fun StringBuilder.appendSources(
+        sources: List<DeepReadSource>,
+        sourceLimit: Int = sources.size,
+        excerptLimit: Int = 2_000,
+    ) {
         appendLine("## 来源")
-        sources.forEachIndexed { index, source ->
+        sources.take(sourceLimit).forEachIndexed { index, source ->
             appendLine("### [${index + 1}] ${source.title}")
             appendLine("- url: ${source.url}")
             appendLine("- source: ${source.source ?: "-"}")
             if (source.publishedAt != null) appendLine("- published_at: ${source.publishedAt}")
             if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
-            appendLine("- excerpt: ${source.content.take(2_000).replace("\n", " ")}")
+            appendLine("- excerpt: ${source.content.take(excerptLimit).replace("\n", " ")}")
             appendLine()
         }
     }
@@ -154,6 +213,41 @@ enum class DeepReadGenerationStage(val label: String) {
     NARRATIVE("时间轴叙事"),
     ANALYSIS("深度分析"),
     EXTENDED_READING("扩展阅读"),
+}
+
+private fun DeepReadGenerationStage.sourceLimit(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> 4
+    DeepReadGenerationStage.NARRATIVE -> 6
+    DeepReadGenerationStage.ANALYSIS -> 6
+    DeepReadGenerationStage.EXTENDED_READING -> 8
+}
+
+private fun DeepReadGenerationStage.excerptLimit(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> 650
+    DeepReadGenerationStage.NARRATIVE -> 950
+    DeepReadGenerationStage.ANALYSIS -> 950
+    DeepReadGenerationStage.EXTENDED_READING -> 360
+}
+
+private fun DeepReadGenerationStage.compactSourceLimit(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> 3
+    DeepReadGenerationStage.NARRATIVE -> 4
+    DeepReadGenerationStage.ANALYSIS -> 4
+    DeepReadGenerationStage.EXTENDED_READING -> 5
+}
+
+private fun DeepReadGenerationStage.compactExcerptLimit(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> 360
+    DeepReadGenerationStage.NARRATIVE -> 520
+    DeepReadGenerationStage.ANALYSIS -> 520
+    DeepReadGenerationStage.EXTENDED_READING -> 240
+}
+
+private fun DeepReadGenerationStage.previousJsonLimit(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> 0
+    DeepReadGenerationStage.NARRATIVE -> 5_000
+    DeepReadGenerationStage.ANALYSIS -> 8_000
+    DeepReadGenerationStage.EXTENDED_READING -> 12_000
 }
 
 data class DeepReadSource(

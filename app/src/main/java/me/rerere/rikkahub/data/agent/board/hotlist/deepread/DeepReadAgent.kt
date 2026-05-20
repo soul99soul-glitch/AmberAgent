@@ -48,12 +48,12 @@ class DeepReadAgent(
     ): Result<DeepReadOutput> {
         val seedSources = hotListRepository.getHotTopic(topicId)
             ?.sources
-            .orEmpty()
-            .toDeepReadSources(topicTitle)
+                .orEmpty()
+                .toDeepReadSources(topicTitle)
         if (!force) {
             hotListRepository.getFreshDeepRead(topicId, title = topicTitle)?.let { cached ->
                 val sanitized = DeepReadSanitizer.sanitize(cached, seedSources, topicTitle)
-                if (sanitized.hasReadableArticle() && sanitized.hasEnoughChinese()) {
+                if (sanitized.generationComplete && sanitized.hasReadableArticle() && sanitized.hasEnoughChinese()) {
                     return Result.success(sanitized)
                 }
                 Log.i(TAG, "ignored cached deep read because it no longer passes quality gates")
@@ -70,25 +70,41 @@ class DeepReadAgent(
         var output: DeepReadOutput? = null
         DeepReadGenerationStage.entries.forEach { stage ->
             onProgress(stage, output)
-            val prompt = DeepReadPrompt.buildStage(
+            val previousJson = output?.let { json.encodeToString(it) }
+            val raw = callStageModel(
+                settings = settings,
                 topicTitle = topicTitle,
                 sources = sources,
                 stage = stage,
-                previousJson = output?.let { json.encodeToString(it) },
+                previousJson = previousJson,
+            ) ?: return Result.failure(
+                IllegalStateException(
+                    if (output == null) {
+                        lastCallFailureReason ?: "深度阅读生成失败，请稍后重试"
+                    } else {
+                        "${stage.label}生成中断，已保留前面生成的段落，可重试重新生成。"
+                    }
+                )
             )
-            val raw = callModel(
-                settings = settings,
-                prompt = prompt,
-                maxTokens = STAGED_MODEL_MAX_TOKENS,
-            ) ?: return Result.failure(IllegalStateException(lastCallFailureReason ?: "深度阅读生成失败，请稍后重试"))
             val parsed = DeepReadOutputParser.parse(raw, json)
                 ?: repairJson(settings, topicTitle, raw)
-                ?: return Result.failure(IllegalStateException("模型输出格式不稳定，未能解析为深度阅读正文。请重试或切换模型。"))
+                ?: return Result.failure(
+                    IllegalStateException(
+                        if (output == null) {
+                            "模型输出格式不稳定，未能解析为深度阅读正文。请重试或切换模型。"
+                        } else {
+                            "${stage.label}输出格式不稳定，已保留前面生成的段落，可重试重新生成。"
+                        }
+                    )
+                )
             output = DeepReadSanitizer.sanitize(output.mergeWith(parsed), sources, topicTitle)
+                .copy(generationComplete = stage == DeepReadGenerationStage.EXTENDED_READING)
+            savePartialIfUsable(topicId, topicTitle, output)
             onProgress(stage, output)
         }
 
         var finalOutput = output ?: return Result.failure(IllegalStateException("深度阅读生成失败，请稍后重试"))
+        finalOutput = finalOutput.copy(generationComplete = true)
         if (!finalOutput.hasReadableArticle()) {
             return Result.failure(IllegalStateException("模型没有生成可用的深度阅读正文，请重试或切换模型。"))
         }
@@ -101,6 +117,16 @@ class DeepReadAgent(
         }
         hotListRepository.saveDeepRead(topicId, topicTitle, finalOutput)
         return Result.success(finalOutput)
+    }
+
+    private suspend fun savePartialIfUsable(
+        topicId: String,
+        topicTitle: String,
+        output: DeepReadOutput?,
+    ) {
+        if (output == null) return
+        if (!output.hasReadableArticle() || !output.hasEnoughChinese()) return
+        hotListRepository.saveDeepRead(topicId, topicTitle, output)
     }
 
     private suspend fun collectSources(
@@ -347,6 +373,42 @@ class DeepReadAgent(
 
     private var lastCallFailureReason: String? = null
 
+    private suspend fun callStageModel(
+        settings: Settings,
+        topicTitle: String,
+        sources: List<DeepReadSource>,
+        stage: DeepReadGenerationStage,
+        previousJson: String?,
+    ): String? {
+        val prompt = DeepReadPrompt.buildStage(
+            topicTitle = topicTitle,
+            sources = sources,
+            stage = stage,
+            previousJson = previousJson,
+        )
+        Log.i(TAG, "deep read stage ${stage.name} start sources=${sources.size} promptChars=${prompt.length}")
+        val raw = callModel(
+            settings = settings,
+            prompt = prompt,
+            maxTokens = stage.maxTokens(),
+        )
+        if (raw != null || stage != DeepReadGenerationStage.OVERVIEW) return raw
+
+        val compactPrompt = DeepReadPrompt.buildStage(
+            topicTitle = topicTitle,
+            sources = sources,
+            stage = stage,
+            previousJson = null,
+            compact = true,
+        )
+        Log.w(TAG, "deep read overview failed; retrying compact promptChars=${compactPrompt.length}")
+        return callModel(
+            settings = settings,
+            prompt = compactPrompt,
+            maxTokens = OVERVIEW_COMPACT_MAX_TOKENS,
+        )
+    }
+
     private suspend fun callModel(
         settings: Settings,
         prompt: String,
@@ -502,25 +564,122 @@ class DeepReadAgent(
 
     private fun DeepReadOutput?.mergeWith(update: DeepReadOutput): DeepReadOutput {
         val base = this ?: DeepReadOutput()
+        val cleaned = update.withoutPromptPlaceholders()
         return base.copy(
-            topicType = update.topicType.takeIf { it.isNotBlank() } ?: base.topicType,
-            summary = update.summary.takeIf { it.isNotBlank() } ?: base.summary,
-            keyEntities = update.keyEntities.ifEmpty { base.keyEntities },
-            timeline = update.timeline?.takeIf { it.isNotEmpty() } ?: base.timeline,
-            corePoints = update.corePoints?.takeIf { it.isNotEmpty() } ?: base.corePoints,
-            analysis = update.analysis.takeIf { analysis ->
+            topicType = cleaned.topicType.takeIf { it.isRealStageContent() } ?: base.topicType,
+            generationComplete = false,
+            summary = cleaned.summary.takeIf { it.isRealStageContent() } ?: base.summary,
+            keyEntities = cleaned.keyEntities.ifEmpty { base.keyEntities },
+            timeline = cleaned.timeline?.takeIf { it.isNotEmpty() } ?: base.timeline,
+            corePoints = cleaned.corePoints?.takeIf { it.isNotEmpty() } ?: base.corePoints,
+            analysis = cleaned.analysis.takeIf { analysis ->
                 !analysis.coreDispute.isNullOrBlank() ||
                     !analysis.implications.isNullOrBlank() ||
                     analysis.perspectives.isNotEmpty() ||
                     analysis.quotes.isNotEmpty()
             } ?: base.analysis,
-            extendedReading = update.extendedReading.ifEmpty { base.extendedReading },
-            heroImageQuery = update.heroImageQuery?.takeIf { it.isNotBlank() } ?: base.heroImageQuery,
-            heroImageUrl = update.heroImageUrl?.takeIf { it.isNotBlank() } ?: base.heroImageUrl,
-            heroCaption = update.heroCaption?.takeIf { it.isNotBlank() } ?: base.heroCaption,
-            imageAssets = update.imageAssets.ifEmpty { base.imageAssets },
-            references = update.references.ifEmpty { base.references },
+            extendedReading = cleaned.extendedReading.ifEmpty { base.extendedReading },
+            heroImageQuery = cleaned.heroImageQuery?.takeIf { it.isRealStageContent() } ?: base.heroImageQuery,
+            heroImageUrl = cleaned.heroImageUrl?.takeIf { it.startsWith("http") } ?: base.heroImageUrl,
+            heroCaption = cleaned.heroCaption?.takeIf { it.isRealStageContent() } ?: base.heroCaption,
+            imageAssets = cleaned.imageAssets.ifEmpty { base.imageAssets },
+            references = cleaned.references.ifEmpty { base.references },
         )
+    }
+
+    private fun DeepReadOutput.withoutPromptPlaceholders(): DeepReadOutput = copy(
+        keyEntities = keyEntities.filter { it.isRealStageContent() },
+        timeline = timeline
+            ?.mapNotNull { event ->
+                val cleanedEvent = event.copy(
+                    date = event.date.takeIf { it.isRealStageContent() }.orEmpty(),
+                    event = event.event.takeIf { it.isRealStageContent() }.orEmpty(),
+                    imageUrl = event.imageUrl?.takeIf { it.startsWith("http") },
+                    imageCaption = event.imageCaption?.takeIf { it.isRealStageContent() },
+                )
+                cleanedEvent.takeIf { it.event.isNotBlank() }
+            }
+            ?.takeIf { it.isNotEmpty() },
+        corePoints = corePoints
+            ?.mapNotNull { point ->
+                val cleanedPoint = point.copy(
+                    point = point.point.takeIf { it.isRealStageContent() }.orEmpty(),
+                    supporting = point.supporting?.takeIf { it.isRealStageContent() },
+                    imageUrl = point.imageUrl?.takeIf { it.startsWith("http") },
+                    imageCaption = point.imageCaption?.takeIf { it.isRealStageContent() },
+                )
+                cleanedPoint.takeIf { it.point.isNotBlank() || !it.supporting.isNullOrBlank() }
+            }
+            ?.takeIf { it.isNotEmpty() },
+        analysis = analysis.copy(
+            coreDispute = analysis.coreDispute?.takeIf { it.isRealStageContent() },
+            implications = analysis.implications?.takeIf { it.isRealStageContent() },
+            perspectives = analysis.perspectives
+                .mapNotNull { perspective ->
+                    val cleaned = perspective.copy(
+                        viewpoint = perspective.viewpoint.takeIf { it.isRealStageContent() }.orEmpty(),
+                        holder = perspective.holder?.takeIf { it.isRealStageContent() },
+                    )
+                    cleaned.takeIf { it.viewpoint.isNotBlank() }
+                },
+            quotes = analysis.quotes
+                .mapNotNull { quote ->
+                    val cleaned = quote.copy(
+                        text = quote.text.takeIf { it.isRealStageContent() }.orEmpty(),
+                        attribution = quote.attribution?.takeIf { it.isRealStageContent() },
+                    )
+                    cleaned.takeIf { it.text.isNotBlank() }
+                },
+        ),
+        extendedReading = extendedReading
+            .filter { it.title.isRealStageContent() && it.url.startsWith("http") }
+            .map { it.copy(source = it.source?.takeIf { source -> source.isRealStageContent() }) },
+        heroImageQuery = heroImageQuery?.takeIf { it.isRealStageContent() },
+        heroImageUrl = heroImageUrl?.takeIf { it.startsWith("http") },
+        heroCaption = heroCaption?.takeIf { it.isRealStageContent() },
+        imageAssets = imageAssets
+            .filter { it.url.startsWith("http") }
+            .map { asset ->
+                asset.copy(
+                    caption = asset.caption?.takeIf { it.isRealStageContent() },
+                    source = asset.source?.takeIf { it.isRealStageContent() },
+                    relatedEntities = asset.relatedEntities.filter { it.isRealStageContent() },
+                    qualityHint = asset.qualityHint?.takeIf { it.isRealStageContent() },
+                )
+            },
+        references = references
+            .filter { it.title.isRealStageContent() && it.url.startsWith("http") }
+            .map { it.copy(source = it.source?.takeIf { source -> source.isRealStageContent() }) },
+    )
+
+    private fun String.isRealStageContent(): Boolean {
+        val text = trim()
+        if (text.isBlank()) return false
+        if (text in setOf(
+            "继承上一阶段",
+            "继承并补充",
+            "保留已有导语",
+            "日期或时间",
+            "连贯叙事事件",
+            "关键脉络",
+            "为什么重要",
+            "核心分歧，可为空",
+            "观点",
+            "持有方",
+            "影响分析，可为空",
+            "短引用，不超过40字",
+            "来源或人物",
+            "中文标题",
+            "URL",
+            "来源",
+            "适合查找真实新闻配图的搜索词",
+            "只能使用来源 images 中的 URL，可为空",
+            "图片说明，可为空",
+            "中文图注",
+            "实体",
+            "event|opinion|product|person",
+        )) return false
+        return !text.contains("可为空") && !text.contains("继承")
     }
 
     companion object {
@@ -534,7 +693,7 @@ class DeepReadAgent(
         private const val OG_IMAGE_HTML_CHAR_LIMIT = 192_000
         private const val MODEL_TIMEOUT_MS = 70_000L
         private const val DEEP_READ_MODEL_MAX_TOKENS = 40_000
-        private const val STAGED_MODEL_MAX_TOKENS = 12_000
+        private const val OVERVIEW_COMPACT_MAX_TOKENS = 1_200
         private const val DEEP_READ_REPAIR_MAX_TOKENS = 40_000
         private const val DEEP_READ_PROVIDER_SAFE_MAX_TOKENS = 12_000
         private const val MAX_SEARCH_SERVICES = 2
@@ -556,6 +715,13 @@ private data class SearchBucket(
     val query: String,
     val items: List<SearchResult.SearchResultItem>,
 )
+
+private fun DeepReadGenerationStage.maxTokens(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> 1_800
+    DeepReadGenerationStage.NARRATIVE -> 4_000
+    DeepReadGenerationStage.ANALYSIS -> 4_000
+    DeepReadGenerationStage.EXTENDED_READING -> 2_000
+}
 
 internal fun Settings.enabledDeepReadSearchServices(): List<SearchServiceOptions> =
     searchServices

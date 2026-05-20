@@ -180,7 +180,6 @@ fun DeepReadScreen(topicId: String, title: String) {
                 palette = palette,
                 stage = generationStage,
             )
-            error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
             output != null -> {
                 val customTemplate = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
                 val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
@@ -204,15 +203,16 @@ fun DeepReadScreen(topicId: String, title: String) {
                                 )
                             },
                         )
-                        if (generating) {
-                            DeepReadProgressNotice(
-                                stage = generationStage,
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                            )
-                        }
+                        DeepReadGenerationOverlay(
+                            generating = generating,
+                            error = error,
+                            stage = generationStage,
+                            onRetry = { run(force = true) },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
                     }
                 } else if (selectedCustomMissing || invalidTemplateCount > 0) {
                     Box(Modifier.fillMaxSize()) {
@@ -243,6 +243,16 @@ fun DeepReadScreen(topicId: String, title: String) {
                                     .padding(horizontal = 18.dp, vertical = 52.dp),
                             )
                         }
+                        if (error != null) {
+                            DeepReadPartialErrorNotice(
+                                error = error.orEmpty(),
+                                onRetry = { run(force = true) },
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 18.dp, vertical = 52.dp),
+                            )
+                        }
                     }
                 } else {
                     Box(Modifier.fillMaxSize()) {
@@ -253,19 +263,35 @@ fun DeepReadScreen(topicId: String, title: String) {
                             fontFamily = readingFontFamily,
                             listState = listState,
                         )
-                        if (generating) {
-                            DeepReadProgressNotice(
-                                stage = generationStage,
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                            )
-                        }
+                        DeepReadGenerationOverlay(
+                            generating = generating,
+                            error = error,
+                            stage = generationStage,
+                            onRetry = { run(force = true) },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
                     }
                 }
             }
+            error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
         }
+    }
+}
+
+@Composable
+private fun DeepReadGenerationOverlay(
+    generating: Boolean,
+    error: String?,
+    stage: DeepReadGenerationStage,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        error != null -> DeepReadPartialErrorNotice(error = error, onRetry = onRetry, modifier = modifier)
+        generating -> DeepReadProgressNotice(stage = stage, modifier = modifier)
     }
 }
 
@@ -283,6 +309,37 @@ private fun DeepReadProgressNotice(stage: DeepReadGenerationStage, modifier: Mod
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+@Composable
+private fun DeepReadPartialErrorNotice(error: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.96f),
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                formatDeepReadError(error).detail.ifBlank { "后续段落生成中断，已保留已写出的内容" },
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Button(
+                onClick = onRetry,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text("重试")
+            }
+        }
     }
 }
 
@@ -1058,35 +1115,58 @@ private fun DeepReadLoading(
     Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.padding(horizontal = 38.dp),
-            verticalArrangement = Arrangement.spacedBy(34.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
             Text(
                 "正在为你生成\n一篇深度好文",
                 style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light, color = palette.ink),
             )
-            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            Text(
+                "内容会按段写入：概览先出现，随后补齐叙事、分析和扩展阅读。",
+                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 23.sp),
+                color = palette.muted,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 stages.forEachIndexed { index, stage ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.Top,
+                    val active = index == activeStage
+                    val done = index < activeStage
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = when {
+                            active -> palette.surface
+                            done -> palette.surface.copy(alpha = 0.72f)
+                            else -> palette.surface.copy(alpha = 0.44f)
+                        },
+                        tonalElevation = if (active) 2.dp else 0.dp,
                     ) {
-                        TimelineMarker(highlight = index <= activeStage, palette = palette)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                stage.label,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light),
-                                color = if (index <= activeStage) palette.ink else palette.muted,
-                            )
-                            Text(
-                                when (index) {
-                                    0 -> "抓取热榜链接与搜索来源"
-                                    1 -> "写入概览后的事件脉络"
-                                    2 -> "补齐各方立场和影响分析"
-                                    else -> "整理来源链接并完成缓存"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = palette.muted,
-                            )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            TimelineMarker(highlight = index <= activeStage, palette = palette)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    when {
+                                        done -> "${stage.label} · 已写入"
+                                        active -> "${stage.label} · 正在写入"
+                                        else -> "${stage.label} · 排队中"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light),
+                                    color = if (index <= activeStage) palette.ink else palette.muted,
+                                )
+                                Text(
+                                    when (index) {
+                                        0 -> "先生成可读概览、关键实体和真实来源图片"
+                                        1 -> "再补时间轴叙事或故事性脉络"
+                                        2 -> "继续写核心分歧、各方立场和影响"
+                                        else -> "最后整理引用、相关阅读并写入缓存"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = palette.muted,
+                                )
+                            }
                         }
                     }
                 }

@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 data class DeepReadOutput(
     @SerialName("topic_type")
     val topicType: String = "event",
+    @SerialName("generation_complete")
+    val generationComplete: Boolean = true,
     val summary: String = "",
     @SerialName("key_entities")
     val keyEntities: List<String> = emptyList(),
