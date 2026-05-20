@@ -258,6 +258,7 @@ internal fun ChatMessageVirtualItemContent(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
+    onMiniAppModify: (String) -> Boolean = { false },
 ) {
     val message = node.currentMessage
     val textStyle = rememberChatMessageTextStyle()
@@ -303,6 +304,7 @@ internal fun ChatMessageVirtualItemContent(
                     onToolAnswer = onToolAnswer,
                     onOpenWorkspaceFile = onOpenWorkspaceFile,
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
+                    onMiniAppModify = onMiniAppModify,
                 )
             }
         }
@@ -325,6 +327,7 @@ internal fun ChatMessageVirtualItemContent(
                     onToolAnswer = onToolAnswer,
                     onOpenWorkspaceFile = onOpenWorkspaceFile,
                     onGenerativeWidgetAction = onGenerativeWidgetAction,
+                    onMiniAppModify = onMiniAppModify,
                 )
             }
         }
@@ -352,6 +355,7 @@ internal fun ChatMessageVirtualItemContent(
                         onToolAnswer = onToolAnswer,
                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                         onGenerativeWidgetAction = onGenerativeWidgetAction,
+                        onMiniAppModify = onMiniAppModify,
                     )
                 }
             }

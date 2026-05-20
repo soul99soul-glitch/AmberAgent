@@ -1003,6 +1003,7 @@ internal fun ChatListNormal(
                                         onToolAnswer = onToolAnswer,
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                        onMiniAppModify = onMiniAppModify,
                                         lastMessage = isLastMessage,
                                     )
                                 }
