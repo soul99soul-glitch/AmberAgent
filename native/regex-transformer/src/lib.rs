@@ -150,9 +150,10 @@ fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn init_logger_once() {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
+    // Standardized to OnceLock across all crates (P3 sweep).
+    use std::sync::OnceLock;
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
         #[cfg(target_os = "android")]
         {
             android_logger::init_once(

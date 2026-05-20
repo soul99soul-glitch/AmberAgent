@@ -18,7 +18,7 @@ internal object MarkdownParserNative {
     private const val LIB_NAME = "markdown_parser"
 
     private val loaded = AtomicBoolean(false)
-    private var loadError: Throwable? = null
+    @Volatile private var loadError: Throwable? = null
 
     val available: Boolean
         get() {

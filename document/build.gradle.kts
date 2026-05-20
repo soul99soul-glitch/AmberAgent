@@ -48,7 +48,8 @@ cargo {
     profile = "release"
     apiLevel = 26
     // Share target/ dir across all 3 crates in the workspace.
-    extraCargoBuildArguments = listOf("--package", "office-parsers")
+    // extraCargoBuildArguments removed (P3 sweep) — `module` already points
+    // at the office-parsers crate root, so --package is redundant.
     targetDirectory = "../native/target"
     verbose = true
 }

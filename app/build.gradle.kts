@@ -268,7 +268,8 @@ cargo {
     targets = listOf("arm64", "arm", "x86_64")
     profile = "release"
     apiLevel = 26
-    extraCargoBuildArguments = listOf("--package", "markdown-parser")
+    // extraCargoBuildArguments removed (P3 sweep) — `module` already points
+    // at the markdown-parser crate root, so --package is redundant.
     targetDirectory = "../native/target"
     verbose = true
 }

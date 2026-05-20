@@ -602,4 +602,16 @@ mod tests {
         let out = try_parse_xhtml(xml).unwrap();
         assert!(out.is_empty() || out.trim().is_empty());
     }
+
+    /// 4-byte UTF-8 (supplementary plane: emoji, ancient scripts) regression
+    /// test. Catches the same UTF-8-corruption family as the CJK 3-byte test
+    /// but for code points U+10000+ (P3 sweep — added defensive coverage).
+    #[test]
+    fn parse_xhtml_preserves_emoji() {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <html><body><p>hello 😀 world 🚀</p></body></html>".as_bytes();
+        let out = try_parse_xhtml(xml).unwrap();
+        assert!(out.contains("😀"), "emoji 😀 corrupted: {:?}", out);
+        assert!(out.contains("🚀"), "emoji 🚀 corrupted: {:?}", out);
+    }
 }

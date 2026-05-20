@@ -133,8 +133,10 @@ pub fn build_tree(text: &str) -> Tree {
                 let leaf = Node::new(NodeTypeCode::MathBlock, range.start, range.end);
                 stack.last_mut().expect("no parent").children.push(leaf);
             }
-            // pulldown-cmark may emit other events in extension builds; ignore
-            // for now (spec-conformant set covers our app's needs).
+            // pulldown-cmark may emit other events in extension builds (or as
+            // it adds new variants). Keep the catch-all even though all known
+            // variants are matched above — protects against future-crate breaks.
+            #[allow(unreachable_patterns)]
             _ => {}
         }
     }

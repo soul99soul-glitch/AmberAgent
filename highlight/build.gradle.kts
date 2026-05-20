@@ -50,7 +50,8 @@ cargo {
     targets = listOf("arm64", "arm", "x86_64")
     profile = "release"
     apiLevel = 24
-    extraCargoBuildArguments = listOf("--package", "highlight-parser")
+    // extraCargoBuildArguments removed (P3 sweep) — `module` already points
+    // at the highlight-parser crate root, so --package is redundant.
     targetDirectory = "../native/target"
     verbose = true
 }

@@ -24,7 +24,7 @@ internal object OfficeParserNative {
     private const val LIB_NAME = "office_parsers"
 
     private val loaded = AtomicBoolean(false)
-    private var loadError: Throwable? = null
+    @Volatile private var loadError: Throwable? = null
 
     val available: Boolean
         get() {

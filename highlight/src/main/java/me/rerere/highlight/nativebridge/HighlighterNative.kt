@@ -22,7 +22,7 @@ internal object HighlighterNative {
     private const val SUPPORTED_WIRE_VERSION = 1
 
     private val loaded = AtomicBoolean(false)
-    private var loadError: Throwable? = null
+    @Volatile private var loadError: Throwable? = null
 
     /**
      * tree-sitter scope name → Prism CSS class name. Mirror of the table
@@ -81,9 +81,14 @@ internal object HighlighterNative {
         }
     }
 
-    fun supportedLanguages(): List<String> {
+    /**
+     * Returns the list of language identifiers the native crate accepts, or
+     * `null` if native is unavailable (P3 sweep — unifies `T?` sentinel
+     * across all entry points).
+     */
+    fun supportedLanguages(): List<String>? {
         ensureLoaded()
-        if (!loaded.get()) return emptyList()
+        if (!loaded.get()) return null
         return supportedLanguagesNative().toList()
     }
 

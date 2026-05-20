@@ -131,9 +131,10 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
 }
 
 fn init_logger_once() {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
+    // Standardized to OnceLock across all crates (P3 sweep).
+    use std::sync::OnceLock;
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
         #[cfg(target_os = "android")]
         {
             android_logger::init_once(
@@ -153,9 +154,7 @@ mod tests {
     // possible; the JNI entry symbols cannot be invoked from host tests
     // because they require a live JVM. cargo-ndk + Gradle drives the
     // device-side execution.
-    #[test]
-    fn unit_sanity_compile() {
-        // Smoke test: the lib at least builds and the modules are linked.
-        assert_eq!(2 + 2, 4);
-    }
+    // Integration test coverage now lives in each module's own #[cfg(test)]
+    // block (docx::tests, pptx::tests, epub::tests). The 2+2 sanity test
+    // that lived here was dropped in the P3 sweep.
 }

@@ -35,8 +35,11 @@ pub fn pack(tree: &Tree) -> Vec<u8> {
         flags |= FLAG_HAS_HTML_BLOCKS;
     }
     out.push(flags);
-    out.push(0); // reserved (lo byte of u16 reserved field per SPIKE_PLAN §4.2)
-    out.push(0); // reserved (hi byte)
+    // `reserved: u16` per SPIKE_PLAN §4.2 — two little-endian zero bytes.
+    // (P3 sweep: clarified comment to match the documented schema; bytes
+    // are equivalent to `out.extend_from_slice(&0u16.to_le_bytes())`.)
+    out.push(0);
+    out.push(0);
 
     pack_tree(&tree.root, &mut out);
     out

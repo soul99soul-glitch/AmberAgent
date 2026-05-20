@@ -158,7 +158,12 @@ fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
     } else if let Some(s) = payload.downcast_ref::<String>() {
         s.clone()
     } else {
-        "non-string panic payload".to_string()
+        // Best-effort: include runtime type name so crash logs are debuggable
+        // (P3 sweep — propagate office-parsers' improved variant).
+        format!(
+            "non-string panic payload (type_name = {})",
+            std::any::type_name_of_val(&**payload)
+        )
     }
 }
 

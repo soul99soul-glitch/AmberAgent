@@ -36,6 +36,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   emit a literal `$`. Rust's `regex` crate uses `$$`. If user-configured
  *   replacements contain `\\$`, output diverges.
  *
+ * - **Named-capture replacement syntax**: Kotlin's `String.replace(Regex, repl)`
+ *   uses `${name}` for named-group references in the replacement. Rust regex
+ *   accepts both `$name` and `${name}`. The two forms are interoperable for
+ *   simple names but diverge if the user wrote `$<name>` (Java-only) or
+ *   relies on the boundary handling of `${name}foo` vs `$namefoo`.
+ *
  * Before [apply] is wired into [replaceRegexes] in production, callers MUST:
  * 1. Detect Rust-incompatible patterns at config-save time, OR
  * 2. Try Rust first and fall back to JVM on per-rule compile failure.
@@ -49,7 +55,7 @@ internal object RegexTransformerNative {
     private const val LIB_NAME = "regex_transformer"
 
     private val loaded = AtomicBoolean(false)
-    private var loadError: Throwable? = null
+    @Volatile private var loadError: Throwable? = null
 
     val available: Boolean
         get() {
