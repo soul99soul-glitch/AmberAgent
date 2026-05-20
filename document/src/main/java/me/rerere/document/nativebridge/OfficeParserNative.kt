@@ -60,18 +60,23 @@ internal object OfficeParserNative {
     fun parseDocx(file: File): Result {
         ensureLoaded()
         if (!loaded.get()) return Result.NativeUnavailable
-        return Result.Success(parseDocxNative(file.absolutePath))
+        // Native side returns nullable String (see rust_to_jstring fallback
+        // behavior). null = JVM allocation failure inside JNI → downgrade
+        // to NativeUnavailable so caller falls back to JVM parser.
+        val output = parseDocxNative(file.absolutePath) ?: return Result.NativeUnavailable
+        return Result.Success(output)
     }
 
     fun parsePptx(file: File): Result {
         ensureLoaded()
         if (!loaded.get()) return Result.NativeUnavailable
-        return Result.Success(parsePptxNative(file.absolutePath))
+        val output = parsePptxNative(file.absolutePath) ?: return Result.NativeUnavailable
+        return Result.Success(output)
     }
 
     @JvmStatic
-    private external fun parseDocxNative(path: String): String
+    private external fun parseDocxNative(path: String): String?
 
     @JvmStatic
-    private external fun parsePptxNative(path: String): String
+    private external fun parsePptxNative(path: String): String?
 }

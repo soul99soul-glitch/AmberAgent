@@ -211,12 +211,19 @@ fn extract_run_text<R: std::io::BufRead>(
                                     inner_depth -= 1;
                                     if local_name(end.name().into_inner()) == b"t" && inner_depth + 1 == depth {
                                         // depth was incremented for <w:t>; matched by its </w:t>
+                                        buf.clear();
                                         break;
                                     }
                                 }
-                                Event::Eof => break,
+                                Event::Eof => {
+                                    buf.clear();
+                                    break;
+                                }
                                 _ => {}
                             }
+                            // Clear after each iteration so buf doesn't grow O(N)
+                            // across all events inside <w:t> (review P2 fix).
+                            buf.clear();
                         }
                         let formatted = match (is_bold, is_italic) {
                             (true, true) => format!("***{}***", text),

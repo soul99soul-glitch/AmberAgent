@@ -20,7 +20,7 @@ android_logger.workspace = true
 
 # Grammar bundle. Each ~150-500KB. Total ~5-7MB stripped.
 tree-sitter-rust.workspace = true
-tree-sitter-kotlin-ng.workspace = true
+# Kotlin grammar disabled — tree-sitter-kotlin-ng 1.1 has no embedded highlight query.
 tree-sitter-java.workspace = true
 tree-sitter-python.workspace = true
 tree-sitter-javascript.workspace = true
@@ -32,4 +32,4 @@ tree-sitter-yaml.workspace = true
 tree-sitter-md.workspace = true
 tree-sitter-html.workspace = true
 tree-sitter-css.workspace = true
-tree-sitter-sql.workspace = true
+tree-sitter-sequel.workspace = true

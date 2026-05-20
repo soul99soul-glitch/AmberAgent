@@ -15,9 +15,6 @@ pub enum OfficeParseError {
     #[error("xml parse error: {0}")]
     Xml(#[from] quick_xml::Error),
 
-    #[error("xml encoding error: {0}")]
-    XmlEncoding(#[from] quick_xml::encoding::EncodingError),
-
     #[error("xml attribute error: {0}")]
     XmlAttr(#[from] quick_xml::events::attributes::AttrError),
 

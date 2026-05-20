@@ -64,15 +64,32 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_h
 }
 
 /// JNI entry: `HighlighterNative.supportedLanguages(): Array<String>`.
+///
+/// Wrapped in `catch_unwind` because any Java-side caller treats the return
+/// type as non-null `Array<String>`; the inner helper ALWAYS returns a valid
+/// (possibly empty) Java array — never `null_mut()` — so the Kotlin side
+/// cannot NPE (review P0 fix).
 #[no_mangle]
 pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_supportedLanguages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jobjectArray {
+    init_logger_once();
+    let result = catch_unwind(AssertUnwindSafe(|| build_supported_languages_array(&mut env)));
+    match result {
+        Ok(arr) => arr,
+        Err(_) => {
+            log::error!("highlight-parser: supported_languages panicked — returning empty array");
+            empty_object_array(&mut env)
+        }
+    }
+}
+
+fn build_supported_languages_array<'local>(env: &mut JNIEnv<'local>) -> jobjectArray {
     let langs = grammars::supported_languages();
     let string_class = match env.find_class("java/lang/String") {
         Ok(c) => c,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => return empty_object_array(env),
     };
     let arr: JObjectArray = match env.new_object_array(
         langs.len() as i32,
@@ -80,7 +97,7 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_s
         unsafe { jni::objects::JObject::from_raw(std::ptr::null_mut()) },
     ) {
         Ok(a) => a,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => return empty_object_array(env),
     };
     for (i, lang) in langs.iter().enumerate() {
         if let Ok(s) = env.new_string(lang) {
@@ -88,6 +105,21 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_s
         }
     }
     arr.into_raw()
+}
+
+fn empty_object_array<'local>(env: &mut JNIEnv<'local>) -> jobjectArray {
+    // Best-effort: empty String[] array. Falls back to null only if even the
+    // tiny empty array allocation fails (JVM truly out of memory).
+    if let Ok(string_class) = env.find_class("java/lang/String") {
+        if let Ok(arr) = env.new_object_array(
+            0,
+            string_class,
+            unsafe { jni::objects::JObject::from_raw(std::ptr::null_mut()) },
+        ) {
+            return arr.into_raw();
+        }
+    }
+    std::ptr::null_mut()
 }
 
 fn empty_array<'local>(env: &mut JNIEnv<'local>) -> jbyteArray {

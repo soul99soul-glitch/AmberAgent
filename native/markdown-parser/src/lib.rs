@@ -14,7 +14,7 @@ mod type_mapping;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JClass, JString};
 use jni::sys::jbyteArray;
 use jni::JNIEnv;
 
@@ -33,8 +33,8 @@ pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebrid
 ) -> jbyteArray {
     init_logger_once();
 
-    let text_str = match env.get_string(&text) {
-        Ok(s) => s.into(),
+    let text_str: String = match env.get_string(&text) {
+        Ok(s) => String::from(s),
         Err(e) => {
             log::error!("markdown-parser: failed to get JString: {}", e);
             return empty_array(&mut env);

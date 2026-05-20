@@ -278,15 +278,26 @@ fn extract_bullet_info<R: std::io::BufRead>(
                 }
             }
             Event::Empty(ref e) => {
-                // Self-closing variants of bullet markers. JVM only inspects
-                // START_TAG so it would MISS a self-closed `<a:buChar/>`. We
-                // intentionally mirror that by **not** treating Empty as a
-                // bullet trigger — but we still need to allow `<a:lvl val="N"/>`
-                // self-closed because it's commonly emitted by PPTX writers.
-                if local_name(e.name().into_inner()) == b"lvl" {
-                    if let Some(v) = attr_val(e, b"val")? {
-                        level = v.parse::<i32>().unwrap_or(0);
+                // Self-closing variants of bullet markers — common in real PPTX.
+                // JVM XmlPullParser delivers self-closing tags as a START_TAG
+                // + END_TAG pair (it does NOT distinguish them at the API),
+                // so JVM picks `<a:buChar char="•"/>` up just fine. Mirror
+                // that here by inspecting Empty events too.
+                match local_name(e.name().into_inner()) {
+                    b"buChar" => {
+                        has_bullet = true;
+                        is_numbered = false;
                     }
+                    b"buAutoNum" => {
+                        has_bullet = true;
+                        is_numbered = true;
+                    }
+                    b"lvl" => {
+                        if let Some(v) = attr_val(e, b"val")? {
+                            level = v.parse::<i32>().unwrap_or(0);
+                        }
+                    }
+                    _ => {}
                 }
             }
             Event::End(ref e) => {
@@ -632,6 +643,9 @@ fn capture_t_text<R: std::io::BufRead>(
             Event::Eof => return Ok(()),
             _ => {}
         }
+        // Clear after each iteration so buf doesn't grow O(N) across all
+        // events inside <a:t> (review P2 fix).
+        buf.clear();
     }
 }
 

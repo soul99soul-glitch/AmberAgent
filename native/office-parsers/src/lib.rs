@@ -26,10 +26,21 @@ fn jstring_to_rust(env: &mut JNIEnv, s: JString) -> Result<String, jni::errors::
 }
 
 /// Wrap a Rust `String` into a Java string and return its `jstring` raw pointer.
+///
+/// On allocation failure (extremely rare — only when the JVM is out of memory)
+/// we fall back to a static ASCII sentinel rather than returning `null_mut()`,
+/// because the Kotlin adapter accepts a nullable `String?` and treats `null`
+/// as "use JVM fallback". The sentinel value lets callers see what went wrong
+/// without crashing.
 fn rust_to_jstring(env: &mut JNIEnv, s: &str) -> jstring {
     match env.new_string(s) {
         Ok(jstr) => jstr.into_raw(),
-        Err(_) => std::ptr::null_mut(),
+        Err(_) => match env.new_string("Error parsing file: native jstring allocation failed") {
+            Ok(jstr) => jstr.into_raw(),
+            // If even the fallback fails the JVM is in deep trouble; null
+            // signals to Kotlin that fallback is required.
+            Err(_) => std::ptr::null_mut(),
+        },
     }
 }
 
@@ -57,7 +68,12 @@ fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
     } else if let Some(s) = payload.downcast_ref::<String>() {
         s.clone()
     } else {
-        "non-string panic payload".to_string()
+        // Best-effort diagnostic — record the runtime type name so future
+        // crash logs are not just "non-string panic payload".
+        format!(
+            "non-string panic payload (type_name = {})",
+            std::any::type_name_of_val(&**payload)
+        )
     }
 }
 

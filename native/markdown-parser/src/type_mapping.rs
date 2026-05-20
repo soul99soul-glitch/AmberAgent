@@ -24,7 +24,9 @@ pub enum NodeTypeCode {
     TableCell = 11,
     HorizontalRule = 12,
     HtmlBlock = 13,
-    ThematicBreak = 14,
+    // 14 reserved for future "ThematicBreak" disambiguation — pulldown-cmark
+    // currently emits `Event::Rule` for both `***`/`---`/`___` thematic breaks
+    // and we map all of them to HorizontalRule(12). Don't reuse code 14.
     FootnoteDef = 40,
 
     // Inline-level

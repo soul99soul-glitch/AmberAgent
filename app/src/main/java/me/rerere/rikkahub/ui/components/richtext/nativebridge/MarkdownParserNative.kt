@@ -80,8 +80,12 @@ class PackedAstReader(private val blob: ByteArray) {
             version = -1
             hasHtmlBlocks = false
         } else {
-            isValid = true
-            version = blob[4].toInt() and 0xFF
+            val rawVersion = blob[4].toInt() and 0xFF
+            version = rawVersion
+            // Reject wire formats we don't know how to read — Phase 1 ships
+            // schema v1. Forward-compat is opt-in (bump SUPPORTED_VERSION when
+            // a backwards-compatible v2 reader lands).
+            isValid = rawVersion == SUPPORTED_VERSION
             hasHtmlBlocks = (blob[5].toInt() and 0x01) != 0
         }
     }
@@ -89,7 +93,11 @@ class PackedAstReader(private val blob: ByteArray) {
     /** Root node, or null if [isValid] is false / blob truncated. */
     fun root(): PackedAstNode? {
         if (!isValid || blob.size < 9) return null
-        return PackedAstNode(blob, offset = 8, parent = null)
+        return PackedAstNode(blob, offset = 8, parent = null, indexInParent = -1)
+    }
+
+    companion object {
+        private const val SUPPORTED_VERSION = 1
     }
 }
 
@@ -103,6 +111,11 @@ class PackedAstNode internal constructor(
     private val blob: ByteArray,
     private val offset: Int,
     val parent: PackedAstNode?,
+    /**
+     * 0-based position within [parent].children, or -1 for the root. Cached
+     * at construction so [nextSibling] is O(1) instead of O(parent-children-count).
+     */
+    private val indexInParent: Int,
 ) {
 
     /** Raw tag byte; map to [NodeType] for typed access. */
@@ -123,18 +136,19 @@ class PackedAstNode internal constructor(
     val children: List<PackedAstNode> by lazy {
         val list = ArrayList<PackedAstNode>(header.childCount)
         var cursor = header.bodyStart
-        repeat(header.childCount) {
-            list.add(PackedAstNode(blob, cursor, this))
+        for (i in 0 until header.childCount) {
+            list.add(PackedAstNode(blob, cursor, this, indexInParent = i))
             cursor = skipNode(blob, cursor)
         }
         list
     }
 
+    /** O(1) sibling lookup — required for deep-tree traversal patterns. */
     fun nextSibling(): PackedAstNode? {
         val p = parent ?: return null
-        val idx = p.children.indexOfFirst { it.offset == offset }
-        if (idx < 0 || idx + 1 >= p.children.size) return null
-        return p.children[idx + 1]
+        val nextIdx = indexInParent + 1
+        if (nextIdx < 0 || nextIdx >= p.children.size) return null
+        return p.children[nextIdx]
     }
 
     fun findChildOfTypeRecursive(vararg types: NodeType): PackedAstNode? {
@@ -221,7 +235,7 @@ enum class NodeType(val code: Int) {
     TableCell(11),
     HorizontalRule(12),
     HtmlBlock(13),
-    ThematicBreak(14),
+    // code 14 reserved (see type_mapping.rs note) — Rust never emits it.
     Emphasis(30),
     Strong(31),
     Strikethrough(32),

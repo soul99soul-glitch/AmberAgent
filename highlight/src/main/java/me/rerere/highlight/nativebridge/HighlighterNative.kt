@@ -105,6 +105,11 @@ internal object HighlighterNative {
         ) return emptyList()
         var cursor = 8
 
+        // Cache the UTF-8 byte representation **once** per decode call so
+        // per-token sub-string slicing doesn't re-encode the entire code
+        // body (review P1 fix; was O(N×codeLen) before).
+        val codeBytes = originalCode.toByteArray(Charsets.UTF_8)
+
         // Type pool: count + [length, utf8 bytes] × N
         val (typeCount, c1) = readVarint(blob, cursor); cursor = c1
         val typePool = ArrayList<String>(typeCount.toInt())
@@ -126,14 +131,14 @@ internal object HighlighterNative {
 
             when (kind) {
                 0 -> {
-                    val content = safeSubstring(originalCode, start.toInt(), length.toInt())
+                    val content = sliceUtf8(codeBytes, start.toInt(), length.toInt())
                     tokens.add(HighlightToken.Plain(content))
                 }
                 1 -> {
                     val (typeRef, c6) = readVarint(blob, cursor); cursor = c6
                     val scope = typePool.getOrNull(typeRef.toInt()) ?: ""
                     val prismClass = SCOPE_TO_PRISM[scope] ?: scope
-                    val content = safeSubstring(originalCode, start.toInt(), length.toInt())
+                    val content = sliceUtf8(codeBytes, start.toInt(), length.toInt())
                     tokens.add(
                         HighlightToken.Token.StringContent(
                             content = content,
@@ -144,7 +149,7 @@ internal object HighlighterNative {
                 }
                 else -> {
                     // Unknown kind — emit content as plain to fail safe.
-                    val content = safeSubstring(originalCode, start.toInt(), length.toInt())
+                    val content = sliceUtf8(codeBytes, start.toInt(), length.toInt())
                     tokens.add(HighlightToken.Plain(content))
                 }
             }
@@ -152,12 +157,10 @@ internal object HighlighterNative {
         return tokens
     }
 
-    private fun safeSubstring(code: String, byteStart: Int, byteLen: Int): String {
-        // Wire format uses byte offsets; convert to char-indexed substring for
-        // String. For ASCII-heavy code this is a no-op; non-ASCII needs care.
-        // Approach: decode the bytes from the original UTF-8 representation.
-        val bytes = code.toByteArray(Charsets.UTF_8)
-        if (byteStart < 0 || byteStart + byteLen > bytes.size) {
+    /** Slice a pre-encoded UTF-8 byte array. Byte offsets come straight from
+     *  tree-sitter, so no char-index conversion needed. */
+    private fun sliceUtf8(bytes: ByteArray, byteStart: Int, byteLen: Int): String {
+        if (byteStart < 0 || byteLen < 0 || byteStart + byteLen > bytes.size) {
             return ""
         }
         return String(bytes, byteStart, byteLen, Charsets.UTF_8)

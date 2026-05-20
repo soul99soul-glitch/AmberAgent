@@ -84,12 +84,21 @@ pub fn build_tree(text: &str) -> Tree {
                 let leaf = Node::new(NodeTypeCode::InlineCode, range.start, range.end);
                 stack.last_mut().expect("no parent").children.push(leaf);
             }
-            Event::Html(_cow) | Event::InlineHtml(_cow) => {
+            Event::Html(_cow) => {
+                // Block-level raw HTML — corresponds to JVM HTML_BLOCK and is
+                // what `astTree.containsHtmlBlocks()` checks. Set the meta flag.
+                let leaf = Node::new(NodeTypeCode::HtmlBlock, range.start, range.end);
+                stack.last_mut().expect("no parent").children.push(leaf);
+                has_html_blocks = true;
+            }
+            Event::InlineHtml(_cow) => {
+                // Inline HTML (e.g., `<br>` inside a paragraph). JVM's
+                // `containsHtmlBlocks()` only inspects block-level HTML, so we
+                // intentionally do NOT set has_html_blocks here — otherwise the
+                // StreamingMarkdownParseCache would reset on every paragraph
+                // containing a `<br>` (review P1 fix).
                 let leaf = Node::new(NodeTypeCode::InlineHtml, range.start, range.end);
                 stack.last_mut().expect("no parent").children.push(leaf);
-                // Track block-level HTML to set has_html_blocks meta flag —
-                // matches the JVM `astTree.containsHtmlBlocks()` extension.
-                has_html_blocks = true;
             }
             Event::FootnoteReference(_cow) => {
                 let leaf = Node::new(NodeTypeCode::FootnoteRef, range.start, range.end);
@@ -133,12 +142,11 @@ fn make_options() -> Options {
     opts.insert(Options::ENABLE_FOOTNOTES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
-    opts.insert(Options::ENABLE_SMART_PUNCTUATION);
+    // ENABLE_SMART_PUNCTUATION intentionally OFF — JetBrains markdown does not
+    // do smart-quote conversion, so leaving it on would diff `'hello'` vs
+    // `'hello'` on every comparison run (review P1 fix).
     opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
     opts.insert(Options::ENABLE_MATH);
-    // ENABLE_GFM is intentionally NOT enabled — we want CommonMark + GFM
-    // additions, but not all GFM relaxed rules to match JetBrains' GFMFlavour
-    // closely.
     opts
 }
 
@@ -218,10 +226,25 @@ fn heading_level_byte(level: HeadingLevel) -> u8 {
 }
 
 fn encode_string(s: &str, out: &mut Vec<u8>) {
+    // varint length prefix + utf-8 bytes. Was 2-byte LE before but >65 535
+    // byte payloads (long code-fence langs / link hrefs) would silently
+    // truncate via `as u16` wrap. Varint scales without ceiling (review P2 fix).
     let bytes = s.as_bytes();
-    // 2-byte little-endian length prefix + utf-8 bytes
-    out.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+    write_varint_to(bytes.len() as u64, out);
     out.extend_from_slice(bytes);
+}
+
+fn write_varint_to(mut value: u64, out: &mut Vec<u8>) {
+    loop {
+        let byte = (value & 0x7F) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        } else {
+            out.push(byte | 0x80);
+        }
+    }
 }
 
 /// Given a TagEnd, return the corresponding Start Tag in a no-payload form

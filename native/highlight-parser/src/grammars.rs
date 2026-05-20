@@ -54,7 +54,7 @@ pub struct Grammar {
 pub fn supported_languages() -> &'static [&'static str] {
     &[
         "rust",
-        "kotlin",
+        // "kotlin" disabled — tree-sitter-kotlin-ng has no bundled highlight query.
         "java",
         "python",
         "javascript",
@@ -92,24 +92,27 @@ pub fn run_highlight(
 }
 
 /// Map language identifier → static Grammar config (lazily initialised once).
+///
+/// Returns `None` for unknown languages and also for languages whose grammar
+/// failed to initialise (logged once and cached).
 pub fn for_language(lang: &str) -> Option<&'static Grammar> {
     let normalized = lang.trim().to_lowercase();
     match normalized.as_str() {
-        "rust" | "rs" => Some(rust_grammar()),
-        "kotlin" | "kt" | "kts" => Some(kotlin_grammar()),
-        "java" => Some(java_grammar()),
-        "python" | "py" => Some(python_grammar()),
-        "javascript" | "js" | "jsx" => Some(javascript_grammar()),
-        "typescript" | "ts" => Some(typescript_grammar()),
-        "tsx" => Some(tsx_grammar()),
-        "go" => Some(go_grammar()),
-        "bash" | "sh" | "shell" | "zsh" => Some(bash_grammar()),
-        "json" | "jsonc" => Some(json_grammar()),
-        "yaml" | "yml" => Some(yaml_grammar()),
-        "markdown" | "md" => Some(markdown_grammar()),
-        "html" | "htm" => Some(html_grammar()),
-        "css" | "scss" | "sass" => Some(css_grammar()),
-        "sql" => Some(sql_grammar()),
+        "rust" | "rs" => rust_grammar(),
+        // kotlin grammar disabled — see tree-sitter-kotlin-ng note above.
+        "java" => java_grammar(),
+        "python" | "py" => python_grammar(),
+        "javascript" | "js" | "jsx" => javascript_grammar(),
+        "typescript" | "ts" => typescript_grammar(),
+        "tsx" => tsx_grammar(),
+        "go" => go_grammar(),
+        "bash" | "sh" | "shell" | "zsh" => bash_grammar(),
+        "json" | "jsonc" => json_grammar(),
+        "yaml" | "yml" => yaml_grammar(),
+        "markdown" | "md" => markdown_grammar(),
+        "html" | "htm" => html_grammar(),
+        "css" | "scss" | "sass" => css_grammar(),
+        "sql" => sql_grammar(),
         _ => None,
     }
 }
@@ -121,6 +124,10 @@ pub fn for_language(lang: &str) -> Option<&'static Grammar> {
 // to whichever each version exports. If a grammar crate changes its API,
 // only this file needs touching.
 
+/// Build a lazily-initialised grammar accessor. Failure (malformed highlight
+/// query, ABI mismatch, etc.) yields `None` so the caller degrades to plain
+/// rendering instead of panicking — important because release builds use
+/// `panic = "abort"` which `catch_unwind` cannot intercept (review P1 fix).
 macro_rules! grammar_static {
     (
         $fn_name:ident,
@@ -129,21 +136,31 @@ macro_rules! grammar_static {
         $injection_query:expr,
         $locals_query:expr
     ) => {
-        fn $fn_name() -> &'static Grammar {
-            static G: OnceLock<Grammar> = OnceLock::new();
+        fn $fn_name() -> Option<&'static Grammar> {
+            static G: OnceLock<Option<Grammar>> = OnceLock::new();
             G.get_or_init(|| {
                 let language: Language = $lang_fn.into();
-                let mut config = HighlightConfiguration::new(
+                let mut config = match HighlightConfiguration::new(
                     language,
                     stringify!($fn_name),
                     $highlight_query,
                     $injection_query,
                     $locals_query,
-                )
-                .expect(concat!("failed to build ", stringify!($fn_name), " highlight config"));
+                ) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        log::warn!(
+                            "highlight-parser: {} grammar init failed ({}) — falling back to plain",
+                            stringify!($fn_name),
+                            e,
+                        );
+                        return None;
+                    }
+                };
                 config.configure(HIGHLIGHT_NAMES);
-                Grammar { config }
+                Some(Grammar { config })
             })
+            .as_ref()
         }
     };
 }
@@ -156,14 +173,7 @@ grammar_static!(
     ""
 );
 
-// tree-sitter-kotlin-ng exposes LANGUAGE + HIGHLIGHTS_QUERY at top level.
-grammar_static!(
-    kotlin_grammar,
-    tree_sitter_kotlin_ng::LANGUAGE,
-    tree_sitter_kotlin_ng::HIGHLIGHTS_QUERY,
-    "",
-    ""
-);
+// kotlin grammar disabled (see lib doc note + Cargo.toml comment).
 
 grammar_static!(
     java_grammar,
@@ -264,8 +274,8 @@ grammar_static!(
 
 grammar_static!(
     sql_grammar,
-    tree_sitter_sql::LANGUAGE,
-    tree_sitter_sql::HIGHLIGHTS_QUERY,
+    tree_sitter_sequel::LANGUAGE,
+    tree_sitter_sequel::HIGHLIGHTS_QUERY,
     "",
     ""
 );
@@ -277,14 +287,14 @@ mod tests {
     #[test]
     fn known_languages_resolve() {
         assert!(for_language("rust").is_some());
-        assert!(for_language("kotlin").is_some());
+        // kotlin is intentionally disabled
         assert!(for_language("RUST").is_some()); // case-insensitive
-        assert!(for_language("kt").is_some());
     }
 
     #[test]
     fn unknown_language_returns_none() {
         assert!(for_language("brainfuck").is_none());
         assert!(for_language("").is_none());
+        assert!(for_language("kotlin").is_none());
     }
 }
