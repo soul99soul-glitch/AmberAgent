@@ -31,7 +31,6 @@ import me.rerere.search.SearchServiceOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URI
-import java.net.URLEncoder
 import kotlin.uuid.Uuid
 
 class DeepReadAgent(
@@ -45,6 +44,7 @@ class DeepReadAgent(
         topicId: String,
         topicTitle: String,
         force: Boolean = false,
+        onProgress: (DeepReadGenerationStage, DeepReadOutput?) -> Unit = { _, _ -> },
     ): Result<DeepReadOutput> {
         val seedSources = hotListRepository.getHotTopic(topicId)
             ?.sources
@@ -61,37 +61,46 @@ class DeepReadAgent(
         }
 
         val settings = settingsStore.settingsFlow.value
+        onProgress(DeepReadGenerationStage.OVERVIEW, null)
         val sources = collectSources(settings, topicTitle, seedSources)
         if (sources.isEmpty()) {
             return Result.failure(IllegalStateException("没有抓到足够的正文来源，无法生成合格深度阅读。请检查搜索源或稍后重试。"))
         }
 
-        val prompt = DeepReadPrompt.build(topicTitle, sources)
-        val raw = callModel(settings, prompt)
-            ?: return Result.failure(IllegalStateException(lastCallFailureReason ?: "深度阅读生成失败，请稍后重试"))
-        val parsed = DeepReadOutputParser.parse(raw, json)
-            ?: repairJson(settings, topicTitle, raw)
-        if (parsed == null) {
-            Log.w(TAG, "deep read JSON parse failed after repair")
-            return Result.failure(IllegalStateException("模型输出格式不稳定，未能解析为深度阅读正文。请重试或切换模型。"))
+        var output: DeepReadOutput? = null
+        DeepReadGenerationStage.entries.forEach { stage ->
+            onProgress(stage, output)
+            val prompt = DeepReadPrompt.buildStage(
+                topicTitle = topicTitle,
+                sources = sources,
+                stage = stage,
+                previousJson = output?.let { json.encodeToString(it) },
+            )
+            val raw = callModel(
+                settings = settings,
+                prompt = prompt,
+                maxTokens = STAGED_MODEL_MAX_TOKENS,
+            ) ?: return Result.failure(IllegalStateException(lastCallFailureReason ?: "深度阅读生成失败，请稍后重试"))
+            val parsed = DeepReadOutputParser.parse(raw, json)
+                ?: repairJson(settings, topicTitle, raw)
+                ?: return Result.failure(IllegalStateException("模型输出格式不稳定，未能解析为深度阅读正文。请重试或切换模型。"))
+            output = DeepReadSanitizer.sanitize(output.mergeWith(parsed), sources, topicTitle)
+            onProgress(stage, output)
         }
-        var shouldCache = true
-        var output = DeepReadSanitizer.sanitize(parsed, sources, topicTitle)
-        if (!output.hasReadableArticle()) {
+
+        var finalOutput = output ?: return Result.failure(IllegalStateException("深度阅读生成失败，请稍后重试"))
+        if (!finalOutput.hasReadableArticle()) {
             return Result.failure(IllegalStateException("模型没有生成可用的深度阅读正文，请重试或切换模型。"))
         }
-        if (!output.hasEnoughChinese()) {
-            output = repairChinese(settings, topicTitle, sources, output)
+        if (!finalOutput.hasEnoughChinese()) {
+            finalOutput = repairChinese(settings, topicTitle, sources, finalOutput)
                 ?: return Result.failure(IllegalStateException("模型输出中文深读质量不足，未通过中文化修复。请重试或切换模型。"))
-            shouldCache = true
         }
-        if (!output.hasReadableArticle()) {
+        if (!finalOutput.hasReadableArticle()) {
             return Result.failure(IllegalStateException("深度阅读内容不足，请稍后重试"))
         }
-        if (shouldCache) {
-            hotListRepository.saveDeepRead(topicId, topicTitle, output)
-        }
-        return Result.success(output)
+        hotListRepository.saveDeepRead(topicId, topicTitle, finalOutput)
+        return Result.success(finalOutput)
     }
 
     private suspend fun collectSources(
@@ -102,7 +111,6 @@ class DeepReadAgent(
         withTimeoutOrNull(SOURCE_COLLECTION_TIMEOUT_MS) {
             coroutineScope {
                 val enabled = settings.enabledDeepReadSearchServices().take(MAX_SEARCH_SERVICES)
-                if (enabled.isEmpty()) return@coroutineScope emptyList()
                 val queries = buildDeepReadQueries(topicTitle)
 
                 val searchResults = enabled.flatMap { service ->
@@ -127,6 +135,10 @@ class DeepReadAgent(
                     .let(::interleaveSearchResults)
 
                 val scrapeService = enabled.firstOrNull()
+                val seedEnriched = seedSources.map { source ->
+                    async { enrichSeedSource(source) }
+                }.awaitAll()
+                    .filter { it.content.trim().length >= MIN_SOURCE_CHARS }
                 val enriched = searchResults.mapIndexed { index, item ->
                     async {
                         val shouldScrape = scrapeService != null && index < MAX_SCRAPE_RESULTS
@@ -134,6 +146,19 @@ class DeepReadAgent(
                             try {
                                 withTimeoutOrNull(SCRAPE_TIMEOUT_MS) {
                                     scrapeWithService(scrapeService, item.url)
+                                }
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Throwable) {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                        val direct = if (scraped.isNullOrBlank()) {
+                            try {
+                                withTimeoutOrNull(DIRECT_FETCH_TIMEOUT_MS) {
+                                    fetchReadableText(item.url)
                                 }
                             } catch (error: CancellationException) {
                                 throw error
@@ -158,7 +183,7 @@ class DeepReadAgent(
                             title = item.title,
                             url = item.url,
                             source = domainOf(item.url),
-                            content = (scraped ?: item.text).ifBlank { item.title }.take(SOURCE_EXCERPT_LIMIT),
+                            content = (scraped ?: direct ?: item.text).ifBlank { item.title }.take(SOURCE_EXCERPT_LIMIT),
                             publishedAt = item.publishedAt,
                             images = (item.images + listOfNotNull(metaImage))
                                 .filter { it.startsWith("http") }
@@ -167,17 +192,31 @@ class DeepReadAgent(
                         )
                     }
                 }.awaitAll()
-                    .filter { it.title.isNotBlank() && it.url.isNotBlank() && it.content.isNotBlank() }
+                    .filter { it.title.isNotBlank() && it.url.isNotBlank() && it.content.trim().length >= MIN_SOURCE_CHARS }
 
-                if (enriched.isEmpty()) {
+                val combined = (enriched + seedEnriched)
+                    .distinctBy { source -> source.url.ifBlank { source.title } }
+                    .take(MAX_SOURCES)
+                if (combined.isEmpty()) {
                     emptyList()
                 } else {
-                    (enriched + seedSources)
-                        .distinctBy { source -> source.url.ifBlank { source.title } }
-                        .take(MAX_SOURCES)
+                    combined
                 }
             }
         } ?: emptyList()
+
+    private suspend fun enrichSeedSource(source: DeepReadSource): DeepReadSource {
+        val direct = source.url.takeIf { it.startsWith("http") }?.let { url ->
+            withTimeoutOrNull(DIRECT_FETCH_TIMEOUT_MS) { fetchReadableText(url) }
+        }
+        val metaImage = source.url.takeIf { it.startsWith("http") }?.let { url ->
+            withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) { fetchOpenGraphImage(url) }
+        }
+        return source.copy(
+            content = (direct ?: source.content).take(SOURCE_EXCERPT_LIMIT),
+            images = (source.images + listOfNotNull(metaImage)).distinct().take(3),
+        )
+    }
 
     private fun interleaveSearchResults(buckets: List<SearchBucket>): List<SearchResult.SearchResultItem> {
         val queryGroups = buckets
@@ -224,8 +263,7 @@ class DeepReadAgent(
 
     private fun List<HotTopicSource>.toDeepReadSources(topicTitle: String): List<DeepReadSource> =
         map { source ->
-            val url = source.url?.takeIf { it.startsWith("http") }
-                ?: "https://www.google.com/search?q=${URLEncoder.encode(source.presentationTitle, "UTF-8")}"
+            val url = source.url?.takeIf { it.startsWith("http") }.orEmpty()
             DeepReadSource(
                 title = source.presentationTitle,
                 url = url,
@@ -290,6 +328,20 @@ class DeepReadAgent(
                         String(buffer, 0, read).extractOpenGraphImage()
                     }
                 }
+            }
+        }
+
+    private suspend fun fetchReadableText(url: String): String? =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", DESKTOP_USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.peekBody(DIRECT_FETCH_MAX_BYTES).string()
+                body.extractReadableText().takeIf { it.length >= MIN_SOURCE_CHARS }?.take(SOURCE_EXCERPT_LIMIT)
             }
         }
 
@@ -425,15 +477,64 @@ class DeepReadAgent(
 
     private fun String.hasCjk(): Boolean = any { it in '\u4e00'..'\u9fff' }
 
+    private fun String.extractReadableText(): String =
+        replace(Regex("(?is)<(script|style|noscript|svg|canvas)\\b.*?</\\1>"), " ")
+            .replace(Regex("(?is)<br\\s*/?>"), "\n")
+            .replace(Regex("(?is)</(p|div|section|article|li|h[1-6])>"), "\n")
+            .replace(Regex("(?is)<[^>]+>"), " ")
+            .htmlUnescape()
+            .replace(Regex("[ \\t\\x0B\\f\\r]+"), " ")
+            .replace(Regex("\\n\\s*\\n+"), "\n")
+            .lines()
+            .map { it.trim() }
+            .filter { line -> line.length >= 18 }
+            .distinct()
+            .joinToString("\n")
+            .trim()
+
+    private fun String.htmlUnescape(): String =
+        replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&apos;", "'")
+
+    private fun DeepReadOutput?.mergeWith(update: DeepReadOutput): DeepReadOutput {
+        val base = this ?: DeepReadOutput()
+        return base.copy(
+            topicType = update.topicType.takeIf { it.isNotBlank() } ?: base.topicType,
+            summary = update.summary.takeIf { it.isNotBlank() } ?: base.summary,
+            keyEntities = update.keyEntities.ifEmpty { base.keyEntities },
+            timeline = update.timeline?.takeIf { it.isNotEmpty() } ?: base.timeline,
+            corePoints = update.corePoints?.takeIf { it.isNotEmpty() } ?: base.corePoints,
+            analysis = update.analysis.takeIf { analysis ->
+                !analysis.coreDispute.isNullOrBlank() ||
+                    !analysis.implications.isNullOrBlank() ||
+                    analysis.perspectives.isNotEmpty() ||
+                    analysis.quotes.isNotEmpty()
+            } ?: base.analysis,
+            extendedReading = update.extendedReading.ifEmpty { base.extendedReading },
+            heroImageQuery = update.heroImageQuery?.takeIf { it.isNotBlank() } ?: base.heroImageQuery,
+            heroImageUrl = update.heroImageUrl?.takeIf { it.isNotBlank() } ?: base.heroImageUrl,
+            heroCaption = update.heroCaption?.takeIf { it.isNotBlank() } ?: base.heroCaption,
+            imageAssets = update.imageAssets.ifEmpty { base.imageAssets },
+            references = update.references.ifEmpty { base.references },
+        )
+    }
+
     companion object {
         private const val TAG = "DeepReadAgent"
         private const val SOURCE_COLLECTION_TIMEOUT_MS = 24_000L
         private const val SEARCH_TIMEOUT_MS = 7_000L
         private const val SCRAPE_TIMEOUT_MS = 4_000L
         private const val OG_IMAGE_TIMEOUT_MS = 2_000L
+        private const val DIRECT_FETCH_TIMEOUT_MS = 4_000L
+        private const val DIRECT_FETCH_MAX_BYTES = 768_000L
         private const val OG_IMAGE_HTML_CHAR_LIMIT = 192_000
         private const val MODEL_TIMEOUT_MS = 70_000L
         private const val DEEP_READ_MODEL_MAX_TOKENS = 40_000
+        private const val STAGED_MODEL_MAX_TOKENS = 12_000
         private const val DEEP_READ_REPAIR_MAX_TOKENS = 40_000
         private const val DEEP_READ_PROVIDER_SAFE_MAX_TOKENS = 12_000
         private const val MAX_SEARCH_SERVICES = 2
@@ -444,6 +545,7 @@ class DeepReadAgent(
         private const val MAX_SEED_SOURCES = 4
         private const val MAX_SOURCES = 10
         private const val SOURCE_EXCERPT_LIMIT = 1_600
+        private const val MIN_SOURCE_CHARS = 280
         private const val RAW_REPAIR_LIMIT = 18_000
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"

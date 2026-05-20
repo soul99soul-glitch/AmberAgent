@@ -60,13 +60,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
 import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
@@ -107,6 +107,8 @@ fun DeepReadScreen(topicId: String, title: String) {
         fontStates = fontStates,
     )
     var loading by remember { mutableStateOf(true) }
+    var generating by remember { mutableStateOf(false) }
+    var generationStage by remember { mutableStateOf(DeepReadGenerationStage.OVERVIEW) }
     var output by remember { mutableStateOf<DeepReadOutput?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -115,12 +117,26 @@ fun DeepReadScreen(topicId: String, title: String) {
     fun run(force: Boolean = false) {
         if (!confirmed) return
         loading = true
+        generating = true
+        generationStage = DeepReadGenerationStage.OVERVIEW
         error = null
         scope.launch {
-            val result = agent.run(topicId = topicId, topicTitle = title, force = force)
-            output = result.getOrNull()
+            val result = agent.run(
+                topicId = topicId,
+                topicTitle = title,
+                force = force,
+                onProgress = { stage, partial ->
+                    generationStage = stage
+                    if (partial != null) {
+                        output = partial
+                        loading = false
+                    }
+                },
+            )
+            output = result.getOrNull() ?: output
             error = result.exceptionOrNull()?.message
             loading = false
+            generating = false
         }
     }
 
@@ -159,30 +175,45 @@ fun DeepReadScreen(topicId: String, title: String) {
                     }
                 },
             )
-            loading -> DeepReadLoading(Modifier.statusBarsPadding().navigationBarsPadding(), palette)
+            loading && output == null -> DeepReadLoading(
+                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                palette = palette,
+                stage = generationStage,
+            )
             error != null -> DeepReadError(error.orEmpty(), Modifier.statusBarsPadding().navigationBarsPadding()) { run(force = true) }
             output != null -> {
                 val customTemplate = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
                 val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
                     customTemplate == null
                 if (board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null) {
-                    DeepReadTemplateArticle(
-                        title = title,
-                        output = output!!,
-                        palette = palette,
-                        fontCss = templateFontCss,
-                        customTemplateHtml = customTemplate?.html,
-                        fontRepository = fontRepository,
-                        fallback = {
-                            DeepReadArticle(
-                                title = title,
-                                output = output!!,
-                                palette = palette,
-                                fontFamily = readingFontFamily,
-                                listState = listState,
+                    Box(Modifier.fillMaxSize()) {
+                        DeepReadTemplateArticle(
+                            title = title,
+                            output = output!!,
+                            palette = palette,
+                            fontCss = templateFontCss,
+                            customTemplateHtml = customTemplate?.html,
+                            fontRepository = fontRepository,
+                            fallback = {
+                                DeepReadArticle(
+                                    title = title,
+                                    output = output!!,
+                                    palette = palette,
+                                    fontFamily = readingFontFamily,
+                                    listState = listState,
+                                )
+                            },
+                        )
+                        if (generating) {
+                            DeepReadProgressNotice(
+                                stage = generationStage,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 18.dp, vertical = 10.dp),
                             )
-                        },
-                    )
+                        }
+                    }
                 } else if (selectedCustomMissing || invalidTemplateCount > 0) {
                     Box(Modifier.fillMaxSize()) {
                         DeepReadArticle(
@@ -203,18 +234,55 @@ fun DeepReadScreen(topicId: String, title: String) {
                                 .statusBarsPadding()
                                 .padding(horizontal = 18.dp, vertical = 10.dp),
                         )
+                        if (generating) {
+                            DeepReadProgressNotice(
+                                stage = generationStage,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 18.dp, vertical = 52.dp),
+                            )
+                        }
                     }
                 } else {
-                    DeepReadArticle(
-                        title = title,
-                        output = output!!,
-                        palette = palette,
-                        fontFamily = readingFontFamily,
-                        listState = listState,
-                    )
+                    Box(Modifier.fillMaxSize()) {
+                        DeepReadArticle(
+                            title = title,
+                            output = output!!,
+                            palette = palette,
+                            fontFamily = readingFontFamily,
+                            listState = listState,
+                        )
+                        if (generating) {
+                            DeepReadProgressNotice(
+                                stage = generationStage,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DeepReadProgressNotice(stage: DeepReadGenerationStage, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        shadowElevation = 4.dp,
+    ) {
+        Text(
+            "正在生成：${stage.label}",
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
@@ -979,16 +1047,14 @@ private fun SectionKicker(text: String, palette: MagazinePalette) {
 }
 
 @Composable
-private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
-    val stages = remember { listOf("收集来源", "组织脉络", "生成中文深读") }
-    val progressStops = remember { listOf(0.24f, 0.56f, 0.86f) }
-    var activeStage by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(8_500L)
-            activeStage = (activeStage + 1).coerceAtMost(stages.lastIndex)
-        }
-    }
+private fun DeepReadLoading(
+    modifier: Modifier,
+    palette: MagazinePalette,
+    stage: DeepReadGenerationStage,
+) {
+    val stages = remember { DeepReadGenerationStage.entries }
+    val activeStage = stages.indexOf(stage).coerceAtLeast(0)
+    val progress = ((activeStage + 1).toFloat() / stages.size).coerceIn(0.18f, 0.92f)
     Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.padding(horizontal = 38.dp),
@@ -1007,15 +1073,16 @@ private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
                         TimelineMarker(highlight = index <= activeStage, palette = palette)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                stage,
+                                stage.label,
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light),
                                 color = if (index <= activeStage) palette.ink else palette.muted,
                             )
                             Text(
                                 when (index) {
-                                    0 -> "正在检索高质量信息源..."
-                                    1 -> "提炼观点，构建内容框架"
-                                    else -> "专业重写，打磨中文表达"
+                                    0 -> "抓取热榜链接与搜索来源"
+                                    1 -> "写入概览后的事件脉络"
+                                    2 -> "补齐各方立场和影响分析"
+                                    else -> "整理来源链接并完成缓存"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = palette.muted,
@@ -1025,7 +1092,7 @@ private fun DeepReadLoading(modifier: Modifier, palette: MagazinePalette) {
                 }
             }
             LinearProgressIndicator(
-                progress = { progressStops.getOrElse(activeStage) { 0.86f } },
+                progress = { progress },
                 modifier = Modifier.fillMaxWidth().height(2.dp),
                 color = palette.accent,
                 trackColor = palette.line,

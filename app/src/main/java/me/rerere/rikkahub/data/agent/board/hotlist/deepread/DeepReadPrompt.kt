@@ -1,6 +1,51 @@
 package me.rerere.rikkahub.data.agent.board.hotlist.deepread
 
 object DeepReadPrompt {
+    fun buildStage(
+        topicTitle: String,
+        sources: List<DeepReadSource>,
+        stage: DeepReadGenerationStage,
+        previousJson: String? = null,
+    ): String = buildString {
+        appendLine("你是 AmberAgent 的深度阅读编辑。请分阶段生成高端 News 杂志 App 的结构化深读稿。")
+        appendLine("话题：$topicTitle")
+        appendLine("当前阶段：${stage.label}")
+        appendLine()
+        appendLine("## 阶段要求")
+        when (stage) {
+            DeepReadGenerationStage.OVERVIEW -> {
+                appendLine("- 只完成 topic_type、summary、key_entities、hero_image_url、hero_caption、image_assets、references、extended_reading。")
+                appendLine("- summary 要像杂志导语，120-200 字，说明为什么值得读。")
+                appendLine("- 不要编造来源之外的事实。")
+            }
+            DeepReadGenerationStage.NARRATIVE -> {
+                appendLine("- 在已有概览基础上补齐 timeline 和 core_points。")
+                appendLine("- timeline 要讲清「早期背景 → 直接导火索 → 当前事件 → 后续影响」。")
+                appendLine("- core_points 写消化后的关键脉络，不是来源列表。")
+            }
+            DeepReadGenerationStage.ANALYSIS -> {
+                appendLine("- 在已有概览和叙事基础上补齐 analysis。")
+                appendLine("- core_dispute 回答各方到底在争什么；perspectives 区分不同当事方或利益方；implications 写影响。")
+            }
+            DeepReadGenerationStage.EXTENDED_READING -> {
+                appendLine("- 做最后整理：保留已有 summary/timeline/core_points/analysis，补齐 extended_reading 与 references。")
+                appendLine("- 输出完整 DeepRead JSON。不要删掉上一阶段已完成内容。")
+            }
+        }
+        appendLine("- 输出合法 JSON 对象，不要代码围栏、不要解释。")
+        appendLine("- 用户可见文本必须是简体中文；url 原样保留。")
+        appendLine("- hero_image_url、image_assets、timeline.image_url、core_points.image_url 只能使用来源 images 中出现过的 URL。")
+        appendLine("- 正文不能写「来源不足」「链接见扩展阅读」来冒充分析；如果某事实来源未覆盖，就保守跳过。")
+        appendLine()
+        previousJson?.takeIf { it.isNotBlank() }?.let {
+            appendLine("## 上一阶段 JSON")
+            appendLine(it)
+            appendLine()
+        }
+        appendSchema()
+        appendSources(sources)
+    }
+
     fun build(topicTitle: String, sources: List<DeepReadSource>): String = buildString {
         appendLine("你是 AmberAgent 的深度阅读编辑，目标是生成高端 News 杂志 App 风格的结构化深读稿。")
         appendLine("话题：$topicTitle")
@@ -29,41 +74,8 @@ object DeepReadPrompt {
         appendLine("- image_assets 只能从来源 images 列表中选择，最多 6 张；图片说明必须中文。")
         appendLine("- timeline[].image_url 和 core_points[].image_url 只能引用 image_assets 中的 url；不确定关联时留空。")
         appendLine()
-        appendLine("## JSON Schema")
-        appendLine(
-            """
-            {
-              "topic_type": "event|opinion|product|person",
-              "summary": "200字以内摘要",
-              "key_entities": ["实体"],
-              "timeline": [{"date":"日期或时间","event":"事件","is_highlight":true,"image_url":"可为空","image_caption":"可为空"}],
-              "core_points": [{"point":"核心论点/亮点","supporting":"支撑材料","image_url":"可为空","image_caption":"可为空"}],
-              "analysis": {
-                "core_dispute": "核心分歧，可为空",
-                "perspectives": [{"viewpoint":"观点","holder":"持有方"}],
-                "implications": "影响分析，可为空",
-                "quotes": [{"text":"短引用，不超过40字","attribution":"来源或人物"}]
-              },
-              "extended_reading": [{"title":"标题","url":"URL","source":"来源"}],
-              "hero_image_query": "适合查找真实新闻配图的搜索词",
-              "hero_image_url": "只能使用来源 images 中的 URL，可为空",
-              "hero_caption": "图片说明，可为空",
-              "image_assets": [{"url":"来源图片URL","caption":"中文图注","source":"来源","related_entities":["实体"],"related_timeline_index":0,"quality_hint":"hero|timeline|context"}],
-              "references": [{"title":"标题","url":"URL","source":"来源"}]
-            }
-            """.trimIndent()
-        )
-        appendLine()
-        appendLine("## 来源")
-        sources.forEachIndexed { index, source ->
-            appendLine("### [${index + 1}] ${source.title}")
-            appendLine("- url: ${source.url}")
-            appendLine("- source: ${source.source ?: "-"}")
-            if (source.publishedAt != null) appendLine("- published_at: ${source.publishedAt}")
-            if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
-            appendLine("- excerpt: ${source.content.take(2_000).replace("\n", " ")}")
-            appendLine()
-        }
+        appendSchema()
+        appendSources(sources)
     }
 
     fun repairChinese(topicTitle: String, outputJson: String): String = buildString {
@@ -94,6 +106,54 @@ object DeepReadPrompt {
         appendLine()
         appendLine(rawOutput)
     }
+
+    private fun StringBuilder.appendSchema() {
+        appendLine("## JSON Schema")
+        appendLine(
+            """
+            {
+              "topic_type": "event|opinion|product|person",
+              "summary": "200字以内摘要",
+              "key_entities": ["实体"],
+              "timeline": [{"date":"日期或时间","event":"事件","is_highlight":true,"image_url":"可为空","image_caption":"可为空"}],
+              "core_points": [{"point":"核心论点/亮点","supporting":"支撑材料","image_url":"可为空","image_caption":"可为空"}],
+              "analysis": {
+                "core_dispute": "核心分歧，可为空",
+                "perspectives": [{"viewpoint":"观点","holder":"持有方"}],
+                "implications": "影响分析，可为空",
+                "quotes": [{"text":"短引用，不超过40字","attribution":"来源或人物"}]
+              },
+              "extended_reading": [{"title":"标题","url":"URL","source":"来源"}],
+              "hero_image_query": "适合查找真实新闻配图的搜索词",
+              "hero_image_url": "只能使用来源 images 中的 URL，可为空",
+              "hero_caption": "图片说明，可为空",
+              "image_assets": [{"url":"来源图片URL","caption":"中文图注","source":"来源","related_entities":["实体"],"related_timeline_index":0,"quality_hint":"hero|timeline|context"}],
+              "references": [{"title":"标题","url":"URL","source":"来源"}]
+            }
+            """.trimIndent()
+        )
+        appendLine()
+    }
+
+    private fun StringBuilder.appendSources(sources: List<DeepReadSource>) {
+        appendLine("## 来源")
+        sources.forEachIndexed { index, source ->
+            appendLine("### [${index + 1}] ${source.title}")
+            appendLine("- url: ${source.url}")
+            appendLine("- source: ${source.source ?: "-"}")
+            if (source.publishedAt != null) appendLine("- published_at: ${source.publishedAt}")
+            if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
+            appendLine("- excerpt: ${source.content.take(2_000).replace("\n", " ")}")
+            appendLine()
+        }
+    }
+}
+
+enum class DeepReadGenerationStage(val label: String) {
+    OVERVIEW("概览"),
+    NARRATIVE("时间轴叙事"),
+    ANALYSIS("深度分析"),
+    EXTENDED_READING("扩展阅读"),
 }
 
 data class DeepReadSource(
