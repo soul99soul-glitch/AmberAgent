@@ -12,6 +12,36 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Kotlin adapter handles the rule-filtering (enabled / visualOnly /
  * affectingScope) and feeds the JNI surface parallel pattern + replacement
  * arrays. This keeps the JNI shape narrow.
+ *
+ * ## ⚠ Pattern compatibility divergence (Round 1 review)
+ *
+ * Java's `Pattern` and Rust's `regex` crate support overlapping but not
+ * identical regex syntax. Cases where Rust will **silently skip** a rule
+ * that JVM applies (P1):
+ *
+ * - **Lookbehind / lookahead**: `(?<=...)`, `(?=...)`, `(?<!...)`, `(?!...)`
+ *   Java supports these; Rust's `regex` crate does not.
+ *   → Rule fails to compile in Rust, gets skipped (logged), JVM applies it.
+ *
+ * - **Backreferences in patterns**: `(\w+)\1` (re-match the first group)
+ *   Java supports; Rust does not.
+ *   → Same skip + log behaviour.
+ *
+ * - **Possessive quantifiers**: `a++`, `a*+`, `a?+`
+ *   Java supports; Rust does not.
+ *
+ * Cases where the **replacement string** differs (P2):
+ *
+ * - **Literal `$` in replacement**: Kotlin uses `\\$` (backslash-dollar) to
+ *   emit a literal `$`. Rust's `regex` crate uses `$$`. If user-configured
+ *   replacements contain `\\$`, output diverges.
+ *
+ * Before [apply] is wired into [replaceRegexes] in production, callers MUST:
+ * 1. Detect Rust-incompatible patterns at config-save time, OR
+ * 2. Try Rust first and fall back to JVM on per-rule compile failure.
+ *
+ * The current Rust impl already does "skip + log" on compile failure, but
+ * the caller is responsible for the wider syntax-flavor question.
  */
 internal object RegexTransformerNative {
 

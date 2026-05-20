@@ -5,7 +5,17 @@ members = [
     "markdown-parser",
     "highlight-parser",
     "regex-transformer",
-    "generative-widget-parser",
+    # "generative-widget-parser" — ABANDONED at Round 1 review (see
+    # native/generative-widget-parser/ABANDONED.md). The JVM impl
+    # (app/.../generative/GenerativeWidgetParser.kt, 466 lines) bundles
+    # security gates (label/instruction length caps, blocked-instruction
+    # filter, MAX_ACTIONS, placeholderPhrases), multi-renderer dispatch
+    # (vchart/slides → GenerativeWidgetRenderer), streaming-tolerant JSON
+    # parsing (findJsonEnd state machine), and parses JSON-string-fields-
+    # inside-fence (not fence-bracketed-raw, which the spike's Rust impl
+    # assumed). Faithful Rust replication is multi-day work — out of spike
+    # scope. Crate dir + Kotlin adapter retained as a "failed prototype"
+    # record; not compiled into the AAR.
 ]
 
 [workspace.package]

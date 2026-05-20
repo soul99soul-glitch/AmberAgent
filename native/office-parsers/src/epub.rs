@@ -379,27 +379,32 @@ fn handle_close_tag(tag: &str, in_body: bool, result: &mut String) {
 
 /// Collapse runs of 3+ '\n' down to '\n\n'. Mirrors JVM
 /// `result.replace(Regex("\n{3,}"), "\n\n")`.
+///
+/// **UTF-8 safety**: Previous impl used `out.push(bytes[i] as char)` which
+/// fractured every multi-byte sequence (CJK / Latin-extended / emoji) into
+/// 2-3 garbage U+00xx code points — Round 2 review P1 regression. This rewrite
+/// walks by `char` so every code point reaches the output intact.
 fn collapse_newlines(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\n' {
-            let mut count = 0;
-            while i < bytes.len() && bytes[i] == b'\n' {
-                count += 1;
-                i += 1;
-            }
-            if count >= 3 {
-                out.push_str("\n\n");
-            } else {
-                for _ in 0..count {
+    let mut newline_run = 0usize;
+    for ch in s.chars() {
+        if ch == '\n' {
+            newline_run += 1;
+        } else {
+            if newline_run > 0 {
+                let to_emit = if newline_run >= 3 { 2 } else { newline_run };
+                for _ in 0..to_emit {
                     out.push('\n');
                 }
+                newline_run = 0;
             }
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
+            out.push(ch);
+        }
+    }
+    if newline_run > 0 {
+        let to_emit = if newline_run >= 3 { 2 } else { newline_run };
+        for _ in 0..to_emit {
+            out.push('\n');
         }
     }
     out
@@ -542,5 +547,59 @@ mod tests {
         let out = try_parse_xhtml(xml).unwrap();
         assert!(out.contains("**bold**"));
         assert!(out.contains("*italic*"));
+    }
+
+    /// Regression test for Round 2 P1: `collapse_newlines` was casting raw UTF-8
+    /// bytes to char, mangling multi-byte sequences into U+00xx replacements.
+    /// This test asserts a real CJK chapter round-trips with code-points intact.
+    #[test]
+    fn collapse_newlines_preserves_cjk() {
+        // 你好 = E4 BD A0 E5 A5 BD. If the old impl runs, each continuation byte
+        // becomes a U+00xx char and the assertion below fails.
+        let input = "你好\n\n\n世界";
+        let out = collapse_newlines(input);
+        assert_eq!(out, "你好\n\n世界");
+    }
+
+    #[test]
+    fn parse_xhtml_preserves_cjk() {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <html><body><p>你好世界</p></body></html>".as_bytes();
+        let out = try_parse_xhtml(xml).unwrap();
+        assert!(out.contains("你好世界"), "CJK roundtrip failed: {:?}", out);
+    }
+
+    #[test]
+    fn parse_xhtml_img_alt() {
+        let xml = br#"<?xml version="1.0"?><html><body><p>before <img src="x.png" alt="diagram"/> after</p></body></html>"#;
+        let out = try_parse_xhtml(xml).unwrap();
+        assert!(out.contains("[image: diagram]"));
+    }
+
+    #[test]
+    fn parse_xhtml_hr_blockquote_br() {
+        let xml = br#"<?xml version="1.0"?><html><body><p>top<br/>bottom</p><hr/><blockquote>quote</blockquote></body></html>"#;
+        let out = try_parse_xhtml(xml).unwrap();
+        assert!(out.contains("top\nbottom"));
+        assert!(out.contains("---"));
+        assert!(out.contains("> quote"));
+    }
+
+    #[test]
+    fn parse_xhtml_nested_lists() {
+        let xml = br#"<?xml version="1.0"?><html><body>
+            <ul><li>outer<ol><li>inner1</li><li>inner2</li></ol></li></ul>
+        </body></html>"#;
+        let out = try_parse_xhtml(xml).unwrap();
+        assert!(out.contains("- outer"));
+        assert!(out.contains("1. inner1"));
+        assert!(out.contains("2. inner2"));
+    }
+
+    #[test]
+    fn parse_xhtml_empty_body_returns_blank() {
+        let xml = br#"<?xml version="1.0"?><html><body></body></html>"#;
+        let out = try_parse_xhtml(xml).unwrap();
+        assert!(out.is_empty() || out.trim().is_empty());
     }
 }

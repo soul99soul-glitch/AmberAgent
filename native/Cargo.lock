@@ -163,18 +163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generative-widget-parser"
-version = "0.1.0"
-dependencies = [
- "android_logger",
- "jni",
- "log",
- "regex",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -279,6 +267,7 @@ dependencies = [
  "jni",
  "log",
  "pulldown-cmark",
+ "regex",
  "similar",
  "thiserror 2.0.18",
 ]

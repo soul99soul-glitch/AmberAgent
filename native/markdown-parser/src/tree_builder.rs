@@ -149,17 +149,7 @@ pub fn build_tree(text: &str) -> Tree {
 }
 
 fn make_options() -> Options {
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_TABLES);
-    opts.insert(Options::ENABLE_FOOTNOTES);
-    opts.insert(Options::ENABLE_STRIKETHROUGH);
-    opts.insert(Options::ENABLE_TASKLISTS);
-    // ENABLE_SMART_PUNCTUATION intentionally OFF — JetBrains markdown does not
-    // do smart-quote conversion, so leaving it on would diff `'hello'` vs
-    // `'hello'` on every comparison run (review P1 fix).
-    opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
-    opts.insert(Options::ENABLE_MATH);
-    opts
+    crate::markdown_options()
 }
 
 fn make_block_or_inline_node(tag: &Tag<'_>, start: usize, end: usize) -> Node {
