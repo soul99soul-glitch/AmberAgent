@@ -143,9 +143,15 @@ fun DeepReadScreen(
         fullRunInFlight = true
         runError = null
         scope.launch {
-            val result = agent.run(topicId = topicId, topicTitle = title, force = force, seedUrl = sourceUrl)
-            runError = result.exceptionOrNull()?.message
-            fullRunInFlight = false
+            try {
+                val result = agent.run(topicId = topicId, topicTitle = title, force = force, seedUrl = sourceUrl)
+                runError = result.exceptionOrNull()?.message
+            } finally {
+                // Always release the in-flight guard, otherwise a cancel
+                // (e.g. composable disposed mid-run) or any other thrown
+                // exception leaves the button permanently locked.
+                fullRunInFlight = false
+            }
         }
     }
 
