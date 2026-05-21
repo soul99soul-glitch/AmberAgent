@@ -78,6 +78,7 @@ import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
 import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
+import me.rerere.rikkahub.data.ai.tools.parseDeepReadSlashCommand
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -244,29 +245,23 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val chatAssistant = remember(setting.assistants, conversation.assistantId) {
         setting.getAssistantById(conversation.assistantId)
     }
-    val lazyItemMessageIndexes = remember(
-        conversation.messageNodes,
-        timelineLoadState.isFullyLoaded,
-        pendingUserMessages.size,
-        loadingJob != null,
-        chatAssistant,
-        setting.displaySetting.showAssistantBubble,
-    ) {
-        buildLazyItemMessageIndexMap(
-            messageNodes = conversation.messageNodes,
-            assistant = chatAssistant,
-            showAssistantBubble = setting.displaySetting.showAssistantBubble,
-            loading = loadingJob != null,
-            hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
-            pendingMessageCount = pendingUserMessages.size,
-        )
-    }
-    val initialChatListIndex = remember(conversation.id, nodeId, conversation.messageNodes, lazyItemMessageIndexes) {
+    val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
+    val activeGeneration = loadingJob != null || pendingUserMessages.isNotEmpty() || compactInTimelineActive
+    val chatTimelinePlan = rememberChatTimelinePlan(
+        conversation = conversation,
+        assistant = chatAssistant,
+        showAssistantBubble = setting.displaySetting.showAssistantBubble,
+        loading = loadingJob != null,
+        activeGeneration = activeGeneration,
+        hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
+        pendingMessageCount = pendingUserMessages.size,
+    )
+    val initialChatListIndex = remember(conversation.id, nodeId, conversation.messageNodes, chatTimelinePlan) {
         if (nodeId != null) {
             val messageIndex = conversation.messageNodes.indexOfFirst { it.id == nodeId }
-            lazyItemMessageIndexes.firstLazyIndexForMessage(messageIndex).takeIf { messageIndex >= 0 } ?: 0
+            chatTimelinePlan.firstLazyIndexForMessage(messageIndex).takeIf { messageIndex >= 0 } ?: 0
         } else {
-            lazyItemMessageIndexes.lastIndex.coerceAtLeast(0)
+            chatTimelinePlan.lastIndex.coerceAtLeast(0)
         }
     }
     val chatListState = key(conversation.id) {
@@ -289,7 +284,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         if (nodeId != null && conversation.messageNodes.isNotEmpty() && !vm.chatListInitialized) {
             val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
             if (index >= 0) {
-                val listIndex = lazyItemMessageIndexes.firstLazyIndexForMessage(index)
+                val listIndex = chatTimelinePlan.firstLazyIndexForMessage(index)
                 if (listIndex != null) {
                     chatListState.scrollToItem(listIndex)
                     vm.chatListInitialized = true
@@ -333,7 +328,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     navController = navController,
                     vm = vm,
                     chatListState = chatListState,
-                    lazyItemMessageIndexes = lazyItemMessageIndexes,
+                    chatTimelinePlan = chatTimelinePlan,
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
                     bigScreen = true,
@@ -378,7 +373,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     navController = navController,
                     vm = vm,
                     chatListState = chatListState,
-                    lazyItemMessageIndexes = lazyItemMessageIndexes,
+                    chatTimelinePlan = chatTimelinePlan,
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
                     bigScreen = false,
@@ -441,7 +436,7 @@ private fun ChatPageContent(
     navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
-    lazyItemMessageIndexes: List<Int?>,
+    chatTimelinePlan: ChatTimelinePlan,
     enableWebSearch: Boolean,
     currentChatModel: Model?,
     errors: List<ChatError>,
@@ -490,6 +485,8 @@ private fun ChatPageContent(
     val canCancelSandbox = sandboxActivity?.canCancel == true && loadingJob != null
     val canPreviewPrevious = currentSandboxIndex > 0
     val canPreviewNext = currentSandboxIndex >= 0 && currentSandboxIndex < latestSandboxIndex
+    fun canSendWithoutChatModel(parts: List<UIMessagePart>): Boolean =
+        parseDeepReadSlashCommand(parts) != null
 
     LaunchedEffect(sandboxTimeline.size, sandboxTimeline.lastOrNull()?.toolCallId) {
         if (sandboxActivity == null) {
@@ -572,7 +569,9 @@ private fun ChatPageContent(
                     },
                     suggestionFillPulseKey = suggestionFillPulseKey,
                     onSendClick = { queueMode ->
-                        if (currentChatModel == null) {
+                        val parts = inputState.getContents()
+                        val canRouteWithoutChatModel = !inputState.isEditing() && canSendWithoutChatModel(parts)
+                        if (currentChatModel == null && !canRouteWithoutChatModel) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                             return@ChatInput
                         }
@@ -582,7 +581,6 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            val parts = inputState.getContents()
                             vm.handleMessageSend(
                                 content = parts,
                                 queueMode = queueMode,
@@ -591,13 +589,18 @@ private fun ChatPageContent(
                         inputState.clearInput()
                     },
                     onLongSendClick = { queueMode ->
+                        val parts = inputState.getContents()
+                        val canRouteWithoutChatModel = !inputState.isEditing() && canSendWithoutChatModel(parts)
+                        if (currentChatModel == null && !canRouteWithoutChatModel) {
+                            toaster.show("请先选择模型", type = ToastType.Error)
+                            return@ChatInput
+                        }
                         if (inputState.isEditing()) {
                             vm.handleMessageEdit(
-                                parts = inputState.getContents(),
+                                parts = parts,
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            val parts = inputState.getContents()
                             vm.handleMessageSend(
                                 content = parts,
                                 answer = loadingJob != null && queueMode == PendingUserMessageMode.STEER,
@@ -681,17 +684,7 @@ private fun ChatPageContent(
                     }
                 },
                 onUpdateMessage = { newNode ->
-                    vm.updateConversation(
-                        conversation.copy(
-                            messageNodes = conversation.messageNodes.map { node ->
-                                if (node.id == newNode.id) {
-                                    newNode
-                                } else {
-                                    node
-                                }
-                            }
-                        ))
-                    vm.saveConversationAsync()
+                    vm.selectMessageNode(newNode.id, newNode.selectIndex)
                 },
                 onClickSuggestion = { suggestion ->
                     val text = suggestion.trim()
@@ -703,12 +696,13 @@ private fun ChatPageContent(
                 onLongClickSuggestion = { suggestion ->
                     val text = suggestion.trim()
                     if (text.isNotEmpty()) {
-                        if (currentChatModel == null) {
+                        val parts = listOf(UIMessagePart.Text(text))
+                        if (currentChatModel == null && !canSendWithoutChatModel(parts)) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                         } else {
                             inputState.editingMessage = null
                             vm.handleMessageSend(
-                                content = listOf(UIMessagePart.Text(text)),
+                                content = parts,
                                 queueMode = PendingUserMessageMode.FOLLOWUP,
                             )
                             inputState.clearInput()
@@ -724,7 +718,7 @@ private fun ChatPageContent(
                 onJumpToMessage = { index ->
                     previewMode = false
                     scope.launch {
-                        val listIndex = lazyItemMessageIndexes.firstLazyIndexForMessage(index)
+                        val listIndex = chatTimelinePlan.firstLazyIndexForMessage(index)
                             ?: index
                         chatListState.animateScrollToItem(listIndex)
                     }
@@ -750,12 +744,13 @@ private fun ChatPageContent(
                 onGenerativeWidgetAction = { instruction ->
                     val text = instruction.trim()
                     if (text.isNotEmpty()) {
-                        if (currentChatModel == null) {
+                        val parts = listOf(UIMessagePart.Text(text))
+                        if (currentChatModel == null && !canSendWithoutChatModel(parts)) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                         } else {
                             inputState.editingMessage = null
                             vm.handleMessageSend(
-                                content = listOf(UIMessagePart.Text(text)),
+                                content = parts,
                                 queueMode = PendingUserMessageMode.FOLLOWUP,
                             )
                         }
@@ -763,14 +758,15 @@ private fun ChatPageContent(
                 },
                 onMiniAppModify = { instruction ->
                     val text = instruction.trim()
+                    val parts = listOf(UIMessagePart.Text(text))
                     if (text.isEmpty()) {
                         false
-                    } else if (currentChatModel == null) {
+                    } else if (currentChatModel == null && !canSendWithoutChatModel(parts)) {
                         toaster.show("请先选择模型", type = ToastType.Error)
                         false
                     } else {
                         vm.handleMessageSend(
-                            content = listOf(UIMessagePart.Text(text)),
+                            content = parts,
                             queueMode = PendingUserMessageMode.FOLLOWUP,
                         )
                     }
@@ -778,6 +774,10 @@ private fun ChatPageContent(
                 onLoadOlderTimeline = {
                     vm.loadOlderTimelinePage()
                 },
+                onEnsureTimelineLoaded = {
+                    vm.ensureTimelineLoaded()
+                },
+                chatTimelinePlan = chatTimelinePlan,
             )
         }
 

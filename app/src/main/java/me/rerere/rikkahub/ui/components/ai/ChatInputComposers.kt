@@ -603,6 +603,15 @@ private fun buildSlashCommandItems(
             action = SlashCommandAction.CompactContext,
         )
     )
+    add(
+        SlashCommandItem(
+            id = "core.deepread",
+            title = "deepread",
+            description = "全屏打开深度阅读面板",
+            action = SlashCommandAction.InsertText("/deepread "),
+            accent = true,
+        )
+    )
     if (subAgentEnabled) {
         add(
             SlashCommandItem(

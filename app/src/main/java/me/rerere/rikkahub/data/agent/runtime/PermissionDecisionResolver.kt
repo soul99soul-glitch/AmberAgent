@@ -172,11 +172,11 @@ class PermissionDecisionResolver {
         if (!policy.needsApproval) {
             return decision(PermissionDecisionAction.ALLOW, "Tool is read-only for this invocation.", "policy", policy)
         }
-        if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME) {
-            return decision(PermissionDecisionAction.ALLOW, "Tool was approved earlier in this run.", "run_trust", policy)
-        }
         if (policy.risk == ToolRisk.High && !autoApproveHighRiskTools) {
             return decision(PermissionDecisionAction.ASK, "High-risk invocation requires explicit approval.", "risk", policy)
+        }
+        if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME && policy.risk != ToolRisk.High) {
+            return decision(PermissionDecisionAction.ALLOW, "Tool was approved earlier in this run.", "run_trust", policy)
         }
         if (autoApproveTools && autoApproveHighRiskTools && policy.risk == ToolRisk.High) {
             return decision(PermissionDecisionAction.ALLOW, "High-risk auto-approval allowed this invocation.", "settings_high_risk", policy)

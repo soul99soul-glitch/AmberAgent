@@ -41,6 +41,7 @@ class SubAgentManager(
 ) {
     private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
     private val runs = ConcurrentHashMap<String, RuntimeRun>()
+    private val admissionLock = Any()
 
     /**
      * Per-run streaming text flows. The runner writes the assistant's evolving response here as
@@ -60,11 +61,6 @@ class SubAgentManager(
             return@withContext errorPayload("subagent_disabled", "Subagent experimental mode is disabled.")
         }
 
-        val running = runs.values.count { it.snapshot.status.running }
-        if (running >= subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)) {
-            return@withContext errorPayload("too_many_subagents", "Subagent concurrency limit reached.")
-        }
-
         val parentToolNames = parentTools.map { it.name }.toSet()
         val task = runCatching { SubAgentValidator.parseTask(input) }
             .getOrElse { return@withContext errorPayload("invalid_task", it.message ?: it.toString()) }
@@ -72,16 +68,6 @@ class SubAgentManager(
             SubAgentValidator.resolveDefinition(input, subAgentSetting, parentToolNames).definition
         }.getOrElse {
             return@withContext errorPayload("invalid_subagent", it.message ?: it.toString())
-        }
-        if (definition.dynamic) {
-            val runningDynamic = runs.values.count { it.snapshot.status.running && it.snapshot.definition.dynamic }
-            val dynamicRunLimit = subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)
-            if (runningDynamic >= dynamicRunLimit) {
-                return@withContext errorPayload(
-                    "too_many_dynamic_subagents",
-                    "Dynamic subagent per-turn limit reached."
-                )
-            }
         }
         val effectiveDefinition = if (definition.dynamic) {
             runCatching {
@@ -143,7 +129,28 @@ class SubAgentManager(
             startedAtMs = now,
         )
         val runtimeRun = RuntimeRun(run)
-        runs[runId] = runtimeRun
+        val admissionError = synchronized(admissionLock) {
+            val runLimit = subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)
+            val running = runs.values.count { it.snapshot.status.running }
+            when {
+                running >= runLimit -> {
+                    "too_many_subagents" to "Subagent concurrency limit reached."
+                }
+
+                effectiveDefinition.dynamic &&
+                    runs.values.count { it.snapshot.status.running && it.snapshot.definition.dynamic } >= runLimit -> {
+                    "too_many_dynamic_subagents" to "Dynamic subagent per-turn limit reached."
+                }
+
+                else -> {
+                    runs[runId] = runtimeRun
+                    null
+                }
+            }
+        }
+        if (admissionError != null) {
+            return@withContext errorPayload(admissionError.first, admissionError.second)
+        }
         agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
             cancel(runId)
             true
@@ -157,20 +164,19 @@ class SubAgentManager(
         capLiveTextFlows()
 
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
-            val result = runCatching {
+            val result = try {
                 withTimeout(definition.timeoutMs) {
                     runner.run(settings, effectiveDefinition, effectiveTask, scopedSubAgentTools(allowedTools), liveText)
                 }
-            }.fold(
-                onSuccess = { it },
-                onFailure = { error ->
-                    val timedOut = error is kotlinx.coroutines.TimeoutCancellationException
-                    SubAgentResult(
-                        status = if (timedOut) SubAgentRunStatus.TIMED_OUT else SubAgentRunStatus.FAILED,
-                        error = error.message ?: error::class.java.simpleName,
-                    )
-                }
-            )
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                return@launch
+            } catch (error: Throwable) {
+                val timedOut = error is kotlinx.coroutines.TimeoutCancellationException
+                SubAgentResult(
+                    status = if (timedOut) SubAgentRunStatus.TIMED_OUT else SubAgentRunStatus.FAILED,
+                    error = error.message ?: error::class.java.simpleName,
+                )
+            }
             finish(runId, result, displayText = liveText.value)
         }
 
@@ -288,16 +294,17 @@ class SubAgentManager(
 
     private fun finish(runId: String, result: SubAgentResult, displayText: String = "") {
         val runtimeRun = runs[runId] ?: return
-        val current = runtimeRun.snapshot
-        if (!current.status.running) return
-        val status = result.status
-        val next = current.copy(
-            status = status,
-            result = result,
-            displayText = displayText.ifBlank { current.displayText },
-            updatedAtMs = Instant.now().toEpochMilli(),
-        )
-        runtimeRun.snapshot = next
+        val next = synchronized(runtimeRun) {
+            val current = runtimeRun.snapshot
+            if (!current.status.running) return@synchronized null
+            current.copy(
+                status = result.status,
+                result = result,
+                displayText = displayText.ifBlank { current.displayText },
+                updatedAtMs = Instant.now().toEpochMilli(),
+            ).also { runtimeRun.snapshot = it }
+        } ?: return
+        val status = next.status
         appScope.launch(Dispatchers.IO) {
             agentTaskStore.update(
                 taskId = runId,

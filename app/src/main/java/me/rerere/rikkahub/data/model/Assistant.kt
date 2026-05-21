@@ -92,13 +92,8 @@ fun String.replaceRegexes(
     if (assistant == null) return this
     if (assistant.regexes.isEmpty()) return this
 
-    // Filter applicable rules once so the native path can take parallel
-    // pattern + replacement arrays in one JNI call. Skip the rest of the
-    // pipeline (incl. building arrays) if nothing applies.
-    val applicable = assistant.regexes.filter { regex ->
-        regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)
-    }
-    if (applicable.isEmpty()) return this
+    val program = AssistantRegexProgramCache.get(assistant, scope, visual)
+    if (program.isEmpty) return this
 
     // Phase 2 Step 3: route through RegexNativeSwitch when enabled AND no
     // rule uses JVM-only syntax. Preflight is required because the Rust
@@ -107,19 +102,139 @@ fun String.replaceRegexes(
     // output without throwing — fallback can't detect it. When the preflight
     // flags any JVM-only rule we route the whole batch to JVM to preserve
     // per-rule semantic parity. See `RegexNativeSwitch` class KDoc.
-    if (RegexNativeSwitch.isEnabled() && !containsJvmOnlyRegexSyntax(applicable)) {
-        val patterns = Array(applicable.size) { applicable[it].findRegex }
-        val replacements = Array(applicable.size) { applicable[it].replaceString }
+    if (RegexNativeSwitch.isEnabled() && !program.containsJvmOnlySyntax) {
         RegexNativeSwitch.applyOrNull(
             input = this,
-            findPatterns = patterns,
-            replacements = replacements,
-            jvmFallback = { applyRegexesJvm(this, applicable) },
+            findPatterns = program.nativePatterns,
+            replacements = program.nativeReplacements,
+            jvmFallback = { program.applyJvm(this) },
         )?.let { return it }
     }
 
-    return applyRegexesJvm(this, applicable)
+    return program.applyJvm(this)
 }
+
+private object AssistantRegexProgramCache {
+    private const val MAX_ENTRIES = 128
+    private val lock = Any()
+    private val entries = object : LinkedHashMap<AssistantRegexProgramKey, AssistantRegexProgram>(
+        MAX_ENTRIES,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<AssistantRegexProgramKey, AssistantRegexProgram>,
+        ): Boolean = size > MAX_ENTRIES
+    }
+
+    fun get(
+        assistant: Assistant,
+        scope: AssistantAffectScope,
+        visual: Boolean,
+    ): AssistantRegexProgram {
+        val key = AssistantRegexProgramKey.of(assistant, scope, visual)
+        synchronized(lock) {
+            entries[key]?.let { return it }
+        }
+        val program = buildProgram(assistant, scope, visual)
+        synchronized(lock) {
+            entries[key]?.let { return it }
+            entries[key] = program
+        }
+        return program
+    }
+
+    private fun buildProgram(
+        assistant: Assistant,
+        scope: AssistantAffectScope,
+        visual: Boolean,
+    ): AssistantRegexProgram {
+        val applicable = assistant.regexes.filter { regex ->
+            regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)
+        }
+        if (applicable.isEmpty()) return AssistantRegexProgram.Empty
+        val compiledRules = applicable.map { rule ->
+            CompiledAssistantRegex(
+                regex = runCatching { Regex(rule.findRegex) }
+                    .onFailure { it.printStackTrace() }
+                    .getOrNull(),
+                replacement = rule.replaceString,
+            )
+        }
+        return AssistantRegexProgram(
+            compiledRules = compiledRules,
+            nativePatterns = Array(applicable.size) { applicable[it].findRegex },
+            nativeReplacements = Array(applicable.size) { applicable[it].replaceString },
+            containsJvmOnlySyntax = containsJvmOnlyRegexSyntax(applicable) ||
+                compiledRules.any { it.regex == null },
+        )
+    }
+}
+
+private data class AssistantRegexProgramKey(
+    val assistantId: Uuid,
+    val scope: AssistantAffectScope,
+    val visual: Boolean,
+    val signature: Int,
+) {
+    companion object {
+        fun of(
+            assistant: Assistant,
+            scope: AssistantAffectScope,
+            visual: Boolean,
+        ): AssistantRegexProgramKey {
+            var signature = 1
+            assistant.regexes.forEach { regex ->
+                signature = 31 * signature + regex.id.hashCode()
+                signature = 31 * signature + regex.enabled.hashCode()
+                signature = 31 * signature + regex.findRegex.hashCode()
+                signature = 31 * signature + regex.replaceString.hashCode()
+                signature = 31 * signature + regex.affectingScope.hashCode()
+                signature = 31 * signature + regex.visualOnly.hashCode()
+            }
+            return AssistantRegexProgramKey(
+                assistantId = assistant.id,
+                scope = scope,
+                visual = visual,
+                signature = signature,
+            )
+        }
+    }
+}
+
+private data class AssistantRegexProgram(
+    val compiledRules: List<CompiledAssistantRegex>,
+    val nativePatterns: Array<String>,
+    val nativeReplacements: Array<String>,
+    val containsJvmOnlySyntax: Boolean,
+) {
+    val isEmpty: Boolean get() = compiledRules.isEmpty()
+
+    fun applyJvm(input: String): String =
+        compiledRules.fold(input) { acc, rule ->
+            val regex = rule.regex ?: return@fold acc
+            try {
+                regex.replace(acc, rule.replacement)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                acc
+            }
+        }
+
+    companion object {
+        val Empty = AssistantRegexProgram(
+            compiledRules = emptyList(),
+            nativePatterns = emptyArray(),
+            nativeReplacements = emptyArray(),
+            containsJvmOnlySyntax = false,
+        )
+    }
+}
+
+private data class CompiledAssistantRegex(
+    val regex: Regex?,
+    val replacement: String,
+)
 
 /**
  * Detect any rule that uses Java `Pattern` syntax the Rust `regex` crate
@@ -158,19 +273,6 @@ private val JVM_ONLY_REPLACEMENT_SYNTAX = Regex(
  *  fold body that was inline before Phase 2 Step 3 — invalid patterns are
  *  caught per-rule and skipped (acc passes through unchanged), so a single
  *  malformed rule doesn't break the whole chain. */
-private fun applyRegexesJvm(input: String, rules: List<AssistantRegex>): String =
-    rules.fold(input) { acc, regex ->
-        try {
-            acc.replace(
-                regex = Regex(regex.findRegex),
-                replacement = regex.replaceString,
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            acc
-        }
-    }
-
 /**
  * 注入位置
  */

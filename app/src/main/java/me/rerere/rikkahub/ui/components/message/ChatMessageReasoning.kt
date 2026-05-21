@@ -52,7 +52,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -215,10 +214,10 @@ private fun ReasoningContent(
                 // removed across the app 2026-05-15, so there's no fade to consider
                 // forwarding here anyway.)
                 MarkdownBlock(
-                    content = displayText.replaceRegexes(
+                    content = MessageRenderCache.visualRegexText(
+                        text = displayText,
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
-                        visual = true,
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier

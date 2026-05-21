@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.richtext
 
 import android.os.Looper
 import android.os.Trace
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -250,6 +251,8 @@ internal data class MarkdownTopLevelBlockSnapshot(
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
 private const val MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 128
 private const val MARKDOWN_PARSE_CACHE_MAX_CHARS = 1_200_000
+private const val MARKDOWN_PERF_TAG = "AmberChatPerf"
+private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
 
 private data class MarkdownParseCacheKey(
     val content: String,
@@ -261,14 +264,15 @@ private data class MarkdownParseCacheKey(
 private object MarkdownParseCache {
     private val lock = Any()
     private var totalChars = 0
+    private var hits = 0
+    private var misses = 0
     private val entries = object : LinkedHashMap<MarkdownParseCacheKey, MarkdownParseResult>(
         MARKDOWN_PARSE_CACHE_MAX_ENTRIES,
         0.75f,
         true,
     ) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MarkdownParseCacheKey, MarkdownParseResult>): Boolean {
-            val shouldRemove = size > MARKDOWN_PARSE_CACHE_MAX_ENTRIES ||
-                totalChars > MARKDOWN_PARSE_CACHE_MAX_CHARS
+            val shouldRemove = size > MARKDOWN_PARSE_CACHE_MAX_ENTRIES
             if (shouldRemove) {
                 totalChars -= eldest.key.content.length
             }
@@ -277,7 +281,10 @@ private object MarkdownParseCache {
     }
 
     fun get(content: String): MarkdownParseResult? = synchronized(lock) {
-        entries[key(content, preprocessed = false)]
+        entries[key(content, preprocessed = false)]?.also {
+            hits++
+            logCacheLocked("hit", content.length, elapsedMs = null)
+        }
     }
 
     fun getOrParse(content: String): MarkdownParseResult {
@@ -306,18 +313,82 @@ private object MarkdownParseCache {
         parser: (String) -> MarkdownParseResult,
     ): MarkdownParseResult {
         synchronized(lock) {
-            entries[key(content, preprocessed)]?.let { return it }
+            entries[key(content, preprocessed)]?.let {
+                hits++
+                logCacheLocked("hit", content.length, elapsedMs = null)
+                return it
+            }
+            misses++
         }
+        val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
         val parsed = traceMarkdown(section) {
             parser(content)
         }
+        val elapsedMs = if (BuildConfig.DEBUG) {
+            (System.nanoTime() - startedAt) / 1_000_000.0
+        } else {
+            null
+        }
         synchronized(lock) {
             val cacheKey = key(content, preprocessed)
-            entries[cacheKey]?.let { return it }
+            entries[cacheKey]?.let {
+                hits++
+                logCacheLocked("hit-after-parse", content.length, elapsedMs)
+                return it
+            }
+            if (content.length > MARKDOWN_PARSE_CACHE_MAX_CHARS) {
+                logCacheLocked("oversize-skip", content.length, elapsedMs)
+                return parsed
+            }
             entries[cacheKey] = parsed
             totalChars += content.length
+            trimToBudgetLocked()
+            logCacheLocked("miss", content.length, elapsedMs)
         }
         return parsed
+    }
+
+    private fun logCacheLocked(
+        event: String,
+        contentLength: Int,
+        elapsedMs: Double?,
+    ) {
+        if (!BuildConfig.DEBUG || !runCatching { Log.isLoggable(MARKDOWN_PERF_TAG, Log.DEBUG) }.getOrDefault(false)) return
+        if (event == "hit" && contentLength < MARKDOWN_PARSE_HIT_LOG_MIN_CHARS) return
+        Log.d(
+            MARKDOWN_PERF_TAG,
+            buildString {
+                append("markdownParse event=")
+                append(event)
+                append(" chars=")
+                append(contentLength)
+                append(" entries=")
+                append(entries.size)
+                append(" totalChars=")
+                append(totalChars)
+                append(" hits=")
+                append(hits)
+                append(" misses=")
+                append(misses)
+                elapsedMs?.let {
+                    append(" elapsedMs=")
+                    append(String.format(java.util.Locale.US, "%.2f", it))
+                }
+            }
+        )
+    }
+
+    private fun trimToBudgetLocked() {
+        while (
+            entries.size > MARKDOWN_PARSE_CACHE_MAX_ENTRIES ||
+            totalChars > MARKDOWN_PARSE_CACHE_MAX_CHARS
+        ) {
+            val iterator = entries.entries.iterator()
+            if (!iterator.hasNext()) break
+            val eldest = iterator.next()
+            totalChars -= eldest.key.content.length
+            iterator.remove()
+        }
     }
 
     private fun key(content: String, preprocessed: Boolean) = MarkdownParseCacheKey(
@@ -329,14 +400,15 @@ private object MarkdownParseCache {
 }
 
 private inline fun <T> traceMarkdown(section: String, block: () -> T): T {
-    if (BuildConfig.DEBUG) {
+    val tracing = BuildConfig.DEBUG && runCatching {
         Trace.beginSection(section)
-    }
+        true
+    }.getOrDefault(false)
     return try {
         block()
     } finally {
-        if (BuildConfig.DEBUG) {
-            Trace.endSection()
+        if (tracing) {
+            runCatching { Trace.endSection() }
         }
     }
 }

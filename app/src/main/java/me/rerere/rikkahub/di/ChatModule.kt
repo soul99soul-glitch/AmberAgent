@@ -63,6 +63,7 @@ val chatModule = module {
         SendMessageOrchestrator(
             chatService = get(),
             analytics = get(),
+            eventBus = get(),
         )
     }
 

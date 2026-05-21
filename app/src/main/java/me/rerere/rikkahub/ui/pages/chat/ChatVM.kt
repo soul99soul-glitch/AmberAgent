@@ -310,9 +310,8 @@ class ChatVM(
         }
     }
 
-    suspend fun ensureTimelineLoaded() {
+    suspend fun ensureTimelineLoaded(): Conversation =
         chatService.ensureConversationTimelineLoaded(_conversationId)
-    }
 
     suspend fun loadOlderTimelinePage() {
         chatService.loadOlderTimelinePage(_conversationId)
@@ -387,6 +386,12 @@ class ChatVM(
     fun updateConversation(newConversation: Conversation) {
         chatService.updateConversationState(_conversationId) {
             newConversation
+        }
+    }
+
+    fun selectMessageNode(nodeId: Uuid, selectIndex: Int) {
+        viewModelScope.launch {
+            chatService.selectMessageNode(_conversationId, nodeId, selectIndex)
         }
     }
 

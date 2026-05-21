@@ -88,7 +88,6 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.modifier.shimmer
-import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import org.koin.compose.koinInject
 
@@ -509,15 +508,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val scope = rememberCoroutineScope()
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
-    val arguments = remember(tool.input) { tool.inputAsJson() }
+    val arguments = remember(tool.input) { MessageRenderCache.toolInputJson(tool.input) }
     val memoryAction = arguments.getStringContent("action")
     val content = remember(tool.isExecuted, tool.output) {
         if (tool.isExecuted) {
-            runCatching {
-                JsonInstant.parseToJsonElement(
-                    tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-                )
-            }.getOrElse { JsonObject(emptyMap()) }
+            MessageRenderCache.toolOutputJson(tool.output)
         } else {
             null
         }

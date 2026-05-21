@@ -70,6 +70,8 @@ class LocalTools(
 
     val askUserTool by lazy { createAskUserTool() }
 
+    val deepReadOpenTool by lazy { createDeepReadOpenTool(eventBus) }
+
     /**
      * Registry-introspection tools — the pair (`tools_list`, `tool_policy_explain`)
      * that lets the model enumerate or probe the runtime tool catalog. Built per
@@ -172,6 +174,7 @@ class LocalTools(
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
         tools.add(agentPromptConfigTool)
+        tools.add(deepReadOpenTool)
 
         // generate_image auto-appears whenever the current assistant — or the
         // global setting — resolves to a real image-gen model. The tool needs

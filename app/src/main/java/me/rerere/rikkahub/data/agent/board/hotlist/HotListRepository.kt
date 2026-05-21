@@ -127,6 +127,29 @@ class HotListRepository(
                 ?.let { dao.getFreshDeepReadByTitle(it, now)?.toFreshDeepRead(json, now) }
     }
 
+    suspend fun materializeFreshDeepRead(
+        topicId: String,
+        title: String,
+        now: Long = System.currentTimeMillis(),
+    ): DeepReadOutput? {
+        dao.getDeepRead(topicId)?.let { direct ->
+            direct.toFreshDeepRead(json, now)?.let { return it }
+        }
+        if (title.isBlank()) return null
+        val fallback = dao.getFreshDeepReadByTitle(title, now) ?: return null
+        val output = fallback.toFreshDeepRead(json, now) ?: return null
+        if (fallback.topicId != topicId) {
+            dao.upsertDeepRead(
+                fallback.copy(
+                    topicId = topicId,
+                    title = title,
+                    updatedAt = now,
+                )
+            )
+        }
+        return output
+    }
+
     suspend fun saveDeepRead(
         topicId: String,
         title: String,

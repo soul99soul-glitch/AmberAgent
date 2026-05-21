@@ -45,6 +45,7 @@ import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
+import me.rerere.rikkahub.data.ai.transformers.visualTransformsStreamingTail
 import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
@@ -65,11 +66,14 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
+import kotlin.uuid.Uuid
 import kotlin.time.Clock
 
 private const val TAG = "GenerationHandler"
+private const val PERF_TAG = "AmberChatPerf"
 // 2026-05-15 — flush cadence rationale.
 //
 // Was 200ms historically. User feedback after that: "一坨一坨蹦出来", not
@@ -129,8 +133,30 @@ internal fun shouldPauseForToolApproval(
 @Serializable
 sealed interface GenerationChunk {
     data class Messages(
-        val messages: List<UIMessage>
+        val messages: List<UIMessage>,
+        val update: GenerationUpdate = GenerationUpdate.full(messages),
     ) : GenerationChunk
+}
+
+data class GenerationUpdate(
+    val messages: List<UIMessage>,
+    val streamingTailMessageId: Uuid?,
+) {
+    val isStreamingTail: Boolean get() = streamingTailMessageId != null
+
+    fun withMessages(messages: List<UIMessage>): GenerationUpdate =
+        copy(messages = messages)
+
+    companion object {
+        fun full(messages: List<UIMessage>): GenerationUpdate =
+            GenerationUpdate(messages = messages, streamingTailMessageId = null)
+
+        fun streamingTail(messages: List<UIMessage>): GenerationUpdate =
+            GenerationUpdate(
+                messages = messages,
+                streamingTailMessageId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.id,
+            )
+    }
 }
 
 class GenerationHandler(
@@ -204,27 +230,50 @@ class GenerationHandler(
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
+                var streamingVisualBaselineReady = false
                 generateInternal(
                     assistant = assistant,
                     settings = settings,
                     messages = messages,
-                    onUpdateMessages = {
-                        messages = it.transforms(
+                    onUpdateMessages = { update ->
+                        messages = update.messages.transforms(
                             transformers = outputTransformers,
                             context = context,
                             model = model,
                             assistant = assistant,
                             settings = settings
                         )
+                        val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+                        val visualMessages = if (update.isStreamingTail && streamingVisualBaselineReady) {
+                            messages.visualTransformsStreamingTail(
+                                transformers = outputTransformers,
+                                context = context,
+                                model = model,
+                                assistant = assistant,
+                                settings = settings
+                            )
+                        } else {
+                            streamingVisualBaselineReady = true
+                            messages.visualTransforms(
+                                transformers = outputTransformers,
+                                context = context,
+                                model = model,
+                                assistant = assistant,
+                                settings = settings
+                            )
+                        }
+                        if (BuildConfig.DEBUG) {
+                            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+                            Log.d(
+                                PERF_TAG,
+                                "streamFlush kind=${if (update.isStreamingTail) "tail" else "full"} " +
+                                    "messages=${visualMessages.size} elapsedMs=${String.format(Locale.US, "%.2f", elapsedMs)}",
+                            )
+                        }
                         emit(
                             GenerationChunk.Messages(
-                                messages.visualTransforms(
-                                    transformers = outputTransformers,
-                                    context = context,
-                                    model = model,
-                                    assistant = assistant,
-                                    settings = settings
-                                )
+                                messages = visualMessages,
+                                update = update.withMessages(visualMessages),
                             )
                         )
                     },
@@ -378,7 +427,7 @@ class GenerationHandler(
         assistant: Assistant,
         settings: Settings,
         messages: List<UIMessage>,
-        onUpdateMessages: suspend (List<UIMessage>) -> Unit,
+        onUpdateMessages: suspend (GenerationUpdate) -> Unit,
         transformers: List<MessageTransformer>,
         model: Model,
         providerImpl: Provider<ProviderSetting>,
@@ -457,7 +506,7 @@ class GenerationHandler(
                 modelName = model.displayName,
                 onBeforeRetry = {
                     messages = baseMessages
-                    onUpdateMessages(messages)
+                    onUpdateMessages(GenerationUpdate.full(messages))
                 },
             ) {
                 aiLoggingManager.addLog(
@@ -501,7 +550,7 @@ class GenerationHandler(
                                 messages.lastOrNull()?.getTools().orEmpty(),
                                 tools.associateBy { it.name }
                             )
-                            onUpdateMessages(messages)
+                            onUpdateMessages(GenerationUpdate.streamingTail(messages))
                             lastFlushAt = now
                         }
                         if (
@@ -521,7 +570,7 @@ class GenerationHandler(
                         messages.lastOrNull()?.getTools().orEmpty(),
                         tools.associateBy { it.name }
                     )
-                    onUpdateMessages(messages)
+                    onUpdateMessages(GenerationUpdate.full(messages))
                     if (requireWidget && !messages.hasVisibleWidgetFence()) {
                         throw GenerativeUiMissingWidgetStreamException()
                     }
@@ -540,7 +589,7 @@ class GenerationHandler(
                         error is GenerativeUiMissingWidgetStreamException
                     ) {
                         messages = baseMessages
-                        onUpdateMessages(messages)
+                        onUpdateMessages(GenerationUpdate.full(messages))
                         processingStatus.value = "正在切换为可见输出模式生成可视化..."
                         streamWith(
                             providerMessages = internalMessages.withGenerativeUiVisibleFallbackPrompt(),
@@ -564,7 +613,7 @@ class GenerationHandler(
                                 baseMessages = baseMessages,
                                 model = model,
                             )
-                            onUpdateMessages(messages)
+                            onUpdateMessages(GenerationUpdate.full(messages))
                         }
                         return@runProviderCallWithRetry
                     }
@@ -586,7 +635,7 @@ class GenerationHandler(
                 modelName = model.displayName,
                 onBeforeRetry = {
                     messages = baseMessages
-                    onUpdateMessages(messages)
+                    onUpdateMessages(GenerationUpdate.full(messages))
                 },
             ) {
                 aiLoggingManager.addLog(
@@ -623,7 +672,7 @@ class GenerationHandler(
                         }
                     }
                 }
-                onUpdateMessages(messages)
+                onUpdateMessages(GenerationUpdate.full(messages))
             }
         }
     }

@@ -48,8 +48,22 @@ class ProviderModelCouncilTextRunner(
                 temperature = candidateTemperature,
             )
             // Streaming path: per-chunk MessageChunk.choices.first.delta is the delta; we
-            // accumulate and emit the running text.
+            // accumulate and emit the running text. Provider chunks can arrive faster than
+            // Compose can render; coalesce live updates to a frame-scale cadence while still
+            // forcing the final text through.
             val accumulated = StringBuilder()
+            var lastEmitNanos = 0L
+            var lastEmittedText = ""
+            fun emitLive(force: Boolean) {
+                val now = System.nanoTime()
+                if (!force && now - lastEmitNanos < MODEL_COUNCIL_LIVE_EMIT_INTERVAL_NANOS) return
+                val text = accumulated.toString().take(outputBudgetChars)
+                if (text != lastEmittedText) {
+                    lastEmittedText = text
+                    lastEmitNanos = now
+                    onChunk(text)
+                }
+            }
             providerImpl.streamText(
                 providerSetting = provider,
                 messages = messages,
@@ -61,9 +75,10 @@ class ProviderModelCouncilTextRunner(
                     .orEmpty()
                 if (delta.isNotEmpty()) {
                     accumulated.append(delta)
-                    onChunk(accumulated.toString())
+                    emitLive(force = false)
                 }
             }
+            emitLive(force = true)
             return accumulated.toString().take(outputBudgetChars)
         }
         val requestedReasoning = reasoningLevel ?: ReasoningLevel.OFF
@@ -127,6 +142,8 @@ class ProviderModelCouncilTextRunner(
         }
     }
 }
+
+private const val MODEL_COUNCIL_LIVE_EMIT_INTERVAL_NANOS = 32_000_000L
 
 private fun Throwable.isUnsupportedReasoningConfigError(): Boolean {
     val message = generateSequence(this) { it.cause }

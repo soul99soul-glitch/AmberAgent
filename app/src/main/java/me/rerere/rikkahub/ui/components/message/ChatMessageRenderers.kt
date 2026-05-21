@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -81,10 +80,10 @@ internal fun VirtualizedAssistantText(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
                         AssistantMarkdownBlockOrWidgets(
-                            content = part.text.replaceRegexes(
+                            content = MessageRenderCache.visualRegexText(
+                                text = part.text,
                                 assistant = assistant,
                                 scope = AssistantAffectScope.ASSISTANT,
-                                visual = true,
                             ),
                             streaming = false,
                             onClickCitation = handleClickCitation,
@@ -94,10 +93,10 @@ internal fun VirtualizedAssistantText(
                 }
             } else {
                 AssistantMarkdownBlockOrWidgets(
-                    content = part.text.replaceRegexes(
+                    content = MessageRenderCache.visualRegexText(
+                        text = part.text,
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
-                        visual = true,
                     ),
                     streaming = false,
                     onClickCitation = handleClickCitation,

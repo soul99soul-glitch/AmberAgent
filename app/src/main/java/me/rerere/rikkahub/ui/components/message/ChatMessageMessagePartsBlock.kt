@@ -55,7 +55,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -238,10 +237,10 @@ internal fun MessagePartsBlock(
                                         ) {
                                             MarkdownBlock(
                                                 content = GenerativeUiPlanner.stripVisualRouteTagsForDisplay(
-                                                    part.text.replaceRegexes(
+                                                    MessageRenderCache.visualRegexText(
+                                                        text = part.text,
                                                         assistant = assistant,
                                                         scope = AssistantAffectScope.USER,
-                                                        visual = true,
                                                     )
                                                 ),
                                                 fillWidth = false,
@@ -255,10 +254,10 @@ internal fun MessagePartsBlock(
                                     // note above for why this is "is the trailing block" rather
                                     // than "is the last Text block".
                                     val isStreamingText = loading && blockIdx == lastBlockIdx
-                                    val assistantDisplayText = part.text.replaceRegexes(
+                                    val assistantDisplayText = MessageRenderCache.visualRegexText(
+                                        text = part.text,
                                         assistant = assistant,
                                         scope = AssistantAffectScope.ASSISTANT,
-                                        visual = true,
                                     )
                                     if (settings.displaySetting.showAssistantBubble) {
                                         // Streaming text height animation is intentionally disabled:

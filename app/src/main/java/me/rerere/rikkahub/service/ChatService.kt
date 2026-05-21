@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.TimeZone
@@ -58,6 +60,7 @@ import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.ai.GenerationChunk
@@ -126,6 +129,7 @@ import me.rerere.rikkahub.utils.sendNotification
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
@@ -182,6 +186,22 @@ private val outputTransformers by lazy {
     )
 }
 
+private sealed interface PendingMessageStoreOp {
+    data class Persist(
+        val conversationId: Uuid,
+        val messages: List<PendingUserMessage>,
+        val revision: Long,
+    ) : PendingMessageStoreOp
+
+    data class Event(
+        val conversationId: Uuid,
+        val event: String,
+        val messageId: String?,
+        val count: Int?,
+        val detail: String?,
+    ) : PendingMessageStoreOp
+}
+
 class ChatService(
     private val context: Application,
     private val appScope: AppScope,
@@ -216,6 +236,9 @@ class ChatService(
     private val trustedRunToolNames = ConcurrentHashMap<Uuid, Set<String>>()
     private val generationCheckpointAt = ConcurrentHashMap<Uuid, Long>()
     private val timelineLoadMutexes = ConcurrentHashMap<Uuid, Mutex>()
+    private val pendingMessageStoreOps = Channel<PendingMessageStoreOp>(Channel.UNLIMITED)
+    private val pendingMessagePersistRevisions = ConcurrentHashMap<Uuid, AtomicLong>()
+    private val pendingMessagePersistLocks = ConcurrentHashMap<Uuid, Mutex>()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -253,12 +276,39 @@ class ChatService(
     init {
         // 添加生命周期观察者
         ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
+        appScope.launch(Dispatchers.IO) {
+            for (op in pendingMessageStoreOps) {
+                when (op) {
+                    is PendingMessageStoreOp.Persist -> {
+                        pendingMessagePersistLock(op.conversationId).withLock {
+                            if (op.revision == pendingMessagePersistRevision(op.conversationId).get()) {
+                                pendingMessageStore.persistBlocking(
+                                    conversationId = op.conversationId,
+                                    messages = op.messages,
+                                )
+                            }
+                        }
+                    }
+
+                    is PendingMessageStoreOp.Event -> pendingMessageStore.recordEvent(
+                        conversationId = op.conversationId,
+                        event = op.event,
+                        messageId = op.messageId,
+                        count = op.count,
+                        detail = op.detail,
+                    )
+                }
+            }
+        }
     }
 
     fun cleanup() = runCatching {
         ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
+        pendingMessageStoreOps.close()
         sessions.values.forEach { it.cleanup() }
         sessions.clear()
+        pendingMessagePersistRevisions.clear()
+        pendingMessagePersistLocks.clear()
     }
 
     // ---- Session 管理 ----
@@ -276,7 +326,7 @@ class ChatService(
                 scope = appScope,
                 onIdle = { removeSession(it) },
                 onPendingMessagesChanged = { sessionId, messages ->
-                    pendingMessageStore.persist(sessionId, messages)
+                    persistPendingMessagesAsync(sessionId, messages)
                 }
             ).also {
                 _sessionsVersion.value++
@@ -296,6 +346,48 @@ class ChatService(
             session.cleanup()
             _sessionsVersion.value++
             Log.i(TAG, "removeSession: $conversationId (remaining: ${sessions.size})")
+        }
+    }
+
+    private fun persistPendingMessagesAsync(
+        conversationId: Uuid,
+        messages: List<PendingUserMessage>,
+    ) {
+        val revision = pendingMessagePersistRevision(conversationId).incrementAndGet()
+        val result = pendingMessageStoreOps.trySend(
+            PendingMessageStoreOp.Persist(
+                conversationId = conversationId,
+                messages = messages,
+                revision = revision,
+            )
+        )
+        if (result.isFailure) {
+            result.exceptionOrNull()?.let { error ->
+                Log.w(TAG, "Failed to enqueue pending message persist for $conversationId", error)
+            } ?: Log.w(TAG, "Failed to enqueue pending message persist for $conversationId")
+        }
+    }
+
+    private fun recordPendingMessageEvent(
+        conversationId: Uuid,
+        event: String,
+        messageId: String? = null,
+        count: Int? = null,
+        detail: String? = null,
+    ) {
+        val result = pendingMessageStoreOps.trySend(
+            PendingMessageStoreOp.Event(
+                conversationId = conversationId,
+                event = event,
+                messageId = messageId,
+                count = count,
+                detail = detail,
+            )
+        )
+        if (result.isFailure) {
+            result.exceptionOrNull()?.let { error ->
+                Log.w(TAG, "Failed to enqueue pending message event for $conversationId", error)
+            } ?: Log.w(TAG, "Failed to enqueue pending message event for $conversationId")
         }
     }
 
@@ -387,8 +479,10 @@ class ChatService(
     }
 
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
-        if (getOrCreateSession(conversationId).cancelPendingUserMessage(messageId)) {
-            pendingMessageStore.recordEvent(conversationId, event = "cancel", messageId = messageId)
+        val session = getOrCreateSession(conversationId)
+        if (session.cancelPendingUserMessage(messageId)) {
+            persistCurrentPendingMessagesDurably(conversationId, session)
+            recordPendingMessageEvent(conversationId, event = "cancel", messageId = messageId)
         }
     }
 
@@ -397,13 +491,16 @@ class ChatService(
         val count = session.pendingUserMessages.value.size
         if (count > 0) {
             session.clearPendingUserMessages()
-            pendingMessageStore.recordEvent(conversationId, event = "clear", count = count)
+            persistCurrentPendingMessagesDurably(conversationId, session)
+            recordPendingMessageEvent(conversationId, event = "clear", count = count)
         }
     }
 
     fun movePendingUserMessage(conversationId: Uuid, messageId: String, offset: Int) {
-        if (getOrCreateSession(conversationId).movePendingUserMessage(messageId, offset)) {
-            pendingMessageStore.recordEvent(
+        val session = getOrCreateSession(conversationId)
+        if (session.movePendingUserMessage(messageId, offset)) {
+            persistCurrentPendingMessagesDurably(conversationId, session)
+            recordPendingMessageEvent(
                 conversationId = conversationId,
                 event = "move",
                 messageId = messageId,
@@ -547,17 +644,19 @@ class ChatService(
                 offset = nextOffset,
                 limit = nextLimit,
             )
-            val currentConversation = session.state.value
-            val existingNodeIds = currentConversation.messageNodes.mapTo(mutableSetOf()) { it.id }
-            val mergedNodes = olderNodes.filterNot { it.id in existingNodeIds } + currentConversation.messageNodes
-            val updatedConversation = currentConversation.copy(messageNodes = mergedNodes)
-            updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+            var mergedNodeCount = session.state.value.messageNodes.size
+            session.state.update { latestConversation ->
+                val existingNodeIds = latestConversation.messageNodes.mapTo(mutableSetOf()) { it.id }
+                val mergedNodes = olderNodes.filterNot { it.id in existingNodeIds } + latestConversation.messageNodes
+                mergedNodeCount = mergedNodes.size
+                latestConversation.copy(messageNodes = mergedNodes)
+            }
 
             val isFullyLoaded = nextOffset == 0 || olderNodes.isEmpty()
             session.setTimelineLoadState(
                 loadState.copy(
                     initialized = true,
-                    loadedNodeCount = mergedNodes.size,
+                    loadedNodeCount = mergedNodeCount,
                     oldestLoadedIndex = nextOffset,
                     isFullyLoaded = isFullyLoaded,
                     prefetchingOlder = false,
@@ -596,7 +695,8 @@ class ChatService(
                 )
                 return false
             } else {
-                pendingMessageStore.recordEvent(
+                persistPendingMessagesDurably(conversationId, session.pendingUserMessages.value)
+                recordPendingMessageEvent(
                     conversationId = conversationId,
                     event = "enqueue",
                     messageId = pendingMessage.id,
@@ -624,7 +724,8 @@ class ChatService(
                         title = "消息未加入队列"
                     )
                 } else {
-                    pendingMessageStore.recordEvent(
+                    persistPendingMessagesDurably(conversationId, session.pendingUserMessages.value)
+                    recordPendingMessageEvent(
                         conversationId = conversationId,
                         event = "enqueue",
                         messageId = message.id,
@@ -636,11 +737,11 @@ class ChatService(
         }
 
         val job = appScope.launch {
-            var nextMessage = firstMessage ?: session.dequeueNextPendingUserMessage()
+            var nextMessage = firstMessage ?: session.dequeueNextPendingUserMessageDurably(conversationId)
             while (nextMessage != null) {
                 try {
-                    val dispatchMessage = session.preparePendingMessageForDispatch(nextMessage)
-                    pendingMessageStore.recordEvent(
+                    val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, nextMessage)
+                    recordPendingMessageEvent(
                         conversationId = conversationId,
                         event = "dequeue",
                         messageId = dispatchMessage.id,
@@ -652,7 +753,7 @@ class ChatService(
                         if (conversation.hasPendingOrUnexecutedTools()) {
                             break
                         }
-                        nextMessage = session.dequeueNextPendingUserMessage()
+                        nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
                         continue
                     }
                     appendUserMessage(conversationId, dispatchMessage)
@@ -671,7 +772,7 @@ class ChatService(
                 if (conversation.hasPendingOrUnexecutedTools()) {
                     break
                 }
-                nextMessage = session.dequeueNextPendingUserMessage()
+                nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
             }
         }
         session.setJob(job)
@@ -738,7 +839,7 @@ class ChatService(
             updateAt = Instant.now(),
         )
         saveConversation(conversationId, updatedConversation)
-        pendingMessageStore.recordEvent(
+        recordPendingMessageEvent(
             conversationId = conversationId,
             event = if (shouldResume) "pending_tool_resume" else "pending_tool_cancel",
             messageId = message.id,
@@ -806,10 +907,10 @@ class ChatService(
 
     private suspend fun drainPendingUserMessagesInline(conversationId: Uuid) {
         val session = getOrCreateSession(conversationId)
-        var nextMessage = session.dequeueNextPendingUserMessage()
+        var nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
         while (nextMessage != null) {
-            val dispatchMessage = session.preparePendingMessageForDispatch(nextMessage)
-            pendingMessageStore.recordEvent(
+            val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, nextMessage)
+            recordPendingMessageEvent(
                 conversationId = conversationId,
                 event = "dequeue",
                 messageId = dispatchMessage.id,
@@ -825,17 +926,57 @@ class ChatService(
             if (conversation.hasPendingOrUnexecutedTools()) {
                 break
             }
-            nextMessage = session.dequeueNextPendingUserMessage()
+            nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
         }
     }
 
+    private fun persistPendingMessagesDurably(
+        conversationId: Uuid,
+        messages: List<PendingUserMessage>,
+    ) {
+        runBlocking(Dispatchers.IO) {
+            pendingMessagePersistLock(conversationId).withLock {
+                pendingMessagePersistRevision(conversationId).incrementAndGet()
+                pendingMessageStore.persistBlocking(conversationId, messages)
+            }
+        }
+    }
+
+    private fun pendingMessagePersistRevision(conversationId: Uuid): AtomicLong =
+        pendingMessagePersistRevisions.computeIfAbsent(conversationId) { AtomicLong(0L) }
+
+    private fun pendingMessagePersistLock(conversationId: Uuid): Mutex =
+        pendingMessagePersistLocks.computeIfAbsent(conversationId) { Mutex() }
+
+    private fun persistCurrentPendingMessagesDurably(
+        conversationId: Uuid,
+        session: ConversationSession,
+    ) {
+        persistPendingMessagesDurably(conversationId, session.pendingUserMessages.value)
+    }
+
+    private fun ConversationSession.dequeueNextPendingUserMessageDurably(
+        conversationId: Uuid,
+    ): PendingUserMessage? {
+        val message = dequeueNextPendingUserMessage()
+        if (message != null) {
+            persistCurrentPendingMessagesDurably(conversationId, this)
+        }
+        return message
+    }
+
     private fun ConversationSession.preparePendingMessageForDispatch(
+        conversationId: Uuid,
         message: PendingUserMessage,
     ): PendingUserMessage {
         return when {
-            message.isCollectable -> buildCollectedPendingUserMessage(
-                listOf(message) + dequeueLeadingCollectableMessages()
-            )
+            message.isCollectable -> {
+                val collected = dequeueLeadingCollectableMessages()
+                if (collected.isNotEmpty()) {
+                    persistCurrentPendingMessagesDurably(conversationId, this)
+                }
+                buildCollectedPendingUserMessage(listOf(message) + collected)
+            }
 
             message.mode == PendingUserMessageMode.STEER -> message.asFollowup()
             else -> message
@@ -1032,7 +1173,7 @@ class ChatService(
             model.displayName
         }
         runCatching {
-            val initialConversation = ensureFullConversationLoaded(conversationId)
+            val initialConversation = loadFullConversationForGeneration(conversationId)
 
             // reset suggestions
             updateConversation(
@@ -1056,11 +1197,7 @@ class ChatService(
             val conversation = sanitizeInvalidMessages(initialConversation)
             if (conversation != initialConversation) {
                 conversationRepo.updateConversation(conversation)
-                updateConversation(
-                    conversationId,
-                    sanitizeInvalidMessages(getConversationFlow(conversationId).value),
-                    checkDeletedFiles = false,
-                )
+                replaceSessionWithFullConversation(conversationId, conversation)
             }
 
             // start generating
@@ -1112,10 +1249,11 @@ class ChatService(
                 tools = runTools,
                 conversation = conversation,
                 consumeSteerMessages = {
-                    val consumed = getOrCreateSession(conversationId)
-                        .dequeueSteerPendingUserMessages()
+                    val session = getOrCreateSession(conversationId)
+                    val consumed = session.dequeueSteerPendingUserMessages()
                     if (consumed.isNotEmpty()) {
-                        pendingMessageStore.recordEvent(
+                        persistCurrentPendingMessagesDurably(conversationId, session)
+                        recordPendingMessageEvent(
                             conversationId = conversationId,
                             event = "steer_consumed",
                             count = consumed.size,
@@ -1159,8 +1297,23 @@ class ChatService(
             }.collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> {
+                        val patchMessages = chunk.update.streamingTailMessageId?.let { tailId ->
+                            chunk.messages.filter { message -> message.id == tailId }
+                        } ?: chunk.messages
+                        val sourceStartIndex = messageRange?.let { range ->
+                            if (chunk.update.isStreamingTail) {
+                                chunk.messages.indexOfFirst { message ->
+                                    message.id == chunk.update.streamingTailMessageId
+                                }.takeIf { it >= 0 }?.let { tailOffset -> range.start + tailOffset }
+                            } else {
+                                range.start
+                            }
+                        }
                         val updatedConversation = getConversationFlow(conversationId).value
-                            .updateCurrentMessages(chunk.messages)
+                            .mergeGeneratedMessagesIntoWindow(
+                                generatedMessages = patchMessages,
+                                sourceStartIndex = sourceStartIndex,
+                            )
                         updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
                         checkpointConversation(conversationId, updatedConversation)
 
@@ -1268,13 +1421,31 @@ class ChatService(
     private suspend fun loadFullConversationForGeneration(conversationId: Uuid): Conversation {
         val windowConversation = getConversationFlow(conversationId).value
         val loadState = getOrCreateSession(conversationId).timelineLoadState.value
-        if (loadState.isFullyLoaded) {
+        if (loadState.initialized && loadState.isFullyLoaded && loadState.oldestLoadedIndex == 0) {
             return windowConversation
         }
         val fullConversation = conversationRepo.getConversationById(conversationId) ?: return windowConversation
         return mergeConversationWindowIntoFull(
             fullConversation = fullConversation,
             windowConversation = windowConversation,
+        )
+    }
+
+    private fun replaceSessionWithFullConversation(
+        conversationId: Uuid,
+        conversation: Conversation,
+    ) {
+        val session = getOrCreateSession(conversationId)
+        updateConversation(conversationId, conversation, checkDeletedFiles = false)
+        session.setTimelineLoadState(
+            ConversationTimelineLoadState(
+                initialized = true,
+                totalNodeCount = conversation.messageNodes.size,
+                loadedNodeCount = conversation.messageNodes.size,
+                oldestLoadedIndex = 0,
+                isFullyLoaded = true,
+                prefetchingOlder = false,
+            )
         )
     }
 
@@ -1619,12 +1790,21 @@ class ChatService(
         val last = generationCheckpointAt[conversationId] ?: 0L
         if (!force && now - last < GENERATION_CHECKPOINT_INTERVAL_MS) return
         generationCheckpointAt[conversationId] = now
+        val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
         runCatching {
             persistConversationWindow(
                 conversationId = conversationId,
                 conversation = conversation,
                 indexFts = force,
             )
+            if (BuildConfig.DEBUG) {
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+                Log.d(
+                    "AmberChatPerf",
+                    "checkpointConversation force=$force nodes=${conversation.messageNodes.size} " +
+                        "elapsedMs=${String.format(Locale.US, "%.2f", elapsedMs)}",
+                )
+            }
         }.onFailure { error ->
             Log.w(TAG, "checkpointConversation failed for $conversationId", error)
         }
@@ -1762,6 +1942,95 @@ class ChatService(
             updateAt = windowConversation.updateAt,
             messageNodes = mergedNodes,
         )
+    }
+
+    private fun Conversation.mergeGeneratedMessagesIntoWindow(
+        generatedMessages: List<UIMessage>,
+        sourceStartIndex: Int? = null,
+    ): Conversation {
+        if (generatedMessages.isEmpty()) return this
+        if (sourceStartIndex != null) {
+            return mergeGeneratedMessagesByIndex(
+                generatedMessages = generatedMessages,
+                sourceStartIndex = sourceStartIndex,
+            )
+        }
+        val generatedById = generatedMessages.associateBy { it.id }
+        var changed = false
+        val updatedNodes = messageNodes.map { node ->
+            val selected = node.currentMessage
+            val replacement = generatedById[selected.id] ?: return@map node
+            if (replacement === selected || replacement == selected) {
+                node
+            } else {
+                changed = true
+                node.copy(
+                    messages = node.messages.map { message ->
+                        if (message.id == selected.id) replacement else message
+                    }
+                )
+            }
+        }
+        val existingCurrentIds = updatedNodes.mapTo(mutableSetOf()) { it.currentMessage.id }
+        val lastWindowMessageId = updatedNodes.lastOrNull()?.currentMessage?.id
+        val appendStart = lastWindowMessageId
+            ?.let { id -> generatedMessages.indexOfLast { it.id == id }.takeIf { it >= 0 }?.plus(1) }
+            ?: 0
+        val appendedNodes = generatedMessages
+            .drop(appendStart)
+            .filterNot { it.id in existingCurrentIds }
+            .map { message ->
+                changed = true
+                message.toMessageNode()
+            }
+        return if (!changed) {
+            this
+        } else {
+            copy(messageNodes = updatedNodes + appendedNodes)
+        }
+    }
+
+    private fun Conversation.mergeGeneratedMessagesByIndex(
+        generatedMessages: List<UIMessage>,
+        sourceStartIndex: Int,
+    ): Conversation {
+        if (generatedMessages.isEmpty()) return this
+        val updatedNodes = messageNodes.toMutableList()
+        var changed = false
+        generatedMessages.forEachIndexed { offset, message ->
+            val nodeIndex = sourceStartIndex + offset
+            val existingNode = updatedNodes.getOrNull(nodeIndex)
+            if (existingNode == null) {
+                updatedNodes.add(message.toMessageNode())
+                changed = true
+                return@forEachIndexed
+            }
+            val existingMessageIndex = existingNode.messages.indexOfFirst { it.id == message.id }
+            if (
+                existingMessageIndex >= 0 &&
+                existingNode.messages[existingMessageIndex] === message &&
+                existingNode.selectIndex == existingMessageIndex
+            ) {
+                return@forEachIndexed
+            }
+            val nextMessages = existingNode.messages.toMutableList()
+            val nextSelectedIndex = if (existingMessageIndex >= 0) {
+                nextMessages[existingMessageIndex] = message
+                existingMessageIndex
+            } else {
+                nextMessages.add(message)
+                nextMessages.lastIndex
+            }
+            val nextNode = existingNode.copy(
+                messages = nextMessages,
+                selectIndex = nextSelectedIndex,
+            )
+            if (nextNode != existingNode) {
+                updatedNodes[nodeIndex] = nextNode
+                changed = true
+            }
+        }
+        return if (changed) copy(messageNodes = updatedNodes) else this
     }
 
     // ---- 翻译消息 ----
@@ -2210,8 +2479,10 @@ class ChatService(
         cancelLiveUpdateNotification(conversationId)
         trustedRunToolNames.remove(conversationId)
         screenCaptureManager.releaseSession()
-        if (sessions[conversationId]?.convertPendingSteerMessagesToFollowup() == true) {
-            pendingMessageStore.recordEvent(conversationId, event = "steer_downgrade")
+        val session = sessions[conversationId]
+        if (session?.convertPendingSteerMessagesToFollowup() == true) {
+            persistCurrentPendingMessagesDurably(conversationId, session)
+            recordPendingMessageEvent(conversationId, event = "steer_downgrade")
         }
 
         val currentConversation = getConversationFlow(conversationId).value

@@ -36,7 +36,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.theme.extendColors
-import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.urlDecode
 
@@ -70,9 +69,8 @@ internal fun rememberClickCitationHandler(parts: List<UIMessagePart>): (String) 
         handler@{ citationId ->
             partsState.forEach { part ->
                 if (part is UIMessagePart.Tool && part.toolName == "search_web" && part.isExecuted) {
-                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
                     val items =
-                        runCatching { JsonInstant.parseToJsonElement(outputText).jsonObject["items"]?.jsonArray }.getOrNull()
+                        runCatching { MessageRenderCache.toolOutputJson(part.output).jsonObject["items"]?.jsonArray }.getOrNull()
                             ?: return@forEach
                     items.forEach { item ->
                         val id = item.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach

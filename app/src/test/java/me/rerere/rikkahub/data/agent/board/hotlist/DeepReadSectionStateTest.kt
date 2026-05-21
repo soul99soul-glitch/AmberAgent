@@ -32,15 +32,19 @@ class DeepReadSectionStateTest {
     }
 
     @Test
-    fun isCompleteRequiresAllSectionsReady() {
+    fun isCompleteRequiresAllSectionsReadyAndFinishFlag() {
         val partial = DeepReadOutput()
             .withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
             .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
             .withSectionStatus(DeepReadGenerationStage.ANALYSIS, DeepReadSectionStatus.READY)
         assertFalse(partial.isComplete())
 
-        val complete = partial
+        val readyButUnfinished = partial
             .withSectionStatus(DeepReadGenerationStage.EXTENDED_READING, DeepReadSectionStatus.READY)
+        assertFalse(readyButUnfinished.isComplete())
+        assertFalse(readyButUnfinished.generationComplete)
+
+        val complete = readyButUnfinished.copy(generationComplete = true)
         assertTrue(complete.isComplete())
         assertTrue(complete.generationComplete)
     }

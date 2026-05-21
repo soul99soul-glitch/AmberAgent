@@ -2,6 +2,8 @@ package me.rerere.rikkahub.service
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -37,42 +39,50 @@ class PendingMessageStore(
         }.getOrDefault(emptyList())
     }
 
-    fun persist(conversationId: Uuid, messages: List<PendingUserMessage>) {
+    suspend fun persist(conversationId: Uuid, messages: List<PendingUserMessage>) {
+        withContext(Dispatchers.IO) {
+            persistBlocking(conversationId, messages)
+        }
+    }
+
+    fun persistBlocking(conversationId: Uuid, messages: List<PendingUserMessage>) {
         runCatching {
             val file = queueFile(conversationId)
             if (messages.isEmpty()) {
                 file.delete()
             } else {
                 file.parentFile?.mkdirs()
-                file.writeText(json.encodeToString(messages))
+                file.writeTextAtomically(json.encodeToString(messages))
             }
         }.onFailure {
             Log.w(TAG, "Failed to persist pending user messages for $conversationId", it)
         }
     }
 
-    fun recordEvent(
+    suspend fun recordEvent(
         conversationId: Uuid,
         event: String,
         messageId: String? = null,
         count: Int? = null,
         detail: String? = null,
     ) {
-        runCatching {
-            val file = auditFile(conversationId)
-            file.parentFile?.mkdirs()
-            file.appendText(
-                buildJsonObject {
-                    put("created_at_ms", System.currentTimeMillis())
-                    put("conversation_id", conversationId.toString())
-                    put("event", event)
-                    messageId?.let { put("message_id", it) }
-                    count?.let { put("count", it) }
-                    detail?.let { put("detail", it) }
-                }.toString() + "\n"
-            )
-        }.onFailure {
-            Log.w(TAG, "Failed to write pending message audit for $conversationId", it)
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val file = auditFile(conversationId)
+                file.parentFile?.mkdirs()
+                file.appendText(
+                    buildJsonObject {
+                        put("created_at_ms", System.currentTimeMillis())
+                        put("conversation_id", conversationId.toString())
+                        put("event", event)
+                        messageId?.let { put("message_id", it) }
+                        count?.let { put("count", it) }
+                        detail?.let { put("detail", it) }
+                    }.toString() + "\n"
+                )
+            }.onFailure {
+                Log.w(TAG, "Failed to write pending message audit for $conversationId", it)
+            }
         }
     }
 
@@ -81,4 +91,14 @@ class PendingMessageStore(
 
     private fun auditFile(conversationId: Uuid): File =
         File(context.filesDir, BASE_DIR).resolve("$conversationId.events.jsonl")
+
+    private fun File.writeTextAtomically(text: String) {
+        parentFile?.mkdirs()
+        val temp = File(parentFile, "$name.tmp")
+        temp.writeText(text)
+        if (!temp.renameTo(this)) {
+            temp.copyTo(this, overwrite = true)
+            temp.delete()
+        }
+    }
 }

@@ -137,12 +137,8 @@ private enum class ModelCouncilCardStatus {
 /** Walk model_council_* tools in reverse, find the most recent parsable `status`. */
 private fun parseLatestCouncilStatus(tools: List<UIMessagePart.Tool>): ModelCouncilCardStatus {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val statusStr = runCatching {
-            (JsonInstant.parseToJsonElement(outputText) as? JsonObject)?.get("status")
-                ?.let { it as? JsonPrimitive }?.contentOrNull
-        }.getOrNull() ?: continue
+        val statusStr = tool.cachedOutputJsonObject()?.get("status")
+            ?.let { it as? JsonPrimitive }?.contentOrNull ?: continue
         ModelCouncilCardStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
             ?.let { return it }
     }
@@ -174,7 +170,7 @@ private fun ModelCouncilRunSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val anchor = step.anchor
-    val arguments = remember(anchor.input) { anchor.inputAsJson() }
+    val arguments = remember(anchor.input) { MessageRenderCache.toolInputJson(anchor.input) }
     val taskObjective = remember(arguments) {
         runCatching {
             (arguments.jsonObject["task"] as? JsonObject)?.get("objective")?.let { it as? JsonPrimitive }?.contentOrNull
@@ -297,7 +293,7 @@ private fun ModelCouncilRunSheet(
             } else {
                 finalText.ifBlank { liveText }
             }
-            val displayText = displayTextSource.cleanCouncilLineBreaks()
+            val displayText = remember(displayTextSource) { displayTextSource.cleanCouncilLineBreaks() }
             val activeModelLabel = remember(step.tools, activeSeatKey) {
                 activeSeatKey?.let { extractCouncilModelLabel(step.tools, it) }.orEmpty()
             }
@@ -358,6 +354,7 @@ private fun ModelCouncilRunSheet(
                     ) {
                         CouncilRoundContent(
                             content = displayText,
+                            streaming = isRunning,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -377,6 +374,7 @@ private data class CouncilRoundSection(
 @Composable
 private fun CouncilRoundContent(
     content: String,
+    streaming: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val sections = remember(content) { content.toCouncilRoundSections() }
@@ -392,6 +390,7 @@ private fun CouncilRoundContent(
                     content = section.content,
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                    streaming = streaming,
                 )
             }
         }
@@ -527,11 +526,7 @@ private val COUNCIL_ROUND_MARKER = Regex("""---\s*(第\s*\d+\s*轮)\s*---""")
 /** Pull the synthesizer's final text from the latest read/wait result (`result.finalRecommendation`). */
 private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): String {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val parsed = runCatching {
-            JsonInstant.parseToJsonElement(outputText) as? JsonObject
-        }.getOrNull() ?: continue
+        val parsed = tool.cachedOutputJsonObject() ?: continue
         val result = parsed.payloadObject("result") ?: continue
         val recommendation = ((result["final_recommendation"] as? JsonPrimitive)?.contentOrNull)
             ?.takeIf { it.isNotBlank() }
@@ -544,11 +539,7 @@ private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): S
 /** Pull the provider/model label for a council seat or synthesizer from the latest payload. */
 private fun extractCouncilModelLabel(tools: List<UIMessagePart.Tool>, seatId: String): String {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val parsed = runCatching {
-            JsonInstant.parseToJsonElement(outputText) as? JsonObject
-        }.getOrNull() ?: continue
+        val parsed = tool.cachedOutputJsonObject() ?: continue
         val labels = parsed["seat_model_labels"] as? JsonObject
         val direct = (labels?.get(seatId) as? JsonPrimitive)?.contentOrNull
         if (!direct.isNullOrBlank()) return direct
@@ -571,11 +562,7 @@ private fun extractCouncilModelLabel(tools: List<UIMessagePart.Tool>, seatId: St
 
 private fun extractCouncilSeatEntries(tools: List<UIMessagePart.Tool>): List<CouncilTabEntry> {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val parsed = runCatching {
-            JsonInstant.parseToJsonElement(outputText) as? JsonObject
-        }.getOrNull() ?: continue
+        val parsed = tool.cachedOutputJsonObject() ?: continue
         val parsedTurns = parsed.payloadArray("turns") ?: continue
         val entries = linkedMapOf<String, String>()
         parsedTurns.forEach { turnElement ->
@@ -603,11 +590,7 @@ private fun extractCouncilSeatEntries(tools: List<UIMessagePart.Tool>): List<Cou
  */
 private fun extractFinalCouncilSeatText(tools: List<UIMessagePart.Tool>, seatId: String): String {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val parsed = runCatching {
-            JsonInstant.parseToJsonElement(outputText) as? JsonObject
-        }.getOrNull() ?: continue
+        val parsed = tool.cachedOutputJsonObject() ?: continue
         val parsedTurns = parsed.payloadArray("turns") ?: continue
         val matching = parsedTurns.mapNotNull { turnElement ->
             val turn = turnElement as? JsonObject ?: return@mapNotNull null
@@ -664,11 +647,7 @@ private fun JsonObject.payloadArray(name: String): JsonArray? {
  */
 internal fun extractFinalSubAgentText(tools: List<UIMessagePart.Tool>): String {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val parsed = runCatching {
-            JsonInstant.parseToJsonElement(outputText) as? JsonObject
-        }.getOrNull() ?: continue
+        val parsed = tool.cachedOutputJsonObject() ?: continue
         val resultStr = (parsed["result"] as? JsonPrimitive)?.contentOrNull
         val nestedSummary = resultStr?.let { rs ->
             runCatching {
@@ -689,10 +668,8 @@ internal suspend fun extractSubAgentDisplayTextFromTranscript(
 ): String =
     withContext(Dispatchers.IO) {
         val transcriptPath = tools.asReversed().firstNotNullOfOrNull { tool ->
-            val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-                ?: return@firstNotNullOfOrNull null
             runCatching {
-                val parsed = JsonInstant.parseToJsonElement(outputText) as? JsonObject
+                val parsed = tool.cachedOutputJsonObject()
                     ?: return@runCatching null
                 val explicitPath = (parsed["transcript_path"] as? JsonPrimitive)?.contentOrNull
                 explicitPath ?: (parsed["run_id"] as? JsonPrimitive)?.contentOrNull
@@ -703,6 +680,9 @@ internal suspend fun extractSubAgentDisplayTextFromTranscript(
 
         readSubAgentDisplayTextFromTranscript(transcriptPath, runRoot)
     }
+
+private fun UIMessagePart.Tool.cachedOutputJsonObject(): JsonObject? =
+    MessageRenderCache.toolOutputJson(output) as? JsonObject
 
 /**
  * Fix legacy council text where [UIMessage.toText] joined streaming deltas with "\n" separators,

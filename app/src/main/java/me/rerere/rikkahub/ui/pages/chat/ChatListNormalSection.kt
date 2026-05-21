@@ -26,8 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
@@ -90,8 +88,8 @@ import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItemContent
-import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems
 import me.rerere.rikkahub.ui.components.richtext.prewarmMarkdownContent
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
@@ -141,13 +139,17 @@ internal fun ChatListNormal(
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     onLoadOlderTimeline: suspend () -> Unit = {},
+    onEnsureTimelineLoaded: suspend () -> Conversation = { conversation },
+    chatTimelinePlan: ChatTimelinePlan,
 ) {
     val scope = rememberCoroutineScope()
+    val currentConversationState by rememberUpdatedState(conversation)
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
     val activeGeneration = loading || pendingUserMessages.isNotEmpty() || compactInTimelineActive
     val activeGenerationState by rememberUpdatedState(activeGeneration)
     val timelineLoadStateState by rememberUpdatedState(timelineLoadState)
     val loadOlderTimelineState by rememberUpdatedState(onLoadOlderTimeline)
+    val ensureTimelineLoadedState by rememberUpdatedState(onEnsureTimelineLoaded)
     var isRecentScroll by remember { mutableStateOf(false) }
     var followMode by remember(conversation.id) { mutableStateOf(TimelineFollowMode.Idle) }
     var programmaticScrollInProgress by remember(conversation.id) { mutableStateOf(false) }
@@ -180,78 +182,13 @@ internal fun ChatListNormal(
     } else {
         emptyList()
     }
-    val latestMessage = conversation.currentMessages.lastOrNull()
-    val latestMessageId = latestMessage?.id?.toString()
+    val latestMessage = conversation.messageNodes.lastOrNull()?.currentMessage
     val conversationId = conversation.id.toString()
-    val latestIsPreSendTail = ChatSendTransitionTracker.isPreSendLatestMessage(
-        conversationId = conversationId,
-        messageId = latestMessageId,
-    )
-    val latestIsSentUserTail = latestMessage?.role == MessageRole.USER &&
-        ChatSendTransitionTracker.isSentUserMessage(
-            conversationId = conversationId,
-            messageId = latestMessageId,
-        )
-    val postSendTailWaitingForAssistant = activeGeneration &&
-        (latestIsPreSendTail || latestIsSentUserTail)
-    val postSendSentUserMessageId = ChatSendTransitionTracker.sentUserMessageId(conversationId)
-    val postSendSentUserMessageIndex = remember(
-        conversation.messageNodes,
-        postSendSentUserMessageId,
-    ) {
-        if (postSendSentUserMessageId != null) {
-            conversation.messageNodes
-                .indexOfFirst { node -> node.currentMessage.id.toString() == postSendSentUserMessageId }
-                .takeIf { it >= 0 }
-        } else {
-            null
-        }
-    }
-    val postSendAssistantMessageIndex = remember(
-        conversation.messageNodes,
-        postSendSentUserMessageIndex,
-    ) {
-        if (postSendSentUserMessageIndex == null) {
-            null
-        } else {
-            val assistantIndex = postSendSentUserMessageIndex + 1
-            val assistantNode = conversation.messageNodes.getOrNull(assistantIndex)
-            if (assistantNode?.currentMessage?.role == MessageRole.ASSISTANT) {
-                assistantIndex
-            } else {
-                null
-            }
-        }
-    }
-    val postSendAssistantHasVisibleContent = remember(
-        conversation.messageNodes,
-        postSendAssistantMessageIndex,
-    ) {
-        postSendAssistantMessageIndex?.let { index ->
-            conversation.messageNodes
-                .getOrNull(index)
-                ?.currentMessage
-                ?.parts
-                ?.hasVisibleTimelineContent() == true
-        } == true
-    }
-    val postSendHiddenAssistantMessageIndex = remember(
-        conversation.messageNodes,
-        postSendAssistantMessageIndex,
-        postSendAssistantHasVisibleContent,
-    ) {
-        postSendAssistantMessageIndex?.takeIf { index ->
-            index == conversation.messageNodes.lastIndex && !postSendAssistantHasVisibleContent
-        }
-    }
-    val postSendWaitingForAssistantContent = activeGeneration &&
-        postSendSentUserMessageIndex != null &&
-        !postSendAssistantHasVisibleContent &&
-        (postSendTailWaitingForAssistant || postSendAssistantMessageIndex != null)
-    val timelineLoading = loading && !postSendWaitingForAssistantContent
+    val postSendState = chatTimelinePlan.postSendState
+    val timelineLoading = chatTimelinePlan.timelineLoading
     val timelineBottomPadding = TimelineBottomSafetyPadding +
         innerPadding.calculateBottomPadding() +
-        if (postSendWaitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
+        if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
 
     LaunchedEffect(conversation.id, activeGeneration) {
         if (!activeGeneration) {
@@ -365,8 +302,12 @@ internal fun ChatListNormal(
 
     // 聊天选择
     val selectedItems = remember { mutableStateListOf<Uuid>() }
+    val selectedItemSet by remember {
+        derivedStateOf { selectedItems.toSet() }
+    }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
+    var exportConversation by remember(conversation.id) { mutableStateOf<Conversation?>(null) }
     fun timelineAnchorForCompactEvent(eventAt: Long): Int {
         if (conversation.messageNodes.isEmpty()) return -1
         val timeZone = TimeZone.currentSystemDefault()
@@ -448,30 +389,7 @@ internal fun ChatListNormal(
     val chatAssistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
-    val showAssistantBubble = settings.displaySetting.showAssistantBubble
-    var markdownVirtualizationEpoch by remember(conversation.id) { mutableIntStateOf(0) }
-    val lazyItemMessageIndexes = remember(
-        conversation.messageNodes,
-        timelineLoadState.isFullyLoaded,
-        pendingUserMessages.size,
-        timelineLoading,
-        chatAssistant,
-        showAssistantBubble,
-        markdownVirtualizationEpoch,
-        postSendWaitingForAssistantContent,
-        postSendAssistantMessageIndex,
-    ) {
-        buildLazyItemMessageIndexMap(
-            messageNodes = conversation.messageNodes,
-            assistant = chatAssistant,
-            showAssistantBubble = showAssistantBubble,
-            loading = timelineLoading,
-            hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
-            pendingMessageCount = pendingUserMessages.size,
-            hasPostSendWaitingPlaceholder = postSendWaitingForAssistantContent &&
-                postSendAssistantMessageIndex == null,
-        )
-    }
+    val lazyItemMessageIndexes = chatTimelinePlan.lazyItemMessageIndexes
     // 自动跟随键盘滚动
     ImeLazyListAutoScroller(
         lazyListState = state,
@@ -651,18 +569,16 @@ internal fun ChatListNormal(
 
     LaunchedEffect(
         conversation.id,
-        conversation.messageNodes,
-        timelineLoadState.isFullyLoaded,
+        chatTimelinePlan,
         timelineLoading,
         chatAssistant,
-        lazyItemMessageIndexes,
     ) {
         snapshotFlow {
             state.markdownPrewarmTexts(
                 messageNodes = conversation.messageNodes,
                 assistant = chatAssistant,
                 loadingLastMessage = timelineLoading,
-                lazyItemMessageIndexes = lazyItemMessageIndexes,
+                timelinePlan = chatTimelinePlan,
             )
         }
             .distinctUntilChanged()
@@ -671,9 +587,6 @@ internal fun ChatListNormal(
                     contents.distinct().forEach { content ->
                         prewarmMarkdownContent(content)
                     }
-                }
-                if (contents.isNotEmpty()) {
-                    markdownVirtualizationEpoch += 1
                 }
             }
     }
@@ -705,16 +618,34 @@ internal fun ChatListNormal(
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(conversation.id, activeGeneration) {
                 if (!activeGeneration) return@LaunchedEffect
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }
-                    .collect { visibleItemsInfo ->
-                        val willFollow = activeGenerationState &&
-                            followMode == TimelineFollowMode.FollowingBottom &&
-                            !userScrollInTimeline &&
-                            !state.isScrollInProgress
+                snapshotFlow {
+                    val layoutInfo = state.layoutInfo
+                    val visibleItemsInfo = layoutInfo.visibleItemsInfo
+                    val lastVisibleItem = visibleItemsInfo.lastOrNull()
+                    FollowLayoutSignal(
+                        totalItems = layoutInfo.totalItemsCount,
+                        visibleItems = visibleItemsInfo.size,
+                        bottomAnchorVisible = visibleItemsInfo.isBottomAnchorVisible(),
+                        lastVisibleIndex = lastVisibleItem?.index ?: -1,
+                        lastVisibleOffset = lastVisibleItem?.offset ?: 0,
+                        lastVisibleSize = lastVisibleItem?.size ?: 0,
+                        viewportEndOffset = layoutInfo.viewportEndOffset,
+                        followingBottom = activeGenerationState &&
+                            followMode == TimelineFollowMode.FollowingBottom,
+                        userScrollInTimeline = userScrollInTimeline,
+                        scrollInProgress = state.isScrollInProgress,
+                    )
+                }
+                    .distinctUntilChanged()
+                    .collect { signal ->
+                        val willFollow = signal.followingBottom &&
+                            !signal.userScrollInTimeline &&
+                            !signal.scrollInProgress &&
+                            !signal.bottomAnchorVisible
                         if (willFollow) {
                             requestTimelineBottom(
-                                "layoutFollow visibleItems=${visibleItemsInfo.size} " +
-                                    "bottomVisible=${visibleItemsInfo.isBottomAnchorVisible()}",
+                                "layoutFollow visibleItems=${signal.visibleItems} " +
+                                    "bottomVisible=${signal.bottomAnchorVisible}",
                             )
                         }
                     }
@@ -773,82 +704,69 @@ internal fun ChatListNormal(
                 }
                 .padding(top = innerPadding.calculateTopPadding()),
         ) {
-            if (!timelineLoadState.isFullyLoaded) {
-                item(
-                    key = HistoryLoadingItemKey,
-                    contentType = "history-loading",
-                ) {
-                    TimelineHistoryLoadingIndicator(
-                        prefetching = timelineLoadState.prefetchingOlder,
-                        loadedNodeCount = timelineLoadState.loadedNodeCount,
-                        totalNodeCount = timelineLoadState.totalNodeCount,
-                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                    )
-                }
-            }
-
-            conversation.messageNodes.forEachIndexed { index, node ->
-                if (index == postSendHiddenAssistantMessageIndex) {
-                    item(
-                        key = node.id,
-                        contentType = "post-send-waiting-assistant",
-                    ) {
-                        PostSendWaitingIndicator(
-                            modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                        )
-                    }
-                    return@forEachIndexed
-                }
-                val isLastMessage = index == conversation.messageNodes.lastIndex
-                val isLoadingMessage = timelineLoading && isLastMessage
-                val isPreCompacted = visualCompactedTimelineEndIndex?.let { index <= it } == true
-                val virtualItems = buildChatMessageVirtualItems(
-                    node = node,
-                    assistant = chatAssistant,
-                    showAssistantBubble = showAssistantBubble,
-                    loading = isLoadingMessage,
-                    lastMessage = isLastMessage,
-                )
-                if (virtualItems == null) {
-                    item(
-                        key = node.id,
-                        contentType = "message-${node.currentMessage.role}",
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(bottom = TimelineItemSpacing)
+            chatTimelinePlan.entries.forEachIndexed { planIndex, entry ->
+                when (entry) {
+                    ChatTimelineEntry.HistoryLoading -> {
+                        item(
+                            key = HistoryLoadingItemKey,
+                            contentType = "history-loading",
                         ) {
-                            TimelineCompactMarkers(
-                                timelineEndIndex = index - 1,
-                                completedMarkersByTimelineEndIndex = completedMarkersByTimelineEndIndex,
-                                lifecycleCompletedTimelineEndIndex = lifecycleCompletedTimelineEndIndex,
-                                compactLifecycleState = compactLifecycleState,
-                                activeCompactTimelineEndIndex = activeCompactTimelineEndIndex,
-                                activeCompactStreamingSummary = activeCompactStreamingSummary,
+                            TimelineHistoryLoadingIndicator(
+                                prefetching = timelineLoadState.prefetchingOlder,
+                                loadedNodeCount = timelineLoadState.loadedNodeCount,
+                                totalNodeCount = timelineLoadState.totalNodeCount,
                                 modifier = Modifier.padding(bottom = TimelineItemSpacing),
                             )
-                            // 2026-05-15 (1.9.5): pass alpha modifier directly to
-                            // ListSelectableItem instead of wrapping in a Box. Compose's
-                            // Modifier.alpha(1f) is a no-op (returns Modifier as-is, no
-                            // graphics layer allocated), so this skips the wrapper Box
-                            // for active messages and avoids the 100+ unnecessary
-                            // Composable nodes a long covered-history conversation
-                            // would otherwise produce. Divider above is rendered
-                            // separately (outside this modifier chain), so it remains
-                            // fully opaque as the boundary marker.
-                            ListSelectableItem(
-                                modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
-                                key = node.id,
-                                onSelectChange = {
-                                    if (!selectedItems.contains(node.id)) {
-                                        selectedItems.add(node.id)
-                                    } else {
-                                        selectedItems.remove(node.id)
-                                    }
-                                },
-                                selectedKeys = selectedItems,
-                                enabled = selecting,
+                        }
+                    }
+
+                    is ChatTimelineEntry.PostSendHiddenAssistant -> {
+                        item(
+                            key = entry.node.id,
+                            contentType = "post-send-waiting-assistant",
+                        ) {
+                            PostSendWaitingIndicator(
+                                modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                            )
+                        }
+                    }
+
+                    is ChatTimelineEntry.Message -> {
+                        val index = entry.messageIndex
+                        val node = entry.node
+                        val isLastMessage = index == conversation.messageNodes.lastIndex
+                        val isLoadingMessage = timelineLoading && isLastMessage
+                        val isPreCompacted = visualCompactedTimelineEndIndex?.let { index <= it } == true
+                        item(
+                            key = node.id,
+                            contentType = "message-${node.currentMessage.role}",
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(bottom = TimelineItemSpacing)
                             ) {
-                                val messageModel = remember(
+                                TimelineCompactMarkers(
+                                    timelineEndIndex = index - 1,
+                                    completedMarkersByTimelineEndIndex = completedMarkersByTimelineEndIndex,
+                                    lifecycleCompletedTimelineEndIndex = lifecycleCompletedTimelineEndIndex,
+                                    compactLifecycleState = compactLifecycleState,
+                                    activeCompactTimelineEndIndex = activeCompactTimelineEndIndex,
+                                    activeCompactStreamingSummary = activeCompactStreamingSummary,
+                                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                                )
+                                ListSelectableItem(
+                                    modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
+                                    key = node.id,
+                                    onSelectChange = {
+                                        if (!selectedItems.contains(node.id)) {
+                                            selectedItems.add(node.id)
+                                        } else {
+                                            selectedItems.remove(node.id)
+                                        }
+                                    },
+                                    selectedKeys = selectedItems,
+                                    enabled = selecting,
+                                ) {
+                                    val messageModel = remember(
                                         node.currentMessage.modelId,
                                         node.currentMessage.role,
                                         isLoadingMessage,
@@ -881,10 +799,9 @@ internal fun ChatListNormal(
                                             onDelete(node.currentMessage)
                                         },
                                         onShare = {
-                                            selecting = true  // 使用 CoroutineScope 延迟状态更新
+                                            selecting = true
                                             selectedItems.clear()
-                                            selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                                .subList(0, index + 1))
+                                            selectedItems.addAll(conversation.messageNodes.take(index + 1).map { it.id })
                                         },
                                         onUpdate = {
                                             onUpdateMessage(it)
@@ -903,21 +820,34 @@ internal fun ChatListNormal(
                                         lastMessage = isLastMessage,
                                     )
                                 }
+                            }
                         }
                     }
-                }
-                if (virtualItems != null) {
-                    virtualItems.forEachIndexed { virtualIndex, virtualItem ->
-                        val isFirstVirtualItem = virtualIndex == 0
-                        val isLastVirtualItem = virtualIndex == virtualItems.lastIndex
-                        val nextVirtualItem = virtualItems.getOrNull(virtualIndex + 1)
+
+                    is ChatTimelineEntry.VirtualMessage -> {
+                        val index = entry.messageIndex
+                        val node = entry.node
+                        val virtualItem = entry.item
+                        val isFirstVirtualItem = entry.virtualIndex == 0
+                        val isLastVirtualItem = entry.virtualIndex == entry.virtualCount - 1
+                        val nextVirtualItem = (chatTimelinePlan.entries.getOrNull(planIndex + 1) as? ChatTimelineEntry.VirtualMessage)
+                            ?.takeIf { it.messageIndex == index }
+                            ?.item
+                        val isLastMessage = index == conversation.messageNodes.lastIndex
+                        val isLoadingMessage = timelineLoading && isLastMessage
+                        val isPreCompacted = visualCompactedTimelineEndIndex?.let { index <= it } == true
                         val bottomPadding = when {
                             isLastVirtualItem -> TimelineItemSpacing
                             virtualItem.isAdjacentMarkdownChild(nextVirtualItem) -> 0.dp
                             else -> TimelineMessageInnerSpacing
                         }
+                        val virtualItemKey = if (virtualItem == ChatMessageVirtualItem.Header) {
+                            node.id
+                        } else {
+                            "${node.id}:${virtualItem.keySuffix}"
+                        }
                         item(
-                            key = "${node.id}:${virtualItem.keySuffix}",
+                            key = virtualItemKey,
                             contentType = "message-${node.currentMessage.role}-virtual-${virtualItem.keySuffix.substringBefore('-')}",
                         ) {
                             Column(
@@ -934,9 +864,6 @@ internal fun ChatListNormal(
                                         modifier = Modifier.padding(bottom = TimelineItemSpacing),
                                     )
                                 }
-                                // See non-virtual branch comment above — alpha is passed to
-                                // TimelineSelectableMessageItem.modifier so the active-message
-                                // path doesn't pay for an extra Box wrapper.
                                 TimelineSelectableMessageItem(
                                     modifier = if (isPreCompacted) Modifier.alpha(0.4f) else Modifier,
                                     key = node.id,
@@ -987,8 +914,7 @@ internal fun ChatListNormal(
                                         onShare = {
                                             selecting = true
                                             selectedItems.clear()
-                                            selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                                .subList(0, index + 1))
+                                            selectedItems.addAll(conversation.messageNodes.take(index + 1).map { it.id })
                                         },
                                         onUpdate = {
                                             onUpdateMessage(it)
@@ -1010,6 +936,11 @@ internal fun ChatListNormal(
                             }
                         }
                     }
+
+                    ChatTimelineEntry.PostSendWaitingAssistant,
+                    is ChatTimelineEntry.Pending,
+                    ChatTimelineEntry.Loading,
+                    ChatTimelineEntry.ScrollBottom -> Unit
                 }
             }
 
@@ -1040,54 +971,71 @@ internal fun ChatListNormal(
                 }
             }
 
-            if (postSendWaitingForAssistantContent && postSendAssistantMessageIndex == null) {
-                item(
-                    key = "post-send-waiting-${postSendSentUserMessageId ?: conversation.id}",
-                    contentType = "post-send-waiting-assistant",
-                ) {
-                    PostSendWaitingIndicator(
-                        modifier = Modifier.padding(bottom = TimelineItemSpacing),
-                    )
-                }
-            }
+            chatTimelinePlan.entries.forEach { entry ->
+                when (entry) {
+                    ChatTimelineEntry.PostSendWaitingAssistant -> {
+                        item(
+                            key = "post-send-waiting-${postSendState.sentUserMessageId ?: conversation.id}",
+                            contentType = "post-send-waiting-assistant",
+                        ) {
+                            PostSendWaitingIndicator(
+                                modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                            )
+                        }
+                    }
 
-            itemsIndexed(
-                items = pendingUserMessages,
-                key = { _, item -> "pending-${item.id}" },
-                contentType = { _, _ -> "pending" },
-            ) { index, pendingMessage ->
-                Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
-                    PendingUserMessageBubble(
-                        message = pendingMessage,
-                        onCancel = { onCancelPendingMessage(pendingMessage.id) },
-                        queueCount = if (index == pendingUserMessages.lastIndex) pendingUserMessages.size else null,
-                        onOpenQueue = onOpenQueue,
-                    )
-                }
-            }
+                    is ChatTimelineEntry.Pending -> {
+                        val pendingMessage = pendingUserMessages.getOrNull(entry.pendingIndex)
+                            ?: return@forEach
+                        item(
+                            key = "pending-${pendingMessage.id}",
+                            contentType = "pending",
+                        ) {
+                            Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
+                                PendingUserMessageBubble(
+                                    message = pendingMessage,
+                                    onCancel = { onCancelPendingMessage(pendingMessage.id) },
+                                    queueCount = if (entry.pendingIndex == pendingUserMessages.lastIndex) {
+                                        pendingUserMessages.size
+                                    } else {
+                                        null
+                                    },
+                                    onOpenQueue = onOpenQueue,
+                                )
+                            }
+                        }
+                    }
 
-            if (timelineLoading) {
-                item(
-                    key = LoadingIndicatorKey,
-                    contentType = "loading",
-                ) {
-                    AgentWorkingIndicator(
-                        processingStatus = processingStatus,
-                        modifier = Modifier.padding(8.dp),
-                    )
-                }
-            }
+                    ChatTimelineEntry.Loading -> {
+                        item(
+                            key = LoadingIndicatorKey,
+                            contentType = "loading",
+                        ) {
+                            AgentWorkingIndicator(
+                                processingStatus = processingStatus,
+                                modifier = Modifier.padding(8.dp),
+                            )
+                        }
+                    }
 
-            // 为了能正确滚动到这
-            item(
-                key = ScrollBottomKey,
-                contentType = "scroll-bottom",
-            ) {
-                Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                )
+                    ChatTimelineEntry.ScrollBottom -> {
+                        item(
+                            key = ScrollBottomKey,
+                            contentType = "scroll-bottom",
+                        ) {
+                            Spacer(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(5.dp)
+                            )
+                        }
+                    }
+
+                    ChatTimelineEntry.HistoryLoading,
+                    is ChatTimelineEntry.PostSendHiddenAssistant,
+                    is ChatTimelineEntry.Message,
+                    is ChatTimelineEntry.VirtualMessage -> Unit
+                }
             }
         }
 
@@ -1160,7 +1108,11 @@ internal fun ChatListNormal(
                                 if (selectedItems.isNotEmpty()) {
                                     selectedItems.clear()
                                 } else {
-                                    selectedItems.addAll(conversation.messageNodes.map { it.id })
+                                    scope.launch {
+                                        val fullConversation = ensureTimelineLoadedState()
+                                        selectedItems.clear()
+                                        selectedItems.addAll(fullConversation.messageNodes.map { it.id })
+                                    }
                                 }
                             }
                         ) {
@@ -1174,10 +1126,22 @@ internal fun ChatListNormal(
                     ) {
                         FilledIconButton(
                             onClick = {
-                                selecting = false
-                                val messages = conversation.messageNodes.filter { it.id in selectedItems }
-                                if (messages.isNotEmpty()) {
-                                    showExportSheet = true
+                                scope.launch {
+                                    val source = if (
+                                        timelineLoadStateState.initialized &&
+                                        timelineLoadStateState.isFullyLoaded &&
+                                        timelineLoadStateState.oldestLoadedIndex == 0
+                                    ) {
+                                        currentConversationState
+                                    } else {
+                                        ensureTimelineLoadedState()
+                                    }
+                                    selecting = false
+                                    exportConversation = source
+                                    val messages = source.messageNodes.filter { it.id in selectedItemSet }
+                                    if (messages.isNotEmpty()) {
+                                        showExportSheet = true
+                                    }
                                 }
                             }
                         ) {
@@ -1192,10 +1156,11 @@ internal fun ChatListNormal(
                 visible = showExportSheet,
                 onDismissRequest = {
                     showExportSheet = false
+                    exportConversation = null
                     selectedItems.clear()
                 },
-                conversation = conversation,
-                selectedMessages = conversation.messageNodes.filter { it.id in selectedItems }
+                conversation = exportConversation ?: conversation,
+                selectedMessages = (exportConversation ?: conversation).messageNodes.filter { it.id in selectedItemSet }
                     .map { it.currentMessage }
             )
 

@@ -55,7 +55,6 @@ import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRunStatus
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.JsonInstant
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -75,7 +74,7 @@ fun SubAgentTaskStepView(
 ) {
     var showSheet by remember(step.runId) { mutableStateOf(false) }
     val anchor = step.anchor
-    val arguments = remember(anchor.input) { anchor.inputAsJson() }
+    val arguments = remember(anchor.input) { MessageRenderCache.toolInputJson(anchor.input) }
     val subagentId = arguments.getStringContent("subagent_id") ?: "subagent"
     val def = remember(subagentId) { SubAgentDefinitions.find(subagentId) }
     val customName = arguments.jsonObjectOrNull
@@ -155,14 +154,8 @@ internal const val PHASE_LABEL_INTERVAL_MS = 5_000L
  */
 private fun parseLatestSubAgentStatus(tools: List<UIMessagePart.Tool>): SubAgentRunStatus {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        // Use `as?` casts (same defensive pattern as parseLatestCouncilStatus) — runCatching
-        // caught the throws before, but the cast version is clearer about intent and fails open.
-        val statusStr = runCatching {
-            (JsonInstant.parseToJsonElement(outputText) as? JsonObject)?.get("status")
-                ?.let { it as? JsonPrimitive }?.contentOrNull
-        }.getOrNull() ?: continue
+        val statusStr = tool.cachedSubAgentOutputJsonObject()?.get("status")
+            ?.let { it as? JsonPrimitive }?.contentOrNull ?: continue
         SubAgentRunStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
             ?.let { return it }
     }
@@ -171,16 +164,15 @@ private fun parseLatestSubAgentStatus(tools: List<UIMessagePart.Tool>): SubAgent
 
 private fun extractLatestSubAgentName(tools: List<UIMessagePart.Tool>): String? {
     for (tool in tools.asReversed()) {
-        val outputText = tool.output.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
-            ?: continue
-        val parsed = runCatching {
-            JsonInstant.parseToJsonElement(outputText) as? JsonObject
-        }.getOrNull() ?: continue
+        val parsed = tool.cachedSubAgentOutputJsonObject() ?: continue
         val name = parsed.getStringContent("subagent_name")
         if (!name.isNullOrBlank()) return name
     }
     return null
 }
+
+private fun UIMessagePart.Tool.cachedSubAgentOutputJsonObject(): JsonObject? =
+    MessageRenderCache.toolOutputJson(output) as? JsonObject
 
 private fun SubAgentRunStatus.toAgentToolStatus(): AgentToolStatus = when (this) {
     SubAgentRunStatus.RUNNING -> AgentToolStatus.RUNNING
@@ -212,7 +204,7 @@ private fun SubAgentRunSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val anchor = step.anchor
-    val arguments = remember(anchor.input) { anchor.inputAsJson() }
+    val arguments = remember(anchor.input) { MessageRenderCache.toolInputJson(anchor.input) }
     val taskObjective = remember(arguments) {
         runCatching {
             arguments.jsonObject["task"]?.jsonObject?.get("objective")?.jsonPrimitive?.contentOrNull
@@ -368,6 +360,7 @@ private fun SubAgentRunSheet(
                         content = displayText,
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                        streaming = isRunning,
                     )
                 }
             }

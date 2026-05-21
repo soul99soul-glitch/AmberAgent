@@ -5,7 +5,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.utils.JsonInstant
 
 /** Tool names whose calls represent a single subagent task and should be coalesced by run_id. */
 private val SUBAGENT_TASK_TOOLS = setOf(
@@ -107,12 +106,10 @@ private fun UIMessagePart.Tool.councilRunId(): String? {
  */
 private fun UIMessagePart.Tool.extractRunId(startToolName: String): String? = runCatching {
     if (toolName == startToolName) {
-        val outputText = output.filterIsInstance<UIMessagePart.Text>()
-            .firstOrNull()?.text ?: return@runCatching null
-        JsonInstant.parseToJsonElement(outputText).jsonObject["run_id"]
+        MessageRenderCache.toolOutputJson(output).jsonObject["run_id"]
             ?.jsonPrimitive?.contentOrNull
     } else {
-        JsonInstant.parseToJsonElement(input).jsonObject["run_id"]
+        MessageRenderCache.toolInputJson(input).jsonObject["run_id"]
             ?.jsonPrimitive?.contentOrNull
     }
 }.getOrNull()?.takeIf { it.isNotBlank() }
@@ -182,6 +179,7 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
     val result = mutableListOf<MessagePartBlock>()
     var currentThinkingSteps = mutableListOf<ThinkingStep>()
     var pendingText: UIMessagePart.Text? = null
+    var pendingTextBuilder: StringBuilder? = null
     var pendingTextIndex = -1
 
     fun flushThinkingSteps() {
@@ -216,10 +214,12 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
     }
 
     fun flushText() {
-        pendingText?.let {
-            result.add(MessagePartBlock.ContentBlock(it, pendingTextIndex))
+        pendingText?.let { textPart ->
+            val mergedText = pendingTextBuilder?.toString() ?: textPart.text
+            result.add(MessagePartBlock.ContentBlock(textPart.copy(text = mergedText), pendingTextIndex))
         }
         pendingText = null
+        pendingTextBuilder = null
         pendingTextIndex = -1
     }
 
@@ -242,10 +242,11 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
                 val previous = pendingText
                 pendingText = if (previous == null) {
                     pendingTextIndex = index
+                    pendingTextBuilder = StringBuilder(part.text)
                     part
                 } else {
+                    pendingTextBuilder?.append(part.text)
                     previous.copy(
-                        text = previous.text + part.text,
                         metadata = part.metadata ?: previous.metadata,
                     )
                 }

@@ -73,7 +73,8 @@ class AgentToolDispatcher(
                 prefetched.toolName == tool.toolName && prefetched.input == tool.input && prefetched.output.isNotEmpty()
             }
         }
-        val remaining = tools.filterNot { tool -> reused.any { it.toolCallId == tool.toolCallId } }
+        val reusedIds = reused.mapTo(HashSet()) { it.toolCallId }
+        val remaining = tools.filterNot { tool -> tool.toolCallId in reusedIds }
         if (remaining.isEmpty()) return reused
         val executed = if (remaining.size > 1 && remaining.all { tool -> canRunInParallel(tool, toolDefinitions[tool.toolName]) }) {
             coroutineScope {
@@ -106,8 +107,10 @@ class AgentToolDispatcher(
             }
             executed
         }
+        val reusedById = reused.associateBy { it.toolCallId }
+        val executedById = executed.associateBy { it.toolCallId }
         return tools.mapNotNull { tool ->
-            reused.find { it.toolCallId == tool.toolCallId } ?: executed.find { it.toolCallId == tool.toolCallId }
+            reusedById[tool.toolCallId] ?: executedById[tool.toolCallId]
         }
     }
 

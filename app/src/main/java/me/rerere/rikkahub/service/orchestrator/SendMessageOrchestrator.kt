@@ -3,6 +3,8 @@ package me.rerere.rikkahub.service.orchestrator
 import com.google.firebase.analytics.FirebaseAnalytics
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
+import me.rerere.rikkahub.data.ai.tools.parseDeepReadSlashCommand
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import kotlin.uuid.Uuid
@@ -19,6 +21,7 @@ import kotlin.uuid.Uuid
 class SendMessageOrchestrator(
     private val chatService: ChatService,
     private val analytics: FirebaseAnalytics,
+    private val eventBus: AppEventBus,
 ) {
     fun send(
         conversationId: Uuid,
@@ -28,6 +31,11 @@ class SendMessageOrchestrator(
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
         analytics.logEvent("ai_send_message", null)
+        parseDeepReadSlashCommand(content)?.let { event ->
+            if (eventBus.tryEmit(event)) {
+                return true
+            }
+        }
         return chatService.sendMessage(conversationId, content, answer, queueMode)
     }
 }

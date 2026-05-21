@@ -13,15 +13,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.ReasoningLevel
@@ -137,18 +139,20 @@ class ModelCouncilManager(
         appendEvent(runtimeRun, "started", runToPayload(run))
 
         runtimeRun.job = appScope.launch(Dispatchers.IO) {
-            val result = withTimeoutOrNull(councilSetting.totalTimeoutMs.coerceAtLeast(10_000L)) {
-                runCatching {
+            val result = try {
+                withTimeoutOrNull(settings.effectiveCouncilTotalTimeoutMs(councilSetting, task)) {
                     executeCouncil(
                         settings = settings,
                         setting = councilSetting,
                         synthesisModelId = synthesisModelId,
                         runtimeRun = runtimeRun,
                     )
-                }.getOrElse { error ->
-                    failResult(error.message ?: error::class.java.simpleName)
-                }
-            } ?: failResult("Model Council timed out.")
+                } ?: failResult("Model Council timed out.")
+            } catch (error: CancellationException) {
+                return@launch
+            } catch (error: Throwable) {
+                failResult(error.message ?: error::class.java.simpleName)
+            }
             finish(runId, result.first, result.second)
         }
         runToPayload(run)
@@ -396,22 +400,45 @@ class ModelCouncilManager(
                 seat.seatId to "--- 第 $round 轮 ---\n\n"
             }
         }
+        val providerGateByKey = runtimeRun.snapshot.seats
+            .groupingBy { seat -> settings.describeCouncilSeatModel(seat).providerGateKey(seat) }
+            .eachCount()
+            .filterValues { it > MODEL_COUNCIL_PROVIDER_PARALLELISM }
+            .mapValues { Semaphore(MODEL_COUNCIL_PROVIDER_PARALLELISM) }
         runtimeRun.snapshot.seats.map { seat ->
             async {
                 val systemPrompt = seatSystemPrompt(seat)
                 val seatFlow = seatFlows?.get(seat.seatId)
                 val priorPrefix = priorPrefixBySeat[seat.seatId].orEmpty()
+                if (priorPrefix.isNotEmpty() && seatFlow?.value != priorPrefix) {
+                    seatFlow?.value = priorPrefix
+                }
                 val modelInfo = settings.describeCouncilSeatModel(seat)
+                val providerGate = providerGateByKey[modelInfo.providerGateKey(seat)]
+                val seatTimeoutMs = setting.seatTimeoutMs.coerceAtLeast(1_000L)
                 val result = runCatching {
-                    withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
+                    val generate: suspend () -> ModelCouncilTextResult = {
                         generateSeatReply(
                             settings = settings,
                             setting = setting,
                             seat = seat,
                             systemPrompt = systemPrompt,
                             userPrompt = promptForSeat(seat),
-                            onChunk = { running -> seatFlow?.value = priorPrefix + running },
+                            onChunk = { running ->
+                                val nextLiveText = priorPrefix + running
+                                if (seatFlow?.value != nextLiveText) {
+                                    seatFlow?.value = nextLiveText
+                                }
+                            },
                         )
+                    }
+                    val timedGenerate: suspend () -> ModelCouncilTextResult = {
+                        withTimeout(seatTimeoutMs) { generate() }
+                    }
+                    if (providerGate != null) {
+                        providerGate.withPermit { timedGenerate() }
+                    } else {
+                        timedGenerate()
                     }
                 }
                 result.fold(
@@ -538,36 +565,36 @@ class ModelCouncilManager(
     }
 
     private fun appendTurn(runtimeRun: RuntimeRun, turn: ModelCouncilTurn) {
-        synchronized(runtimeRun) {
+        val next = synchronized(runtimeRun) {
             val current = runtimeRun.snapshot
-            if (!current.status.running) return
-            val next = current.copy(
+            if (!current.status.running) return@synchronized null
+            current.copy(
                 turns = current.turns + turn,
                 updatedAtMs = Instant.now().toEpochMilli(),
+            ).also { runtimeRun.snapshot = it }
+        } ?: return
+        appScope.launch(Dispatchers.IO) {
+            agentTaskStore.update(
+                taskId = next.runId,
+                status = AgentTaskStatus.RUNNING,
+                summary = "${turn.seatName}: ${(turn.content.ifBlank { turn.error }).take(700)}",
+                cancelCapability = true,
             )
-            runtimeRun.snapshot = next
-            appScope.launch(Dispatchers.IO) {
-                agentTaskStore.update(
-                    taskId = next.runId,
-                    status = AgentTaskStatus.RUNNING,
-                    summary = "${turn.seatName}: ${(turn.content.ifBlank { turn.error }).take(700)}",
-                    cancelCapability = true,
-                )
-            }
-            appendEvent(runtimeRun, "turn", runToPayload(next))
         }
+        appendEvent(runtimeRun, "turn", turnToPayload(next, turn))
     }
 
     private fun finish(runId: String, status: ModelCouncilRunStatus, result: ModelCouncilResult) {
         val runtimeRun = runs[runId] ?: return
-        val current = runtimeRun.snapshot
-        if (!current.status.running) return
-        val next = current.copy(
-            status = status,
-            result = result,
-            updatedAtMs = Instant.now().toEpochMilli(),
-        )
-        runtimeRun.snapshot = next
+        val next = synchronized(runtimeRun) {
+            val current = runtimeRun.snapshot
+            if (!current.status.running) return@synchronized null
+            current.copy(
+                status = status,
+                result = result,
+                updatedAtMs = Instant.now().toEpochMilli(),
+            ).also { runtimeRun.snapshot = it }
+        } ?: return
         appScope.launch(Dispatchers.IO) {
             agentTaskStore.update(
                 taskId = runId,
@@ -600,7 +627,10 @@ class ModelCouncilManager(
             put("created_at_ms", Instant.now().toEpochMilli())
             put("payload", payload)
         }
-        File(runtimeRun.snapshot.transcriptPath).appendText(line.toString() + "\n")
+        val transcriptPath = runtimeRun.snapshot.transcriptPath
+        synchronized(runtimeRun.transcriptLock) {
+            File(transcriptPath).appendText(line.toString() + "\n")
+        }
     }
 
     private fun runToPayload(run: ModelCouncilRun): JsonObject = buildJsonObject {
@@ -623,6 +653,16 @@ class ModelCouncilManager(
         put("seat_outputs_visible", exposeSeatOutputs)
         put("turns", encoded(run.turns.map { it.visible(exposeSeatOutputs) }))
         run.result?.let { put("result", encoded(it)) }
+    }
+
+    private fun turnToPayload(run: ModelCouncilRun, turn: ModelCouncilTurn): JsonObject = buildJsonObject {
+        val exposeSeatOutputs = settingsStore.settingsFlow.value.agentRuntime.modelCouncil.showSeatOutputs
+        put("status", run.status.name.lowercase())
+        put("run_id", run.runId)
+        put("mode", run.mode.name.lowercase())
+        put("updated_at_ms", run.updatedAtMs)
+        put("turn", encoded(turn.visible(exposeSeatOutputs)))
+        put("turn_count", run.turns.size)
     }
 
     private fun errorPayload(code: String, message: String): JsonObject = buildJsonObject {
@@ -689,11 +729,12 @@ class ModelCouncilManager(
     }
 
     private inline fun <reified T> encoded(value: T): JsonElement =
-        json.parseToJsonElement(json.encodeToString(value))
+        json.encodeToJsonElement(value)
 
     private class RuntimeRun(
         @Volatile var snapshot: ModelCouncilRun,
         @Volatile var job: Job? = null,
+        val transcriptLock: Any = Any(),
     )
 
     private data class ModelCouncilSynthesisResult(
@@ -709,6 +750,9 @@ class ModelCouncilManager(
         const val LIVE_TEXT_CAP = 64
     }
 }
+
+private const val MODEL_COUNCIL_PROVIDER_PARALLELISM = 4
+private const val MODEL_COUNCIL_TOTAL_TIMEOUT_OVERHEAD_MS = 30_000L
 
 private fun ModelCouncilTurn.visible(exposeContent: Boolean): ModelCouncilTurn {
     if (exposeContent) return this
@@ -841,6 +885,38 @@ private fun CouncilSeatModelInfo.decorateError(message: String): String {
 
 private fun CouncilSeatModelInfo.label(): String =
     listOf(providerName, modelName).filter { it.isNotBlank() }.joinToString(" / ")
+
+private fun Settings.effectiveCouncilTotalTimeoutMs(
+    setting: ModelCouncilRuntimeSetting,
+    task: ModelCouncilTaskSpec,
+): Long {
+    val seatTimeoutMs = setting.seatTimeoutMs.coerceAtLeast(1_000L)
+    val rounds = when (task.mode) {
+        ModelCouncilMode.COMPARE -> 1
+        ModelCouncilMode.DEBATE -> task.rounds.coerceAtLeast(1)
+    }
+    val maxProviderWaves = task.seats
+        .groupingBy { seat -> describeCouncilSeatModel(seat).providerGateKey(seat) }
+        .eachCount()
+        .values
+        .maxOfOrNull { count -> ((count - 1) / MODEL_COUNCIL_PROVIDER_PARALLELISM) + 1 }
+        ?: 1
+    val waveBudgetMs = seatTimeoutMs * ((rounds * maxProviderWaves) + 1L)
+    return maxOf(
+        setting.totalTimeoutMs.coerceAtLeast(10_000L),
+        waveBudgetMs + MODEL_COUNCIL_TOTAL_TIMEOUT_OVERHEAD_MS,
+    )
+}
+
+private fun CouncilSeatModelInfo.providerGateKey(seat: ModelCouncilSeat): String =
+    when (seat.runnerType) {
+        ModelCouncilSeatRunner.PROVIDER_MODEL -> providerName.ifBlank { "provider:${seat.modelId}" }
+        ModelCouncilSeatRunner.EXTERNAL_CLI -> {
+            val runtime = seat.externalRuntime.ifBlank { "default" }
+            val tool = seat.externalTool.ifBlank { "external_cli" }
+            "external:$runtime:$tool"
+        }
+    }
 
 private fun StringBuilder.appendLines(lines: List<String>) {
     if (lines.isEmpty()) {

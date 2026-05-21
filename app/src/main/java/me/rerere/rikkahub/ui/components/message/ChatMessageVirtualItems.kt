@@ -29,13 +29,10 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.ui.components.richtext.MarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
-import me.rerere.rikkahub.ui.components.richtext.cachedMarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.canRenderByTopLevelBlocks
-import me.rerere.rikkahub.ui.components.richtext.parseMarkdownContent
 import me.rerere.rikkahub.ui.components.richtext.topLevelBlockCount
 import me.rerere.rikkahub.ui.components.richtext.topLevelBlockKey
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -127,11 +124,13 @@ internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
         .filterIsInstance<UIMessagePart.Text>()
         .mapNotNull { part ->
             part.text
-                .replaceRegexes(
-                    assistant = assistant,
-                    scope = AssistantAffectScope.ASSISTANT,
-                    visual = true,
-                )
+                .let { text ->
+                    MessageRenderCache.visualRegexText(
+                        text = text,
+                        assistant = assistant,
+                        scope = AssistantAffectScope.ASSISTANT,
+                    )
+                }
                 .takeUnless(GenerativeWidgetParser::containsWidgetFence)
                 ?.takeIf(::shouldVirtualizeMarkdownContent)
         }
@@ -150,30 +149,21 @@ internal fun buildChatMessageVirtualItems(
     }
 
     val groupedParts = message.parts.groupMessageParts()
-    val thinkingStepCount = groupedParts.sumOf { block ->
-        if (block is MessagePartBlock.ThinkingBlock) block.steps.size else 0
-    }
-    val shouldSplitComplexMessage = groupedParts.size > 2 || thinkingStepCount > 1 || message.parts.size > 4
+    val shouldSplitComplexMessage = groupedParts.size > 2 || message.parts.size > 4
     var hasVirtualMarkdown = false
     val bodyItems = buildList {
         groupedParts.fastForEachIndexed { index, block ->
             when (block) {
                 is MessagePartBlock.ThinkingBlock -> {
-                    if (shouldSplitComplexMessage && block.steps.size > 1) {
-                        block.steps.fastForEachIndexed { stepIndex, step ->
-                            add(ChatMessageVirtualItem.ThinkingStepItem(step, index, stepIndex))
-                        }
-                    } else {
-                        add(ChatMessageVirtualItem.Thinking(block, index))
-                    }
+                    add(ChatMessageVirtualItem.Thinking(block, index))
                 }
                 is MessagePartBlock.ContentBlock -> {
                     val part = block.part
                     if (part is UIMessagePart.Text) {
-                        val content = part.text.replaceRegexes(
+                        val content = MessageRenderCache.visualRegexText(
+                            text = part.text,
                             assistant = assistant,
                             scope = AssistantAffectScope.ASSISTANT,
-                            visual = true,
                         )
                         if (GenerativeWidgetParser.containsWidgetFence(content)) {
                             add(ChatMessageVirtualItem.Content(block, index))
@@ -181,7 +171,7 @@ internal fun buildChatMessageVirtualItems(
                         }
                         val shouldVirtualize = shouldVirtualizeMarkdownContent(content)
                         val parseResult = if (shouldVirtualize) {
-                            cachedMarkdownParseResult(content) ?: parseMarkdownContent(content)
+                            MessageRenderCache.markdownParseResult(content)
                         } else {
                             null
                         }

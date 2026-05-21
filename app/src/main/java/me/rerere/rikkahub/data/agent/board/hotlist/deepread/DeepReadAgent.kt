@@ -135,11 +135,16 @@ class DeepReadAgent(
             return Result.failure(failure)
         }
 
+        if (output.sectionsReady() && !output.generationComplete) {
+            output = output.copy(generationComplete = true)
+            hotListRepository.saveDeepRead(topicId, topicTitle, output)
+        }
+
         // Best-effort Chinese repair only when all sections READY but content is mostly English.
         if (output.isComplete() && !output.hasEnoughChinese()) {
             repairChinese(settings, topicTitle, sources, output)?.let { repaired ->
                 val finalized = repaired.copy(sectionStates = output.sectionStates)
-                    .let { it.copy(generationComplete = it.isComplete()) }
+                    .copy(generationComplete = output.generationComplete)
                 hotListRepository.saveDeepRead(topicId, topicTitle, finalized)
                 output = finalized
             }

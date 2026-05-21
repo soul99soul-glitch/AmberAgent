@@ -43,6 +43,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,7 +68,7 @@ import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState
@@ -93,8 +94,13 @@ import java.io.ByteArrayInputStream
 import java.io.File
 
 @Composable
-fun DeepReadScreen(topicId: String, title: String) {
-    val agent: DeepReadAgent = koinInject()
+fun DeepReadScreen(
+    topicId: String,
+    title: String,
+    sourceUrl: String? = null,
+    initialForceRegenerate: Boolean = false,
+) {
+    val agent: DeepReadAgentRunManager = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val hotListRepository: HotListRepository = koinInject()
     val fontRepository: SlidesFontRepository = koinInject()
@@ -123,6 +129,7 @@ fun DeepReadScreen(topicId: String, title: String) {
     var runError by remember(topicId) { mutableStateOf<String?>(null) }
     var fullRunInFlight by remember(topicId) { mutableStateOf(false) }
     var retryingStages by remember(topicId) { mutableStateOf<Set<DeepReadGenerationStage>>(emptySet()) }
+    var initialForceConsumed by rememberSaveable(topicId, sourceUrl) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -136,7 +143,7 @@ fun DeepReadScreen(topicId: String, title: String) {
         fullRunInFlight = true
         runError = null
         scope.launch {
-            val result = agent.run(topicId = topicId, topicTitle = title, force = force)
+            val result = agent.run(topicId = topicId, topicTitle = title, force = force, seedUrl = sourceUrl)
             runError = result.exceptionOrNull()?.message
             fullRunInFlight = false
         }
@@ -147,15 +154,19 @@ fun DeepReadScreen(topicId: String, title: String) {
         retryingStages = retryingStages + stage
         scope.launch {
             try {
-                agent.runSection(topicId = topicId, topicTitle = title, stage = stage)
+                agent.runSection(topicId = topicId, topicTitle = title, stage = stage, seedUrl = sourceUrl)
             } finally {
                 retryingStages = retryingStages - stage
             }
         }
     }
 
-    LaunchedEffect(topicId, confirmed) {
-        if (confirmed) runAll(force = false)
+    LaunchedEffect(topicId, confirmed, initialForceRegenerate) {
+        if (confirmed) {
+            val shouldForce = initialForceRegenerate && !initialForceConsumed
+            if (shouldForce) initialForceConsumed = true
+            runAll(force = shouldForce)
+        }
     }
 
     LaunchedEffect(Unit) {

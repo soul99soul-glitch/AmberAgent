@@ -60,6 +60,19 @@ internal data class TimelineHistoryLoadSignal(
     val loadedNodeCount: Int,
 )
 
+internal data class FollowLayoutSignal(
+    val totalItems: Int,
+    val visibleItems: Int,
+    val bottomAnchorVisible: Boolean,
+    val lastVisibleIndex: Int,
+    val lastVisibleOffset: Int,
+    val lastVisibleSize: Int,
+    val viewportEndOffset: Int,
+    val followingBottom: Boolean,
+    val userScrollInTimeline: Boolean,
+    val scrollInProgress: Boolean,
+)
+
 internal data class TimelineScrollAnchor(
     val key: Any,
     val offset: Int,
@@ -139,7 +152,7 @@ internal fun Modifier.dashedRoundedBorder(color: Color, radius: androidx.compose
 }
 
 @Composable
-fun ChatList(
+internal fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
     timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
@@ -177,6 +190,8 @@ fun ChatList(
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     onLoadOlderTimeline: suspend () -> Unit = {},
+    onEnsureTimelineLoaded: suspend () -> Conversation = { conversation },
+    chatTimelinePlan: ChatTimelinePlan,
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -232,6 +247,8 @@ fun ChatList(
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
                 onMiniAppModify = onMiniAppModify,
                 onLoadOlderTimeline = onLoadOlderTimeline,
+                onEnsureTimelineLoaded = onEnsureTimelineLoaded,
+                chatTimelinePlan = chatTimelinePlan,
             )
         }
     }

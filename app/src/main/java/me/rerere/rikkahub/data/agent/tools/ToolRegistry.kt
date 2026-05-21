@@ -9,6 +9,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
+import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
+import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
+import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.utils.JsonInstant
 import java.util.Locale
 
@@ -336,6 +340,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("memory_") -> "memory"
     name == "agent_prompt_config" -> "prompt_config"
     name.startsWith("conversation_") || name.startsWith("session_") -> "context"
+    name.startsWith("deep_read_") -> "deep_read"
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
     name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
@@ -348,6 +353,7 @@ internal fun Tool.category(): String = when {
 
 private fun Tool.mutatesState(): Boolean {
     if (name == "memory_tool") return true
+    if (name == "deep_read_open") return true
     return name.contains("_write") ||
         name.contains("_edit") ||
         name.contains("_move") ||
@@ -364,6 +370,7 @@ private fun Tool.mutatesState(): Boolean {
         name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") ||
         name.startsWith("memory_") && name != "memory_list" ||
         name == "conversation_compact" ||
+        name == "deep_read_finish" ||
         name in setOf("subagent_start", "subagent_cancel") ||
         name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") ||
         name.startsWith("skill_enable") ||
@@ -471,6 +478,17 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
     "github_file_read" -> 220_000
     "zhihu_answer_read" -> 90_000
     "zhihu_question_read" -> 100_000
+    "model_council_status",
+    "model_council_start",
+    "model_council_wait",
+    "model_council_cancel",
+    "model_council_read" -> MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS
+
+    "subagent_start",
+    "subagent_wait",
+    "subagent_cancel",
+    "subagent_read" -> SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS
+
     else -> DEFAULT_TOOL_OUTPUT_BUDGET_CHARS
 }
 
@@ -541,3 +559,10 @@ private fun truncatedEnvelope(text: String, maxChars: Int): String {
 }
 
 private const val DEFAULT_TOOL_OUTPUT_BUDGET_CHARS = 80_000
+private const val MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS =
+    EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS *
+        DEFAULT_MODEL_COUNCIL_MAX_SEATS *
+        DEFAULT_MODEL_COUNCIL_MAX_ROUNDS +
+        512_000
+private const val SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS =
+    EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS + 64_000

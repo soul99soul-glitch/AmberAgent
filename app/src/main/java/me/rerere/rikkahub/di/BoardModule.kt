@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.HotListSafeFetcher
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListTitleLocalizer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.providers.BuiltInHotListProviders
@@ -23,6 +24,7 @@ import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
 import me.rerere.rikkahub.data.agent.office.radar.DocRadar
 import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
+import me.rerere.rikkahub.data.agent.tools.AgentToolSetFactory
 import me.rerere.rikkahub.ui.pages.board.BoardViewModel
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
@@ -47,6 +49,12 @@ val boardModule = module {
     single { HotListAggregator() }
 
     single { HotListSafeFetcher() }
+
+    single {
+        AgentToolSetFactory(
+            localTools = get(),
+        )
+    }
 
     single {
         DeepReadTemplateRepository(
@@ -79,6 +87,17 @@ val boardModule = module {
             hotListRepository = get(),
             json = get(),
             client = get(),
+        )
+    }
+
+    single {
+        DeepReadAgentRunManager(
+            settingsStore = get(),
+            generationHandler = get(),
+            hotListRepository = get(),
+            toolSetFactory = get(),
+            legacyAgent = get(),
+            appScope = get(),
         )
     }
 

@@ -6,6 +6,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 
@@ -60,6 +61,13 @@ interface OutputMessageTransformer : MessageTransformer {
     }
 }
 
+interface TailSafeOutputMessageTransformer : OutputMessageTransformer {
+    suspend fun visualTransformTail(
+        ctx: TransformerContext,
+        message: UIMessage,
+    ): UIMessage
+}
+
 suspend fun List<UIMessage>.transforms(
     transformers: List<MessageTransformer>,
     context: Context,
@@ -71,13 +79,15 @@ suspend fun List<UIMessage>.transforms(
 ): List<UIMessage> {
     val ctx = TransformerContext(context, model, assistant, settings, processingStatus, forceImageToText)
     return transformers.fold(this) { acc, transformer ->
-        transformer.transform(ctx, acc).also { output ->
+        val output = transformer.transform(ctx, acc)
+        if (output !== acc) {
             validateTransformerInvariants(
                 before = acc,
                 after = output,
                 transformerName = transformer.javaClass.simpleName
             )
         }
+        output
     }
 }
 
@@ -91,17 +101,52 @@ suspend fun List<UIMessage>.visualTransforms(
     val ctx = TransformerContext(context, model, assistant, settings)
     return transformers.fold(this) { acc, transformer ->
         if (transformer is OutputMessageTransformer) {
-            transformer.visualTransform(ctx, acc).also { output ->
+            val output = transformer.visualTransform(ctx, acc)
+            if (output !== acc) {
                 validateTransformerInvariants(
                     before = acc,
                     after = output,
                     transformerName = transformer.javaClass.simpleName
                 )
             }
+            output
         } else {
             acc
         }
     }
+}
+
+suspend fun List<UIMessage>.visualTransformsStreamingTail(
+    transformers: List<MessageTransformer>,
+    context: Context,
+    model: Model,
+    assistant: Assistant,
+    settings: Settings,
+): List<UIMessage> {
+    val tailIndex = indexOfLast { it.role == MessageRole.ASSISTANT }
+    if (tailIndex < 0) return this
+    val ctx = TransformerContext(context, model, assistant, settings)
+    var tail = this[tailIndex]
+    var changed = false
+    transformers.forEach { transformer ->
+        if (transformer is TailSafeOutputMessageTransformer) {
+            val next = transformer.visualTransformTail(ctx, tail)
+            if (next !== tail) {
+                tail = next
+                changed = true
+            }
+        }
+    }
+    if (!changed) return this
+    val output = toMutableList().also { it[tailIndex] = tail }
+    if (BuildConfig.DEBUG) {
+        validateTransformerInvariants(
+            before = this,
+            after = output,
+            transformerName = "StreamingTailVisualTransform",
+        )
+    }
+    return output
 }
 
 suspend fun List<UIMessage>.onGenerationFinish(

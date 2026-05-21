@@ -55,10 +55,13 @@ fun DeepReadOutput.withSectionStatus(
     val nextStates = sectionStates.toMutableMap()
     nextStates[stage] = DeepReadSectionState(status, errorMessage)
     val merged = copy(sectionStates = nextStates)
-    return merged.copy(generationComplete = merged.isComplete())
+    return merged.copy(generationComplete = generationComplete && merged.sectionsReady())
 }
 
 fun DeepReadOutput.isComplete(): Boolean =
+    generationComplete && sectionsReady()
+
+fun DeepReadOutput.sectionsReady(): Boolean =
     DeepReadGenerationStage.entries.all { sectionStates[it]?.status == DeepReadSectionStatus.READY }
 
 fun DeepReadOutput.hasAnyReadySection(): Boolean =
@@ -89,7 +92,7 @@ fun DeepReadOutput.withInferredSectionStates(): DeepReadOutput {
         inferred[DeepReadGenerationStage.EXTENDED_READING] = DeepReadSectionState(DeepReadSectionStatus.READY)
     }
     val merged = copy(sectionStates = inferred)
-    return merged.copy(generationComplete = merged.isComplete())
+    return merged.copy(generationComplete = legacyComplete && merged.sectionsReady())
 }
 
 @Serializable

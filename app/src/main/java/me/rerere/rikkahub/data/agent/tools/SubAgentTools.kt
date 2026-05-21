@@ -57,6 +57,7 @@ class SubAgentTools(
         //   2) @-mention escalation — if the latest user message contains @role-id, force a
         //      subagent_start delegation for that role.
         systemPrompt = { _, messages ->
+            val builtIns = subAgentManager.listBuiltIns()
             val roster = buildString {
                 appendLine("=== Available Subagents ===")
                 if (subAgentManager.runtimeMode() == SubAgentMode.SMART_DYNAMIC) {
@@ -72,7 +73,7 @@ class SubAgentTools(
                     appendLine("To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait. The user can watch the subagent's live Markdown panel; subagent_wait/read returns a compact structured result for you to synthesize.")
                 }
                 appendLine()
-                subAgentManager.listBuiltIns().forEach { agent ->
+                builtIns.forEach { agent ->
                     appendLine("@${agent.id} (${agent.name})")
                     appendLine("- ${agent.description}")
                     if (agent.routingHint.isNotBlank()) {
@@ -100,7 +101,7 @@ class SubAgentTools(
             // Full id set = built-ins + user-saved custom roles. @council belongs to the
             // ModelCouncilTools prompt so it still works when subagents are disabled.
             val rosterIds = buildSet {
-                addAll(subAgentManager.listBuiltIns().map { it.id })
+                addAll(builtIns.map { it.id })
             }
             val mentioned = messages
                 .lastOrNull { it.role == MessageRole.USER }

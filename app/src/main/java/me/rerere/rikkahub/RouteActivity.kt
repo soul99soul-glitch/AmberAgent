@@ -284,13 +284,6 @@ class RouteActivity : ComponentActivity() {
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
         val tts = rememberCustomTtsState()
         val eventBus = koinInject<AppEventBus>()
-        LaunchedEffect(tts) {
-            eventBus.events.collect { event ->
-                when (event) {
-                    is AppEvent.Speak -> tts.speak(event.text)
-                }
-            }
-        }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
         val startScreen = remember {
@@ -321,6 +314,21 @@ class RouteActivity : ComponentActivity() {
         SideEffect {
             this@RouteActivity.navStack = backStack
             this@RouteActivity.newIntentHandler = { currentIntent = it }
+        }
+        LaunchedEffect(backStack, tts) {
+            eventBus.events.collect { event ->
+                when (event) {
+                    is AppEvent.Speak -> tts.speak(event.text)
+                    is AppEvent.OpenDeepRead -> backStack.add(
+                        Screen.DeepRead(
+                            topicId = event.topicId,
+                            title = event.title,
+                            sourceUrl = event.sourceUrl,
+                            forceRegenerate = event.forceRegenerate,
+                        )
+                    )
+                }
+            }
         }
 
         ShareHandler(backStack, currentIntent)
@@ -589,7 +597,12 @@ class RouteActivity : ComponentActivity() {
                             }
 
                             entry<Screen.DeepRead> { key ->
-                                DeepReadScreen(topicId = key.topicId, title = key.title)
+                                DeepReadScreen(
+                                    topicId = key.topicId,
+                                    title = key.title,
+                                    sourceUrl = key.sourceUrl,
+                                    initialForceRegenerate = key.forceRegenerate,
+                                )
                             }
 
                             entry<Screen.SettingTodayBoard> {
@@ -917,7 +930,12 @@ sealed interface Screen : NavKey {
     data object MiniAppSettings : Screen
 
     @Serializable
-    data class DeepRead(val topicId: String, val title: String) : Screen
+    data class DeepRead(
+        val topicId: String,
+        val title: String,
+        val sourceUrl: String? = null,
+        val forceRegenerate: Boolean = false,
+    ) : Screen
 
     @Serializable
     data object SettingTodayBoard : Screen

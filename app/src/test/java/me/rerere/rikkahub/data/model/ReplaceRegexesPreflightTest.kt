@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.model
 
 import me.rerere.rikkahub.data.model.AssistantAffectScope.USER
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -157,6 +158,25 @@ class ReplaceRegexesPreflightTest {
                     rule("""(\d+)""", """$1!"""),
                 )
             )
+        )
+    }
+
+    @Test fun invalid_replacement_is_skipped_without_aborting_batch() {
+        val assistant = Assistant(
+            id = Uuid.random(),
+            regexes = listOf(
+                rule("bad", "$"),
+                rule("good", "better"),
+            ),
+        )
+
+        assertEquals(
+            "bad better",
+            "bad good".replaceRegexes(
+                assistant = assistant,
+                scope = USER,
+                visual = false,
+            ),
         )
     }
 }
