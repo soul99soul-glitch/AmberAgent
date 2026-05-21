@@ -254,6 +254,13 @@ private const val MARKDOWN_PARSE_CACHE_MAX_CHARS = 1_200_000
 private const val MARKDOWN_PERF_TAG = "AmberChatPerf"
 private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
 
+// Tag used to mark leaf-text ranges in the static AnnotatedString that
+// are eligible for per-frame reveal alpha. The annotation's value carries
+// the leaf's absolute startOffset in the source content string so the
+// overlay can map static positions back to CharRevealController offsets.
+// See applyRevealOverlay below. internal so the parity test can pin it.
+internal const val REVEAL_LEAF_TAG = "rikkahub.reveal.leaf"
+
 private data class MarkdownParseCacheKey(
     val content: String,
     val contentHash: Int,
@@ -1273,7 +1280,15 @@ private fun Paragraph(
     modifier: Modifier,
 ) {
     // dumpAst(node, content)
-    if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
+    // Cache the AST-walk result so a per-frame recomposition (triggered by
+    // revealClock subscription below) doesn't re-traverse the whole subtree
+    // just to decide between FlowRow-of-MarkdownNode (images/block-math
+    // present) and the inline AnnotatedString path. Pre-cache mirrors
+    // hasInlineMath's pattern further down.
+    val hasImageOrBlockMath = remember(node) {
+        node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null
+    }
+    if (hasImageOrBlockMath) {
         FlowRow(modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) {
             node.children.fastForEach { child ->
                 MarkdownNode(
@@ -1285,6 +1300,14 @@ private fun Paragraph(
     }
 
     val colorScheme = MaterialTheme.colorScheme
+    // Populated lazily by appendMarkdownNodeContent during static rebuilds
+    // via putIfAbsent for INLINE_LINK citation + INLINE_MATH formula
+    // keys. Lives as long as this Paragraph composable (remember without
+    // keys), so entries from previously rendered inline nodes can persist
+    // across content changes — pre-existing behavior, not introduced by
+    // the reveal-overlay refactor. Acceptable because content changes
+    // during streaming only append new inline nodes; the user doesn't
+    // edit/remove inline content mid-stream in this app.
     val inlineContents = remember {
         mutableStateMapOf<String, InlineTextContent>()
     }
@@ -1300,9 +1323,17 @@ private fun Paragraph(
         { url -> context.openUrl(url) }
     }
 
-    // Active streaming paragraphs deliberately rebuild only their AnnotatedString
-    // while reveal entries are alive. Finalized paragraphs have a null controller
-    // and stay keyed by content like the stable path.
+    // Streaming-aware text build, split into two layers so per-frame work
+    // is bounded by the active reveal window instead of the whole paragraph:
+    //   - staticAnnotated: built once per (content, theme, AST) tuple. Marks
+    //     fade-eligible leaves with REVEAL_LEAF_TAG annotations carrying the
+    //     leaf's source startOffset.
+    //   - annotatedString:  if the controller has active reveal entries,
+    //     layer per-codepoint alpha on top of staticAnnotated via
+    //     applyRevealOverlay; otherwise pass staticAnnotated through.
+    // Previously a single remember(...) keyed on revealClock rebuilt the
+    // whole AST every frame at 60 Hz — that contended with LazyColumn
+    // scroll measure/layout under concurrent tool calls.
     val revealController = LocalCharRevealController.current
     val baseColor = LocalContentColor.current
     val revealClock = revealController?.nowNanos ?: 0L
@@ -1315,13 +1346,21 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
-        val annotatedString = remember(
+        // `node` is included as a defensive key — in practice it's stable
+        // across content-equal recompositions because MarkdownParseCache
+        // returns the same root reference, so this rarely contributes to
+        // invalidations. Kept so a future cache refactor that breaks the
+        // identity invariant doesn't silently stale the static AnnotatedString.
+        val staticAnnotated = remember(
             content,
             enableLatexRendering,
             onClickUrl,
-            revealController,
-            revealClock,
             baseColor,
+            node,
+            trim,
+            colorScheme,
+            density,
+            textStyle,
         ) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
@@ -1337,9 +1376,41 @@ private fun Paragraph(
                         enableLatexRendering = enableLatexRendering,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        revealController = revealController,
                     )
                 }
+            }
+        }
+
+        // Cache the REVEAL_LEAF_TAG range list once per static AnnotatedString.
+        // getStringAnnotations(tag, ...) walks every annotation in the doc to
+        // tag-filter, including any UrlAnnotation / InlineContent annotations
+        // pushed by INLINE_LINK / INLINE_MATH. For a paragraph with dozens of
+        // citations + formulas that's O(N) per frame — exactly the kind of
+        // per-frame regression this refactor exists to prevent.
+        val revealRanges = remember(staticAnnotated) {
+            staticAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, staticAnnotated.length)
+        }
+
+        // revealClock = controller?.nowNanos ?: 0L already covers the
+        // null↔non-null transition (the clock jumps between 0 and a real
+        // nanoTime when the controller is installed/removed), so the
+        // controller reference itself isn't a needed key — keeping it
+        // would just add identity churn during the brief streaming-end
+        // window without functional benefit.
+        val annotatedString = remember(
+            staticAnnotated,
+            revealRanges,
+            revealClock,
+            baseColor,
+        ) {
+            if (
+                revealController != null &&
+                revealController.hasActiveReveals() &&
+                revealRanges.isNotEmpty()
+            ) {
+                applyRevealOverlay(staticAnnotated, revealRanges, revealController, baseColor)
+            } else {
+                staticAnnotated
             }
         }
 
@@ -1436,7 +1507,30 @@ internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownT
     )
 }
 
-private fun AnnotatedString.Builder.appendMarkdownNodeContent(
+/**
+ * Walks a markdown [ASTNode] and appends its rendered content into the
+ * receiver [AnnotatedString.Builder] — including spans for EMPH /
+ * STRONG / STRIKETHROUGH / links / code / inline math.
+ *
+ * **Reveal convention**: when adding a new arm to this function that
+ * calls `append(text)` directly (rather than recursing into children),
+ * decide whether the new arm's text should fade in during streaming.
+ *  - If YES: wrap the append in
+ *    `pushStringAnnotation(REVEAL_LEAF_TAG, node.startOffset.toString())`
+ *    / `pop()` so [applyRevealOverlay] knows to layer per-frame alpha
+ *    on it. The [shouldMarkLeafAsFadeEligible] helper encodes the
+ *    canonical gate (text-aligned-with-source + valid baseColor + not
+ *    trim'd). See the [LeafASTNode] arm for the reference pattern.
+ *  - If NO (typical for code spans, inline links, autolinks, inline
+ *    math — they have their own non-fade visual treatment and would
+ *    look weird with an alpha modulation on top): just `append(text)`
+ *    or use [withStyle], don't push the annotation.
+ *
+ * Recursing arms (EMPH / STRONG / STRIKETHROUGH / default) automatically
+ * inherit the convention because their leaf descendants land in the
+ * [LeafASTNode] arm.
+ */
+internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     node: ASTNode,
     content: String,
     trim: Boolean = false,
@@ -1448,7 +1542,6 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     onClickCitation: (String) -> Unit = {},
     onClickUrl: (String) -> Unit = {},
     baseColor: Color = Color.Unspecified,
-    revealController: CharRevealController? = null,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1466,42 +1559,25 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             val rawText = node.getTextInNode(content)
             val text = (if (trim) rawText.trim() else rawText)
                 .replace(BREAK_LINE_REGEX, "\n")
-            // B1 char-reveal: when an active controller is provided AND we
-            // have a usable baseColor, split the text by codepoint and
-            // wrap each in a SpanStyle whose alpha tracks the reveal
-            // window. baseColor=Unspecified (no LocalContentColor handed
-            // down) falls through to the fast path — visually a no-op
-            // because the reveal effect requires color modulation.
-            //
-            // Offset accuracy: the stable-prefix shortcut is only safe
-            // when this leaf text is byte-for-byte aligned with the AST
-            // source. Trimmed or <br>-collapsed leaves keep the old path.
-            if (revealController != null && baseColor != Color.Unspecified) {
-                val baseOffset = node.startOffset
-                val canAppendStablePrefix = !trim && text == rawText
-                var i = if (canAppendStablePrefix) {
-                    (revealController.stableOffsetExclusive() - baseOffset)
-                        .coerceIn(0, text.length)
-                } else {
-                    0
-                }
-                if (i > 0) {
-                    append(text, 0, i)
-                }
-                while (i < text.length) {
-                    val cp = text.codePointAt(i)
-                    val cpLen = Character.charCount(cp)
-                    val alpha = revealController.alphaAt(baseOffset + i)
-                        .coerceIn(0f, 1f)
-                    if (alpha >= 1f) {
-                        append(text, i, i + cpLen)
-                    } else {
-                        withStyle(SpanStyle(color = baseColor.copy(alpha = alpha))) {
-                            append(text, i, i + cpLen)
-                        }
-                    }
-                    i += cpLen
-                }
+            // B1 char-reveal: mark the leaf as fade-eligible iff its text is
+            // byte-for-byte aligned with the AST source (no trim, no
+            // <br>-collapse) AND we have a usable baseColor to modulate.
+            // The annotation carries the leaf's absolute startOffset so
+            // applyRevealOverlay can map static positions back to the
+            // controller's content-offset space. baseColor=Unspecified or
+            // trimmed/collapsed text falls through to a bulk append — the
+            // reveal effect requires color modulation and a 1:1 offset
+            // map, both of which fail in those cases.
+            val canFade = shouldMarkLeafAsFadeEligible(
+                rawText = rawText,
+                text = text,
+                baseColor = baseColor,
+                trim = trim,
+            )
+            if (canFade) {
+                pushStringAnnotation(REVEAL_LEAF_TAG, node.startOffset.toString())
+                append(text)
+                pop()
             } else {
                 append(text)
             }
@@ -1521,7 +1597,6 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        revealController = revealController,
                     )
                 }
             }
@@ -1541,7 +1616,6 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        revealController = revealController,
                     )
                 }
             }
@@ -1561,7 +1635,6 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
-                        revealController = revealController,
                     )
                 }
             }
@@ -1695,7 +1768,128 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
                     baseColor = baseColor,
-                    revealController = revealController,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Decides whether the [LeafASTNode] arm of [appendMarkdownNodeContent]
+ * should mark this leaf with [REVEAL_LEAF_TAG]. Extracted so the rule
+ * can be pinned by [RevealOverlayParityTest] without going through the
+ * MarkdownParser, which doesn't reliably keep `<br>` inside a single
+ * TEXT leaf and therefore can't exercise the `text == rawText` clause
+ * via end-to-end parsing.
+ *
+ * Three gates, all must pass:
+ *  - [baseColor] is not [Color.Unspecified]: the reveal effect modulates
+ *    foreground color; without a baseColor there's nothing to modulate.
+ *  - [trim] is false: ATX heading children call with trim=true, which
+ *    runs `rawText.trim()` and breaks the static↔content offset map
+ *    the overlay relies on (the controller is in content-offset space).
+ *  - [text] equals [rawText]: when BREAK_LINE_REGEX rewrites `<br>` to
+ *    `\n` the lengths differ and offset alignment is similarly broken.
+ *
+ * Failing any gate falls through to a bulk append — no fade, no
+ * annotation. This is a small behavioral change from the pre-refactor
+ * code, which attempted fade with mis-aligned alphas in the trim /
+ * `<br>` cases; the misalignment was a latent bug that always produced
+ * the wrong char-to-alpha mapping. No-fade is the safer fallback.
+ */
+internal fun shouldMarkLeafAsFadeEligible(
+    rawText: String,
+    text: String,
+    baseColor: Color,
+    trim: Boolean,
+): Boolean = baseColor != Color.Unspecified && !trim && text == rawText
+
+/**
+ * Frame-local alpha overlay for the static [AnnotatedString] produced by
+ * [appendMarkdownNodeContent]. Caller passes the pre-cached
+ * [REVEAL_LEAF_TAG] range list (caching avoids per-frame
+ * getStringAnnotations tag-filter cost — see the [remember] in
+ * [Paragraph]); for each range, computes per-codepoint alpha from
+ * [revealController] and layers a translucent color [SpanStyle] on top
+ * of the existing styling.
+ *
+ * Cost: O(unrevealed codepoints across all marked leaves). In practice
+ * this stays small because (a) the per-leaf stable-prefix shortcut
+ * skips chars whose absolute offset is below
+ * [CharRevealController.stableOffsetExclusive], so only chars inside
+ * the active fade window contribute, and (b) the reveal queue itself
+ * is degraded to instant-promote once it crosses [CharRevealController]'s
+ * BACKLOG_DEGRADE entry count, draining unrevealed codepoints quickly.
+ *
+ * Returns [static] unchanged when there's no usable [baseColor] or
+ * [ranges] is empty — preserves Color.Unspecified parity with the
+ * pre-refactor leaf-text fast path.
+ */
+internal fun applyRevealOverlay(
+    static: AnnotatedString,
+    ranges: List<AnnotatedString.Range<String>>,
+    revealController: CharRevealController,
+    baseColor: Color,
+): AnnotatedString {
+    if (baseColor == Color.Unspecified) return static
+    if (ranges.isEmpty()) return static
+    return buildAnnotatedString {
+        append(static)
+        ranges.fastForEach { range ->
+            val baseOffset = range.item.toIntOrNull() ?: return@fastForEach
+            val rangeLen = range.end - range.start
+            val stableRel = (revealController.stableOffsetExclusive() - baseOffset)
+                .coerceAtLeast(0)
+            if (stableRel >= rangeLen) return@fastForEach
+            var i = range.start + stableRel
+            val rangeEnd = range.end
+            // Batch adjacent codepoints that share the same alpha into one
+            // SpanStyle. CharRevealController slices the queue by reveal
+            // entry (whitespace / CJK / word) and every codepoint inside
+            // one entry returns the same alpha from alphaAt(), so this
+            // collapses ~5-10 per-codepoint addStyle calls per word into
+            // one — under BACKLOG_DEGRADE=80 entries this is the
+            // difference between sub-millisecond and ~3-5ms per frame
+            // worst case.
+            var runStart = -1
+            var runAlpha = 0f
+            while (i < rangeEnd) {
+                val cp = static.text.codePointAt(i)
+                val cpLen = Character.charCount(cp)
+                val alpha = revealController
+                    .alphaAt(baseOffset + (i - range.start))
+                    .coerceIn(0f, 1f)
+                if (alpha < 1f) {
+                    if (runStart < 0) {
+                        runStart = i
+                        runAlpha = alpha
+                    } else if (alpha != runAlpha) {
+                        addStyle(
+                            style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                            start = runStart,
+                            end = i,
+                        )
+                        runStart = i
+                        runAlpha = alpha
+                    }
+                } else if (runStart >= 0) {
+                    // alpha == 1f: revealed codepoint terminates any
+                    // accumulated run. The revealed codepoint itself
+                    // needs no style.
+                    addStyle(
+                        style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                        start = runStart,
+                        end = i,
+                    )
+                    runStart = -1
+                }
+                i += cpLen
+            }
+            if (runStart >= 0) {
+                addStyle(
+                    style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                    start = runStart,
+                    end = rangeEnd,
                 )
             }
         }
