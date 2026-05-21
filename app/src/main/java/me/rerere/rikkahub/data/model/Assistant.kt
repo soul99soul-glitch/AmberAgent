@@ -10,6 +10,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.memory.model.MemoryKind
 import me.rerere.rikkahub.data.memory.model.MemoryScope
+import me.rerere.rikkahub.data.model.nativebridge.RegexNativeSwitch
 import kotlin.uuid.Uuid
 
 @Serializable
@@ -90,25 +91,85 @@ fun String.replaceRegexes(
 ): String {
     if (assistant == null) return this
     if (assistant.regexes.isEmpty()) return this
-    return assistant.regexes.fold(this) { acc, regex ->
-        if (regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)) {
-            try {
-                val result = acc.replace(
-                    regex = Regex(regex.findRegex),
-                    replacement = regex.replaceString,
-                )
-                // println("Regex: ${regex.findRegex} -> ${result}")
-                result
-            } catch (e: Exception) {
-                e.printStackTrace()
-                // 如果正则表达式格式错误，返回原字符串
-                acc
-            }
-        } else {
+
+    // Filter applicable rules once so the native path can take parallel
+    // pattern + replacement arrays in one JNI call. Skip the rest of the
+    // pipeline (incl. building arrays) if nothing applies.
+    val applicable = assistant.regexes.filter { regex ->
+        regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)
+    }
+    if (applicable.isEmpty()) return this
+
+    // Phase 2 Step 3: route through RegexNativeSwitch when enabled AND no
+    // rule uses JVM-only syntax. Preflight is required because the Rust
+    // `regex` crate silently skips lookbehind / backref / possessive in
+    // patterns (and `\$` / `$<name>` in replacements), producing different
+    // output without throwing — fallback can't detect it. When the preflight
+    // flags any JVM-only rule we route the whole batch to JVM to preserve
+    // per-rule semantic parity. See `RegexNativeSwitch` class KDoc.
+    if (RegexNativeSwitch.isEnabled() && !containsJvmOnlyRegexSyntax(applicable)) {
+        val patterns = Array(applicable.size) { applicable[it].findRegex }
+        val replacements = Array(applicable.size) { applicable[it].replaceString }
+        RegexNativeSwitch.applyOrNull(
+            input = this,
+            findPatterns = patterns,
+            replacements = replacements,
+            jvmFallback = { applyRegexesJvm(this, applicable) },
+        )?.let { return it }
+    }
+
+    return applyRegexesJvm(this, applicable)
+}
+
+/**
+ * Detect any rule that uses Java `Pattern` syntax the Rust `regex` crate
+ * doesn't support (and would silently skip, producing a divergent output).
+ *
+ * Detects, in **pattern** strings:
+ * - lookbehind: `(?<=...)`, `(?<!...)`
+ * - lookahead:  `(?=...)`, `(?!...)`
+ * - atomic group: `(?>...)`
+ * - backreference: `\1` through `\9` (only `\` followed by single digit;
+ *   `\10` etc. are rare and we accept under-coverage there)
+ * - possessive quantifier: `?+`, `*+`, `++`
+ *
+ * Detects, in **replacement** strings:
+ * - literal-dollar Java syntax: `\$`
+ * - named-group Java syntax: `$<name>` (Rust uses `${name}` or `$name`)
+ *
+ * Pure prefilter — no compilation, no DFA, no allocations beyond the
+ * `Regex.containsMatchIn` internal state. Safe to run per-message.
+ */
+private fun containsJvmOnlyRegexSyntax(rules: List<AssistantRegex>): Boolean {
+    return rules.any { rule ->
+        JVM_ONLY_PATTERN_SYNTAX.containsMatchIn(rule.findRegex) ||
+            JVM_ONLY_REPLACEMENT_SYNTAX.containsMatchIn(rule.replaceString)
+    }
+}
+
+private val JVM_ONLY_PATTERN_SYNTAX = Regex(
+    """\(\?<[=!]|\(\?[=!]|\(\?>|\\[1-9]|[?*+]\+"""
+)
+private val JVM_ONLY_REPLACEMENT_SYNTAX = Regex(
+    """\\\$|\$<"""
+)
+
+/** JVM regex pipeline preserved as the sole fallback path. Identical to the
+ *  fold body that was inline before Phase 2 Step 3 — invalid patterns are
+ *  caught per-rule and skipped (acc passes through unchanged), so a single
+ *  malformed rule doesn't break the whole chain. */
+private fun applyRegexesJvm(input: String, rules: List<AssistantRegex>): String =
+    rules.fold(input) { acc, regex ->
+        try {
+            acc.replace(
+                regex = Regex(regex.findRegex),
+                replacement = regex.replaceString,
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
             acc
         }
     }
-}
 
 /**
  * 注入位置

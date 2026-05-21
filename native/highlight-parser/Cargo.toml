@@ -12,11 +12,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni.workspace = true
+jni-common.workspace = true
 tree-sitter.workspace = true
 tree-sitter-highlight.workspace = true
 thiserror.workspace = true
 log.workspace = true
-android_logger.workspace = true
 
 # Grammar bundle. Each ~150-500KB. Total ~5-7MB stripped.
 tree-sitter-rust.workspace = true

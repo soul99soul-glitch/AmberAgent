@@ -25,6 +25,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.document.DocxParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
+import me.rerere.document.nativebridge.OfficeNativeSwitch
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.agent.workspace.WorkspacePaths
@@ -275,10 +276,21 @@ class WorkspaceArtifactTools(
             trackArtifactTool("office_read", "读取 Office 文档", input) {
                 val path = input.requiredString("path")
                 val text = withTempWorkspaceFile(path) { file ->
+                    // Phase 2 Step 1: route docx/pptx/epub through OfficeNativeSwitch.
+                    // Phase 3 D-1: xlsx also routes through Switch (net-new,
+                    // no JVM XlsxParser; fallback is the in-app `parseXlsxText`
+                    // helper; diff sampling for xlsx is hard-gated off until a
+                    // JVM-side byte baseline exists).
                     when (path.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
-                        "docx" -> DocxParser.parse(file)
-                        "pptx" -> PptxParser.parse(file)
-                        "xlsx" -> parseXlsxText(file)
+                        "docx" -> OfficeNativeSwitch.parseDocxOrNull(file) {
+                            DocxParser.parse(file)
+                        } ?: DocxParser.parse(file)
+                        "pptx" -> OfficeNativeSwitch.parsePptxOrNull(file) {
+                            PptxParser.parse(file)
+                        } ?: PptxParser.parse(file)
+                        "xlsx" -> OfficeNativeSwitch.parseXlsxOrNull(file) {
+                            parseXlsxText(file)
+                        } ?: parseXlsxText(file)
                         else -> error("Unsupported Office extension: $path")
                     }
                 }

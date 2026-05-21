@@ -14,6 +14,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.google.firebase.Firebase
+import com.google.firebase.crashlytics.crashlytics
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -46,6 +48,7 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
+import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
@@ -104,6 +107,18 @@ class RikkaHubApp : Application() {
             setDefaultsAsync(R.xml.remote_config_defaults)
             fetchAndActivate()
         }
+
+        // Wire Phase-2 Rust JNI production switches to user prefs + Remote Config
+        // + Crashlytics. Default state stays JVM-only (see SPIKE_PLAN §8.3).
+        // A failure here leaves every Switch on DisabledConfig (safe), so we
+        // record it to Crashlytics rather than let it pass silently —
+        // otherwise an entire opt-in cohort would never see the native path
+        // and we'd notice only via metrics (review P2-5).
+        runCatching { get<NativePathBootstrap>().install() }
+            .onFailure {
+                Log.e(TAG, "NativePathBootstrap.install failed; native path stays disabled", it)
+                runCatching { Firebase.crashlytics.recordException(it) }
+            }
 
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()

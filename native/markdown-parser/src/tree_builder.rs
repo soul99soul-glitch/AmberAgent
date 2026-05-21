@@ -237,21 +237,8 @@ fn encode_string(s: &str, out: &mut Vec<u8>) {
     // byte payloads (long code-fence langs / link hrefs) would silently
     // truncate via `as u16` wrap. Varint scales without ceiling (review P2 fix).
     let bytes = s.as_bytes();
-    write_varint_to(bytes.len() as u64, out);
+    jni_common::write_varint(bytes.len() as u64, out);
     out.extend_from_slice(bytes);
-}
-
-fn write_varint_to(mut value: u64, out: &mut Vec<u8>) {
-    loop {
-        let byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value == 0 {
-            out.push(byte);
-            return;
-        } else {
-            out.push(byte | 0x80);
-        }
-    }
 }
 
 /// Given a TagEnd, return the corresponding Start Tag in a no-payload form

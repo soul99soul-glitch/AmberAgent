@@ -21,6 +21,7 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.highlight.HighlightToken.Token.StringContent
+import me.rerere.highlight.nativebridge.HighlightNativeSwitch
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -52,7 +53,24 @@ class Highlighter(ctx: Context) {
         context.globalObject.getJSFunction("highlight")
     }
 
-    suspend fun highlight(code: String, language: String) =
+    /**
+     * Phase 2 Step 2: route through [HighlightNativeSwitch] which gates on
+     * `NativePathPrefs.highlight` (default false). When disabled or native
+     * fails, the existing QuickJS+Prism JVM path runs unchanged.
+     *
+     * The diff-sampling JVM call (`samplingRate > 0`) lives inside the
+     * Switch's lambda and uses the same [highlightJvm] entry, so a sampled
+     * run pays exactly one extra JVM execution — no double-execution in the
+     * steady-state non-sampled path.
+     */
+    suspend fun highlight(code: String, language: String): List<HighlightToken> {
+        HighlightNativeSwitch.highlightOrNull(code, language) {
+            highlightJvm(code, language)
+        }?.let { return it }
+        return highlightJvm(code, language)
+    }
+
+    private suspend fun highlightJvm(code: String, language: String): List<HighlightToken> =
         suspendCancellableCoroutine { continuation ->
             executor.submit {
                 runCatching {

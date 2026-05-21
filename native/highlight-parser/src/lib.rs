@@ -13,7 +13,6 @@ mod packed_tokens;
 mod scope_mapping;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::OnceLock;
 
 use jni::objects::{JClass, JObjectArray, JString};
 use jni::sys::{jbyteArray, jobjectArray};
@@ -27,7 +26,7 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_h
     code: JString<'local>,
     language: JString<'local>,
 ) -> jbyteArray {
-    init_logger_once();
+    jni_common::init_logger_once!("RustHighlightParser");
 
     let code_str: String = match env.get_string(&code) {
         Ok(s) => s.into(),
@@ -56,7 +55,7 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_h
         Err(panic) => {
             log::error!(
                 "highlight-parser: native panic: {:?}",
-                panic_to_string(&panic)
+                jni_common::panic_to_string(&panic)
             );
             empty_array(&mut env)
         }
@@ -74,7 +73,7 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_s
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jobjectArray {
-    init_logger_once();
+    jni_common::init_logger_once!("RustHighlightParser");
     let result = catch_unwind(AssertUnwindSafe(|| build_supported_languages_array(&mut env)));
     match result {
         Ok(arr) => arr,
@@ -150,35 +149,6 @@ fn highlight_to_packed(code: &str, language: &str) -> Vec<u8> {
             packed_tokens::pack_plain_only(code)
         }
     }
-}
-
-fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        // Best-effort: include runtime type name so crash logs are debuggable
-        // (P3 sweep — propagate office-parsers' improved variant).
-        format!(
-            "non-string panic payload (type_name = {})",
-            std::any::type_name_of_val(&**payload)
-        )
-    }
-}
-
-fn init_logger_once() {
-    static INIT: OnceLock<()> = OnceLock::new();
-    INIT.get_or_init(|| {
-        #[cfg(target_os = "android")]
-        {
-            android_logger::init_once(
-                android_logger::Config::default()
-                    .with_max_level(log::LevelFilter::Info)
-                    .with_tag("RustHighlightParser"),
-            );
-        }
-    });
 }
 
 #[cfg(test)]

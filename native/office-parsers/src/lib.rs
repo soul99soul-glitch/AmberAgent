@@ -12,6 +12,7 @@
 mod docx;
 mod pptx;
 mod epub;
+mod xlsx;
 mod error;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -45,36 +46,31 @@ fn rust_to_jstring(env: &mut JNIEnv, s: &str) -> jstring {
     }
 }
 
-/// Top-level helper: dispatches to the supplied closure and converts any
-/// panic into a sentinel error string so the JNI boundary is panic-safe.
+/// Top-level helper: dispatches to the supplied closure and signals panic vs.
+/// soft-error distinctly back to the JNI caller.
+///
+/// - Closure returns a String (potentially the JVM-compatible
+///   "Error parsing ..." sentinel for soft errors like IO / zip / xml): we
+///   pass that String through as the success value, matching the legacy JVM
+///   contract.
+/// - Closure panics: we return `null` (`std::ptr::null_mut()`) so the
+///   Kotlin adapter sees `parseDocxNative(...) == null`, downgrades to
+///   `Result.NativeUnavailable`, and the Switch routes the event through
+///   `cfg.onNativePanic` + JVM fallback (Codex review P1-1). Previously the
+///   panic string was returned as a success value, so the caller silently
+///   showed `"Error parsing DOCX file: native panic — ..."` to the user
+///   instead of falling back.
 fn safe_parse<F>(env: &mut JNIEnv, kind: &str, f: F) -> jstring
 where
     F: FnOnce() -> String,
 {
-    let result = catch_unwind(AssertUnwindSafe(f));
-    let s = match result {
-        Ok(s) => s,
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(s) => rust_to_jstring(env, &s),
         Err(panic_payload) => {
-            let msg = panic_to_string(&panic_payload);
+            let msg = jni_common::panic_to_string(&panic_payload);
             log::error!("native {} parser panicked: {}", kind, msg);
-            format!("Error parsing {} file: native panic — {}", kind, msg)
+            std::ptr::null_mut()
         }
-    };
-    rust_to_jstring(env, &s)
-}
-
-fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        // Best-effort diagnostic — record the runtime type name so future
-        // crash logs are not just "non-string panic payload".
-        format!(
-            "non-string panic payload (type_name = {})",
-            std::any::type_name_of_val(&**payload)
-        )
     }
 }
 
@@ -92,7 +88,7 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
     _class: JClass<'local>,
     path: JString<'local>,
 ) -> jstring {
-    init_logger_once();
+    jni_common::init_logger_once!("RustOfficeParsers");
     let path_str = match jstring_to_rust(&mut env, path) {
         Ok(p) => p,
         Err(e) => return rust_to_jstring(&mut env, &format!("Error parsing DOCX file: bad path — {}", e)),
@@ -107,7 +103,7 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
     _class: JClass<'local>,
     path: JString<'local>,
 ) -> jstring {
-    init_logger_once();
+    jni_common::init_logger_once!("RustOfficeParsers");
     let path_str = match jstring_to_rust(&mut env, path) {
         Ok(p) => p,
         Err(e) => return rust_to_jstring(&mut env, &format!("Error parsing PPTX file: bad path — {}", e)),
@@ -122,7 +118,7 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
     _class: JClass<'local>,
     path: JString<'local>,
 ) -> jstring {
-    init_logger_once();
+    jni_common::init_logger_once!("RustOfficeParsers");
     let path_str = match jstring_to_rust(&mut env, path) {
         Ok(p) => p,
         Err(e) => return rust_to_jstring(&mut env, &format!("Error parsing EPUB file: bad path — {}", e)),
@@ -130,20 +126,22 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
     safe_parse(&mut env, "EPUB", || epub::parse_to_markdown(&path_str))
 }
 
-fn init_logger_once() {
-    // Standardized to OnceLock across all crates (P3 sweep).
-    use std::sync::OnceLock;
-    static INIT: OnceLock<()> = OnceLock::new();
-    INIT.get_or_init(|| {
-        #[cfg(target_os = "android")]
-        {
-            android_logger::init_once(
-                android_logger::Config::default()
-                    .with_max_level(log::LevelFilter::Info)
-                    .with_tag("RustOfficeParsers"),
-            );
-        }
-    });
+/// JNI entry: `OfficeParserNative.parseXlsxNative(path: String): String`.
+///
+/// Phase 3 D-1 — net-new (no JVM `XlsxParser` exists). Markdown-pipe-table
+/// representation of every sheet, see `xlsx::parse_to_markdown`.
+#[no_mangle]
+pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_parseXlsxNative<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    path: JString<'local>,
+) -> jstring {
+    jni_common::init_logger_once!("RustOfficeParsers");
+    let path_str = match jstring_to_rust(&mut env, path) {
+        Ok(p) => p,
+        Err(e) => return rust_to_jstring(&mut env, &format!("Error parsing XLSX file: bad path — {}", e)),
+    };
+    safe_parse(&mut env, "XLSX", || xlsx::parse_to_markdown(&path_str))
 }
 
 #[cfg(test)]

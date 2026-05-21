@@ -12,11 +12,12 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni.workspace = true
+jni-common.workspace = true
 quick-xml.workspace = true
 zip.workspace = true
+calamine.workspace = true
 thiserror.workspace = true
 log.workspace = true
-android_logger.workspace = true
 
 [dev-dependencies]
 # Used by integration tests to compare against JVM-equivalent outputs

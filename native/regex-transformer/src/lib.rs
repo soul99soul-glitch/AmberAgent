@@ -38,7 +38,7 @@ pub extern "system" fn Java_me_rerere_rikkahub_data_model_nativebridge_RegexTran
     find_patterns: JObjectArray<'local>,
     replacements: JObjectArray<'local>,
 ) -> jstring {
-    init_logger_once();
+    jni_common::init_logger_once!("RustRegexTransformer");
 
     let input_str: String = match env.get_string(&input) {
         Ok(s) => String::from(s),
@@ -67,7 +67,7 @@ pub extern "system" fn Java_me_rerere_rikkahub_data_model_nativebridge_RegexTran
         Err(panic) => {
             log::error!(
                 "regex-transformer: native panic: {:?}",
-                panic_to_string(&panic)
+                jni_common::panic_to_string(&panic)
             );
             std::ptr::null_mut()
         }
@@ -134,35 +134,6 @@ enum RegexTransformerError {
 
     #[error("array length mismatch: finds={finds}, replacements={reps}")]
     ArrayLengthMismatch { finds: usize, reps: usize },
-}
-
-fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        format!(
-            "non-string panic payload (type_name = {})",
-            std::any::type_name_of_val(&**payload)
-        )
-    }
-}
-
-fn init_logger_once() {
-    // Standardized to OnceLock across all crates (P3 sweep).
-    use std::sync::OnceLock;
-    static INIT: OnceLock<()> = OnceLock::new();
-    INIT.get_or_init(|| {
-        #[cfg(target_os = "android")]
-        {
-            android_logger::init_once(
-                android_logger::Config::default()
-                    .with_max_level(log::LevelFilter::Info)
-                    .with_tag("RustRegexTransformer"),
-            );
-        }
-    });
 }
 
 #[cfg(test)]

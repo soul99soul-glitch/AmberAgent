@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni.workspace = true
+jni-common.workspace = true
 regex.workspace = true
 thiserror.workspace = true
 log.workspace = true
-android_logger.workspace = true
