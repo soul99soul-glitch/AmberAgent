@@ -15,7 +15,6 @@ import me.rerere.rikkahub.data.agent.board.hotlist.HotListAggregator
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListSafeFetcher
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListTitleLocalizer
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
@@ -81,22 +80,11 @@ val boardModule = module {
     }
 
     single {
-        DeepReadAgent(
-            settingsStore = get(),
-            providerManager = get(),
-            hotListRepository = get(),
-            json = get(),
-            client = get(),
-        )
-    }
-
-    single {
         DeepReadAgentRunManager(
             settingsStore = get(),
             generationHandler = get(),
             hotListRepository = get(),
             toolSetFactory = get(),
-            legacyAgent = get(),
             appScope = get(),
         )
     }

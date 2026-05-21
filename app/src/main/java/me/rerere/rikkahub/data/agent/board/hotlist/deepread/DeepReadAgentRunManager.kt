@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.ui.UIMessage
@@ -32,7 +33,6 @@ class DeepReadAgentRunManager(
     private val generationHandler: GenerationHandler,
     private val hotListRepository: HotListRepository,
     private val toolSetFactory: AgentToolSetFactory,
-    private val legacyAgent: DeepReadAgent,
     private val appScope: AppScope,
 ) {
     private val mutexes = ConcurrentHashMap<String, Mutex>()
@@ -107,14 +107,7 @@ class DeepReadAgentRunManager(
         val resolvedModel = resolveModel(settings)
             ?: return Result.failure(IllegalStateException("请先配置今日看板模型或主聊天模型"))
         if (ModelAbility.TOOL !in resolvedModel.abilities) {
-            if (!seedUrl.isNullOrBlank()) {
-                return Result.failure(IllegalStateException("链接深度阅读需要支持工具调用的模型，以便读取指定 URL 并交叉核查。"))
-            }
-            return if (stages.size == 1) {
-                legacyAgent.runSection(topicId = topicId, topicTitle = topicTitle, stage = stages.single())
-            } else {
-                legacyAgent.run(topicId = topicId, topicTitle = topicTitle, force = force)
-            }
+            return Result.failure(IllegalStateException("深度阅读需要配置支持工具调用的模型"))
         }
         val model = resolvedModel.withBoardRequestOptions(settings)
         val writer = DeepReadSectionWriterTools(
@@ -146,28 +139,32 @@ class DeepReadAgentRunManager(
             )
             repeat(MAX_SUPERVISOR_PASSES) { pass ->
                 val beforeWrites = writer.writeCount
-                messages = collectRun(
-                    settings = hiddenSettings,
-                    model = model,
-                    messages = messages,
-                    assistant = assistant,
-                    tools = tools,
-                    writerToolNames = writerTools.map { it.name }.toSet(),
-                    statusLabel = "深度阅读 ${stages.joinToString(" / ") { it.label }}",
-                )
+                messages = withTimeout(collectRunTimeoutFor(stages)) {
+                    collectRun(
+                        settings = hiddenSettings,
+                        model = model,
+                        messages = messages,
+                        assistant = assistant,
+                        tools = tools,
+                        writerToolNames = writerTools.map { it.name }.toSet(),
+                        statusLabel = "深度阅读 ${stages.joinToString(" / ") { it.label }}",
+                    )
+                }
                 val current = writer.currentOutput()
                 if (stages.all { current.statusOf(it) == DeepReadSectionStatus.READY }) {
                     if (writer.verificationCount == 0) {
                         messages = messages + UIMessage.user(buildVerificationReminder(topicTitle, current))
-                        messages = collectRun(
-                            settings = hiddenSettings,
-                            model = model,
-                            messages = messages,
-                            assistant = assistant,
-                            tools = tools,
-                            writerToolNames = writerTools.map { it.name }.toSet(),
-                            statusLabel = "深度阅读 验真",
-                        )
+                        messages = withTimeout(VERIFICATION_COLLECT_RUN_TIMEOUT_MS) {
+                            collectRun(
+                                settings = hiddenSettings,
+                                model = model,
+                                messages = messages,
+                                assistant = assistant,
+                                tools = tools,
+                                writerToolNames = writerTools.map { it.name }.toSet(),
+                                statusLabel = "深度阅读 验真",
+                            )
+                        }
                     }
                     if (!writer.hasFreshVerification) {
                         return@runCatching writer.markVerificationFailed("验真未完成：Agent 没有在最终写入后调用 deep_read_verify_claims。")
@@ -448,10 +445,21 @@ class DeepReadAgentRunManager(
     private fun firstFailure(output: DeepReadOutput): String? =
         DeepReadGenerationStage.entries.firstNotNullOfOrNull { output.errorOf(it) }
 
+    private fun collectRunTimeoutFor(stages: List<DeepReadGenerationStage>): Long =
+        COLLECT_RUN_BASE_TIMEOUT_MS + stages.size * COLLECT_RUN_PER_STAGE_TIMEOUT_MS
+
     companion object {
         private const val TAG = "DeepReadAgentRunManager"
         private const val MAX_GENERATION_STEPS = 32
         private const val MAX_SUPERVISOR_PASSES = 2
+
+        // Hard timeouts so a stuck generation cannot hang the hidden run forever.
+        // Total budget per supervisor pass scales with how many sections the model
+        // needs to produce in this single collectRun call. Verification is a fixed
+        // short follow-up pass that should not need long search loops.
+        private const val COLLECT_RUN_BASE_TIMEOUT_MS = 30_000L
+        private const val COLLECT_RUN_PER_STAGE_TIMEOUT_MS = 60_000L
+        private const val VERIFICATION_COLLECT_RUN_TIMEOUT_MS = 60_000L
     }
 }
 
