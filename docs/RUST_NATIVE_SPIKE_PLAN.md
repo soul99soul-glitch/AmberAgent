@@ -466,11 +466,50 @@ Phase 1 关心**代码与架构正确性**：JNI 安全、fallback 完整、wire
 - ⏳ 真实 corpus（`native/<component>/tests/corpus/`）建库：每组件 5-10 个真实样本
 - ⏳ JVM/Rust 输出 diff harness：office 输出字符串等价 / markdown AST 节点 N 对得上 / highlight scope ≥80% 一致
 - ⏳ benchmark harness：单 device 真实测速，验证 SPIKE_PLAN §3.3/§4.4/§5.4 的加速比阈值
-- ⏳ 3-variant Android assemble (Debug/Notion/Refactortest) + testDebugUnitTest baseline 保持
-- ⏳ APK size 增量在 `arm64-v8a` 上量出来跟预期匹配
+- ⏳ AAB release build size 增量在 `arm64-v8a` 上量出来跟预期匹配
+- ⏳ CI job 显式断言 cargo-ndk 真产出了 `.so`（防止当前 `onlyIf` 守卫让 CI "绿但没打 .so"，Codex Round 3 follow-up）
 - ⏳ SPIKE_REPORT.md：决策会用
 
-**不达标的部分**：单独 abandon 该组件，不影响其他组件。如果 Phase 2 acceptance 不过，**spike 也不会自动落地到生产**——所有 Kotlin adapter 写法都 lazy load + fallback to JVM，即使 `.so` 缺失也不崩。
+### 8.3 ⛔ Phase 2 **HARD GATE** — 接入生产前必须满足
+
+**只要任一 production caller 切到 native 路径（即 `DocxParser.kt` /
+`MarkdownNew.kt` / `Highlighter.kt` / `replaceRegexes` 在调 `nativebridge.*Native`
+而不是当前的 JVM 实现），必须在合 PR **之前** 满足以下所有条件**：
+
+1. **Feature flag / kill switch**：BuildConfig 或运行时 setting（如
+   `agentRuntime.useNativeRust = false` 默认 false），可由用户 / 远端配置 /
+   实验 framework 单向切回 JVM 而不需要发新版
+2. **默认走 JVM**：feature flag 默认值是 `false` / "jvm"，灰度时 opt-in
+3. **灰度启用**：按 device cohort / user id hash / build variant 分批
+   启用（先 Notion variant → Debug variant → 5% 用户 → 25% → 100%）
+4. **Crashlytics 接入**：native panic / load failure / output divergence
+   单独 tag，dashboard 可分流监控
+5. **观测**：JVM vs Rust 输出 diff 在生产用 sampling 抓回来做事后分析
+6. **Revert plan**：合 main 走 merge commit；接入生产的 PR 也走 merge commit。
+   任何 incident 都可以 `git revert <merge>` 单步回滚（合并方式正是为此选 merge）
+
+**不达标的部分**：单独 abandon 该组件，不影响其他组件。Phase 2 acceptance
+不过的话 **spike 也不会自动落地到生产**——本 spike 合 main 的 PR
+保持 zero-侵入（`DocxParser.kt` 等 0 行改动），所有 Kotlin adapter 写法都
+lazy load + fallback to JVM，即使 `.so` 缺失也不崩。
+
+### 8.4 本次合 main PR 的边界
+
+**这次合 main 的范围**（PR #9）：
+- ✅ 4 个 Rust crate 落 `native/`
+- ✅ 4 个 Kotlin nativebridge adapter 落 `nativebridge/` 子包
+- ✅ 3 个 Android module 的 build.gradle.kts 加 hand-rolled `cargo-ndk` Exec task
+- ✅ docs/ + native/Cargo.toml 等基础设施
+- ✅ `panic = "unwind"` 等 release profile 配置
+
+**这次合 main **明确不做** 的**：
+- ❌ 任何 production caller 切换到 native 路径
+- ❌ feature flag 接入
+- ❌ Crashlytics 接入
+- ❌ 任何 byte-for-byte 等价性 / benchmark / 真机数据证据
+
+→ **合 main 后 native 路径默认不被调用**。这是 Phase 1 structural prototype，
+不是产品功能。任何后续切换都走 §8.3 hard gate。
 
 ---
 
