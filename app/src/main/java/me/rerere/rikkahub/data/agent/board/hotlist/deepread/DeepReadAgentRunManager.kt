@@ -2,6 +2,10 @@ package me.rerere.rikkahub.data.agent.board.hotlist.deepread
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -14,8 +18,6 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.board.boardRequestBodies
 import me.rerere.rikkahub.data.agent.board.boardRequestHeaders
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
-import me.rerere.rikkahub.data.agent.board.hotlist.HotTopic
-import me.rerere.rikkahub.data.agent.board.hotlist.presentationTitle
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
 import me.rerere.rikkahub.data.agent.subagent.toIsolatedSubAgentSettings
 import me.rerere.rikkahub.data.agent.tools.AgentToolSetFactory
@@ -137,59 +139,146 @@ class DeepReadAgentRunManager(
 
         return runCatching {
             writer.markRunning(stages)
-            var messages = listOf(
-                UIMessage.user(
-                    buildPrompt(
-                        topicTitle = topicTitle,
-                        stages = stages,
-                        existingOutput = writer.currentOutput(),
-                        seedUrl = seedUrl,
-                        scrapeWebAvailable = scrapeWebAvailable,
-                        prefetchedSources = prefetchedSources,
+            val writerToolNamesSet = writerTools.map { it.name }.toSet()
+
+            // Each stage runs its own bounded supervisor loop. Wrapping
+            // withTimeout failures here keeps a stalled stage from cancelling
+            // a parallel sibling in the NARRATIVE ∥ ANALYSIS group below.
+            suspend fun runStageSupervisorLoop(stage: DeepReadGenerationStage) {
+                val singleStage = listOf(stage)
+                var messages = listOf(
+                    UIMessage.user(
+                        buildPrompt(
+                            topicTitle = topicTitle,
+                            stages = singleStage,
+                            existingOutput = writer.currentOutput(),
+                            seedUrl = seedUrl,
+                            scrapeWebAvailable = scrapeWebAvailable,
+                            prefetchedSources = prefetchedSources,
+                        )
                     )
                 )
-            )
-            repeat(MAX_SUPERVISOR_PASSES) { pass ->
-                val beforeWrites = writer.writeCount
-                messages = withTimeout(collectRunTimeoutFor(stages)) {
-                    collectRun(
-                        settings = hiddenSettings,
-                        model = model,
-                        messages = messages,
-                        assistant = assistant,
-                        tools = tools,
-                        writerToolNames = writerTools.map { it.name }.toSet(),
-                        statusLabel = "深度阅读 ${stages.joinToString(" / ") { it.label }}",
-                    )
-                }
-                val current = writer.currentOutput()
-                if (stages.all { current.statusOf(it) == DeepReadSectionStatus.READY }) {
-                    if (writer.verificationCount == 0) {
-                        messages = messages + UIMessage.user(buildVerificationReminder(topicTitle, current))
-                        messages = withTimeout(VERIFICATION_COLLECT_RUN_TIMEOUT_MS) {
+                try {
+                    repeat(MAX_SUPERVISOR_PASSES) { pass ->
+                        val beforeWrites = writer.writeCount
+                        messages = withTimeout(collectRunTimeoutFor(singleStage)) {
                             collectRun(
                                 settings = hiddenSettings,
                                 model = model,
                                 messages = messages,
                                 assistant = assistant,
                                 tools = tools,
-                                writerToolNames = writerTools.map { it.name }.toSet(),
-                                statusLabel = "深度阅读 验真",
+                                writerToolNames = writerToolNamesSet,
+                                statusLabel = "深度阅读 ${stage.label}",
                             )
                         }
+                        if (writer.currentOutput().statusOf(stage) == DeepReadSectionStatus.READY) {
+                            return
+                        }
+                        if (writer.writeCount == beforeWrites) {
+                            messages = messages + UIMessage.user(buildWriterReminder(singleStage, pass))
+                        }
                     }
-                    if (!writer.hasFreshVerification) {
-                        return@runCatching writer.markVerificationFailed("验真未完成：Agent 没有在最终写入后调用 deep_read_verify_claims。")
+                } catch (timeout: TimeoutCancellationException) {
+                    Log.w(TAG, "deep read stage ${stage.label} timed out", timeout)
+                    if (writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
+                        writer.markFailed(stage, "${stage.label}超时未完成。")
                     }
-                    return@runCatching finishIfPossible(writer)
-                }
-                if (writer.writeCount == beforeWrites) {
-                    messages = messages + UIMessage.user(buildWriterReminder(stages, pass))
+                } catch (cancel: CancellationException) {
+                    // External cancellation (e.g., user navigated away or parent
+                    // job cancelled) must propagate so the whole DeepRead run
+                    // stops cleanly.
+                    throw cancel
+                } catch (other: Throwable) {
+                    // Local failure — keep the sibling parallel stage alive by
+                    // not letting this exception escape the coroutineScope. The
+                    // outer runCatching will not see it either, since we mark
+                    // the section FAILED here and return normally.
+                    Log.e(TAG, "deep read stage ${stage.label} failed", other)
+                    if (writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
+                        writer.markFailed(
+                            stage,
+                            "${stage.label}生成失败：${other.message ?: other::class.simpleName.orEmpty()}",
+                        )
+                    }
                 }
             }
 
-            val current = writer.currentOutput()
-            val missing = stages.filter { current.statusOf(it) != DeepReadSectionStatus.READY }
+            // Global verification pass; only runs after all targeted stages
+            // reach READY. Single collectRun with the verify reminder.
+            suspend fun runVerificationPass() {
+                val current = writer.currentOutput()
+                val verifyMessages = listOf(
+                    UIMessage.user(buildVerificationReminder(topicTitle, current)),
+                )
+                try {
+                    withTimeout(VERIFICATION_COLLECT_RUN_TIMEOUT_MS) {
+                        collectRun(
+                            settings = hiddenSettings,
+                            model = model,
+                            messages = verifyMessages,
+                            assistant = assistant,
+                            tools = tools,
+                            writerToolNames = writerToolNamesSet,
+                            statusLabel = "深度阅读 验真",
+                        )
+                    }
+                } catch (timeout: TimeoutCancellationException) {
+                    Log.w(TAG, "deep read verification timed out", timeout)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (other: Throwable) {
+                    Log.w(TAG, "deep read verification failed", other)
+                }
+            }
+
+            // OVERVIEW must settle before NARRATIVE/ANALYSIS so they can read
+            // overview.summary and overview.key_entities from writer state when
+            // building their prompts.
+            if (DeepReadGenerationStage.OVERVIEW in stages) {
+                runStageSupervisorLoop(DeepReadGenerationStage.OVERVIEW)
+            }
+
+            // NARRATIVE ∥ ANALYSIS: schema-independent given OVERVIEW. Fan out
+            // via coroutineScope so both finish (or fail) before EXTENDED_READING.
+            val parallelTargets = stages.filter {
+                it == DeepReadGenerationStage.NARRATIVE || it == DeepReadGenerationStage.ANALYSIS
+            }
+            if (parallelTargets.isNotEmpty()) {
+                coroutineScope {
+                    parallelTargets.map { stage ->
+                        async { runStageSupervisorLoop(stage) }
+                    }.awaitAll()
+                }
+            }
+
+            // EXTENDED_READING collates references and image_assets; needs the
+            // prior stages settled.
+            if (DeepReadGenerationStage.EXTENDED_READING in stages) {
+                runStageSupervisorLoop(DeepReadGenerationStage.EXTENDED_READING)
+            }
+
+            // Verification + finish only when every targeted stage made it.
+            val allTargetedReady = stages.all {
+                writer.currentOutput().statusOf(it) == DeepReadSectionStatus.READY
+            }
+            if (allTargetedReady && writer.verificationCount == 0) {
+                runVerificationPass()
+            }
+            if (allTargetedReady) {
+                if (!writer.hasFreshVerification) {
+                    return@runCatching writer.markVerificationFailed(
+                        "验真未完成：Agent 没有在最终写入后调用 deep_read_verify_claims。"
+                    )
+                }
+                return@runCatching finishIfPossible(writer)
+            }
+
+            // Anything that didn't reach READY gets a clear FAILED so the UI
+            // shows an error instead of a perpetual loading skeleton.
+            val missing = stages.filter {
+                writer.currentOutput().statusOf(it) != DeepReadSectionStatus.READY
+            }
             markMissingFailed(writer, missing, "Agent 未按约定调用分段写入工具，该段未写入。")
             writer.currentOutput()
         }.fold(
@@ -199,6 +288,11 @@ class DeepReadAgentRunManager(
                 )
             },
             onFailure = { error ->
+                // kotlin.runCatching swallows CancellationException, which would
+                // otherwise unwind structured concurrency correctly. Re-throw it
+                // so user-initiated cancel (UI navigation away, parent scope
+                // cancel) is not silently turned into a Result.failure here.
+                if (error is CancellationException) throw error
                 Log.e(TAG, "deep read hidden run failed", error)
                 val output = markMissingFailed(
                     writer = writer,
