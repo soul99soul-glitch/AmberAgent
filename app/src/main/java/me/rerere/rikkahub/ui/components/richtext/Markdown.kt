@@ -1292,6 +1292,12 @@ private fun Paragraph(
     }
 
     val colorScheme = MaterialTheme.colorScheme
+    // Lifecycle pinned to this Paragraph composable; populated lazily
+    // by appendMarkdownNodeContent during the staticAnnotated build
+    // (INLINE_LINK citation + INLINE_MATH formula keys). Keep the same
+    // remember()-no-key form so the map persists across recompositions
+    // alongside staticAnnotated's lambda re-runs — they're created and
+    // disposed together as part of the same composable scope.
     val inlineContents = remember {
         mutableStateMapOf<String, InlineTextContent>()
     }
@@ -1330,6 +1336,11 @@ private fun Paragraph(
                 else Modifier
             )
     ) {
+        // `node` is included as a defensive key — in practice it's stable
+        // across content-equal recompositions because MarkdownParseCache
+        // returns the same root reference, so this rarely contributes to
+        // invalidations. Kept so a future cache refactor that breaks the
+        // identity invariant doesn't silently stale the static AnnotatedString.
         val staticAnnotated = remember(
             content,
             enableLatexRendering,
@@ -1360,14 +1371,29 @@ private fun Paragraph(
             }
         }
 
+        // Cache the REVEAL_LEAF_TAG range list once per static AnnotatedString.
+        // getStringAnnotations(tag, ...) walks every annotation in the doc to
+        // tag-filter, including any UrlAnnotation / InlineContent annotations
+        // pushed by INLINE_LINK / INLINE_MATH. For a paragraph with dozens of
+        // citations + formulas that's O(N) per frame — exactly the kind of
+        // per-frame regression this refactor exists to prevent.
+        val revealRanges = remember(staticAnnotated) {
+            staticAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, staticAnnotated.length)
+        }
+
         val annotatedString = remember(
             staticAnnotated,
+            revealRanges,
             revealController,
             revealClock,
             baseColor,
         ) {
-            if (revealController != null && revealController.hasActiveReveals()) {
-                applyRevealOverlay(staticAnnotated, revealController, baseColor)
+            if (
+                revealController != null &&
+                revealController.hasActiveReveals() &&
+                revealRanges.isNotEmpty()
+            ) {
+                applyRevealOverlay(staticAnnotated, revealRanges, revealController, baseColor)
             } else {
                 staticAnnotated
             }
@@ -1466,7 +1492,7 @@ internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownT
     )
 }
 
-private fun AnnotatedString.Builder.appendMarkdownNodeContent(
+internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     node: ASTNode,
     content: String,
     trim: Boolean = false,
@@ -1707,26 +1733,28 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
 
 /**
  * Frame-local alpha overlay for the static [AnnotatedString] produced by
- * [appendMarkdownNodeContent]. Reads the [REVEAL_LEAF_TAG] string
- * annotations marked during static build; for each marked range, computes
- * per-codepoint alpha from [revealController] and layers a translucent
- * color [SpanStyle] on top of the existing styling.
+ * [appendMarkdownNodeContent]. Caller passes the pre-cached
+ * [REVEAL_LEAF_TAG] range list (caching avoids per-frame
+ * getStringAnnotations tag-filter cost — see the [remember] in
+ * [Paragraph]); for each range, computes per-codepoint alpha from
+ * [revealController] and layers a translucent color [SpanStyle] on top
+ * of the existing styling.
  *
  * Cost is O(unrevealed codepoints across all leaves), bounded by
  * [CharRevealController]'s BACKLOG_DEGRADE (≈ 80). Skip-stable-prefix is
  * applied per leaf using [CharRevealController.stableOffsetExclusive].
  *
- * Returns [static] unchanged when there's no usable [baseColor] or no
- * fade-eligible leaves were marked — preserves Color.Unspecified parity
- * with the pre-refactor leaf-text fast path.
+ * Returns [static] unchanged when there's no usable [baseColor] or
+ * [ranges] is empty — preserves Color.Unspecified parity with the
+ * pre-refactor leaf-text fast path.
  */
 internal fun applyRevealOverlay(
     static: AnnotatedString,
+    ranges: List<AnnotatedString.Range<String>>,
     revealController: CharRevealController,
     baseColor: Color,
 ): AnnotatedString {
     if (baseColor == Color.Unspecified) return static
-    val ranges = static.getStringAnnotations(REVEAL_LEAF_TAG, 0, static.length)
     if (ranges.isEmpty()) return static
     return buildAnnotatedString {
         append(static)
