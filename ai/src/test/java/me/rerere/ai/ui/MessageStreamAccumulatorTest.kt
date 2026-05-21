@@ -49,6 +49,20 @@ class MessageStreamAccumulatorTest {
         assertTrue(reasoning.hasExplicitReasoningContentField())
     }
 
+    @Test
+    fun `final full message replaces streamed deltas instead of appending again`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        accumulator.append(chunk(UIMessagePart.Text("{\"summary\":\"半")))
+        accumulator.append(chunk(UIMessagePart.Text("截\"")))
+        accumulator.append(finalMessage("""{"summary":"完整 JSON"}"""))
+
+        val assistant = accumulator.snapshot().last()
+        assertEquals("""{"summary":"完整 JSON"}""", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+    }
+
     private fun chunk(part: UIMessagePart): MessageChunk = MessageChunk(
         id = "chunk",
         model = "test",
@@ -60,6 +74,19 @@ class MessageStreamAccumulatorTest {
                     parts = listOf(part)
                 ),
                 message = null,
+                finishReason = null,
+            )
+        )
+    )
+
+    private fun finalMessage(text: String): MessageChunk = MessageChunk(
+        id = "final",
+        model = "test",
+        choices = listOf(
+            UIMessageChoice(
+                index = 0,
+                delta = null,
+                message = UIMessage.assistant(text),
                 finishReason = null,
             )
         )

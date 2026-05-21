@@ -35,7 +35,6 @@ class DeepReadTemplateAgent(
         return try {
             val params = TextGenerationParams(
                 model = model,
-                temperature = 0.35f,
                 maxTokens = 3600,
                 customHeaders = model.boardRequestHeaders(settings.providers),
                 customBody = model.boardRequestBodies(settings.providers),

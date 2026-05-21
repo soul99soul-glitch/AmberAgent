@@ -1,8 +1,12 @@
 package me.rerere.ai.provider.providers
 
 import android.content.Context
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -34,7 +38,9 @@ import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.ImageGenerationResult
 import me.rerere.ai.ui.MessageChunk
+import me.rerere.ai.ui.MessageStreamAccumulator
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
@@ -45,6 +51,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+
+private const val TAG = "OpenAIProvider"
 
 class OpenAIProvider(
     private val client: OkHttpClient,
@@ -140,35 +148,231 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<MessageChunk> = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH || providerSetting.useResponseApi) {
-        responseAPI.streamText(
-            providerSetting = providerSetting.codexOAuthSettingIfNeeded(),
-            messages = messages,
-            params = params
-        )
-    } else {
-        chatCompletionsAPI.streamText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params
-        )
+    ): Flow<MessageChunk> = flow {
+        var emitted = false
+        try {
+            streamTextOnce(providerSetting, messages, params).collect {
+                emitted = true
+                emit(it)
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (emitted) throw error
+            val retryParams = params.withoutParamsRejectedByOpenAI(error) ?: throw error
+            Log.w(TAG, "streamText rejected request params; retrying with compatible body", error)
+            streamTextOnce(providerSetting, messages, retryParams).collect { emit(it) }
+        }
     }
 
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
-        params: TextGenerationParams
-    ): MessageChunk = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH || providerSetting.useResponseApi) {
-        responseAPI.generateText(
+        params: TextGenerationParams,
+    ): MessageChunk = try {
+        generateTextOnce(providerSetting, messages, params)
+    } catch (error: Throwable) {
+        if (error is CancellationException) throw error
+        handleGenerateTextRetry(providerSetting, messages, params, error)
+    }
+
+    private suspend fun streamTextOnce(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): Flow<MessageChunk> = when {
+        providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH || providerSetting.useResponseApi -> responseAPI.streamText(
             providerSetting = providerSetting.codexOAuthSettingIfNeeded(),
             messages = messages,
-            params = params
+            params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+                params.withCodexResponsesCompatibility()
+            } else {
+                params
+            },
         )
-    } else {
-        chatCompletionsAPI.generateText(
+
+        else -> chatCompletionsAPI.streamText(
             providerSetting = providerSetting,
             messages = messages,
-            params = params
+            params = params,
+        )
+    }
+
+    private suspend fun generateTextOnce(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): MessageChunk = when {
+        providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH -> generateCodexTextWithStreaming(
+            providerSetting = providerSetting.codexOAuthSettingIfNeeded(),
+            messages = messages,
+            params = params.withCodexResponsesCompatibility(),
+        )
+
+        providerSetting.useResponseApi -> responseAPI.generateText(
+            providerSetting = providerSetting,
+            messages = messages,
+            params = params,
+        )
+
+        else -> chatCompletionsAPI.generateText(
+            providerSetting = providerSetting,
+            messages = messages,
+            params = params,
+        )
+    }
+
+    private suspend fun handleGenerateTextRetry(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        error: Throwable,
+    ): MessageChunk {
+        params.withoutParamsRejectedByOpenAI(error)?.let { retryParams ->
+            Log.w(TAG, "generateText rejected request params; retrying with compatible body", error)
+            return try {
+                generateTextOnce(providerSetting, messages, retryParams)
+            } catch (retryError: Throwable) {
+                if (retryError is CancellationException) throw retryError
+                if (providerSetting.shouldRetryGenerateTextWithStreaming(retryError)) {
+                    Log.w(TAG, "generateText requires streaming; retrying with stream aggregation", retryError)
+                    generateResponseTextWithStreaming(providerSetting.codexOAuthSettingIfNeeded(), messages, retryParams)
+                } else {
+                    throw retryError
+                }
+            }
+        }
+        if (providerSetting.shouldRetryGenerateTextWithStreaming(error)) {
+            Log.w(TAG, "generateText requires streaming; retrying with stream aggregation", error)
+            return generateResponseTextWithStreaming(
+                providerSetting.codexOAuthSettingIfNeeded(),
+                messages,
+                params.withCodexResponsesCompatibility(),
+            )
+        }
+        throw error
+    }
+
+    private fun TextGenerationParams.withoutParamsRejectedByOpenAI(error: Throwable): TextGenerationParams? {
+        var retryParams = this
+        if (error.isUnsupportedOpenAISamplingError()) {
+            retryParams = retryParams.withoutSamplingParams()
+        }
+        if (error.isUnsupportedOpenAIOutputLimitError()) {
+            retryParams = retryParams.withoutOutputLimitParams()
+        }
+        return retryParams.takeIf { it != this }
+    }
+
+    private fun TextGenerationParams.withCodexResponsesCompatibility(): TextGenerationParams =
+        withoutSamplingParams().withoutOutputLimitParams()
+
+    private fun TextGenerationParams.withoutOutputLimitParams(): TextGenerationParams =
+        copy(
+            maxTokens = null,
+            customBody = customBody.filterNot { it.key.isOpenAIOutputLimitKey() },
+        )
+
+    private fun String.isOpenAIOutputLimitKey(): Boolean {
+        val normalized = lowercase()
+        return normalized == "max_output_tokens" ||
+            normalized == "max_tokens" ||
+            normalized == "max_completion_tokens"
+    }
+
+    private fun TextGenerationParams.withoutSamplingParams(): TextGenerationParams =
+        copy(
+            temperature = null,
+            topP = null,
+            customBody = customBody.filterNot { it.key.isOpenAISamplingKey() },
+        )
+
+    private fun String.isOpenAISamplingKey(): Boolean =
+        equals("temperature", ignoreCase = true) || equals("top_p", ignoreCase = true)
+
+    private fun Throwable.isUnsupportedOpenAISamplingError(): Boolean {
+        val message = generateSequence(this) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString("\n")
+            .lowercase()
+        return message.isOpenAIUnsupportedParameterError() &&
+            ("temperature" in message || "top_p" in message)
+    }
+
+    private fun Throwable.isUnsupportedOpenAIOutputLimitError(): Boolean {
+        val message = generateSequence(this) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString("\n")
+            .lowercase()
+        return message.isOpenAIUnsupportedParameterError() &&
+            ("max_output_tokens" in message || "max_tokens" in message || "max_completion_tokens" in message)
+    }
+
+    private fun String.isOpenAIUnsupportedParameterError(): Boolean =
+        "unsupported parameter" in this ||
+            "unknown parameter" in this ||
+            "unrecognized request argument" in this ||
+            "invalid parameter" in this ||
+            "not support" in this
+
+    private fun ProviderSetting.OpenAI.shouldRetryGenerateTextWithStreaming(error: Throwable): Boolean {
+        if (authMode != OpenAIAuthMode.CODEX_OAUTH && !useResponseApi) return false
+        return error.isOpenAIStreamRequiredError()
+    }
+
+    private fun Throwable.isOpenAIStreamRequiredError(): Boolean {
+        val message = generateSequence(this) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString("\n")
+            .lowercase()
+        return "stream must be set to true" in message ||
+            ("stream" in message && "true" in message && "400" in message)
+    }
+
+    private suspend fun generateCodexTextWithStreaming(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): MessageChunk = generateResponseTextWithStreaming(providerSetting, messages, params)
+
+    private suspend fun generateResponseTextWithStreaming(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): MessageChunk {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.assistant("")),
+            model = params.model,
+        )
+        var chunkId = ""
+        var modelId = params.model.modelId
+        var finishReason: String? = null
+        responseAPI.streamText(
+            providerSetting = providerSetting,
+            messages = messages,
+            params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+                params.withCodexResponsesCompatibility()
+            } else {
+                params
+            },
+        ).collect { chunk ->
+            if (chunk.id.isNotBlank()) chunkId = chunk.id
+            if (chunk.model.isNotBlank()) modelId = chunk.model
+            finishReason = chunk.choices.firstOrNull()?.finishReason ?: finishReason
+            accumulator.append(chunk)
+        }
+        val message = accumulator.snapshot().lastOrNull() ?: UIMessage.assistant("")
+        return MessageChunk(
+            id = chunkId,
+            model = modelId,
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    delta = null,
+                    message = message,
+                    finishReason = finishReason,
+                )
+            ),
+            usage = message.usage,
         )
     }
 

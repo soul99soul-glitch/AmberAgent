@@ -15,8 +15,9 @@ object DeepReadPrompt {
         appendLine("## 阶段要求")
         when (stage) {
             DeepReadGenerationStage.OVERVIEW -> {
-                appendLine("- 只完成 topic_type、summary、key_entities、hero_image_url、hero_caption、image_assets、references、extended_reading。")
+                appendLine("- 只完成 topic_type、summary、key_entities。")
                 appendLine("- summary 要像杂志导语，120-200 字，说明为什么值得读。")
+                appendLine("- 本阶段不要输出图片、引用、扩展阅读、时间轴或分析字段；这些由后续阶段补齐。")
                 appendLine("- 不要编造来源之外的事实。")
             }
             DeepReadGenerationStage.NARRATIVE -> {
@@ -148,12 +149,7 @@ object DeepReadPrompt {
                     {
                       "topic_type": "event|opinion|product|person",
                       "summary": "120-200字中文杂志导语",
-                      "key_entities": ["关键实体"],
-                      "hero_image_url": "只能使用来源 images 中的 URL，可为空",
-                      "hero_caption": "中文图注，可为空",
-                      "image_assets": [{"url":"来源图片URL","caption":"中文图注","source":"来源","related_entities":["实体"],"related_timeline_index":0,"quality_hint":"hero|timeline|context"}],
-                      "references": [{"title":"中文标题","url":"URL","source":"来源"}],
-                      "extended_reading": [{"title":"中文标题","url":"URL","source":"来源"}]
+                      "key_entities": ["关键实体"]
                     }
                 """.trimIndent()
                 DeepReadGenerationStage.NARRATIVE -> """
@@ -216,31 +212,31 @@ enum class DeepReadGenerationStage(val label: String) {
 }
 
 private fun DeepReadGenerationStage.sourceLimit(): Int = when (this) {
-    DeepReadGenerationStage.OVERVIEW -> 4
-    DeepReadGenerationStage.NARRATIVE -> 6
-    DeepReadGenerationStage.ANALYSIS -> 6
-    DeepReadGenerationStage.EXTENDED_READING -> 8
+    DeepReadGenerationStage.OVERVIEW -> 5
+    DeepReadGenerationStage.NARRATIVE -> 10
+    DeepReadGenerationStage.ANALYSIS -> 10
+    DeepReadGenerationStage.EXTENDED_READING -> 12
 }
 
 private fun DeepReadGenerationStage.excerptLimit(): Int = when (this) {
-    DeepReadGenerationStage.OVERVIEW -> 650
-    DeepReadGenerationStage.NARRATIVE -> 950
-    DeepReadGenerationStage.ANALYSIS -> 950
-    DeepReadGenerationStage.EXTENDED_READING -> 360
+    DeepReadGenerationStage.OVERVIEW -> 800
+    DeepReadGenerationStage.NARRATIVE -> 1_400
+    DeepReadGenerationStage.ANALYSIS -> 1_600
+    DeepReadGenerationStage.EXTENDED_READING -> 520
 }
 
 private fun DeepReadGenerationStage.compactSourceLimit(): Int = when (this) {
     DeepReadGenerationStage.OVERVIEW -> 3
-    DeepReadGenerationStage.NARRATIVE -> 4
-    DeepReadGenerationStage.ANALYSIS -> 4
-    DeepReadGenerationStage.EXTENDED_READING -> 5
+    DeepReadGenerationStage.NARRATIVE -> 6
+    DeepReadGenerationStage.ANALYSIS -> 6
+    DeepReadGenerationStage.EXTENDED_READING -> 6
 }
 
 private fun DeepReadGenerationStage.compactExcerptLimit(): Int = when (this) {
     DeepReadGenerationStage.OVERVIEW -> 360
-    DeepReadGenerationStage.NARRATIVE -> 520
-    DeepReadGenerationStage.ANALYSIS -> 520
-    DeepReadGenerationStage.EXTENDED_READING -> 240
+    DeepReadGenerationStage.NARRATIVE -> 760
+    DeepReadGenerationStage.ANALYSIS -> 760
+    DeepReadGenerationStage.EXTENDED_READING -> 300
 }
 
 private fun DeepReadGenerationStage.previousJsonLimit(): Int = when (this) {

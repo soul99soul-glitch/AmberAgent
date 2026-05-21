@@ -15,7 +15,7 @@ object DeepReadSanitizer {
             .mapIndexed { index, link -> link.withChineseSafeTitle(topicTitle, index) }
         val safeExtended = parsed.extendedReading.filter { it.url in sourceUrls }
             .mapIndexed { index, link -> link.withChineseSafeTitle(topicTitle, index) }
-        val fallbackReading = sources.mapIndexed { index, source ->
+        val fallbackReading = sources.filter { it.url.startsWith("http") }.mapIndexed { index, source ->
             ReadingLink(source.chineseSafeTitle(topicTitle, index), source.url, source.source)
         }
             .distinctBy { it.url }

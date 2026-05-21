@@ -23,6 +23,14 @@ class MessageStreamAccumulator(
 
     fun append(chunk: MessageChunk) {
         val choice = chunk.choices.getOrNull(0) ?: return
+        val finalMessage = choice.message
+        if (choice.delta == null && finalMessage != null) {
+            replaceActive(finalMessage)
+            chunk.usage?.let { usage ->
+                active.usage = active.usage.merge(usage)
+            }
+            return
+        }
         val delta = choice.delta ?: choice.message ?: return
 
         if (active.role != delta.role) {
@@ -43,6 +51,14 @@ class MessageStreamAccumulator(
     }
 
     fun snapshot(): List<UIMessage> = prefix + active.snapshot()
+
+    private fun replaceActive(message: UIMessage) {
+        val replacement = message.copy(modelId = message.modelId ?: model?.id)
+        if (active.role != replacement.role) {
+            prefix += active.snapshot()
+        }
+        active = MutableMessage.from(replacement)
+    }
 
     private class MutableMessage(
         private val source: UIMessage,

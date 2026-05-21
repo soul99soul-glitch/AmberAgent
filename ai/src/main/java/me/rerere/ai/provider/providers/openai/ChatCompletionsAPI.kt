@@ -420,10 +420,29 @@ class ChatCompletionsAPI(
                 }
             }
         }.mergeCustomBody(params.customBody)
+            .withoutSamplingParamsIfNeeded(params.model)
+            .withForcedStream(stream)
     }
 
+    private fun JsonObject.withoutSamplingParamsIfNeeded(model: Model): JsonObject {
+        if (isModelAllowTemperature(model)) return this
+        return JsonObject(toMutableMap().apply {
+            remove("temperature")
+            remove("top_p")
+        })
+    }
+
+    private fun JsonObject.withForcedStream(stream: Boolean): JsonObject =
+        JsonObject(toMutableMap().apply {
+            put("stream", JsonPrimitive(stream))
+        })
+
     private fun isModelAllowTemperature(model: Model): Boolean {
-        return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) && !ModelRegistry.GPT_5.match(model.modelId)
+        val modelId = model.modelId.lowercase()
+        return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) &&
+            !ModelRegistry.GPT_5.match(model.modelId) &&
+            !modelId.startsWith("gpt-5") &&
+            !modelId.contains("codex")
     }
 
     private fun buildMessages(

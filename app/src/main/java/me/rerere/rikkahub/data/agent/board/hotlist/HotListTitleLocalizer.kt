@@ -106,7 +106,6 @@ class HotListTitleLocalizer(
                     ),
                     params = TextGenerationParams(
                         model = model,
-                        temperature = 0.1f,
                         maxTokens = 1_200,
                         customHeaders = model.boardRequestHeaders(settings.providers),
                         customBody = model.boardRequestBodies(settings.providers),

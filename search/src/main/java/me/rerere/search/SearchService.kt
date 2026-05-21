@@ -307,5 +307,8 @@ internal suspend fun Call.await(): Response {
                 }
             }
         })
+        continuation.invokeOnCancellation {
+            cancel()
+        }
     }
 }

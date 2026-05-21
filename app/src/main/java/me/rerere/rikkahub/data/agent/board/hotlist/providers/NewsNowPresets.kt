@@ -17,6 +17,7 @@ object NewsNowPresets {
         NewsNowPreset("zhihu", "知乎热榜"),
         NewsNowPreset("weibo", "微博热搜"),
         NewsNowPreset("douyin", "抖音热搜"),
+        NewsNowPreset("coolapk", "酷安"),
         NewsNowPreset("bilibili-hot-search", "B 站热搜"),
         NewsNowPreset("v2ex-share", "V2EX 分享"),
         NewsNowPreset("github-trending-today", "GitHub 趋势"),
