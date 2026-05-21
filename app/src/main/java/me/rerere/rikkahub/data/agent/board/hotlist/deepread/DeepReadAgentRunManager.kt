@@ -91,7 +91,13 @@ class DeepReadAgentRunManager(
                 topicMutex(topicId).withLock {
                     val current = fresh(topicId, topicTitle, seedUrl) ?: DeepReadOutput()
                     val stillMissing = stages.filter { current.statusOf(it) != DeepReadSectionStatus.READY }
-                    if (stillMissing.isNotEmpty()) generateStages(topicId, topicTitle, stillMissing, seedUrl)
+                    // Explicit force = false: background fill should reuse the
+                    // prefetch cache populated by the primary run instead of
+                    // re-paying the 36s budget. This is the biggest measurable
+                    // win from Phase E.
+                    if (stillMissing.isNotEmpty()) {
+                        generateStages(topicId, topicTitle, stillMissing, seedUrl, force = false)
+                    }
                 }
             } finally {
                 backgroundRuns.remove(key)
@@ -129,6 +135,7 @@ class DeepReadAgentRunManager(
             topicId = topicId,
             topicTitle = topicTitle,
             seedUrl = seedUrl,
+            force = force,
         )
         if (prefetchedSources.isEmpty()) {
             val message = "没有抓到足够的来源，无法生成深度阅读。请检查搜索源或稍后重试。"

@@ -22,6 +22,7 @@ import me.rerere.search.SearchServiceOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URI
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Pre-fetches sources for DeepRead before the model loop runs.
@@ -39,16 +40,43 @@ class DeepReadSourcePrefetcher(
     private val client: OkHttpClient,
 ) {
 
+    private data class CacheEntry(
+        val sources: List<DeepReadSource>,
+        val timestamp: Long,
+    )
+
+    // In-memory TTL cache so back-to-back generateStages calls for the same
+    // topic (most commonly: primary run + scheduleBackgroundFill of missing
+    // stages) do not re-pay the 36s search+scrape budget. Keyed by topic +
+    // seedUrl since the seed changes what we anchor on.
+    private val cache = ConcurrentHashMap<String, CacheEntry>()
+
     suspend fun collect(
         topicId: String,
         topicTitle: String,
         seedUrl: String? = null,
+        force: Boolean = false,
     ): List<DeepReadSource> {
+        val cacheKey = "$topicId|${seedUrl.orEmpty()}"
+        val now = System.currentTimeMillis()
+        if (!force) {
+            cache[cacheKey]?.let { entry ->
+                val age = now - entry.timestamp
+                if (age < CACHE_TTL_MS) {
+                    Log.i(TAG, "deep read prefetch cache hit topic=$topicId age=${age}ms")
+                    return entry.sources
+                }
+                cache.remove(cacheKey)
+            }
+        } else {
+            cache.remove(cacheKey)
+        }
+
         val settings = settingsStore.settingsFlow.value
         val seedSources = buildSeedSources(topicId, topicTitle, seedUrl)
         val seedFallback = seedSources.filter { it.isUsableSeedSource() }
 
-        return withTimeoutOrNull(SOURCE_COLLECTION_TIMEOUT_MS) {
+        val collected = withTimeoutOrNull(SOURCE_COLLECTION_TIMEOUT_MS) {
             coroutineScope {
                 val enabled = settings.enabledDeepReadSearchServices()
                 if (enabled.isEmpty()) {
@@ -154,6 +182,25 @@ class DeepReadSourcePrefetcher(
                     .take(MAX_SOURCES)
             }
         } ?: seedFallback
+
+        // Only cache non-empty results: an empty list is a transient failure
+        // and the next call should retry rather than serve emptiness from
+        // cache. Caching after the 36s budget so a re-entry within TTL skips
+        // the full prefetch.
+        if (collected.isNotEmpty()) {
+            evictIfFull()
+            cache[cacheKey] = CacheEntry(sources = collected, timestamp = now)
+        }
+        return collected
+    }
+
+    private fun evictIfFull() {
+        if (cache.size < CACHE_MAX_ENTRIES) return
+        // Best-effort LRU: snapshot entries, find the oldest by timestamp,
+        // remove. Concurrent inserts may briefly push us over the cap; that's
+        // bounded and self-corrects on the next insert.
+        val oldestKey = cache.entries.minByOrNull { it.value.timestamp }?.key
+        oldestKey?.let { cache.remove(it) }
     }
 
     private suspend fun buildSeedSources(
@@ -471,6 +518,12 @@ class DeepReadSourcePrefetcher(
         private const val MIN_SEED_SOURCE_CHARS = 15
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+
+        // Cache TTL is short relative to a news cycle but long enough to cover
+        // a primary run plus its scheduleBackgroundFill completion. Size cap
+        // prevents the cache from growing unbounded over a long app session.
+        private const val CACHE_TTL_MS = 10 * 60 * 1000L
+        private const val CACHE_MAX_ENTRIES = 16
     }
 }
 
