@@ -1280,7 +1280,15 @@ private fun Paragraph(
     modifier: Modifier,
 ) {
     // dumpAst(node, content)
-    if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
+    // Cache the AST-walk result so a per-frame recomposition (triggered by
+    // revealClock subscription below) doesn't re-traverse the whole subtree
+    // just to decide between FlowRow-of-MarkdownNode (images/block-math
+    // present) and the inline AnnotatedString path. Pre-cache mirrors
+    // hasInlineMath's pattern further down.
+    val hasImageOrBlockMath = remember(node) {
+        node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null
+    }
+    if (hasImageOrBlockMath) {
         FlowRow(modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) {
             node.children.fastForEach { child ->
                 MarkdownNode(
@@ -1292,12 +1300,14 @@ private fun Paragraph(
     }
 
     val colorScheme = MaterialTheme.colorScheme
-    // Lifecycle pinned to this Paragraph composable; populated lazily
-    // by appendMarkdownNodeContent during the staticAnnotated build
-    // (INLINE_LINK citation + INLINE_MATH formula keys). Keep the same
-    // remember()-no-key form so the map persists across recompositions
-    // alongside staticAnnotated's lambda re-runs — they're created and
-    // disposed together as part of the same composable scope.
+    // Populated lazily by appendMarkdownNodeContent during static rebuilds
+    // via putIfAbsent for INLINE_LINK citation + INLINE_MATH formula
+    // keys. Lives as long as this Paragraph composable (remember without
+    // keys), so entries from previously rendered inline nodes can persist
+    // across content changes — pre-existing behavior, not introduced by
+    // the reveal-overlay refactor. Acceptable because content changes
+    // during streaming only append new inline nodes; the user doesn't
+    // edit/remove inline content mid-stream in this app.
     val inlineContents = remember {
         mutableStateMapOf<String, InlineTextContent>()
     }
@@ -1381,10 +1391,15 @@ private fun Paragraph(
             staticAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, staticAnnotated.length)
         }
 
+        // revealClock = controller?.nowNanos ?: 0L already covers the
+        // null↔non-null transition (the clock jumps between 0 and a real
+        // nanoTime when the controller is installed/removed), so the
+        // controller reference itself isn't a needed key — keeping it
+        // would just add identity churn during the brief streaming-end
+        // window without functional benefit.
         val annotatedString = remember(
             staticAnnotated,
             revealRanges,
-            revealController,
             revealClock,
             baseColor,
         ) {
@@ -1492,6 +1507,29 @@ internal fun extractMarkdownTableData(node: ASTNode, content: String): MarkdownT
     )
 }
 
+/**
+ * Walks a markdown [ASTNode] and appends its rendered content into the
+ * receiver [AnnotatedString.Builder] — including spans for EMPH /
+ * STRONG / STRIKETHROUGH / links / code / inline math.
+ *
+ * **Reveal convention**: when adding a new arm to this function that
+ * calls `append(text)` directly (rather than recursing into children),
+ * decide whether the new arm's text should fade in during streaming.
+ *  - If YES: wrap the append in
+ *    `pushStringAnnotation(REVEAL_LEAF_TAG, node.startOffset.toString())`
+ *    / `pop()` so [applyRevealOverlay] knows to layer per-frame alpha
+ *    on it. The [shouldMarkLeafAsFadeEligible] helper encodes the
+ *    canonical gate (text-aligned-with-source + valid baseColor + not
+ *    trim'd). See the [LeafASTNode] arm for the reference pattern.
+ *  - If NO (typical for code spans, inline links, autolinks, inline
+ *    math — they have their own non-fade visual treatment and would
+ *    look weird with an alpha modulation on top): just `append(text)`
+ *    or use [withStyle], don't push the annotation.
+ *
+ * Recursing arms (EMPH / STRONG / STRIKETHROUGH / default) automatically
+ * inherit the convention because their leaf descendants land in the
+ * [LeafASTNode] arm.
+ */
 internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     node: ASTNode,
     content: String,
@@ -1805,6 +1843,16 @@ internal fun applyRevealOverlay(
             if (stableRel >= rangeLen) return@fastForEach
             var i = range.start + stableRel
             val rangeEnd = range.end
+            // Batch adjacent codepoints that share the same alpha into one
+            // SpanStyle. CharRevealController slices the queue by reveal
+            // entry (whitespace / CJK / word) and every codepoint inside
+            // one entry returns the same alpha from alphaAt(), so this
+            // collapses ~5-10 per-codepoint addStyle calls per word into
+            // one — under BACKLOG_DEGRADE=80 entries this is the
+            // difference between sub-millisecond and ~3-5ms per frame
+            // worst case.
+            var runStart = -1
+            var runAlpha = 0f
             while (i < rangeEnd) {
                 val cp = static.text.codePointAt(i)
                 val cpLen = Character.charCount(cp)
@@ -1812,13 +1860,37 @@ internal fun applyRevealOverlay(
                     .alphaAt(baseOffset + (i - range.start))
                     .coerceIn(0f, 1f)
                 if (alpha < 1f) {
+                    if (runStart < 0) {
+                        runStart = i
+                        runAlpha = alpha
+                    } else if (alpha != runAlpha) {
+                        addStyle(
+                            style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                            start = runStart,
+                            end = i,
+                        )
+                        runStart = i
+                        runAlpha = alpha
+                    }
+                } else if (runStart >= 0) {
+                    // alpha == 1f: revealed codepoint terminates any
+                    // accumulated run. The revealed codepoint itself
+                    // needs no style.
                     addStyle(
-                        style = SpanStyle(color = baseColor.copy(alpha = alpha)),
-                        start = i,
-                        end = i + cpLen,
+                        style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                        start = runStart,
+                        end = i,
                     )
+                    runStart = -1
                 }
                 i += cpLen
+            }
+            if (runStart >= 0) {
+                addStyle(
+                    style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                    start = runStart,
+                    end = rangeEnd,
+                )
             }
         }
     }

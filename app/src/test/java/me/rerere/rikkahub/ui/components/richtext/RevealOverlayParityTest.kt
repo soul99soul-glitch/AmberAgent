@@ -9,6 +9,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.util.fastForEach
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.LeafASTNode
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
@@ -272,8 +273,24 @@ class RevealOverlayParityTest {
     @Test
     fun overlay_handles_surrogate_pair_emoji() {
         // U+1F600 (😀) is a surrogate pair: 2 Java chars, 1 codepoint.
-        // The codepoint walk must advance by 2 chars per emoji, not 1.
-        val content = "😀 hi"  // "😀 hi" — 5 Java chars, 4 codepoints
+        // The codepoint walk must advance by 2 chars per emoji, not 1 —
+        // otherwise it would land on the dangling low-surrogate at
+        // position 1 and emit a span starting there.
+        //
+        // Note: post-batching, adjacent codepoints in the same reveal
+        // entry / chunk share alpha and collapse to a single span, so
+        // we can't isolate the emoji's exact end boundary from spans
+        // alone — that would require interleaving different alphas
+        // across the surrogate boundary, which requires multi-chunk
+        // setup that doesn't compose well with the controller's
+        // System.nanoTime-based stamping. The observable invariant we
+        // CAN check is "no span starts at position 1" — a buggy
+        // char-walk would produce one there (high-surrogate alpha at
+        // 0, low-surrogate alpha at 1) regardless of batching, because
+        // surrogate-half codepoints are distinct (Character.codePointAt
+        // at offset 1 returns U+DE00 — the low surrogate as a standalone
+        // codepoint).
+        val content = "😀 hi"  // 5 Java chars, 4 codepoints
         val static = buildAnnotatedString {
             pushStringAnnotation(REVEAL_LEAF_TAG, "0")
             append(content)
@@ -283,18 +300,19 @@ class RevealOverlayParityTest {
         c.onFrame(System.nanoTime())
         val result = applyRevealOverlay(static, rangesOf(static), c, baseColor)
         assertEquals(static.text, result.text)
-        // The emoji's alpha span must cover the WHOLE surrogate pair
-        // [0..2). If overlay walked by char (not codepoint), the second
-        // surrogate at position 1 would get its own span starting at 1,
-        // and the first span would only span [0..1).
         val alphaSpans = result.spanStyles.filter { span ->
             span.item.color != Color.Unspecified && span.item.color.alpha < 1f
         }
+        // Some span must cover the emoji at position 0 (proves the walk
+        // didn't bail out before reaching it).
         assertTrue(
-            "Emoji span at position 0 must span the full surrogate pair " +
-                "(start=0, end=2); found spans: ${alphaSpans.map { it.start to it.end }}",
-            alphaSpans.any { it.start == 0 && it.end == 2 }
+            "Expected at least one alpha span starting at position 0 covering " +
+                "the emoji; found spans: ${alphaSpans.map { it.start to it.end }}",
+            alphaSpans.any { it.start == 0 && it.end >= 2 }
         )
+        // Critical: no span starts at position 1. A buggy char-walk
+        // (i++) would process the low surrogate at position 1 as its
+        // own codepoint and emit a span there.
         assertTrue(
             "Unexpected alpha span starts at position 1 — overlay walked by " +
                 "Java char instead of codepoint, splitting the surrogate pair",
@@ -434,5 +452,87 @@ class RevealOverlayParityTest {
             0,
             annotations.size,
         )
+    }
+
+    @Test
+    fun static_marks_both_leaves_inside_strong_wrapping() {
+        // Locks the STRONG-recurse-threads-baseColor-correctly invariant:
+        // if a future refactor drops baseColor from the recursive call
+        // (compiles clean, parses fine, just silently disables fade for
+        // bold/italic text mid-stream), this test goes red. End-to-end
+        // through MarkdownParser to exercise the actual recursive arm.
+        val content = "**bold** plain"
+        val root: ASTNode =
+            MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
+        // Find the PARAGRAPH and build the static from its children
+        // (mirrors what Paragraph composable does).
+        fun findParagraph(n: ASTNode): ASTNode? {
+            if (n.type.name == "PARAGRAPH") return n
+            return n.children.firstNotNullOfOrNull { findParagraph(it) }
+        }
+        val paragraph = findParagraph(root) ?: error("paragraph not found")
+        val static = buildAnnotatedString {
+            paragraph.children.fastForEach { child ->
+                appendMarkdownNodeContent(
+                    node = child,
+                    content = content,
+                    trim = false,
+                    inlineContents = mutableMapOf(),
+                    colorScheme = lightColorScheme(),
+                    density = Density(1f, 1f),
+                    style = TextStyle(),
+                    baseColor = baseColor,
+                )
+            }
+        }
+        val annotations = static.getStringAnnotations(REVEAL_LEAF_TAG, 0, static.length)
+        // Both the leaf inside the STRONG wrap AND the plain leaf after
+        // it must be marked. If the STRONG recursion drops baseColor or
+        // somehow skips the leaf arm, the bold leaf's annotation goes
+        // missing.
+        assertTrue(
+            "Expected at least 2 REVEAL_LEAF_TAG annotations (one for the " +
+                "leaf inside STRONG, one for the plain text after); got " +
+                "${annotations.size} at offsets ${annotations.map { it.item }}",
+            annotations.size >= 2,
+        )
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Batching: same-alpha codepoints collapse to one SpanStyle
+    // ──────────────────────────────────────────────────────────────
+
+    @Test
+    fun overlay_batches_adjacent_same_alpha_codepoints() {
+        // CharRevealController slices its queue by word/CJK/whitespace
+        // entry. Inside one word entry, every codepoint returns the SAME
+        // alpha from alphaAt() (per CharReveal.kt's alphaAt formula —
+        // age and duration are entry-level fields). applyRevealOverlay
+        // batches by alpha-equal run to avoid N×addStyle when one would do.
+        // Lock the savings: a single contiguous word's worth of unrevealed
+        // codepoints should produce ONE alpha SpanStyle, not N.
+        val content = "hello"  // one word, slices into one entry of length 5
+        val static = buildAnnotatedString {
+            pushStringAnnotation(REVEAL_LEAF_TAG, "0")
+            append(content)
+            pop()
+        }
+        val c = controllerFor(content)
+        c.onFrame(System.nanoTime())  // entry queued, age ~0 → alpha 0+
+        val result = applyRevealOverlay(static, rangesOf(static), c, baseColor)
+        val alphaSpans = result.spanStyles.filter { span ->
+            span.item.color != Color.Unspecified && span.item.color.alpha < 1f
+        }
+        assertEquals(
+            "Five codepoints in one reveal entry must collapse to a single " +
+                "alpha SpanStyle; found ${alphaSpans.size} spans at " +
+                "${alphaSpans.map { it.start to it.end }}",
+            1,
+            alphaSpans.size,
+        )
+        // And the single span must cover the whole word [0..5).
+        val span = alphaSpans.single()
+        assertEquals(0, span.start)
+        assertEquals(5, span.end)
     }
 }
