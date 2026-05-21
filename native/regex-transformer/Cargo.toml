@@ -1,0 +1,18 @@
+[package]
+name = "regex-transformer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "regex_transformer"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+log.workspace = true
+android_logger.workspace = true

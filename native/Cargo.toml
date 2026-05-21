@@ -1,0 +1,96 @@
+[workspace]
+resolver = "2"
+members = [
+    "office-parsers",
+    "markdown-parser",
+    "highlight-parser",
+    "regex-transformer",
+    # `generative-widget-parser` was ABANDONED at Round 1 review (P0 structural
+    # mismatch with JVM). Both the Rust crate and the Kotlin adapter have been
+    # removed from the spike branch — the abandonment record + revival
+    # instructions live in `docs/RUST_NATIVE_ABANDONED_COMPONENTS.md`.
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+# JNI bindings — kept aligned across all 3 crates so they can share helpers
+jni = "0.21"
+
+# Common error / log
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+android_logger = "0.14"
+
+# Component #1 — office parsers
+quick-xml = { version = "0.36", features = ["serialize"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Component #2 — markdown parser
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+# Component #6 — regex transformer
+regex = "1"
+
+# (Component #7 generative-widget-parser was abandoned — its `serde_json`
+# workspace dep was removed. tree-sitter pulls serde transitively but no
+# active crate uses serde_json directly. See
+# docs/RUST_NATIVE_ABANDONED_COMPONENTS.md for the abandonment record.)
+
+# Component #3 — highlight parser
+tree-sitter = "0.26"
+tree-sitter-highlight = "0.26"
+
+# All released tree-sitter language grammars — bundle the most useful ones.
+# Each adds ~150-500KB to the .so. We deliberately exclude rare languages
+# to keep binary size in check; see SPIKE_PLAN §5.4 binary budget.
+#
+# Versions verified against crates.io 2026-05-20. Tree-sitter ecosystem
+# moved to the LanguageFn pattern in TS 0.25+ — grammar crates published
+# after that point expose `LANGUAGE: LanguageFn` uniformly. Earlier crates
+# may still use `language() -> Language`.
+tree-sitter-rust = "0.24"
+# tree-sitter-kotlin-ng v1.1 ships grammar only (no embedded HIGHLIGHTS_QUERY).
+# Kotlin code blocks degrade to plain in the spike. Re-evaluate when a
+# query-bundled Kotlin grammar lands.
+# tree-sitter-kotlin-ng = "1"
+tree-sitter-java = "0.23"
+tree-sitter-python = "0.25"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-bash = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7"
+tree-sitter-md = "0.5"
+tree-sitter-html = "0.23"
+tree-sitter-css = "0.25"
+# crates.io `tree-sitter-sql` stops at 0.0.2; the maintained fork is `tree-sitter-sequel`.
+tree-sitter-sequel = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"      # full LTO bloats compile time too much; thin gives ~80% of full LTO benefit
+codegen-units = 1
+strip = "symbols" # strip debug symbols from .so — major APK size savings
+# panic = "unwind" so the JNI-boundary catch_unwind in every crate's lib.rs
+# can actually intercept panics from tree-builder expect() / pulldown-cmark
+# internal assertions. Earlier we set "abort" for binary-size savings but
+# that defeats the safety net — review P2 fix.
+panic = "unwind"
+overflow-checks = false
+
+[profile.release-with-debug]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
+[profile.dev]
+opt-level = 0
+debug = true

@@ -16,6 +16,12 @@ pluginManagement {
             if (requested.id.id == "io.objectbox") {
                 useModule("io.objectbox:objectbox-gradle-plugin:${requested.version}")
             }
+            // (Removed) `org.mozilla.rust-android-gradle.rust-android` override:
+            // it mapped to a non-existent module
+            // `gradle.plugin.org.mozilla.rust-android-gradle:plugin:0.9.6` and
+            // broke fresh-clone Gradle config. The standard plugins DSL +
+            // gradlePluginPortal above resolve the plugin correctly without
+            // any override — Codex review fix.
         }
     }
 }

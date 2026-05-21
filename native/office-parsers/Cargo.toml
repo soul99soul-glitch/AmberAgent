@@ -1,0 +1,23 @@
+[package]
+name = "office-parsers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "office_parsers"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni.workspace = true
+quick-xml.workspace = true
+zip.workspace = true
+thiserror.workspace = true
+log.workspace = true
+android_logger.workspace = true
+
+[dev-dependencies]
+# Used by integration tests to compare against JVM-equivalent outputs
+similar = "2"
