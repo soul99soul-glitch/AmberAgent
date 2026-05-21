@@ -33,6 +33,7 @@ class DeepReadAgentRunManager(
     private val generationHandler: GenerationHandler,
     private val hotListRepository: HotListRepository,
     private val toolSetFactory: AgentToolSetFactory,
+    private val sourcePrefetcher: DeepReadSourcePrefetcher,
     private val appScope: AppScope,
 ) {
     private val mutexes = ConcurrentHashMap<String, Mutex>()
@@ -119,9 +120,20 @@ class DeepReadAgentRunManager(
         val writerTools = writer.tools(stages = stages.toSet())
         val tools = toolSetFactory.forDeepRead(settings, writerTools)
         val scrapeWebAvailable = tools.any { it.name == "scrape_web" }
-        val hotTopic = hotListRepository.getHotTopic(topicId)
         val hiddenSettings = settings.toIsolatedSubAgentSettings()
         val assistant = DeepReadHiddenAssistantFactory.create(settings)
+
+        val prefetchedSources = sourcePrefetcher.collect(
+            topicId = topicId,
+            topicTitle = topicTitle,
+            seedUrl = seedUrl,
+        )
+        if (prefetchedSources.isEmpty()) {
+            val message = "没有抓到足够的来源，无法生成深度阅读。请检查搜索源或稍后重试。"
+            Log.w(TAG, "deep read prefetch returned no sources for topic=$topicId")
+            return Result.failure(IllegalStateException(message))
+        }
+        Log.i(TAG, "deep read prefetch ready: ${prefetchedSources.size} sources for topic=$topicId")
 
         return runCatching {
             writer.markRunning(stages)
@@ -130,10 +142,10 @@ class DeepReadAgentRunManager(
                     buildPrompt(
                         topicTitle = topicTitle,
                         stages = stages,
-                        hotTopic = hotTopic,
                         existingOutput = writer.currentOutput(),
                         seedUrl = seedUrl,
                         scrapeWebAvailable = scrapeWebAvailable,
+                        prefetchedSources = prefetchedSources,
                     )
                 )
             )
@@ -263,52 +275,38 @@ class DeepReadAgentRunManager(
     private fun buildPrompt(
         topicTitle: String,
         stages: List<DeepReadGenerationStage>,
-        hotTopic: HotTopic?,
         existingOutput: DeepReadOutput,
         seedUrl: String?,
         scrapeWebAvailable: Boolean,
+        prefetchedSources: List<DeepReadSource>,
     ): String = buildString {
         appendLine("今天日期：${LocalDate.now()}")
         appendLine("话题标题：$topicTitle")
         appendLine("目标段落：${stages.joinToString(" → ") { it.label }}")
         seedUrl?.takeIf { it.isNotBlank() }?.let { url ->
             appendLine("用户指定来源 URL：$url")
-            if (scrapeWebAvailable) {
-                appendLine("必须先调用 scrape_web 读取该 URL；它是重要线索，但不能作为唯一证据，仍需 search_web 交叉核查。")
-            } else {
-                appendLine("当前未暴露 scrape_web。必须用 search_web 精准检索该 URL、域名和标题，抓取可用搜索摘要后再交叉核查。")
-            }
+            appendLine("该 URL 已在预抓阶段尝试读取，优先使用预抓正文；如下面预抓正文为空再 search_web/scrape_web 补充。")
         }
         appendLine()
-        appendLine("## 热榜来源线索")
-        if (hotTopic == null || hotTopic.sources.isEmpty()) {
-            appendLine("- 当前没有可用热榜来源详情。必须通过 search_web 重新核查。")
-        } else {
-            hotTopic.sources.take(8).forEach { source ->
-                appendLine(
-                    "- ${source.providerName} #${source.rank}: ${source.presentationTitle}" +
-                        source.url?.let { " <$it>" }.orEmpty() +
-                        source.heat?.let { " heat=$it" }.orEmpty()
-                )
-                if (source.images.isNotEmpty()) appendLine("  images: ${source.images.take(4).joinToString(", ")}")
-            }
-        }
+        appendPrefetchedSources(prefetchedSources)
         appendLine()
         appendArticleContext(existingOutput)
         appendLine()
-        appendLine("## 必须执行的研究顺序")
-        appendLine("1. 先调用 search_sources_status，确认可用搜索源。")
-        appendLine("2. 至少调用 search_web 两次：中文 query 和英文 query。重大国际/政策/产品发布话题使用 day/week 时间范围交叉核查。")
+        appendLine("## 研究顺序")
+        appendLine("1. 上面已经为你预抓了 ${prefetchedSources.size} 条来源（含标题/URL/正文摘要/图片）。先把这些来源读懂，再判断是否够用。")
+        appendLine("2. 仅在以下情况补充 search_web：")
+        appendLine("   - 关键事实（发布时间、价格、官方表态、版本号等）在预抓来源中找不到或互相矛盾")
+        appendLine("   - 用户指定 URL 的预抓正文为空，需要别的 query 命中该话题")
+        appendLine("   - 你需要反面证据时（例如「辟谣」「不实」「未确认」）")
         if (scrapeWebAvailable) {
-            appendLine("3. 对关键搜索结果调用 scrape_web 获取正文；snippet 不够时不得写入确定结论。")
+            appendLine("3. 仅在确认某个 URL 比预抓正文更详细时再 scrape_web；不要把预抓已有正文重抓一次。")
         } else {
-            appendLine("3. 当前未暴露 scrape_web；只能基于 search_web 返回的来源摘要、URL、来源状态做保守写入，不得伪造正文细节。")
+            appendLine("3. 当前未暴露 scrape_web；只能基于预抓正文 + 必要时的 search_web 摘要写入。")
         }
-        appendLine("4. 搜索反面证据或纠错信息，例如加上「辟谣」「官方」「timeline」「release date」「not confirmed」等关键词。")
-        appendLine("5. 本轮只生成目标段落，不要改写或重写未列入目标的段落。")
-        appendLine("6. 只调用下列 writer tool；每个目标段完成后立即调用对应 tool：")
+        appendLine("4. 本轮只生成目标段落，不要改写或重写未列入目标的段落。")
+        appendLine("5. 完成研究后立即调用对应 writer tool：")
         stages.forEach { stage -> appendLine("   - ${stage.writerToolName()}：${stage.label}") }
-        appendLine("7. 如果所有段落已 READY，系统会要求验真；验真时先调用 deep_read_verify_claims，再调用 deep_read_finish。")
+        appendLine("6. 全部 writer 完成后，系统会要求验真：调用 deep_read_verify_claims（至少 2 条带 evidence_urls 的核心声明），再 deep_read_finish。")
         appendLine()
         appendLine("## 段落要求")
         if (DeepReadGenerationStage.OVERVIEW in stages) {
@@ -327,6 +325,24 @@ class DeepReadAgentRunManager(
         appendLine("正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。")
     }
 
+    private fun StringBuilder.appendPrefetchedSources(sources: List<DeepReadSource>) {
+        appendLine("## 已预抓取来源（共 ${sources.size} 条，优先使用）")
+        if (sources.isEmpty()) {
+            appendLine("- 预抓返回空（理论上不会到这里，因为上层会先 fail）")
+            return
+        }
+        sources.take(PROMPT_SOURCE_LIMIT).forEachIndexed { index, source ->
+            appendLine("### [${index + 1}] ${source.title}")
+            if (source.url.isNotBlank()) appendLine("- url: ${source.url}")
+            appendLine("- source: ${source.source ?: "-"}")
+            source.publishedAt?.takeIf { it.isNotBlank() }?.let { appendLine("- published_at: $it") }
+            if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
+            val excerpt = source.content.take(PROMPT_SOURCE_EXCERPT_LIMIT).replace("\n", " ").trim()
+            if (excerpt.isNotBlank()) appendLine("- excerpt: $excerpt")
+            appendLine()
+        }
+    }
+
     private fun buildWriterReminder(stages: List<DeepReadGenerationStage>, pass: Int): String = buildString {
         appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
         appendLine("UI 不会消费你的自由文本。请立刻继续研究缺口，然后调用以下 writer tool 中至少一个：")
@@ -342,9 +358,9 @@ class DeepReadAgentRunManager(
         appendLine()
         appendLine("验真要求：")
         appendLine("1. 基于上面的当前稿件全文，抽取影响最大的 3-5 个核心子声明。")
-        appendLine("2. 用已获得来源、必要时继续 search_web / scrape_web，核查这些声明。")
+        appendLine("2. 用已获得来源（含预抓 URL）核查这些声明；仅当声明在所有已抓来源中都找不到对应证据时，才再调 search_web / scrape_web 补充。")
         appendLine("3. 如果发现不确定或被证伪的声明，先调用对应 deep_read_write_* 修正段落。")
-        appendLine("4. deep_read_verify_claims 至少提供 2 条带 evidence_urls 的核心声明；未带来源 URL 的声明不会计入验真门槛。")
+        appendLine("4. deep_read_verify_claims 至少提供 2 条带 evidence_urls 的核心声明。evidence_urls **只能来自**：(a) 上面「已预抓取来源」列表中的 URL（只要该声明在该来源正文里有依据），或 (b) 你在本轮 search_web/scrape_web 实际访问过的 URL。**不要写未访问过的猜测 URL**。未带来源 URL 的声明不会计入验真门槛。")
         appendLine("5. 然后调用 deep_read_verify_claims，最后调用 deep_read_finish。")
         appendLine()
         appendLine("仍然不要输出完整 JSON 或 Markdown 长文。")
@@ -460,6 +476,13 @@ class DeepReadAgentRunManager(
         private const val COLLECT_RUN_BASE_TIMEOUT_MS = 30_000L
         private const val COLLECT_RUN_PER_STAGE_TIMEOUT_MS = 60_000L
         private const val VERIFICATION_COLLECT_RUN_TIMEOUT_MS = 60_000L
+
+        // Prompt-side caps on how many pre-fetched sources we surface and how much
+        // of each source body we inline. Anything beyond this stays in the
+        // prefetcher cache and can still be reached if the model needs it via
+        // search_web on the same URL.
+        private const val PROMPT_SOURCE_LIMIT = 12
+        private const val PROMPT_SOURCE_EXCERPT_LIMIT = 2_000
     }
 }
 
