@@ -1,3 +1,8 @@
+// Many `depth -= 1; break;` lines exist for symmetry with the non-break END_TAG
+// path (where the decrement IS used). Module-level allow rather than silencing
+// each site — Codex P3 sweep follow-up.
+#![allow(unused_assignments)]
+
 //! DOCX → markdown-flavoured plain text converter. Output **must** match
 //! `document/DocxParser.kt` byte-for-byte to satisfy the spike's equivalence
 //! requirement (SPIKE_PLAN §3.3).

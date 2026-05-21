@@ -1,3 +1,7 @@
+// Same depth-decrement-before-break stylistic choice as docx.rs — silence the
+// module-wide lint here too (Codex P3 sweep follow-up).
+#![allow(unused_assignments)]
+
 //! PPTX → markdown-flavoured plain text converter. Output **must** match
 //! `document/PptxParser.kt` byte-for-byte to satisfy the spike's equivalence
 //! requirement (SPIKE_PLAN §3.3).

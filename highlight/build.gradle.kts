@@ -47,7 +47,8 @@ android {
 cargo {
     module = "../native/highlight-parser"
     libname = "highlight_parser"
-    targets = listOf("arm64", "arm", "x86_64")
+    // Narrowed to arm64 — matches app abi filters; see document/build.gradle.kts comment.
+    targets = listOf("arm64")
     profile = "release"
     apiLevel = 24
     // extraCargoBuildArguments removed (P3 sweep) — `module` already points

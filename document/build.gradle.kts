@@ -42,9 +42,10 @@ android {
 cargo {
     module = "../native/office-parsers"
     libname = "office_parsers"
-    // Match common Android targets. arm64 covers modern phones; arm + x86_64
-    // round out emulator + older-device coverage.
-    targets = listOf("arm64", "arm", "x86_64")
+    // app currently ships arm64-v8a only (see app/build.gradle.kts ndk.abiFilters
+    // + splits.abi.include). Building arm + x86_64 here would just inflate CI
+    // without ending up in the APK. Narrow to arm64 — Codex review fix.
+    targets = listOf("arm64")
     profile = "release"
     apiLevel = 26
     // Share target/ dir across all 3 crates in the workspace.

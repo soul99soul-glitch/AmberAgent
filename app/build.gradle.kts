@@ -265,7 +265,8 @@ android {
 cargo {
     module = "../native/markdown-parser"
     libname = "markdown_parser"
-    targets = listOf("arm64", "arm", "x86_64")
+    // Narrowed to arm64 — matches app abi filters; see document/build.gradle.kts comment.
+    targets = listOf("arm64")
     profile = "release"
     apiLevel = 26
     // extraCargoBuildArguments removed (P3 sweep) — `module` already points
@@ -287,12 +288,12 @@ val androidNdkHome: String =
 
 val cargoBuildRegexTransformer = tasks.register<Exec>("cargoBuildRegexTransformer") {
     group = "rust"
-    description = "Build libregex_transformer.so for arm64-v8a, armeabi-v7a, x86_64 via cargo-ndk"
+    description = "Build libregex_transformer.so for arm64-v8a via cargo-ndk (matches app abi filters)"
     workingDir = file("../native/regex-transformer")
     environment("ANDROID_NDK_HOME", androidNdkHome)
     commandLine = listOf(
         "cargo", "ndk",
-        "-t", "arm64-v8a", "-t", "armeabi-v7a", "-t", "x86_64",
+        "-t", "arm64-v8a",
         "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
         "build", "--release",
         "--manifest-path", file("../native/regex-transformer/Cargo.toml").absolutePath,

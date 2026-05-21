@@ -16,11 +16,12 @@ pluginManagement {
             if (requested.id.id == "io.objectbox") {
                 useModule("io.objectbox:objectbox-gradle-plugin:${requested.version}")
             }
-            // Mozilla's Rust JNI plugin lives on gradlePluginPortal but the
-            // module coordinates need disambiguation for IDE sync.
-            if (requested.id.id == "org.mozilla.rust-android-gradle.rust-android") {
-                useModule("gradle.plugin.org.mozilla.rust-android-gradle:plugin:${requested.version}")
-            }
+            // (Removed) `org.mozilla.rust-android-gradle.rust-android` override:
+            // it mapped to a non-existent module
+            // `gradle.plugin.org.mozilla.rust-android-gradle:plugin:0.9.6` and
+            // broke fresh-clone Gradle config. The standard plugins DSL +
+            // gradlePluginPortal above resolve the plugin correctly without
+            // any override — Codex review fix.
         }
     }
 }
