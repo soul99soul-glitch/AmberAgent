@@ -14,6 +14,7 @@ import org.intellij.markdown.ast.LeafASTNode
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,11 +112,13 @@ class RevealOverlayParityTest {
 
     @Test
     fun overlay_skips_at_stable_offset_equal_to_leaf_length() {
-        // Boundary: stableRel == rangeLen → early-out path. Distinct from
-        // "fully drained" because here the queue might still have entries
-        // for OTHER leaves, but THIS leaf's stableHead just reached its
-        // end. Lock the early-return so a future off-by-one (`>` vs `>=`)
-        // can't sneak back in.
+        // Boundary: stableRel == rangeLen → early-out. Locks the
+        // `stableRel >= rangeLen` clause against a future off-by-one
+        // (`>` instead of `>=`). With a single-leaf static the
+        // "queue drained" and "this leaf's stableHead reached its
+        // end" cases collapse to the same code path; the test
+        // exercises the early-return but doesn't isolate it from
+        // drain. Sufficient for the off-by-one regression risk.
         val content = "hi"
         val static = buildAnnotatedString {
             pushStringAnnotation(REVEAL_LEAF_TAG, "0")
@@ -383,6 +386,39 @@ class RevealOverlayParityTest {
                 "align with the static positions after .trim() modifies the string",
             0,
             annotations.size,
+        )
+    }
+
+    @Test
+    fun shouldMarkLeaf_false_when_text_differs_from_rawText() {
+        // BREAK_LINE_REGEX rewrites `<br>` → `\n` inside the LeafASTNode
+        // arm. When that fires, `text != rawText` and the offset map
+        // breaks. The end-to-end MarkdownParser path can't reach this
+        // case reliably (GFM may not preserve `<br>` inside a single
+        // TEXT leaf), so pin it via the extracted helper.
+        assertFalse(
+            "Leaf with text != rawText (BREAK_LINE_REGEX collision) must not be " +
+                "marked — alpha offsets would misalign with content positions",
+            shouldMarkLeafAsFadeEligible(
+                rawText = "a<br>b",
+                text = "a\nb",
+                baseColor = baseColor,
+                trim = false,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldMarkLeaf_true_when_all_gates_pass() {
+        // Symmetric positive case for the helper: identical rawText/text,
+        // trim=false, valid baseColor → marking allowed.
+        assertTrue(
+            shouldMarkLeafAsFadeEligible(
+                rawText = "hello",
+                text = "hello",
+                baseColor = baseColor,
+                trim = false,
+            ),
         )
     }
 

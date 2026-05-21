@@ -1530,7 +1530,12 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             // trimmed/collapsed text falls through to a bulk append — the
             // reveal effect requires color modulation and a 1:1 offset
             // map, both of which fail in those cases.
-            val canFade = baseColor != Color.Unspecified && !trim && text == rawText
+            val canFade = shouldMarkLeafAsFadeEligible(
+                rawText = rawText,
+                text = text,
+                baseColor = baseColor,
+                trim = trim,
+            )
             if (canFade) {
                 pushStringAnnotation(REVEAL_LEAF_TAG, node.startOffset.toString())
                 append(text)
@@ -1732,6 +1737,36 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
 }
 
 /**
+ * Decides whether the [LeafASTNode] arm of [appendMarkdownNodeContent]
+ * should mark this leaf with [REVEAL_LEAF_TAG]. Extracted so the rule
+ * can be pinned by [RevealOverlayParityTest] without going through the
+ * MarkdownParser, which doesn't reliably keep `<br>` inside a single
+ * TEXT leaf and therefore can't exercise the `text == rawText` clause
+ * via end-to-end parsing.
+ *
+ * Three gates, all must pass:
+ *  - [baseColor] is not [Color.Unspecified]: the reveal effect modulates
+ *    foreground color; without a baseColor there's nothing to modulate.
+ *  - [trim] is false: ATX heading children call with trim=true, which
+ *    runs `rawText.trim()` and breaks the static↔content offset map
+ *    the overlay relies on (the controller is in content-offset space).
+ *  - [text] equals [rawText]: when BREAK_LINE_REGEX rewrites `<br>` to
+ *    `\n` the lengths differ and offset alignment is similarly broken.
+ *
+ * Failing any gate falls through to a bulk append — no fade, no
+ * annotation. This is a small behavioral change from the pre-refactor
+ * code, which attempted fade with mis-aligned alphas in the trim /
+ * `<br>` cases; the misalignment was a latent bug that always produced
+ * the wrong char-to-alpha mapping. No-fade is the safer fallback.
+ */
+internal fun shouldMarkLeafAsFadeEligible(
+    rawText: String,
+    text: String,
+    baseColor: Color,
+    trim: Boolean,
+): Boolean = baseColor != Color.Unspecified && !trim && text == rawText
+
+/**
  * Frame-local alpha overlay for the static [AnnotatedString] produced by
  * [appendMarkdownNodeContent]. Caller passes the pre-cached
  * [REVEAL_LEAF_TAG] range list (caching avoids per-frame
@@ -1740,9 +1775,13 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
  * [revealController] and layers a translucent color [SpanStyle] on top
  * of the existing styling.
  *
- * Cost is O(unrevealed codepoints across all leaves), bounded by
- * [CharRevealController]'s BACKLOG_DEGRADE (≈ 80). Skip-stable-prefix is
- * applied per leaf using [CharRevealController.stableOffsetExclusive].
+ * Cost: O(unrevealed codepoints across all marked leaves). In practice
+ * this stays small because (a) the per-leaf stable-prefix shortcut
+ * skips chars whose absolute offset is below
+ * [CharRevealController.stableOffsetExclusive], so only chars inside
+ * the active fade window contribute, and (b) the reveal queue itself
+ * is degraded to instant-promote once it crosses [CharRevealController]'s
+ * BACKLOG_DEGRADE entry count, draining unrevealed codepoints quickly.
  *
  * Returns [static] unchanged when there's no usable [baseColor] or
  * [ranges] is empty — preserves Color.Unspecified parity with the
