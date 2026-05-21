@@ -61,7 +61,7 @@ class DeepReadSectionWriterTools(
             if (current.statusOf(stage) == DeepReadSectionStatus.READY) {
                 current
             } else {
-                current.withSectionStatus(stage, DeepReadSectionStatus.FAILED, message.take(220))
+                current.withSectionStatus(stage, DeepReadSectionStatus.FAILED, message.safeTake(220))
             }
         }
 
@@ -70,7 +70,7 @@ class DeepReadSectionWriterTools(
             val states = current.sectionStates.toMutableMap()
             states[DeepReadGenerationStage.EXTENDED_READING] = DeepReadSectionState(
                 status = DeepReadSectionStatus.FAILED,
-                errorMessage = message.take(220),
+                errorMessage = message.safeTake(220),
             )
             current.copy(sectionStates = states, generationComplete = false)
         }
@@ -105,7 +105,7 @@ class DeepReadSectionWriterTools(
             val output = update { current ->
                 val references = obj.readingLinks("references")
                 val next = current.copy(
-                    topicType = obj.string("topic_type")?.take(32) ?: current.topicType,
+                    topicType = obj.string("topic_type")?.safeTake(32) ?: current.topicType,
                     summary = obj.string("summary")?.cleanText(1_500) ?: current.summary,
                     keyEntities = mergeStrings(current.keyEntities, obj.stringList("key_entities"), limit = 12),
                     heroImageUrl = obj.url("hero_image_url") ?: current.heroImageUrl,
@@ -560,7 +560,21 @@ private data class VerifiedClaimGate(
 )
 
 private fun String.cleanText(max: Int): String =
-    replace(Regex("\\s+"), " ").trim().take(max)
+    replace(Regex("\\s+"), " ").trim().safeTake(max)
+
+/**
+ * Like [String.take] but does not split a UTF-16 surrogate pair. A dangling
+ * high surrogate produced by a naive `take` corrupts the string for any layer
+ * that round-trips through UTF-8 encoding (kotlinx.serialization rejects it,
+ * WebView replaces it with U+FFFD), so emoji-containing model output ends up
+ * blanking the rendered section.
+ */
+internal fun String.safeTake(n: Int): String {
+    if (n <= 0) return ""
+    if (length <= n) return this
+    val cut = if (this[n - 1].isHighSurrogate()) n - 1 else n
+    return substring(0, cut)
+}
 
 private fun mergeStrings(existing: List<String>, incoming: List<String>, limit: Int): List<String> =
     (existing + incoming)
