@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "jni-common",
     "office-parsers",
     "markdown-parser",
     "highlight-parser",
@@ -14,11 +15,20 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+# Bumped from 1.75 → 1.76 because `std::any::type_name_of_val` (used by
+# jni-common::panic_to_string) stabilized in 1.76. Previous setting was a
+# latent contract violation — local builds passed because the active toolchain
+# was ≥1.76, but a strict CI on a 1.75 toolchain would have failed.
+rust-version = "1.76"
 license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+# Shared internal helpers — see `jni-common/src/lib.rs`. Extracted in
+# Phase 3 D-2 (was 3 duplicated copies of panic_to_string +
+# init_logger_once + write_varint).
+jni-common = { path = "jni-common" }
+
 # JNI bindings — kept aligned across all 3 crates so they can share helpers
 jni = "0.21"
 
@@ -31,6 +41,19 @@ android_logger = "0.14"
 # Component #1 — office parsers
 quick-xml = { version = "0.36", features = ["serialize"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# xlsx reader (Phase 3 D-1). `default-features = false` is defensive —
+# calamine's current default feature set is empty (no chrono / picture /
+# serde) but pinning the toggle protects us from a silent upstream
+# default-bump pulling chrono into the .so.
+#
+# Held at 0.26 deliberately: newer calamine (0.27+) pulls in quick-xml
+# 0.37 AND zip 4, both of which differ from the workspace pins (quick-xml
+# 0.36, zip 2). The "dedup" by upgrading actually doubled the duplicated
+# crate count. Until the rest of the workspace (docx / pptx / epub
+# parsers) is ready to migrate to quick-xml 0.37 + zip 4 in lockstep,
+# accept the ~80 KB cost of one duplicated quick-xml (0.31 vs 0.36) at
+# the calamine boundary.
+calamine = { version = "0.26", default-features = false }
 
 # Component #2 — markdown parser
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }

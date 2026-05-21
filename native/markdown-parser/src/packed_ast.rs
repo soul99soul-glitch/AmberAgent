@@ -56,28 +56,15 @@ fn pack_tree(root: &Node, out: &mut Vec<u8>) {
     stack.push(root);
     while let Some(node) = stack.pop() {
         out.push(node.type_code.as_byte());
-        write_varint(node.start as u64, out);
+        jni_common::write_varint(node.start as u64, out);
         let delta = node.end.saturating_sub(node.start) as u64;
-        write_varint(delta, out);
-        write_varint(node.extras.len() as u64, out);
+        jni_common::write_varint(delta, out);
+        jni_common::write_varint(node.extras.len() as u64, out);
         out.extend_from_slice(&node.extras);
-        write_varint(node.children.len() as u64, out);
+        jni_common::write_varint(node.children.len() as u64, out);
         // Push children in reverse so the first child is popped next.
         for child in node.children.iter().rev() {
             stack.push(child);
-        }
-    }
-}
-
-fn write_varint(mut value: u64, out: &mut Vec<u8>) {
-    loop {
-        let byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value == 0 {
-            out.push(byte);
-            return;
-        } else {
-            out.push(byte | 0x80);
         }
     }
 }
@@ -120,18 +107,6 @@ mod tests {
         assert_eq!(bytes[5], FLAG_HAS_HTML_BLOCKS);
     }
 
-    #[test]
-    fn varint_small_values_one_byte() {
-        let mut out = Vec::new();
-        write_varint(0, &mut out);
-        assert_eq!(out, vec![0]);
-
-        let mut out = Vec::new();
-        write_varint(127, &mut out);
-        assert_eq!(out, vec![127]);
-
-        let mut out = Vec::new();
-        write_varint(128, &mut out);
-        assert_eq!(out, vec![0x80, 0x01]);
-    }
+    // varint encoding tests moved to jni-common (single source of truth for
+    // the wire format — see jni_common::tests::varint_*).
 }

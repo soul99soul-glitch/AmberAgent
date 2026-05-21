@@ -10,6 +10,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.memory.model.MemoryKind
 import me.rerere.rikkahub.data.memory.model.MemoryScope
+import me.rerere.rikkahub.data.model.nativebridge.RegexNativeSwitch
 import kotlin.uuid.Uuid
 
 @Serializable
@@ -90,25 +91,58 @@ fun String.replaceRegexes(
 ): String {
     if (assistant == null) return this
     if (assistant.regexes.isEmpty()) return this
-    return assistant.regexes.fold(this) { acc, regex ->
-        if (regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)) {
-            try {
-                val result = acc.replace(
-                    regex = Regex(regex.findRegex),
-                    replacement = regex.replaceString,
-                )
-                // println("Regex: ${regex.findRegex} -> ${result}")
-                result
-            } catch (e: Exception) {
-                e.printStackTrace()
-                // 如果正则表达式格式错误，返回原字符串
-                acc
-            }
-        } else {
+
+    // Filter applicable rules once so the native path can take parallel
+    // pattern + replacement arrays in one JNI call. Skip the rest of the
+    // pipeline (incl. building arrays) if nothing applies.
+    val applicable = assistant.regexes.filter { regex ->
+        regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)
+    }
+    if (applicable.isEmpty()) return this
+
+    // Phase 2 Step 3: route through RegexNativeSwitch. Default disabled →
+    // skip the entire JNI path (no array allocation) and go straight to JVM
+    // (review P1-1 / P2-3). Both paths skip individual rules whose regex
+    // fails to compile (silent log + acc passthrough) so per-rule semantic
+    // parity is the only correctness concern — caught by diff sampling per
+    // RegexNativeSwitch class KDoc.
+    //
+    // TODO: before flipping `regex=true` for any cohort, add a
+    //   config-save-time validator that scans every assistant rule for
+    //   JVM-only syntax (lookbehind `(?<=` `(?<!`, backref `\1`-`\9`,
+    //   possessive `*+`/`?+`/`++`) and warns the user so they understand the
+    //   semantic gap — diff sampling at sampleRate=0 doesn't catch this
+    //   class of divergence on its own.
+    if (RegexNativeSwitch.isEnabled()) {
+        val patterns = Array(applicable.size) { applicable[it].findRegex }
+        val replacements = Array(applicable.size) { applicable[it].replaceString }
+        RegexNativeSwitch.applyOrNull(
+            input = this,
+            findPatterns = patterns,
+            replacements = replacements,
+            jvmFallback = { applyRegexesJvm(this, applicable) },
+        )?.let { return it }
+    }
+
+    return applyRegexesJvm(this, applicable)
+}
+
+/** JVM regex pipeline preserved as the sole fallback path. Identical to the
+ *  fold body that was inline before Phase 2 Step 3 — invalid patterns are
+ *  caught per-rule and skipped (acc passes through unchanged), so a single
+ *  malformed rule doesn't break the whole chain. */
+private fun applyRegexesJvm(input: String, rules: List<AssistantRegex>): String =
+    rules.fold(input) { acc, regex ->
+        try {
+            acc.replace(
+                regex = Regex(regex.findRegex),
+                replacement = regex.replaceString,
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
             acc
         }
     }
-}
 
 /**
  * 注入位置

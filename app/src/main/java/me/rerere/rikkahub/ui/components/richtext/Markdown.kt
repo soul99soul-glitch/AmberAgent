@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.richtext
 
+import android.os.Looper
 import android.os.Trace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -93,7 +94,10 @@ import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
+import me.rerere.rikkahub.ui.components.richtext.nativebridge.MarkdownNativeSwitch
+import me.rerere.rikkahub.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
+import kotlin.random.Random
 
 /**
  * When false, markdown nodes use wrap-content width instead of fill-max-width.
@@ -355,7 +359,73 @@ private fun ASTNode.containsHtmlBlocks(): Boolean {
 
 private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownParseResult {
     val astTree = parser.buildMarkdownTreeFromString(preprocessed)
+    // Phase 2 Step 5: shadow-compare against native pulldown-cmark AST when
+    // `markdownAst` is enabled. The renderer still consumes `astTree` (JVM
+    // tree) — we don't swap the consumer because Markdown.kt is mid-migration
+    // (see `feedback_rikkahub_rust_native_spike` memory: 12+ commits/month,
+    // touching the renderer right now risks merge conflicts with active
+    // streaming-render fixes). The shadow path gives us correctness telemetry
+    // ahead of the eventual full swap.
+    maybeShadowCompareNativeAst(preprocessed, astTree)
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
+}
+
+/**
+ * Top-level structural compare. **Count-only** — the JVM ASTNode exposes
+ * UTF-16 char offsets, pulldown-cmark exposes UTF-8 byte offsets; on a
+ * CJK / emoji corpus (rikkahub's bread-and-butter) span comparison
+ * deterministically diverges and would swamp Crashlytics with false-positive
+ * mismatches (review Step 5 P0-1). The "real" semantic-equivalence compare
+ * needs an offset-normalizer + a JVM↔Rust type-name mapping table and
+ * arrives with the eventual renderer swap.
+ *
+ * Cost-gated by the shared sample rate so streaming chunks don't pay the
+ * JNI + decode bill per tick — only a fraction of parses run native and
+ * compare (review Step 5 P1-1).
+ */
+private fun maybeShadowCompareNativeAst(preprocessed: String, jvmTree: ASTNode) {
+    if (!MarkdownNativeSwitch.isAstEnabled()) return
+    // Skip when called on the composition (main) thread — the JNI parse +
+    // PackedAstReader decode would block the UI. Caches in this file
+    // sometimes hit a parse on main during first composition; let those
+    // fast-path through JVM and only sample compare on background renders.
+    if (Looper.myLooper() == Looper.getMainLooper()) return
+    val rate = MarkdownNativeSwitch.sampleRate()
+    if (rate <= 0f) return
+    // Caller-side roll decides whether to incur the JNI + decode cost at all.
+    // `reportAstDiff` also samples internally for matches (so dashboards see
+    // a sparse "sampling is alive" heartbeat) — that's an intentional second
+    // gate, the divergence path bypasses it and always reports.
+    if (Random.nextFloat() >= rate) return
+
+    // Whole-body try/catch: `PackedAstReader.root()` / `.children` is lazy
+    // and can throw (e.g. "varint too long") on a magic-valid but truncated
+    // native blob. Without this guard a corrupted Rust output would surface
+    // as an exception inside the JVM renderer path that just consumed the
+    // valid JVM tree — i.e. the shadow harness, which is supposed to NEVER
+    // affect the caller, would break the caller (Codex review P1-2).
+    try {
+        val blob = MarkdownNativeSwitch.parseAstOrNull(preprocessed) ?: return
+        val reader = PackedAstReader(blob)
+        val nativeRoot = reader.root()
+        if (!reader.isValid || nativeRoot == null) {
+            MarkdownNativeSwitch.reportAstBlobRejected()
+            return
+        }
+        val jvmCount = jvmTree.children.size
+        val nativeChildren = nativeRoot.children
+        val nativeCount = nativeChildren.size
+        val equal = jvmCount == nativeCount
+        val nativeTypeCodes = nativeChildren.take(8).map { it.typeCode }
+        MarkdownNativeSwitch.reportAstDiff(
+            equal = equal,
+            jvmSummary = "blocks=$jvmCount",
+            nativeSummary = "blocks=$nativeCount typeCodes=$nativeTypeCodes",
+        )
+    } catch (t: Throwable) {
+        android.util.Log.w("MarkdownAstShadow", "native AST decode/compare threw", t)
+        MarkdownNativeSwitch.reportAstBlobRejected()
+    }
 }
 
 private fun parseMarkdownUncached(content: String): MarkdownParseResult {

@@ -7,8 +7,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Bridge to the `highlight-parser` Rust crate (tree-sitter based).
  *
- * Spike-phase contract: NOT wired into [me.rerere.highlight.Highlighter] —
- * benchmarks call directly. See SPIKE_PLAN §5.
+ * Phase 1 (PR #9) shipped this bridge without production wiring — only
+ * benchmarks called it. From Phase 2 Step 2 onwards [Highlighter.highlight]
+ * routes through the sibling [HighlightNativeSwitch] (public face that adds
+ * flag gating + Crashlytics + diff sampling). See SPIKE_PLAN §5 / §8.
  *
  * The native side returns a packed binary token stream; we decode to
  * [HighlightToken] so the existing Compose renderer ([HighlightText]) can
@@ -66,6 +68,14 @@ internal object HighlighterNative {
             return loaded.get()
         }
 
+    /**
+     * Throwable from the most recent [System.loadLibrary] attempt, or `null`
+     * if the library loaded fine / no attempt yet. Visible to the in-package
+     * [HighlightNativeSwitch] so it can route load failures to Crashlytics
+     * exactly once.
+     */
+    internal fun lastLoadError(): Throwable? = loadError
+
     private fun ensureLoaded() {
         if (loaded.get() || loadError != null) return
         synchronized(this) {
@@ -101,21 +111,36 @@ internal object HighlighterNative {
         ensureLoaded()
         if (!loaded.get()) return null
         val blob = highlightNative(code, language)
+        // Truncated / empty blob = Rust caught a panic + returned no header.
+        // Returning null here is intentional — the caller (Switch) sees null
+        // and routes it through `cfg.onNativePanic("highlight", null)` for
+        // Crashlytics. Do NOT inline a panic call here; the bridge stays
+        // telemetry-agnostic by design.
         if (blob.size < 8) return null
         return decode(blob, code)
     }
 
-    private fun decode(blob: ByteArray, originalCode: String): List<HighlightToken> {
+    /**
+     * Decode the packed token blob.
+     *
+     * Returns `null` (NOT empty list) on invalid magic or unsupported wire
+     * version (Codex review P2-5) — empty list would be indistinguishable
+     * from "valid blob with no tokens" and the Switch would render an empty
+     * code block instead of falling back to QuickJS+Prism. Null propagates
+     * through `highlight()` → Switch sees `nativeTokens == null` →
+     * `cfg.onNativePanic("highlight", null)` → JVM fallback.
+     */
+    private fun decode(blob: ByteArray, originalCode: String): List<HighlightToken>? {
         // Header: 'PHLT' + u8 ver + u8 flags + u16 reserved
         if (blob[0] != 'P'.code.toByte() || blob[1] != 'H'.code.toByte()
             || blob[2] != 'L'.code.toByte() || blob[3] != 'T'.code.toByte()
-        ) return emptyList()
+        ) return null
         // Reject wire-format versions we don't know how to read so a future
         // v2 .so with a Kotlin client on this version silently falls back
         // instead of mis-decoding (cross-component review P2 fix; mirrors the
         // PackedAstReader.isValid check in MarkdownParserNative).
         val rawVersion = blob[4].toInt() and 0xFF
-        if (rawVersion != SUPPORTED_WIRE_VERSION) return emptyList()
+        if (rawVersion != SUPPORTED_WIRE_VERSION) return null
         var cursor = 8
 
         // Cache the UTF-8 byte representation **once** per decode call so

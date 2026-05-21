@@ -83,6 +83,7 @@ import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
+import me.rerere.rikkahub.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -118,6 +119,30 @@ private val parser by lazy { MarkdownParser(flavour) }
 
 private fun generateMarkdownHtml(content: String): String {
     val preprocessed = preProcess(content)
+    // Phase 2 Step 4: try native pulldown-cmark HTML emit before falling
+    // back to the JetBrains HtmlGenerator. Default config keeps native off
+    // → renderHtmlOrNull returns null → JVM path runs unchanged.
+    //
+    // Diff sampling for the HTML stage now runs both outputs through
+    // `HtmlDiffNormalizer` (Phase 3 C) before comparison, so cosmetic
+    // divergences (whitespace, attr order, entity escape, void-tag style)
+    // don't flood Crashlytics — only genuine semantic differences do.
+    // `HTML_DIFF_ENABLED` remains as a one-flip kill-switch should the
+    // normalizer itself need to be backed out.
+    if (MarkdownNativeSwitch.isHtmlEnabled()) {
+        // TODO: pulldown-cmark JNI call is uninterruptible — when the caller's
+        //   mapLatest cancels the previous chunk's render, this still burns
+        //   a Dispatchers.Default worker until completion. Acceptable for v1
+        //   because individual renders are <ms; revisit if ANR signals
+        //   point to Default-pool saturation on streamed messages.
+        MarkdownNativeSwitch
+            .renderHtmlOrNull(preprocessed) { generateMarkdownHtmlJvm(preprocessed) }
+            ?.let { return it }
+    }
+    return generateMarkdownHtmlJvm(preprocessed)
+}
+
+private fun generateMarkdownHtmlJvm(preprocessed: String): String {
     val tree = parser.buildMarkdownTreeFromString(preprocessed)
     return HtmlGenerator(preprocessed, tree, flavour).generateHtml()
 }
@@ -131,6 +156,11 @@ fun MarkdownNew(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
 ) {
+    // The initial `generateMarkdownHtml(content)` runs on the composition
+    // thread (main). With native HTML enabled this includes a JNI call —
+    // bounded but visible on long lists scrolling into view. Pre-existing
+    // behaviour with the JVM path; native adds JNI overhead. Revisit if
+    // first-paint metrics regress after rollout.
     var html by remember {
         mutableStateOf(
             value = generateMarkdownHtml(content),

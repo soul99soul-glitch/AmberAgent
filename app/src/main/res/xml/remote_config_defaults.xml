@@ -8,4 +8,14 @@
     <key>silicon_cloud_free_models</key>
     <value>Qwen/Qwen3-8B,THUDM/GLM-4.1V-9B-Thinking</value>
   </entry>
+  <!--
+    Phase 2 Rust JNI kill switch (SPIKE_PLAN §8.3). When `true`, all native
+    paths are forced off regardless of per-user prefs; lets us yank the
+    feature without a binary rollback. Defaults to false; flip remotely if a
+    production incident is traced to native code.
+  -->
+  <entry>
+    <key>native_path_kill_switch</key>
+    <value>false</value>
+  </entry>
 </defaults>

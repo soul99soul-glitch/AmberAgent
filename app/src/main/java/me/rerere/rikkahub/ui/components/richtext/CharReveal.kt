@@ -55,8 +55,11 @@ enum class StreamRevealPreset(val baseRevealDurationMs: Long) {
     /** Snappy: ~120ms fade. Closest to "no animation but with a soft edge". */
     REALTIME(120L),
 
-    /** Default. ~200ms — 12 frames @60Hz, matches the original B1 tuning. */
-    BALANCED(200L),
+    /** Default. ~80ms — ~5 frames @60Hz. "Crisp typing" sweet spot: short
+     *  enough to feel snappy, long enough that the fade is still
+     *  perceivable. Was 200L before the experiment; flip back if streaming
+     *  jank surfaces on slow devices. */
+    BALANCED(80L),
 
     /** Slow + cinematic. ~320ms — feels deliberate, good for long replies. */
     SILKY(320L),

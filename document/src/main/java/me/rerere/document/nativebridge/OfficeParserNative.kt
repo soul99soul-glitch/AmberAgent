@@ -15,8 +15,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   / [me.rerere.document.PptxParser] emit. Sentinel error prefixes mirror JVM
  *   ("Error parsing DOCX file: ...", "Unable to find document content ...").
  *
- * NOT wired into [DocxParser] / [PptxParser] during Phase 1 — benchmarks call
- * the bridge directly. See `docs/RUST_NATIVE_SPIKE_PLAN.md` §3.
+ * Phase 1 (PR #9) shipped the bridge without any production caller — only
+ * benchmarks touched it. From Phase 2 Step 1 onwards callers go through the
+ * sibling [OfficeNativeSwitch] (public face that handles flag gating +
+ * Crashlytics + diff sampling) rather than calling the bridge directly.
+ * See `docs/RUST_NATIVE_SPIKE_PLAN.md` §3 / §8.
  */
 internal object OfficeParserNative {
 
@@ -31,6 +34,14 @@ internal object OfficeParserNative {
             ensureLoaded()
             return loaded.get()
         }
+
+    /**
+     * Returns the throwable from the most recent [System.loadLibrary] attempt,
+     * or `null` if the library loaded successfully (or no attempt has been made
+     * yet). Visible to the in-package [OfficeNativeSwitch] so it can report
+     * load failures to Crashlytics exactly once.
+     */
+    internal fun lastLoadError(): Throwable? = loadError
 
     private fun ensureLoaded() {
         if (loaded.get() || loadError != null) return
@@ -81,6 +92,13 @@ internal object OfficeParserNative {
         return Result.Success(output)
     }
 
+    fun parseXlsx(file: File): Result {
+        ensureLoaded()
+        if (!loaded.get()) return Result.NativeUnavailable
+        val output = parseXlsxNative(file.absolutePath) ?: return Result.NativeUnavailable
+        return Result.Success(output)
+    }
+
     @JvmStatic
     private external fun parseDocxNative(path: String): String?
 
@@ -89,4 +107,7 @@ internal object OfficeParserNative {
 
     @JvmStatic
     private external fun parseEpubNative(path: String): String?
+
+    @JvmStatic
+    private external fun parseXlsxNative(path: String): String?
 }

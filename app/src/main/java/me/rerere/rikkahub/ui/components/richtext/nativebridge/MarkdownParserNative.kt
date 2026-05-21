@@ -9,8 +9,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Returns a packed binary AST blob (see SPIKE_PLAN §4.2 for wire format).
  * Decode via [PackedAstReader].
  *
- * Spike-phase: NOT wired into [me.rerere.rikkahub.ui.components.richtext.Markdown]
- * — benchmarks/tests call directly.
+ * Phase 1 (PR #9) shipped this bridge without production wiring — benchmarks
+ * called it directly. Phase 2 Step 4 wires the HTML emit path through the
+ * sibling [MarkdownNativeSwitch] (called from `MarkdownNew.kt`'s
+ * `generateMarkdownHtml`). Phase 2 Step 5 will wire the packed-AST path
+ * through the same Switch when the JetBrains-tree-builder caller in
+ * `Markdown.kt` is ready to consume the binary format.
  */
 internal object MarkdownParserNative {
 
@@ -25,6 +29,9 @@ internal object MarkdownParserNative {
             ensureLoaded()
             return loaded.get()
         }
+
+    /** See [me.rerere.document.nativebridge.OfficeParserNative.lastLoadError]. */
+    internal fun lastLoadError(): Throwable? = loadError
 
     private fun ensureLoaded() {
         if (loaded.get() || loadError != null) return

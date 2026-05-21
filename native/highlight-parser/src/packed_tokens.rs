@@ -39,15 +39,15 @@ const KIND_TOKEN: u8 = 1;
 pub fn pack_plain_only(code: &str) -> Vec<u8> {
     let mut out = write_header();
     // type pool: empty
-    write_varint(0, &mut out);
+    jni_common::write_varint(0, &mut out);
     // tokens: just one Plain
     if code.is_empty() {
-        write_varint(0, &mut out);
+        jni_common::write_varint(0, &mut out);
     } else {
-        write_varint(1, &mut out);
+        jni_common::write_varint(1, &mut out);
         out.push(KIND_PLAIN);
-        write_varint(0, &mut out);
-        write_varint(code.len() as u64, &mut out);
+        jni_common::write_varint(0, &mut out);
+        jni_common::write_varint(code.len() as u64, &mut out);
     }
     out
 }
@@ -58,9 +58,9 @@ pub fn pack(code: &str, events: Vec<HighlightEvent>) -> Vec<u8> {
     // Emit type pool (full HIGHLIGHT_NAMES list — small, ~26 entries).
     // Kotlin side caches this once and indexes by `type_ref`.
     let names = highlight_names();
-    write_varint(names.len() as u64, &mut out);
+    jni_common::write_varint(names.len() as u64, &mut out);
     for name in names {
-        write_varint(name.len() as u64, &mut out);
+        jni_common::write_varint(name.len() as u64, &mut out);
         out.extend_from_slice(name.as_bytes());
     }
 
@@ -109,13 +109,13 @@ pub fn pack(code: &str, events: Vec<HighlightEvent>) -> Vec<u8> {
         });
     }
 
-    write_varint(tokens.len() as u64, &mut out);
+    jni_common::write_varint(tokens.len() as u64, &mut out);
     for token in &tokens {
         match token {
             Token::Plain { start, end } => {
                 out.push(KIND_PLAIN);
-                write_varint(*start as u64, &mut out);
-                write_varint((*end - *start) as u64, &mut out);
+                jni_common::write_varint(*start as u64, &mut out);
+                jni_common::write_varint((*end - *start) as u64, &mut out);
             }
             Token::Token {
                 start,
@@ -123,9 +123,9 @@ pub fn pack(code: &str, events: Vec<HighlightEvent>) -> Vec<u8> {
                 type_ref,
             } => {
                 out.push(KIND_TOKEN);
-                write_varint(*start as u64, &mut out);
-                write_varint((*end - *start) as u64, &mut out);
-                write_varint(*type_ref as u64, &mut out);
+                jni_common::write_varint(*start as u64, &mut out);
+                jni_common::write_varint((*end - *start) as u64, &mut out);
+                jni_common::write_varint(*type_ref as u64, &mut out);
             }
         }
     }
@@ -149,18 +149,8 @@ fn write_header() -> Vec<u8> {
     out
 }
 
-fn write_varint(mut value: u64, out: &mut Vec<u8>) {
-    loop {
-        let byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value == 0 {
-            out.push(byte);
-            return;
-        } else {
-            out.push(byte | 0x80);
-        }
-    }
-}
+// varint writer moved to jni-common (single source of truth for the wire
+// format — see jni_common::write_varint).
 
 #[cfg(test)]
 mod tests {

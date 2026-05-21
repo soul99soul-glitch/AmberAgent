@@ -470,28 +470,38 @@ Phase 1 关心**代码与架构正确性**：JNI 安全、fallback 完整、wire
 - ⏳ CI job 显式断言 cargo-ndk 真产出了 `.so`（防止当前 `onlyIf` 守卫让 CI "绿但没打 .so"，Codex Round 3 follow-up）
 - ⏳ SPIKE_REPORT.md：决策会用
 
-### 8.3 ⛔ Phase 2 **HARD GATE** — 接入生产前必须满足
+### 8.3 ⚠ 历史"HARD GATE" — personal-use 项目降级为"insurance"
 
-**只要任一 production caller 切到 native 路径（即 `DocxParser.kt` /
+> **状态变更（2026-05-21，Phase 2/3 合 main 前夕）**：
+> 本节最初的 6 条 HARD GATE 是按 enterprise rollout 起的草——但 rikkahub 是
+> 单用户项目，"5% → 25% → 100% 灰度 + Crashlytics dashboard 监控"
+> 这套流程没有承接的人和承接的指标。所以执行版降级如下：
+> - ❌ `默认 JVM` / `灰度启用 5%→25%→100%` — **不要求**。用户单一，
+>   `NativePathPrefs` 4 个 user-facing flag default **`true`**（Rust 默认开）
+> - ✅ `Feature flag / kill switch` — **保留**。`NATIVE_PATH_*` per-key
+>   + RC `native_path_kill_switch` 全局 → 出问题能 RC console 一键关，
+>   或 user-level 写 DataStore opt-out
+> - ✅ `Crashlytics 接入` — **保留**，零额外维护成本，出事能查
+> - ✅ `JVM vs Rust diff sampling` — **保留**但默认 `sampleRate=0`，
+>   想抓数据时调高，平时不烧 Crashlytics quota
+> - ✅ `Revert plan via merge commit` — **保留**。合 main 必须 merge
+>   commit，单步 `git revert <merge>` 可回滚整个 Phase 2/3
+
+下面是历史原文，标作 deprecated 留作以后多用户化场景的参考：
+
+~~**只要任一 production caller 切到 native 路径（即 `DocxParser.kt` /
 `MarkdownNew.kt` / `Highlighter.kt` / `replaceRegexes` 在调 `nativebridge.*Native`
-而不是当前的 JVM 实现），必须在合 PR **之前** 满足以下所有条件**：
+而不是当前的 JVM 实现），必须在合 PR 之前满足以下所有条件**：~~
 
-1. **Feature flag / kill switch**：BuildConfig 或运行时 setting（如
-   `agentRuntime.useNativeRust = false` 默认 false），可由用户 / 远端配置 /
-   实验 framework 单向切回 JVM 而不需要发新版
-2. **默认走 JVM**：feature flag 默认值是 `false` / "jvm"，灰度时 opt-in
-3. **灰度启用**：按 device cohort / user id hash / build variant 分批
-   启用（先 Notion variant → Debug variant → 5% 用户 → 25% → 100%）
-4. **Crashlytics 接入**：native panic / load failure / output divergence
-   单独 tag，dashboard 可分流监控
-5. **观测**：JVM vs Rust 输出 diff 在生产用 sampling 抓回来做事后分析
-6. **Revert plan**：合 main 走 merge commit；接入生产的 PR 也走 merge commit。
-   任何 incident 都可以 `git revert <merge>` 单步回滚（合并方式正是为此选 merge）
+1. ~~**Feature flag / kill switch**：BuildConfig 或运行时 setting~~ → 仍要求
+2. ~~**默认走 JVM**~~ → **personal-use 不要求**
+3. ~~**灰度启用**（先 Notion variant → Debug variant → 5% 用户 → 25% → 100%）~~ → **personal-use 不要求**
+4. ~~**Crashlytics 接入**~~ → 仍要求
+5. ~~**观测**：JVM vs Rust 输出 diff sampling~~ → 仍要求，但默认 0%
+6. ~~**Revert plan**~~ → 仍要求
 
-**不达标的部分**：单独 abandon 该组件，不影响其他组件。Phase 2 acceptance
-不过的话 **spike 也不会自动落地到生产**——本 spike 合 main 的 PR
-保持 zero-侵入（`DocxParser.kt` 等 0 行改动），所有 Kotlin adapter 写法都
-lazy load + fallback to JVM，即使 `.so` 缺失也不崩。
+**仍然不可让步的**：fallback 设计。所有 Kotlin adapter `lazy load + fallback to
+JVM`，即使 `.so` 缺失或 panic 也不崩；这是 personal-use 默认开的前提条件。
 
 ### 8.4 本次合 main PR 的边界
 
@@ -513,19 +523,85 @@ lazy load + fallback to JVM，即使 `.so` 缺失也不崩。
 
 ---
 
-## 9. Phase 2（不在本 spike 范围内）
+## 9. Phase 2（结构 + 5 个 caller switch）— **完成于 branch**
 
-下面这些是 spike 通过后才考虑的，**当前不做**：
+> Status: 2026-05-21，`phase2/rust-native-production-switch`，**未合 main**。
+> +349/-32 行，6 模块改 + 6 新文件，6 轮 sub-agent review 收敛到 0 P3+。
+> 默认全 JVM（5 flag false + sampleRate 0 + kill switch false），用户 0 行为变化。
 
-- 接入生产渲染层（Markdown.kt 用 Rust parser 替换 JetBrains 调用）
-- BuildConfig feature flag A/B 切流量
-- Crashlytics / 性能监控接入
-- 多架构 .so 体积优化（strip debug symbols / `panic_immediate_abort` / `lto = "fat"`）
-- 在 Codex 主 worktree 同步分支
+实做项（personal-use 版 §8.3 — 4 条 insurance 全保留 + 2 条 enterprise-only 撤销）：
+
+- ✅ Feature flag / kill switch — `NativePathPrefs` 5 个 boolean + RC `native_path_kill_switch`
+- ✅ **默认 Rust 全开**（personal-use 决定）— `NativePathPrefsData` 4 个 user-facing flag default `true`；DataStore key 缺失时 `readFrom` 也 fallback 到 `true`。`markdownAst` 留 `false` 因为它是 shadow-only 没用户价值
+- ✅ Crashlytics — `NativePathFailure` / `NativePathDivergence` 子类（race-free，per-event payload 走 message 不走全局 custom key）
+- ✅ Diff sampling — 每 Switch 内置 sample rate 门控
+- ✅ Revert plan — merge commit 模式合 main 即可单步 `git revert <merge>`
+
+5 个 caller switch：
+
+| Step | 文件 | switch 后行为 |
+|---|---|---|
+| 1 office | DocumentAsPromptTransformer + WorkspaceArtifactTools | `OfficeNativeSwitch.parseXOrNull(file) { jvm } ?: jvm` |
+| 2 highlight | Highlighter.kt — 原 body 抽到 `highlightJvm()` | concurrency profile change：JVM 单线程 executor，native parallel |
+| 3 regex | Assistant.kt `String.replaceRegexes` + 私有 `applyRegexesJvm` | `isEnabled()` gate 防热路径 lambda alloc |
+| 4 markdown HTML | MarkdownNew.kt `generateMarkdownHtml` + 私有 `generateMarkdownHtmlJvm` | HTML diff sampling **硬关**（`HTML_DIFF_ENABLED=false`） |
+| 5 markdown AST | Markdown.kt `parsePreprocessedMarkdownUncached` + `maybeShadowCompareNativeAst` | **shadow-compare only**：renderer 仍吃 JVM tree |
+
+⚠ Step 5 故意不切 renderer：Markdown.kt 还在 migration（10+ commits/月），切 renderer 会爆 conflict。Phase 2 只装 telemetry，真正 renderer 切换留给 Phase 3-B。
+
+## 10. Phase 3（用户感受加速 + 工程债收尾）— 待开
+
+Phase 2 让 native 路径**能跑**但默认不跑。Phase 3 干两件事：(1) **真的让用户感受到加速** —— 灰度开 flag + Markdown.kt renderer 真正消费 packed AST；(2) **还工程债** —— xlsx Rust 化、抽 jni-common、HTML normalizer。
+
+### A. 灰度开 flag（运营层，无代码）
+
+**前置条件**：§10-C 的 HTML normalizer 必须先 ship 并把 `HTML_DIFF_ENABLED` 翻为 true；否则 markdownHtml flag 任何灰度都没有 divergence 数据可看。office / highlight / regex / markdownAst 不受此约束，可独立灰度。
+
+1. Dogfood 1+ 周：开发机 5 flag 全 true，sampleRate=0.05，每天看 Crashlytics 是否有 `NativePathFailure` / `NativePathDivergence`
+2. Notion variant 5-10 人内测，48h+ 无新 issue
+3. RC ramp 5% → 25% → 100%，每档 48h+
+4. 配套：markdownHtml 灰度到 ≥25% 且 48h 无 divergence 后启动 `CharReveal.kt:BALANCED` 从 80ms 继续下探的实验（D-3 收集数据）
+
+### B. Markdown.kt renderer 切到 packed AST
+
+**前提**：Markdown.kt streaming-render migration 收敛 ≥ 2 周（最近一次相关 commit 时间 + 14d 才能动）。
+
+- ~1700 行 Markdown.kt 里所有 `ASTNode.children.find { type == X }` 走查 → 改为 `PackedAstNode` walker
+- 写 JVM `IElementType` ↔ Rust `NodeType` 全量映射表（30+ 节点 + extras 字段：链接 url / image alt / code lang / table column alignments）
+- 删 JetBrains markdown artifact（Gradle 依赖 `libs.markdown` → `com.github.JetBrains:markdown`；包 `org.intellij.markdown.*`），APK 估省 ~1MiB
+- **跑全套测试**——任何 `test/` 文件 `import org.intellij.markdown.*` 都要先迁移或删除
+
+### C. HTML 等价归一化器 + 翻 `HTML_DIFF_ENABLED`
+
+JetBrains HtmlGenerator 与 pulldown-cmark 在 whitespace / attr 顺序 / entity 转义上不等价 → 直接 `==` 比较会产生大量假阳性 → Phase 2 把 `HTML_DIFF_ENABLED` 硬关了。
+
+Phase 3-C 写一个 `normalizeHtml(s: String): String`（Jsoup 解析 + canonical 序列化 + entity 归一 + 自闭合标签统一），两边 normalize 后再比较，然后翻 `HTML_DIFF_ENABLED=true`。这是开 markdownHtml 灰度的前置数据条件。
+
+### D. 工程债收尾
+
+| 编号 | 项 | 工作量 |
+|---|---|---|
+| D-1 | **xlsx via `calamine`（新格式，无 JVM baseline）**：在 office-parsers crate 加 `parseXlsxNative` + Switch 扩展 `parseXlsxOrNull` + WorkspaceArtifactTools `xlsx` 分支切走 Rust。无既有 JVM `XlsxParser`——这是新功能，**没有 byte-equivalence diff**，靠 corpus + 输出 schema 单元测试验证 | 大 |
+| D-2 | 抽 `native/jni-common/` Rust crate：LEB128 + panic_to_string + init_logger_once 4 crate 共享 | 中 |
+| D-3 | CharReveal `BALANCED` baseRevealDurationMs 调优实验数据：当前已下调至 80ms，markdownHtml 灰度到 ≥25% 且 48h 无 divergence 后启动下探到 50ms 的灰度数据收集 | 小 |
+| D-4 | Macrobenchmark + APK size baseline（§8.2 acceptance gate）。**Phase 3 退出门槛**：arm64-v8a APK size 增量 ≤ +5 MiB（Phase 1 baseline +3.95 MiB，给 D-1 xlsx 留 +1 MiB 头寸） | 大，需真机 |
+| D-5 | Phase 2 PR 拆 6 个 commit（infra + 5 step）便于独立 review | 中，git 操作 |
+| D-6 | 删 JetBrains markdown 依赖（依赖 B 完成）| 小 |
+| D-7 | **Per-component kill switch**：当前只有一个 `native_path_kill_switch`，触发即全停。Phase 3 加 5 个 `native_kill_*` per-component RC key；保留全局 kill switch 作为最高优先级 OR-门 | 小 |
+
+### Phase 3 退出条件
+
+- 5 个 native flag 在生产 100% 开启完成 **1 个完整 release cycle 且未触发 kill switch**（任意 per-component 或全局）
+- markdownAst 不仅 shadow compare，且 renderer 真正消费 packed AST，`org.intellij.markdown` 依赖移除
+- xlsx 走 Rust 路径——所有 `WorkspaceArtifactTools` 的 office 入口（docx/pptx/epub/xlsx）行为一致经过 Switch
+- jni-common 抽完，4 crate 0 重复（grep `LEB128` / `panic_to_string` / `init_logger_once` 在 office/markdown/highlight/regex 各 crate 应为 0 命中）
+- `HTML_DIFF_ENABLED=true` 在生产开启后 ≥ 48h 连续采样，divergence 报告稳定 < 0.1%
+- arm64-v8a APK size 增量 ≤ +5 MiB（vs Phase 0 baseline `595e8414`）。若 D-1 xlsx 实测占用 >+1 MiB，重审阈值（Phase 1 占 +3.95 MiB，给 D-1 留 +1 MiB 头寸；超出说明 calamine 比预期大，需要评估缩减策略或抬阈值）
+- SPIKE_REPORT.md 输出，与 §8.2 acceptance gate 全部对齐
 
 ---
 
-## 10. 状态跟踪
+## 11. 状态跟踪
 
 ### Phase 1 (结构性 spike) — 完成（含扩张）
 
@@ -549,14 +625,31 @@ lazy load + fallback to JVM，即使 `.so` 缺失也不崩。
 | 13. 跨组件全面 review | ✅ V1 + V2 都过 |
 | 14. `cargo test --workspace` 全 pass | ✅ | 55/55（office 26 + markdown 16 + highlight 6 + regex 7）|
 
-### Phase 2 (acceptance gate) — 待开
+### Phase 2 (basic infra + 5 caller switches) — 完成于 branch（未合 main）
 
 | 节点 | 状态 | 备注 |
 |---|---|---|
-| A. corpus（每组件 5-10 真实样本） | ⏳ pending | |
-| B. JVM/Rust 等价性 diff harness | ⏳ pending | 跑 corpus 比对输出 |
-| C. benchmark harness（真机测速）| ⏳ pending | 验证 §3.3/§4.4/§5.4 阈值 |
-| D. 3-variant Android assemble 验证 | ⏳ pending | Debug/Notion/Refactortest |
-| E. APK size 增量量化 | ⏳ pending | arm64-v8a 真实数据 |
-| F. SPIKE_REPORT.md | ⏳ pending | 决策会输出 |
-| G. 接入生产渲染层（feature flag）| ⏳ pending | 仅在 Phase 2 数据达标后 |
+| Step 0 pre-flight (NativePathBootstrap + Prefs + Crashlytics + CI .so 校验) | ✅ | 6 轮 review，0 P3+ |
+| Step 1 office caller switch | ✅ | DocumentAsPromptTransformer + WorkspaceArtifactTools，2 轮 review |
+| Step 2 highlight caller switch | ✅ | Highlighter.kt 重构，2 轮 review |
+| Step 3 regex caller switch | ✅ | Assistant.kt `replaceRegexes`，2 轮 review |
+| Step 4 markdown HTML caller switch | ✅ | MarkdownNew.kt，HTML diff sampling 硬关，2 轮 review |
+| Step 5 markdown AST shadow compare | ✅ | Markdown.kt 加 `maybeShadowCompareNativeAst`，renderer 仍吃 JVM，2 轮 review |
+| Final cross-component sweep | ✅ | 3 轮 review，收敛到 0 P0/P1/P2/P3 |
+| 合 main + 推 remote | ⏳ pending | 需要先真机 dogfood |
+
+### Phase 3 (用户感受加速 + 工程债) — 进行中
+
+| 节点 | 状态 | 备注 |
+|---|---|---|
+| A. 灰度开 flag（dogfood → 5%→25%→100%） | ⏳ pending | 运营层，无代码；markdownHtml 依赖 C — 现可启动（C 已完成） |
+| B. Markdown.kt renderer 切到 packed AST | ⏳ blocked | 等 Markdown.kt streaming-render migration 收敛 ≥ 2 周 |
+| C. HTML normalizer + flip `HTML_DIFF_ENABLED` | ✅ | `HtmlDiffNormalizer.kt` (17 tests) + `HTML_DIFF_ENABLED=true`，2 轮 sub-agent review |
+| D-1 xlsx via calamine | ✅ | calamine 0.26 + Howard Hinnant date conv + 12 tests + Switch hard-gate sampling，2 轮 sub-agent review |
+| D-2 抽 native/jni-common crate | ✅ | `panic_to_string` + `init_logger_once!` macro + `write_varint` 4 crate 共享 + rust-version 1.75→1.76，2 轮 sub-agent review |
+| D-3 CharReveal BALANCED 80→50 调优 | ⏳ blocked | 依赖 A markdownHtml ≥25% 灰度 48h |
+| D-4 Macrobenchmark + APK size baseline | ⏳ pending | 需真机 |
+| D-5 Phase 2 PR 拆 6 commit | ⏳ pending | git 操作，需用户授权 |
+| D-6 删 JetBrains markdown 依赖 | ⏳ blocked | 依赖 B |
+| D-7 per-component kill switch | ⏳ pending | 5 个 `native_kill_*` RC key |
+| §11 SPIKE_REPORT.md | ⏳ pending | Phase 3 出口产物 |

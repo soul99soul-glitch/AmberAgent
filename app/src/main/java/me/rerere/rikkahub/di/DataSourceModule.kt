@@ -26,11 +26,13 @@ import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
 import me.rerere.rikkahub.data.datastore.prefs.AssistantPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ExtensionPrefs
+import me.rerere.rikkahub.data.datastore.prefs.NativePathPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ProviderPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SearchPrefs
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.datastore.prefs.UIPrefs
+import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
 import me.rerere.rikkahub.data.datastore.settingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
@@ -91,6 +93,19 @@ val dataSourceModule = module {
 
     single {
         AssistantPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        NativePathPrefs(dataStore = get<Context>().settingsStore, scope = get())
+    }
+
+    single {
+        NativePathBootstrap(
+            prefs = get(),
+            crashlytics = get(),
+            remoteConfig = get(),
+            scope = get(),
+        )
     }
 
     single {

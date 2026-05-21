@@ -61,7 +61,7 @@ pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebrid
     _class: JClass<'local>,
     text: JString<'local>,
 ) -> jbyteArray {
-    init_logger_once();
+    jni_common::init_logger_once!("RustMarkdownParser");
 
     let text_str: String = match env.get_string(&text) {
         Ok(s) => String::from(s),
@@ -81,7 +81,7 @@ pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebrid
             }
         },
         Err(panic) => {
-            log::error!("markdown-parser: native panic: {:?}", panic_to_string(&panic));
+            log::error!("markdown-parser: native panic: {:?}", jni_common::panic_to_string(&panic));
             empty_array(&mut env)
         }
     }
@@ -113,7 +113,7 @@ pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebrid
     _class: JClass<'local>,
     text: JString<'local>,
 ) -> jni::sys::jstring {
-    init_logger_once();
+    jni_common::init_logger_once!("RustMarkdownParser");
 
     let text_str: String = match env.get_string(&text) {
         Ok(s) => String::from(s),
@@ -135,7 +135,7 @@ pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebrid
         Err(panic) => {
             log::error!(
                 "markdown-parser (to-html): native panic: {:?}",
-                panic_to_string(&panic)
+                jni_common::panic_to_string(&panic)
             );
             std::ptr::null_mut()
         }
@@ -297,36 +297,6 @@ fn sanitize_dangerous_schemes(html: &str) -> String {
     .into_owned()
 }
 
-fn panic_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        // Best-effort: include runtime type name so crash logs are debuggable
-        // (P3 sweep — propagate office-parsers' improved variant).
-        format!(
-            "non-string panic payload (type_name = {})",
-            std::any::type_name_of_val(&**payload)
-        )
-    }
-}
-
-fn init_logger_once() {
-    // Standardized to OnceLock across all crates (P3 sweep).
-    use std::sync::OnceLock;
-    static INIT: OnceLock<()> = OnceLock::new();
-    INIT.get_or_init(|| {
-        #[cfg(target_os = "android")]
-        {
-            android_logger::init_once(
-                android_logger::Config::default()
-                    .with_max_level(log::LevelFilter::Info)
-                    .with_tag("RustMarkdownParser"),
-            );
-        }
-    });
-}
 
 #[cfg(test)]
 mod tests {

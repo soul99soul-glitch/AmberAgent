@@ -1,0 +1,100 @@
+name: Native Build Check
+
+# PR-gated debug build that asserts the 4 Rust .so files are present in the
+# arm64-v8a APK. Light-weight enough to run on every PR; the heavyweight
+# `release.yml` (signed APK upload) stays workflow_dispatch.
+#
+# Codex review P3 follow-up: the .so presence assertion in release.yml
+# isn't usable as a required PR check because release.yml is
+# workflow_dispatch only. This workflow gives the same assertion at PR time
+# without exposing signing keys.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - 'app/**/Cargo.toml'
+      - 'document/build.gradle.kts'
+      - 'highlight/build.gradle.kts'
+      - 'app/build.gradle.kts'
+      - '.github/workflows/native-build-check.yml'
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Rust + Android target
+        uses: dtolnay/rust-toolchain@1.82.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked --version 3.5.4
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: 27.0.12077973
+          add-to-path: true
+          local-cache: true
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml') }}
+
+      - name: cargo test --workspace
+        working-directory: native
+        run: cargo test --workspace --locked
+
+      - name: Gradle Debug Build
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug
+
+      - name: Verify native .so files present in debug APK
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/debug/app-arm64-v8a-debug.apk)
+          expected=(
+            "lib/arm64-v8a/liboffice_parsers.so"
+            "lib/arm64-v8a/libmarkdown_parser.so"
+            "lib/arm64-v8a/libhighlight_parser.so"
+            "lib/arm64-v8a/libregex_transformer.so"
+          )
+          missing=()
+          for so in "${expected[@]}"; do
+            if ! unzip -l "$APK" | awk '{print $4}' | grep -qx "$so"; then
+              missing+=("$so")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Debug APK missing native libraries:"
+            printf '  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "All 4 native libraries present in debug APK."

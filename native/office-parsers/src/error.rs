@@ -29,6 +29,16 @@ pub enum OfficeParseError {
 
     #[error("unable to find OPF file in EPUB")]
     EpubOpfMissing,
+
+    // Inner Display intentionally just the inner text — the caller-facing
+    // sentinel is built by `to_xlsx_message()` ("Error parsing XLSX file: …")
+    // so we don't want a redundant "xlsx error:" prefix sandwiched in (D-1
+    // R1 P3-a).
+    #[error("{0}")]
+    Xlsx(String),
+
+    #[error("no sheets found in XLSX file")]
+    XlsxNoSheets,
 }
 
 impl OfficeParseError {
@@ -51,6 +61,13 @@ impl OfficeParseError {
         match self {
             Self::EpubOpfMissing => "Unable to find OPF file in EPUB".to_string(),
             other => format!("Error parsing EPUB file: {}", other),
+        }
+    }
+
+    pub fn to_xlsx_message(&self) -> String {
+        match self {
+            Self::XlsxNoSheets => "No sheets found in XLSX file".to_string(),
+            other => format!("Error parsing XLSX file: {}", other),
         }
     }
 }

@@ -6,8 +6,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Bridge to the `regex-transformer` Rust crate.
  *
- * Spike-phase: NOT wired into [me.rerere.rikkahub.data.model.replaceRegexes];
- * benchmark/equivalence tests call directly.
+ * Phase 1 (PR #9) shipped this bridge without production wiring — benchmarks
+ * called it directly. From Phase 2 Step 3 onwards `String.replaceRegexes`
+ * routes through the sibling [RegexNativeSwitch].
  *
  * Kotlin adapter handles the rule-filtering (enabled / visualOnly /
  * affectingScope) and feeds the JNI surface parallel pattern + replacement
@@ -62,6 +63,9 @@ internal object RegexTransformerNative {
             ensureLoaded()
             return loaded.get()
         }
+
+    /** See [me.rerere.document.nativebridge.OfficeParserNative.lastLoadError]. */
+    internal fun lastLoadError(): Throwable? = loadError
 
     private fun ensureLoaded() {
         if (loaded.get() || loadError != null) return

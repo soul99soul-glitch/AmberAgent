@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.datastore
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 
@@ -110,4 +111,17 @@ object PreferencesKeys {
 
     // 赞助提醒
     val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
+
+    // -----------------------------------------------------------------------
+    // Phase 2 Rust JNI production switches. All default to false so JVM stays
+    // the default code path until a user opts in via Settings → Developer or
+    // until Remote Config flips a cohort to enabled. See SPIKE_PLAN §8.3.
+    // -----------------------------------------------------------------------
+    val NATIVE_PATH_OFFICE = booleanPreferencesKey("native_path_office")
+    val NATIVE_PATH_HIGHLIGHT = booleanPreferencesKey("native_path_highlight")
+    val NATIVE_PATH_REGEX = booleanPreferencesKey("native_path_regex")
+    val NATIVE_PATH_MARKDOWN_HTML = booleanPreferencesKey("native_path_markdown_html")
+    val NATIVE_PATH_MARKDOWN_AST = booleanPreferencesKey("native_path_markdown_ast")
+    /** Fraction of native calls that also run JVM for diff comparison. 0.0..1.0. */
+    val NATIVE_PATH_SAMPLING_RATE = floatPreferencesKey("native_path_sampling_rate")
 }
