@@ -42,10 +42,11 @@ object DeepReadTemplateValidator {
 
     private fun validatePlaceholderSlots(html: String) {
         BLOCK_PLACEHOLDERS.forEach { placeholder ->
-            if (Regex("""(?is)<[^>]*\{\{$placeholder}}[^>]*>""").containsMatchIn(html)) {
+            val token = Regex.escape("{{$placeholder}}")
+            if (Regex("""(?is)<[^>]*$token[^>]*>""").containsMatchIn(html)) {
                 throw DeepReadTemplateValidationException("Block placeholder {{$placeholder}} must not be used inside a tag")
             }
-            if (Regex("""(?is)<style\b[^>]*>.*\{\{$placeholder}}.*</style>""").containsMatchIn(html)) {
+            if (Regex("""(?is)<style\b[^>]*>.*$token.*</style>""").containsMatchIn(html)) {
                 throw DeepReadTemplateValidationException("Block placeholder {{$placeholder}} must not be used inside <style>")
             }
         }

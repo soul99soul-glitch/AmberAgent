@@ -6,6 +6,8 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.agent.board.BoardRepository
+import me.rerere.rikkahub.data.agent.board.boardRequestBodies
+import me.rerere.rikkahub.data.agent.board.boardRequestHeaders
 import me.rerere.rikkahub.data.agent.board.collector.AppUsageCollector
 import me.rerere.rikkahub.data.agent.board.collector.AppUsageEntry
 import me.rerere.rikkahub.data.datastore.Settings
@@ -185,8 +187,8 @@ class DailyReviewAgent(
                     ),
                     params = TextGenerationParams(
                         model = model,
-                        customHeaders = model.customHeaders,
-                        customBody = model.customBodies,
+                        customHeaders = model.boardRequestHeaders(settings.providers),
+                        customBody = model.boardRequestBodies(settings.providers),
                     ),
                 )
                 response.choices.firstOrNull()?.message?.toText()

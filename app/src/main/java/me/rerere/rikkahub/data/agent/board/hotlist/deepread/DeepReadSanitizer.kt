@@ -1,12 +1,14 @@
 package me.rerere.rikkahub.data.agent.board.hotlist.deepread
 
+import java.net.URI
+
 object DeepReadSanitizer {
     fun sanitize(parsed: DeepReadOutput, sources: List<DeepReadSource>, topicTitle: String): DeepReadOutput {
         val sourceUrls = sources.map { it.url }.toSet()
         val sourceImages = sources
             .flatMap { source -> source.images.map { image -> SourceImage(image, source.source) } }
             .filter { it.url.isUsableDeepReadImageUrl() }
-            .distinctBy { it.url }
+            .distinctBy { it.url.imageDedupKey() }
             .take(12)
         val sourceImageUrls = sourceImages.map { it.url }.toSet()
         val safeReferences = parsed.references.filter { it.url in sourceUrls }
@@ -24,6 +26,7 @@ object DeepReadSanitizer {
             topicTitle = topicTitle,
         )
         val safeAssetUrls = safeAssets.map { it.url }.toSet()
+        val usedInlineImages = mutableSetOf<String>()
 
         return parsed.copy(
             heroImageUrl = parsed.heroImageUrl
@@ -31,6 +34,7 @@ object DeepReadSanitizer {
                 ?: safeAssets.firstOrNull()?.url,
             timeline = parsed.timeline?.mapIndexed { index, event ->
                 val url = event.imageUrl?.takeIf { it in safeAssetUrls }
+                    ?.takeIf { usedInlineImages.add(it.imageDedupKey()) }
                 event.copy(
                     imageUrl = url,
                     imageCaption = event.imageCaption?.takeIf { url != null && it.hasCjk() },
@@ -38,6 +42,7 @@ object DeepReadSanitizer {
             },
             corePoints = parsed.corePoints?.map { point ->
                 val url = point.imageUrl?.takeIf { it in safeAssetUrls }
+                    ?.takeIf { usedInlineImages.add(it.imageDedupKey()) }
                 point.copy(
                     imageUrl = url,
                     imageCaption = point.imageCaption?.takeIf { url != null && it.hasCjk() },
@@ -81,7 +86,7 @@ object DeepReadSanitizer {
             )
         }
         return (parsedAssets + fallbackAssets)
-            .distinctBy { it.url }
+            .distinctBy { it.url.imageDedupKey() }
             .take(6)
     }
 
@@ -109,6 +114,47 @@ object DeepReadSanitizer {
         if (lower.contains("pixel") || lower.contains("tracking") || lower.contains("spacer")) return false
         return true
     }
+
+    private fun String.imageDedupKey(): String {
+        val trimmed = trim()
+        val uri = runCatching { URI(trimmed) }.getOrNull()
+        if (uri == null) return trimmed.substringBefore('#')
+
+        val scheme = uri.scheme?.lowercase().orEmpty()
+        val authority = buildString {
+            append(uri.host?.lowercase() ?: uri.rawAuthority.orEmpty())
+            if (uri.port != -1) append(':').append(uri.port)
+        }
+        val identityQuery = uri.rawQuery
+            ?.split('&')
+            .orEmpty()
+            .filter { pair ->
+                val name = pair.substringBefore('=').lowercase()
+                name !in ignoredImageVariantQueryParams
+            }
+            .sorted()
+            .joinToString("&")
+        val querySuffix = identityQuery.takeIf { it.isNotBlank() }?.let { "?$it" }.orEmpty()
+        return "$scheme://$authority${uri.rawPath.orEmpty()}$querySuffix"
+    }
+
+    private val ignoredImageVariantQueryParams = setOf(
+        "w",
+        "width",
+        "h",
+        "height",
+        "q",
+        "quality",
+        "format",
+        "fmt",
+        "fm",
+        "auto",
+        "fit",
+        "crop",
+        "resize",
+        "dpr",
+        "ixlib",
+    )
 
     private fun String.containsQuote(quote: String): Boolean {
         val normalizedQuote = quote.normalizeQuoteText()

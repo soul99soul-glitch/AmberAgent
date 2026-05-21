@@ -70,6 +70,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
@@ -83,7 +84,6 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTem
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.font.FontPackCategory
 import me.rerere.rikkahub.data.font.FontPackState
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.R
@@ -167,6 +167,12 @@ fun DeepReadScreen(topicId: String, title: String) {
     val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
         customTemplate == null
     val templateSelected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
+    val firstFailureMessage = output?.sectionStates
+        ?.values
+        ?.firstOrNull { it.status == DeepReadSectionStatus.FAILED }
+        ?.errorMessage
+    val initialDisplayError = (runError ?: firstFailureMessage)
+        ?.takeIf { !generating && (output == null || output?.hasAnyReadySection() != true) }
 
     Box(Modifier.fillMaxSize().background(palette.background)) {
         when {
@@ -189,12 +195,61 @@ fun DeepReadScreen(topicId: String, title: String) {
                 },
             )
 
+            initialDisplayError != null -> DeepReadError(
+                error = initialDisplayError,
+                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                onRetry = { runAll(force = true) },
+            )
+
+            templateSelected && !selectedCustomMissing -> {
+                val data = remember(output, generating) {
+                    (output?.withInferredSectionStates() ?: DeepReadOutput()).asVisibleGeneratingOutput(generating)
+                }
+                Box(Modifier.fillMaxSize()) {
+                    DeepReadTemplateArticle(
+                        title = title,
+                        output = data,
+                        palette = palette,
+                        fontCss = templateFontCss,
+                        customTemplateHtml = customTemplate?.html,
+                        fontRepository = fontRepository,
+                        fallback = {
+                            DeepReadArticle(
+                                title = title,
+                                output = data,
+                                palette = palette,
+                                fontFamily = readingFontFamily,
+                                listState = listState,
+                                onRetrySection = ::runOne,
+                            )
+                        },
+                    )
+
+                    val noticeModifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                    when {
+                        generating -> RunningStageNotice(
+                            stages = data.sectionStates,
+                            modifier = noticeModifier,
+                        )
+                        runError != null && !complete -> DeepReadPartialErrorNotice(
+                            error = runError.orEmpty(),
+                            onRetry = { runAll(force = true) },
+                            modifier = noticeModifier,
+                        )
+                        firstFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
+                            error = firstFailureMessage,
+                            onRetry = { runAll(force = true) },
+                            modifier = noticeModifier,
+                        )
+                    }
+                }
+            }
+
             // Nothing usable yet — only initial fetch banner before first section persists.
             output == null || !output!!.hasAnyReadySection() -> {
-                val firstFailureMessage = output?.sectionStates
-                    ?.values
-                    ?.firstOrNull { it.status == DeepReadSectionStatus.FAILED }
-                    ?.errorMessage
                 val displayError = runError ?: firstFailureMessage?.takeIf { !generating }
                 if (displayError != null) {
                     DeepReadError(
@@ -203,11 +258,27 @@ fun DeepReadScreen(topicId: String, title: String) {
                         onRetry = { runAll(force = true) },
                     )
                 } else {
-                    DeepReadLoading(
-                        modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
-                        palette = palette,
-                        output = output,
-                    )
+                    val data = remember(output, generating) {
+                        (output?.withInferredSectionStates() ?: DeepReadOutput())
+                            .asVisibleGeneratingOutput(generating = true)
+                    }
+                    Box(Modifier.fillMaxSize()) {
+                        DeepReadArticle(
+                            title = title,
+                            output = data,
+                            palette = palette,
+                            fontFamily = readingFontFamily,
+                            listState = listState,
+                            onRetrySection = ::runOne,
+                        )
+                        RunningStageNotice(
+                            stages = data.sectionStates,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
+                    }
                 }
             }
 
@@ -272,6 +343,20 @@ fun DeepReadScreen(topicId: String, title: String) {
             }
         }
     }
+}
+
+private fun DeepReadOutput.asVisibleGeneratingOutput(generating: Boolean): DeepReadOutput {
+    if (sectionStates.isNotEmpty() || !generating) return this
+    val states = DeepReadGenerationStage.entries.associateWith { stage ->
+        DeepReadSectionState(
+            status = if (stage == DeepReadGenerationStage.OVERVIEW) {
+                DeepReadSectionStatus.RUNNING
+            } else {
+                DeepReadSectionStatus.PENDING
+            }
+        )
+    }
+    return copy(sectionStates = states)
 }
 
 @Composable
@@ -358,12 +443,16 @@ private fun DeepReadTemplateArticle(
     fallback: @Composable () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
-    val rendered = remember(title, output, fontCss, customTemplateHtml) {
+    var failedImageUrls by remember(output) { mutableStateOf<Set<String>>(emptySet()) }
+    val displayOutput = remember(output, failedImageUrls) {
+        output.withoutTemplateImages(failedImageUrls)
+    }
+    val rendered = remember(title, displayOutput, fontCss, customTemplateHtml) {
         runCatching {
             if (customTemplateHtml != null) {
-                DeepReadTemplateRenderer.renderCustom(title, output, customTemplateHtml, fontCss)
+                DeepReadTemplateRenderer.renderCustom(title, displayOutput, customTemplateHtml, fontCss)
             } else {
-                DeepReadTemplateRenderer.renderEditorialSlant(title, output, fontCss)
+                DeepReadTemplateRenderer.renderEditorialSlant(title, displayOutput, fontCss)
             }
         }.getOrNull()
     }
@@ -423,7 +512,25 @@ private fun DeepReadTemplateArticle(
                             error: android.webkit.WebResourceError?,
                         ) {
                             super.onReceivedError(view, request, error)
-                            if (request?.isForMainFrame == true) failed = true
+                            val url = request?.url?.toString().orEmpty()
+                            when {
+                                request?.isForMainFrame == true -> failed = true
+                                url in rendered.allowedImageUrls -> failedImageUrls = failedImageUrls + url
+                            }
+                        }
+
+                        override fun onReceivedHttpError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            errorResponse: WebResourceResponse?,
+                        ) {
+                            super.onReceivedHttpError(view, request, errorResponse)
+                            val url = request?.url?.toString().orEmpty()
+                            if (request?.isForMainFrame == true) {
+                                failed = true
+                            } else if (url in rendered.allowedImageUrls) {
+                                failedImageUrls = failedImageUrls + url
+                            }
                         }
                     }
                     loadDataWithBaseURL(
@@ -440,6 +547,28 @@ private fun DeepReadTemplateArticle(
     }
 }
 
+private fun DeepReadOutput.withoutTemplateImages(urls: Set<String>): DeepReadOutput {
+    if (urls.isEmpty()) return this
+    return copy(
+        heroImageUrl = heroImageUrl?.takeUnless { it in urls },
+        imageAssets = imageAssets.filterNot { it.url in urls },
+        timeline = timeline?.map { event ->
+            if (event.imageUrl in urls) {
+                event.copy(imageUrl = null, imageCaption = null)
+            } else {
+                event
+            }
+        },
+        corePoints = corePoints?.map { point ->
+            if (point.imageUrl in urls) {
+                point.copy(imageUrl = null, imageCaption = null)
+            } else {
+                point
+            }
+        },
+    )
+}
+
 private fun emptyWebResponse(): WebResourceResponse =
     WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
 
@@ -450,8 +579,8 @@ private fun openHttpUrl(uriHandler: androidx.compose.ui.platform.UriHandler, url
     }
 }
 
-private const val DEEP_READ_TEMPLATE_BASE_URL = "https://amberagent.deepread.local/"
-private const val DEEP_READ_BUILTIN_SERIF_FONT_URL = "https://amberagent.deepread.local/fonts/noto_serif_sc.otf"
+private const val DEEP_READ_TEMPLATE_BASE_URL = "https://amberagent.local/deepread/"
+private const val DEEP_READ_BUILTIN_SERIF_FONT_URL = "https://amberagent.local/deepread-fonts/noto_serif_sc.otf"
 private const val DEEP_READ_SLIDES_FONT_HOST = "amberagent.local"
 
 private fun interceptBuiltInDeepReadFont(view: WebView?, url: String): WebResourceResponse? {
@@ -1656,18 +1785,8 @@ private fun rememberDeepReadTemplateFontCss(
                     else -> "truetype"
                 }
                 val source = "https://$DEEP_READ_SLIDES_FONT_HOST/fonts/${state.pack.id}/${state.pack.fileName}"
-                val serif = when (state.pack.category) {
-                    FontPackCategory.SERIF, FontPackCategory.HANDWRITING ->
-                        "\"$family\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif"
-
-                    else -> "\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif"
-                }
-                val sans = when (state.pack.category) {
-                    FontPackCategory.SANS ->
-                        "\"$family\",\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif"
-
-                    else -> "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif"
-                }
+                val serif = "\"$family\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif"
+                val sans = "\"$family\",\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif"
                 """
                     @font-face{
                       font-family:"$family";

@@ -23,7 +23,8 @@ class HotListRepository(
         dao.observeProviderCaches(),
     ) { topicEntities, providerEntities ->
         val providers = providerEntities.map { it.toSnapshot(json) }
-        val topics = topicEntities.map { it.toTopic(json) }
+        val titleCache = providers.buildDisplayTitleCache()
+        val topics = topicEntities.map { it.toTopic(json).withDisplayTitles(titleCache) }
         HotListDashboard(
             topics = topics,
             providers = providers,
@@ -197,3 +198,40 @@ private fun DeepReadCacheEntity.toFreshDeepRead(json: Json, now: Long = System.c
     if (!DeepReadCachePolicy.isFresh(expiresAt, now)) return null
     return runCatching { json.decodeFromString<DeepReadOutput>(outputJson) }.getOrNull()
 }
+
+private fun List<HotListProviderSnapshot>.buildDisplayTitleCache(): Map<String, String> =
+    flatMap { provider ->
+        provider.items.mapNotNull { item ->
+            val display = item.displayTitle?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val keys = listOfNotNull(item.cacheKey(), item.title.cacheKey())
+            keys.map { key -> key to display }
+        }.flatten()
+    }.toMap()
+
+private fun HotTopic.withDisplayTitles(titleCache: Map<String, String>): HotTopic {
+    if (titleCache.isEmpty()) return this
+    val repairedSources = sources.map { source ->
+        val display = source.displayTitle?.takeIf { it.isNotBlank() }
+            ?: source.cacheKey()?.let(titleCache::get)
+            ?: source.title.cacheKey()?.let(titleCache::get)
+        if (display.isNullOrBlank()) source else source.copy(displayTitle = display)
+    }
+    val repairedTitle = repairedSources
+        .firstNotNullOfOrNull { it.displayTitle?.takeIf { display -> display.isNotBlank() && display.countCjk() >= 2 } }
+        ?: title
+    return copy(title = repairedTitle, sources = repairedSources)
+}
+
+private fun HotListItem.cacheKey(): String? =
+    (url?.takeIf { it.isNotBlank() } ?: title).cacheKey()
+
+private fun HotTopicSource.cacheKey(): String? =
+    (url?.takeIf { it.isNotBlank() } ?: title).cacheKey()
+
+private fun String.cacheKey(): String? =
+    takeIf { it.isNotBlank() }
+        ?.lowercase()
+        ?.replace(Regex("\\s+"), " ")
+        ?.trim()
+
+private fun String.countCjk(): Int = count { it in '\u4e00'..'\u9fff' }

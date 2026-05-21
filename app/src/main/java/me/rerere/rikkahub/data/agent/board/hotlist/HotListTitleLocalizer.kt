@@ -11,6 +11,8 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.agent.board.boardRequestBodies
+import me.rerere.rikkahub.data.agent.board.boardRequestHeaders
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -29,19 +31,15 @@ class HotListTitleLocalizer(
     ): List<HotListProviderSnapshot> {
         val reusedSnapshots = reuseCachedTitles(snapshots, previousSnapshots)
         val targets = reusedSnapshots.flatMapIndexed { snapshotIndex, snapshot ->
-            if (snapshot.stale) {
-                emptyList()
-            } else {
-                snapshot.items.mapIndexedNotNull { itemIndex, item ->
-                    if (item.needsChineseDisplayTitle()) {
-                        TranslationTarget(
-                            id = "$snapshotIndex:$itemIndex",
-                            source = snapshot.providerName,
-                            title = item.title,
-                        )
-                    } else {
-                        null
-                    }
+            snapshot.items.mapIndexedNotNull { itemIndex, item ->
+                if (item.needsChineseDisplayTitle()) {
+                    TranslationTarget(
+                        id = "$snapshotIndex:$itemIndex",
+                        source = snapshot.providerName,
+                        title = item.title,
+                    )
+                } else {
+                    null
                 }
             }
         }.take(MAX_TRANSLATED_TITLES)
@@ -110,8 +108,8 @@ class HotListTitleLocalizer(
                         model = model,
                         temperature = 0.1f,
                         maxTokens = 1_200,
-                        customHeaders = model.customHeaders,
-                        customBody = model.customBodies,
+                        customHeaders = model.boardRequestHeaders(settings.providers),
+                        customBody = model.boardRequestBodies(settings.providers),
                     ),
                 )
             }

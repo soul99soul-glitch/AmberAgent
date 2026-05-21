@@ -1,5 +1,11 @@
 package me.rerere.rikkahub.ui.pages.board
 
+import android.annotation.SuppressLint
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,25 +13,34 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplatePackage
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadRenderedTemplate
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+import java.io.ByteArrayInputStream
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -40,6 +55,34 @@ fun DeepReadTemplateSettingsRow(
     onGenerate: (String, String) -> Unit,
 ) {
     var showGenerateDialog by rememberSaveable { mutableStateOf(false) }
+    var previewTarget by remember { mutableStateOf<TemplatePreviewTarget?>(null) }
+    val sampleTitle = "具身智能进入家庭前夜"
+    val sampleOutput = remember { DeepReadTemplateRenderer.sampleOutput() }
+    val selectedTemplateName = when (board.deepReadTemplateId) {
+        DeepReadTemplateIds.COMPOSE_MAGAZINE -> "默认杂志"
+        DeepReadTemplateIds.EDITORIAL_SLANT -> "斜切图文"
+        else -> customTemplates.firstOrNull { it.id == board.deepReadTemplateId }?.name ?: "当前模板"
+    }
+    fun previewSelectedTemplate() {
+        previewTarget = when (board.deepReadTemplateId) {
+            DeepReadTemplateIds.COMPOSE_MAGAZINE,
+            DeepReadTemplateIds.EDITORIAL_SLANT -> DeepReadTemplateRenderer.renderEditorialSlant(sampleTitle, sampleOutput)
+                .toPreviewTarget(selectedTemplateName)
+            else -> {
+                val template = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
+                if (template == null) {
+                    TemplatePreviewTarget(selectedTemplateName, "<html><body><p>当前模板不可用</p></body></html>")
+                } else {
+                    runCatching {
+                        DeepReadTemplateRenderer.renderCustom(sampleTitle, sampleOutput, template.html)
+                            .toPreviewTarget(template.name)
+                    }.getOrElse {
+                        TemplatePreviewTarget(template.name, "<html><body><p>模板预览失败：${it.message.orEmpty()}</p></body></html>")
+                    }
+                }
+            }
+        }
+    }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("深度阅读模板", style = MaterialTheme.typography.titleSmall)
@@ -48,7 +91,7 @@ fun DeepReadTemplateSettingsRow(
             }
         }
         Text(
-            "模板会持久化复用；仅允许静态 HTML/CSS 和安全占位符，生成失败不会伪造新闻内容。",
+            "模板会持久化复用；AI 只生成版式模板。预览使用固定样稿，只看 UI 风格，不混入真实新闻内容。",
             style = MaterialTheme.typography.bodySmall,
             color = workspaceColors().muted,
         )
@@ -63,6 +106,14 @@ fun DeepReadTemplateSettingsRow(
                 label = "斜切图文",
                 onClick = { onSelect(DeepReadTemplateIds.EDITORIAL_SLANT) },
             )
+        }
+        OutlinedButton(
+            onClick = { previewSelectedTemplate() },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+        ) {
+            Text("预览当前模板：$selectedTemplateName")
         }
         if (customTemplates.isNotEmpty()) {
             Text("自定义模板", style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
@@ -104,6 +155,12 @@ fun DeepReadTemplateSettingsRow(
             },
         )
     }
+    previewTarget?.let { target ->
+        DeepReadTemplatePreviewDialog(
+            target = target,
+            onDismiss = { previewTarget = null },
+        )
+    }
 }
 
 @Composable
@@ -134,7 +191,7 @@ private fun GenerateDeepReadTemplateDialog(
                     maxLines = 6,
                 )
                 Text(
-                    "模型只生成版式模板。真实深度阅读内容仍由深度阅读 Agent 基于抓取来源生成。",
+                    "模型只生成版式模板。保存后可用固定样稿预览版式；真实深度阅读内容仍由 Deep Read Agent 生成。",
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                 )
@@ -171,3 +228,92 @@ private fun TemplateChip(
         Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = MaterialTheme.typography.labelMedium)
     }
 }
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun DeepReadTemplatePreviewDialog(
+    target: TemplatePreviewTarget,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${target.name} 预览") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "以下是固定占位样稿，只用于判断模板版式和字体层级。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspaceColors().muted,
+                )
+                AndroidView(
+                    modifier = Modifier.fillMaxWidth().height(520.dp),
+                    factory = { context ->
+                        WebView(context).apply {
+                            settings.javaScriptEnabled = false
+                            settings.domStorageEnabled = false
+                            settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldInterceptRequest(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                ): WebResourceResponse? {
+                                    val url = request?.url?.toString().orEmpty()
+                                    val mainFrame = request?.isForMainFrame == true
+                                    if (mainFrame && url == TEMPLATE_PREVIEW_BASE_URL) return null
+                                    if (!mainFrame && url in target.allowedImageUrls) return null
+                                    return emptyTemplatePreviewResponse()
+                                }
+
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                ): Boolean = true
+                            }
+                            loadDataWithBaseURL(
+                                TEMPLATE_PREVIEW_BASE_URL,
+                                target.html,
+                                "text/html",
+                                "utf-8",
+                                null,
+                            )
+                        }
+                    },
+                    update = { view ->
+                        view.loadDataWithBaseURL(
+                            TEMPLATE_PREVIEW_BASE_URL,
+                            target.html,
+                            "text/html",
+                            "utf-8",
+                            null,
+                        )
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
+}
+
+private data class TemplatePreviewTarget(
+    val name: String,
+    val html: String,
+    val allowedImageUrls: Set<String> = emptySet(),
+)
+
+private fun DeepReadRenderedTemplate.toPreviewTarget(name: String): TemplatePreviewTarget =
+    TemplatePreviewTarget(
+        name = name,
+        html = html,
+        allowedImageUrls = allowedImageUrls,
+    )
+
+private fun emptyTemplatePreviewResponse(): WebResourceResponse =
+    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+
+private const val TEMPLATE_PREVIEW_BASE_URL = "https://amberagent.template-preview.local/"

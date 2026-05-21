@@ -111,4 +111,108 @@ class DeepReadSanitizerTest {
         assertEquals(null, sanitized.timeline?.get(1)?.imageUrl)
         assertEquals(null, sanitized.corePoints?.first()?.imageUrl)
     }
+
+    @Test
+    fun deduplicatesInlineImagesButAllowsHeroReuseOnce() {
+        val image = "https://news.example.com/photo.jpg?width=1200"
+        val sameImage = "https://news.example.com/photo.jpg?width=640"
+        val otherImage = "https://news.example.com/other.jpg"
+        val source = DeepReadSource(
+            title = "Real",
+            url = "https://news.example.com/a",
+            source = "news.example.com",
+            content = "body",
+            publishedAt = null,
+            images = listOf(image, sameImage, otherImage),
+        )
+        val parsed = DeepReadOutput(
+            summary = "这是中文摘要，足够用于深度阅读",
+            heroImageUrl = image,
+            timeline = listOf(
+                TimelineEvent(
+                    date = "2026-02",
+                    event = "第一处正文配图可以复用 hero",
+                    imageUrl = image,
+                    imageCaption = "第一张来源图片",
+                ),
+                TimelineEvent(
+                    date = "2026-05",
+                    event = "同一图片再次出现时应该清掉",
+                    imageUrl = sameImage,
+                    imageCaption = "重复图片说明",
+                ),
+            ),
+            corePoints = listOf(
+                CorePoint(
+                    point = "另一个模块也不能重复同图",
+                    supporting = "正文已经出现过这张图片",
+                    imageUrl = image,
+                    imageCaption = "重复核心图",
+                ),
+                CorePoint(
+                    point = "不同图片可以保留",
+                    supporting = "这是一张不同的来源图片",
+                    imageUrl = otherImage,
+                    imageCaption = "第二张来源图片",
+                ),
+            ),
+            analysis = DeepAnalysis(),
+            imageAssets = listOf(
+                DeepReadImageAsset(url = image, caption = "Hero 图片"),
+                DeepReadImageAsset(url = sameImage, caption = "重复图片"),
+                DeepReadImageAsset(url = otherImage, caption = "其他图片"),
+            ),
+        )
+
+        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "AI 热点")
+
+        assertEquals(image, sanitized.heroImageUrl)
+        assertEquals(image, sanitized.timeline?.get(0)?.imageUrl)
+        assertEquals(null, sanitized.timeline?.get(1)?.imageUrl)
+        assertEquals(null, sanitized.corePoints?.get(0)?.imageUrl)
+        assertEquals(otherImage, sanitized.corePoints?.get(1)?.imageUrl)
+        assertEquals(listOf(image, otherImage), sanitized.imageAssets.map { it.url })
+    }
+
+    @Test
+    fun keepsDifferentImagesWhenQueryCarriesIdentity() {
+        val imageA = "https://cdn.example.com/image?media_id=1&width=1200"
+        val imageB = "https://cdn.example.com/image?media_id=2&width=1200"
+        val source = DeepReadSource(
+            title = "Real",
+            url = "https://news.example.com/a",
+            source = "news.example.com",
+            content = "body",
+            publishedAt = null,
+            images = listOf(imageA, imageB),
+        )
+        val parsed = DeepReadOutput(
+            summary = "这是中文摘要，足够用于深度阅读",
+            timeline = listOf(
+                TimelineEvent(
+                    date = "2026-02",
+                    event = "第一张身份参数图片",
+                    imageUrl = imageA,
+                    imageCaption = "第一张来源图片",
+                ),
+                TimelineEvent(
+                    date = "2026-05",
+                    event = "第二张身份参数图片",
+                    imageUrl = imageB,
+                    imageCaption = "第二张来源图片",
+                ),
+            ),
+            analysis = DeepAnalysis(),
+            imageAssets = listOf(
+                DeepReadImageAsset(url = imageA, caption = "第一张图片"),
+                DeepReadImageAsset(url = imageB, caption = "第二张图片"),
+            ),
+        )
+
+        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "AI 热点")
+
+        assertEquals(imageA, sanitized.timeline?.get(0)?.imageUrl)
+        assertEquals(imageB, sanitized.timeline?.get(1)?.imageUrl)
+        assertEquals(listOf(imageA, imageB), sanitized.imageAssets.map { it.url })
+    }
 }

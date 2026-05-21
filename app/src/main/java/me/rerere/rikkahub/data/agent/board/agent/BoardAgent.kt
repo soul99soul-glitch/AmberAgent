@@ -6,6 +6,8 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.aggregator.ScoredSignal
+import me.rerere.rikkahub.data.agent.board.boardRequestBodies
+import me.rerere.rikkahub.data.agent.board.boardRequestHeaders
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -94,8 +96,8 @@ class BoardAgent(
                 ),
                 params = TextGenerationParams(
                     model = model,
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies,
+                    customHeaders = model.boardRequestHeaders(settings.providers),
+                    customBody = model.boardRequestBodies(settings.providers),
                 ),
             )
             response.choices.firstOrNull()?.message?.toText()

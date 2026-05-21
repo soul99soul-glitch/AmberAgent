@@ -1,9 +1,50 @@
 package me.rerere.rikkahub.data.agent.board.hotlist.deepread.template
 
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.errorOf
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 
 object DeepReadTemplateRenderer {
+    fun sampleOutput(): DeepReadOutput = DeepReadOutput(
+        topicType = "event",
+        generationComplete = true,
+        summary = "当模型开始理解空间、物体与人的意图，机器人不再只是工具，而可能成为家庭场景里的新成员。这篇样稿用于预览模板版式，不代表真实新闻内容。",
+        keyEntities = listOf("具身智能", "家庭机器人", "大模型"),
+        timeline = listOf(
+            TimelineEvent("早期背景", "大模型把语言理解能力带入机器人系统，研究焦点从单一动作控制转向环境理解与任务规划。"),
+            TimelineEvent("关键转折", "多模态模型开始接入视觉、语音和传感器数据，让机器人能在复杂家庭环境中识别对象、理解指令并调整动作。"),
+            TimelineEvent("当前进展", "产业公司尝试把机器人从实验室带到家庭与服务场景，但成本、安全和泛化能力仍是落地门槛。"),
+        ),
+        corePoints = listOf(
+            CorePoint("真正的变化不是机器人学会行走，而是它开始理解人的日常。", "家庭场景高度不确定，模型需要把环境、任务和人的意图放在同一个上下文里判断。"),
+            CorePoint("评价标准正在从单点能力转向长期协作。", "一次成功演示不能证明可用性，稳定、可解释和安全的连续行为更重要。"),
+        ),
+        analysis = DeepAnalysis(
+            coreDispute = "核心分歧在于：具身智能到底已经进入产品化拐点，还是仍停留在高成本演示阶段。",
+            perspectives = listOf(
+                Perspective("技术公司强调模型能力带来的泛化提升。", "模型厂商"),
+                Perspective("硬件团队更关注可靠性、成本和安全冗余。", "机器人厂商"),
+                Perspective("普通用户真正需要的是少打扰、能交付结果的家庭助手。", "消费者"),
+            ),
+            implications = "如果具身智能继续进步，家庭设备可能从被动执行命令转向主动理解场景；但在此之前，产品仍需要把边界讲清楚。"
+        ),
+        extendedReading = listOf(
+            ReadingLink("具身智能为什么重新成为焦点", "https://example.com/embodied-ai", "Amber Sample"),
+            ReadingLink("家庭机器人落地的三道门槛", "https://example.com/home-robot", "Amber Sample"),
+        ),
+        references = listOf(
+            ReadingLink("样稿来源：具身智能专题", "https://example.com/source", "Amber Sample"),
+        ),
+    )
+
     fun renderCustom(
         title: String,
         output: DeepReadOutput,
@@ -26,11 +67,11 @@ object DeepReadTemplateRenderer {
             "core_points_html" to output.corePointsHtml(safeImages),
             "analysis_html" to output.analysisHtml(),
             "extended_reading_html" to output.extendedReadingHtml(),
-            "font_css" to fontCss,
+            "font_css" to fontCss + "\n" + TEMPLATE_RUNTIME_CSS,
         )
         val html = placeholders.entries.fold(templateHtml) { current, (key, value) ->
             current.replace("{{$key}}", value)
-        }
+        }.withRuntimeCss(fontCss + "\n" + TEMPLATE_RUNTIME_CSS)
         return DeepReadRenderedTemplate(
             html = html,
             allowedImageUrls = safeImages,
@@ -50,48 +91,25 @@ object DeepReadTemplateRenderer {
             appendLine("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>")
             appendLine(fontCss)
             appendLine(BASE_CSS)
+            appendLine(TEMPLATE_RUNTIME_CSS)
             appendLine("</style></head><body>")
             appendLine("<article>")
             if (hero != null) {
                 appendLine("<figure class=\"hero\"><img src=\"${hero.escapeHtml()}\"/><div class=\"hero-cut\"><div><span class=\"hero-type\">${output.topicType.uppercase().escapeHtml()}</span><span class=\"hero-source\">${output.sourceLabel().escapeHtml()}</span></div><figcaption>${(output.heroCaption ?: output.imageAssets.firstOrNull { it.url == hero }?.caption).orEmpty().escapeHtml()}</figcaption></div></figure>")
             }
-            appendLine("<section class=\"headline\">${if (hero == null) "<p class=\"kicker\">${output.topicType.uppercase().escapeHtml()} · DEEP READ</p>" else ""}<h1>${title.escapeHtml()}</h1><p class=\"summary\">${output.summary.escapeHtml()}</p></section>")
-            output.timeline.orEmpty().takeIf { it.isNotEmpty() }?.let { events ->
-                appendLine("<section><p class=\"section\">时间轴</p>")
-                events.forEachIndexed { index, event ->
-                    appendLine("<div class=\"timeline\"><div class=\"num\">${(index + 1).toString().padStart(2, '0')}</div><div><p class=\"date\">${event.date.escapeHtml()}</p><p>${event.event.escapeHtml()}</p>")
-                    event.imageUrl?.takeIf { it in safeImages }?.let { url ->
-                        appendLine("<figure class=\"inline\"><img src=\"${url.escapeHtml()}\"/><figcaption>${event.imageCaption.orEmpty().escapeHtml()}</figcaption></figure>")
-                    }
-                    appendLine("</div></div>")
-                }
-                appendLine("</section>")
-            }
-            output.corePoints.orEmpty().takeIf { it.isNotEmpty() }?.let { points ->
-                appendLine("<section><p class=\"section\">关键脉络</p>")
-                points.forEach { point ->
-                    appendLine("<div class=\"point\"><h2>${point.point.escapeHtml()}</h2><p>${point.supporting.orEmpty().escapeHtml()}</p>")
-                    point.imageUrl?.takeIf { it in safeImages }?.let { url ->
-                        appendLine("<figure class=\"inline\"><img src=\"${url.escapeHtml()}\"/><figcaption>${point.imageCaption.orEmpty().escapeHtml()}</figcaption></figure>")
-                    }
-                    appendLine("</div>")
-                }
-                appendLine("</section>")
-            }
-            appendLine("<section><p class=\"section\">深度分析</p>")
-            output.analysis.coreDispute?.takeIf { it.isNotBlank() }?.let { appendLine("<blockquote>${it.escapeHtml()}</blockquote>") }
-            output.analysis.perspectives.take(4).forEach { perspective ->
-                appendLine("<div class=\"perspective\"><p class=\"holder\">${perspective.holder.orEmpty().escapeHtml()}</p><p>${perspective.viewpoint.escapeHtml()}</p></div>")
-            }
-            output.analysis.implications?.takeIf { it.isNotBlank() }?.let { appendLine("<p>${it.escapeHtml()}</p>") }
+            appendLine("<section class=\"headline\">${if (hero == null) "<p class=\"kicker\">${output.topicType.uppercase().escapeHtml()} · DEEP READ</p>" else ""}<h1>${title.escapeHtml()}</h1>${output.summaryHtml()}</section>")
+            appendLine("<section><p class=\"section\">时间轴</p>")
+            appendLine(output.timelineHtml(safeImages))
             appendLine("</section>")
-            if (output.extendedReading.isNotEmpty()) {
-                appendLine("<section><p class=\"section\">扩展阅读</p>")
-                output.extendedReading.take(8).forEachIndexed { index, link ->
-                    appendLine("<a class=\"reading\" href=\"${link.url.escapeHtml()}\"><span>${(index + 1).toString().padStart(2, '0')}</span><div><p>${link.title.escapeHtml()}</p><small>${(link.source ?: link.url).escapeHtml()}</small></div></a>")
-                }
-                appendLine("</section>")
-            }
+            appendLine("<section><p class=\"section\">关键脉络</p>")
+            appendLine(output.corePointsHtml(safeImages))
+            appendLine("</section>")
+            appendLine("<section><p class=\"section\">深度分析</p>")
+            appendLine(output.analysisHtml())
+            appendLine("</section>")
+            appendLine("<section><p class=\"section\">扩展阅读</p>")
+            appendLine(output.extendedReadingHtml())
+            appendLine("</section>")
             appendLine("</article></body></html>")
         }
         return DeepReadRenderedTemplate(
@@ -118,10 +136,44 @@ object DeepReadTemplateRenderer {
         return if (count > 0) "$count SOURCES" else "DEEP READ"
     }
 
-    private fun DeepReadOutput.timelineHtml(safeImages: Set<String>): String =
-        timeline.orEmpty().joinToString("\n") { event ->
+    private fun DeepReadOutput.summaryHtml(): String {
+        if (statusOf(DeepReadGenerationStage.OVERVIEW) == DeepReadSectionStatus.FAILED) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.OVERVIEW,
+                runningText = "正在写入概览、关键实体和真实来源图片",
+                pendingText = "概览会先出现，随后补齐叙事、分析和扩展阅读",
+            )
+        }
+        val summaryText = summary.trim()
+        if (summaryText.isNotEmpty()) {
+            return "<p class=\"summary\">${summaryText.escapeHtml()}</p>"
+        }
+        return sectionStateHtml(
+            stage = DeepReadGenerationStage.OVERVIEW,
+            runningText = "正在写入概览、关键实体和真实来源图片",
+            pendingText = "概览会先出现，随后补齐叙事、分析和扩展阅读",
+        )
+    }
+
+    private fun DeepReadOutput.timelineHtml(safeImages: Set<String>): String {
+        if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.FAILED) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.NARRATIVE,
+                runningText = "正在组织时间轴叙事或故事性脉络",
+                pendingText = "等待概览完成后补写事件脉络",
+            )
+        }
+        val events = timeline.orEmpty()
+        if (events.isEmpty()) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.NARRATIVE,
+                runningText = "正在组织时间轴叙事或故事性脉络",
+                pendingText = "等待概览完成后补写事件脉络",
+            )
+        }
+        return events.joinToString("\n") { event ->
             buildString {
-                append("<div class=\"timeline-item\"><p class=\"timeline-date\">")
+                append("<div class=\"timeline-item\"><div class=\"timeline-marker\"></div><div class=\"timeline-body\"><p class=\"timeline-date\">")
                 append(event.date.escapeHtml())
                 append("</p><p>")
                 append(event.event.escapeHtml())
@@ -133,12 +185,28 @@ object DeepReadTemplateRenderer {
                     append(event.imageCaption.orEmpty().escapeHtml())
                     append("</figcaption></figure>")
                 }
-                append("</div>")
+                append("</div></div>")
             }
         }
+    }
 
-    private fun DeepReadOutput.corePointsHtml(safeImages: Set<String>): String =
-        corePoints.orEmpty().joinToString("\n") { point ->
+    private fun DeepReadOutput.corePointsHtml(safeImages: Set<String>): String {
+        if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.FAILED) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.NARRATIVE,
+                runningText = "正在把来源消化成中文关键脉络",
+                pendingText = "稍后会写入综合判断，而不是来源清单",
+            )
+        }
+        val points = corePoints.orEmpty()
+        if (points.isEmpty()) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.NARRATIVE,
+                runningText = "正在把来源消化成中文关键脉络",
+                pendingText = "稍后会写入综合判断，而不是来源清单",
+            )
+        }
+        return points.joinToString("\n") { point ->
             buildString {
                 append("<div class=\"core-point\"><h2>")
                 append(point.point.escapeHtml())
@@ -155,8 +223,32 @@ object DeepReadTemplateRenderer {
                 append("</div>")
             }
         }
+    }
 
     private fun DeepReadOutput.analysisHtml(): String = buildString {
+        if (statusOf(DeepReadGenerationStage.ANALYSIS) == DeepReadSectionStatus.FAILED) {
+            append(
+                sectionStateHtml(
+                    stage = DeepReadGenerationStage.ANALYSIS,
+                    runningText = "正在继续写核心分歧、各方立场和影响判断",
+                    pendingText = "等脉络完成后开始深度分析",
+                )
+            )
+            return@buildString
+        }
+        val hasAnalysis = !analysis.coreDispute.isNullOrBlank() ||
+            analysis.perspectives.any { it.viewpoint.isNotBlank() } ||
+            !analysis.implications.isNullOrBlank()
+        if (!hasAnalysis) {
+            append(
+                sectionStateHtml(
+                    stage = DeepReadGenerationStage.ANALYSIS,
+                    runningText = "正在继续写核心分歧、各方立场和影响判断",
+                    pendingText = "等脉络完成后开始深度分析",
+                )
+            )
+            return@buildString
+        }
         analysis.coreDispute?.takeIf { it.isNotBlank() }?.let {
             append("<blockquote>")
             append(it.escapeHtml())
@@ -176,10 +268,52 @@ object DeepReadTemplateRenderer {
         }
     }
 
-    private fun DeepReadOutput.extendedReadingHtml(): String =
-        extendedReading.take(10).joinToString("\n") { link ->
+    private fun DeepReadOutput.extendedReadingHtml(): String {
+        if (statusOf(DeepReadGenerationStage.EXTENDED_READING) == DeepReadSectionStatus.FAILED) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.EXTENDED_READING,
+                runningText = "正在整理可点击的来源与延伸阅读",
+                pendingText = "最后会把引用和相关阅读写入缓存",
+            )
+        }
+        if (extendedReading.isEmpty()) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.EXTENDED_READING,
+                runningText = "正在整理可点击的来源与延伸阅读",
+                pendingText = "最后会把引用和相关阅读写入缓存",
+            )
+        }
+        return extendedReading.take(10).joinToString("\n") { link ->
             "<a class=\"reading-link\" href=\"${link.url.escapeHtml()}\"><p>${link.title.escapeHtml()}</p><small>${(link.source ?: link.url).escapeHtml()}</small></a>"
         }
+    }
+
+    private fun DeepReadOutput.sectionStateHtml(
+        stage: DeepReadGenerationStage,
+        runningText: String,
+        pendingText: String,
+    ): String {
+        val status = statusOf(stage)
+        val label = when (status) {
+            DeepReadSectionStatus.RUNNING -> runningText
+            DeepReadSectionStatus.FAILED -> "${stage.label}生成失败：${errorOf(stage).orEmpty().ifBlank { "请稍后重试" }}"
+            DeepReadSectionStatus.READY -> ""
+            DeepReadSectionStatus.PENDING -> pendingText
+        }
+        val tone = when (status) {
+            DeepReadSectionStatus.FAILED -> " failed"
+            DeepReadSectionStatus.RUNNING -> " running"
+            else -> ""
+        }
+        return """
+            <div class="section-state$tone">
+              <div class="state-row"><span class="state-dot"></span><p>${label.escapeHtml()}</p></div>
+              <div class="skeleton-line wide"></div>
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+        """.trimIndent()
+    }
 
     private fun String.escapeHtml(): String =
         replace("&", "&amp;")
@@ -187,6 +321,22 @@ object DeepReadTemplateRenderer {
             .replace(">", "&gt;")
             .replace("\"", "&quot;")
             .replace("'", "&#39;")
+
+    private fun String.withRuntimeCss(css: String): String {
+        val hasCss = css.trim() in this
+        val hasImageFallback = "img:not([src])" in this
+        if (hasCss && hasImageFallback) return this
+        val styleCss = buildString {
+            if (!hasCss) appendLine(css)
+            if (!hasImageFallback) appendLine(EMPTY_IMAGE_FALLBACK_CSS)
+        }
+        val styleTag = "<style>$styleCss</style>"
+        return when {
+            "</head>" in this -> replace("</head>", "$styleTag</head>")
+            "<body" in this -> replaceFirst(Regex("""<body([^>]*)>""", RegexOption.IGNORE_CASE), "<body\$1>$styleTag")
+            else -> "$styleTag$this"
+        }
+    }
 
     private const val DEFAULT_FONT_CSS = """
         :root{
@@ -214,14 +364,44 @@ object DeepReadTemplateRenderer {
         section{margin-top:28px;}
         .timeline{display:grid;grid-template-columns:32px 1fr;gap:10px;padding:11px 0;border-top:1px solid #ddd;}
         .num{font-family:var(--deep-read-sans);color:#ef4444;letter-spacing:.12em;font-size:12px;padding-top:4px;}
+        .timeline-item{display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;padding:11px 0;border-top:1px solid #ddd;}
+        .timeline-marker{width:18px;height:18px;border-radius:50%;border:1px solid #ef4444;margin-top:3px;}
+        .timeline-body{min-width:0;}
+        .timeline-date{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:#ef4444;font-size:10px;margin-bottom:4px;}
+        .core-point{padding:12px 0;border-top:1px solid #ddd;}
         .inline{margin:12px 0 4px;background:#f0f0ec;}
         .inline img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
         .inline figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+        .timeline-item figure,.core-point figure{margin:12px 0 4px;background:#f0f0ec;}
+        .timeline-item img,.core-point img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
+        .timeline-item figcaption,.core-point figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
         blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid #ef4444;}
         .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid #ddd;padding:10px 0;text-decoration:none;color:inherit;}
         .reading span{font-family:var(--deep-read-sans);color:#ef4444;font-size:12px;letter-spacing:.12em;}
         .reading p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
         .reading small{letter-spacing:.08em;font-size:9px;}
+        .reading-link{display:block;border-top:1px solid #ddd;padding:10px 0;text-decoration:none;color:inherit;}
+        .reading-link p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+        .reading-link small{font-family:var(--deep-read-sans);letter-spacing:.08em;text-transform:uppercase;color:#6b7280;font-size:9px;}
+    """
+
+    private const val TEMPLATE_RUNTIME_CSS = """
+        @keyframes deepReadPulse{0%,100%{opacity:.36}50%{opacity:.76}}
+        .section-state{border-radius:18px;background:#f7f2f2;padding:18px 18px 16px;margin:10px 0;color:#6b7280;font-family:var(--deep-read-sans);}
+        .section-state.running .state-dot{background:#ef4444;box-shadow:0 0 0 8px rgba(239,68,68,.12);}
+        .section-state.failed{background:#fff1f2;color:#9f1239;}
+        .state-row{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px;}
+        .state-row p{font-family:var(--deep-read-sans);font-size:13px;line-height:1.5;margin:0;color:inherit;}
+        .state-dot{width:9px;height:9px;border-radius:50%;background:#cbd5e1;margin-top:6px;flex:0 0 auto;animation:deepReadPulse 1.4s ease-in-out infinite;}
+        .skeleton-line{height:9px;border-radius:999px;background:#d8dee6;margin:9px 0;animation:deepReadPulse 1.4s ease-in-out infinite;}
+        .skeleton-line.wide{width:92%;}
+        .skeleton-line{width:74%;}
+        .skeleton-line.short{width:42%;}
+    """
+
+    private const val EMPTY_IMAGE_FALLBACK_CSS = """
+        img:not([src]),img[src=""]{display:none!important;}
+        figure:has(> img:not([src])),figure:has(> img[src=""]){display:none!important;}
     """
 }
 

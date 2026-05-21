@@ -19,6 +19,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.board.boardRequestBodies
+import me.rerere.rikkahub.data.agent.board.boardRequestHeaders
 import me.rerere.rikkahub.data.agent.board.hotlist.HotTopicSource
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.presentationTitle
@@ -102,8 +105,8 @@ class DeepReadAgent(
 
         var output = starting
         var firstFailure: Throwable? = null
-        DeepReadGenerationStage.entries.forEach { stage ->
-            if (output.statusOf(stage) == DeepReadSectionStatus.READY) return@forEach
+        for (stage in DeepReadGenerationStage.entries) {
+            if (output.statusOf(stage) == DeepReadSectionStatus.READY) continue
             val stageResult = runStage(
                 settings = settings,
                 topicId = topicId,
@@ -117,6 +120,7 @@ class DeepReadAgent(
                 is StageOutcome.Failure -> {
                     output = stageResult.output
                     if (firstFailure == null) firstFailure = IllegalStateException(stageResult.message)
+                    break
                 }
             }
         }
@@ -324,10 +328,24 @@ class DeepReadAgent(
 
     private suspend fun enrichSeedSource(source: DeepReadSource): DeepReadSource {
         val direct = source.url.takeIf { it.startsWith("http") }?.let { url ->
-            withTimeoutOrNull(DIRECT_FETCH_TIMEOUT_MS) { fetchReadableText(url) }
+            try {
+                withTimeoutOrNull(DIRECT_FETCH_TIMEOUT_MS) { fetchReadableText(url) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.w(TAG, "deep read seed fetch failed: $url", error)
+                null
+            }
         }
         val metaImage = source.url.takeIf { it.startsWith("http") }?.let { url ->
-            withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) { fetchOpenGraphImage(url) }
+            try {
+                withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) { fetchOpenGraphImage(url) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.w(TAG, "deep read seed og image fetch failed: $url", error)
+                null
+            }
         }
         return source.copy(
             content = (direct ?: source.content).take(SOURCE_EXCERPT_LIMIT),
@@ -510,18 +528,45 @@ class DeepReadAgent(
             ?: return StageCallResult(null, "模型 ${model.displayName} 的提供商不可用")
         return try {
             val response = try {
-                generateDeepReadText(provider, model, systemInstruction, prompt, maxTokens)
+                generateDeepReadText(provider, model, settings.providers, systemInstruction, prompt, maxTokens)
             } catch (error: Throwable) {
                 if (maxTokens > DEEP_READ_PROVIDER_SAFE_MAX_TOKENS && error.looksLikeMaxTokenRejection()) {
                     Log.w(TAG, "deep read model rejected maxTokens=$maxTokens; retrying with $DEEP_READ_PROVIDER_SAFE_MAX_TOKENS", error)
-                    generateDeepReadText(provider, model, systemInstruction, prompt, DEEP_READ_PROVIDER_SAFE_MAX_TOKENS)
+                    generateDeepReadText(
+                        provider,
+                        model,
+                        settings.providers,
+                        systemInstruction,
+                        prompt,
+                        DEEP_READ_PROVIDER_SAFE_MAX_TOKENS,
+                    )
                 } else {
                     throw error
                 }
             }
             val text = response.choices.firstOrNull()?.message?.toText()
             if (text.isNullOrBlank()) {
-                StageCallResult(null, "模型返回空内容，请重试或切换模型")
+                val emptyDetail = response.describeEmptyDeepReadResponse()
+                Log.w(TAG, "deep read model returned empty text: $emptyDetail")
+                val retryResponse = runCatching {
+                    generateDeepReadText(
+                        provider = provider,
+                        model = model,
+                        providers = settings.providers,
+                        systemInstruction = systemInstruction + "\n不要只输出思考过程；必须在最终答案里输出一个完整 JSON 对象。不要解释，不要 Markdown。",
+                        prompt = prompt + "\n\n再次强调：最终输出必须是合法 JSON 对象。如果信息不足，也要基于已给来源输出可解析 JSON，不能空回复。",
+                        maxTokens = maxTokens.coerceAtMost(DEEP_READ_PROVIDER_SAFE_MAX_TOKENS),
+                    )
+                }.onFailure {
+                    Log.w(TAG, "deep read empty-response retry failed", it)
+                }.getOrNull()
+                val retryText = retryResponse?.choices?.firstOrNull()?.message?.toText()
+                if (retryText.isNullOrBlank()) {
+                    val retryDetail = retryResponse?.describeEmptyDeepReadResponse()
+                    StageCallResult(null, buildEmptyResponseMessage(emptyDetail, retryDetail))
+                } else {
+                    StageCallResult(retryText, null)
+                }
             } else {
                 StageCallResult(text, null)
             }
@@ -539,6 +584,7 @@ class DeepReadAgent(
     private suspend fun generateDeepReadText(
         provider: me.rerere.ai.provider.ProviderSetting,
         model: me.rerere.ai.provider.Model,
+        providers: List<me.rerere.ai.provider.ProviderSetting>,
         systemInstruction: String,
         prompt: String,
         maxTokens: Int,
@@ -553,10 +599,42 @@ class DeepReadAgent(
                 model = model,
                 temperature = 0.2f,
                 maxTokens = maxTokens,
-                customHeaders = model.customHeaders,
-                customBody = model.customBodies,
+                customHeaders = model.boardRequestHeaders(providers),
+                customBody = model.boardRequestBodies(providers),
             ),
         )
+    }
+
+    private fun me.rerere.ai.ui.MessageChunk.describeEmptyDeepReadResponse(): String {
+        val choice = choices.firstOrNull() ?: return "choices 为空"
+        val message = choice.message ?: choice.delta ?: return "message 为空 finishReason=${choice.finishReason.orEmpty()}"
+        val partTypes = message.parts.joinToString(",") { part ->
+            when (part) {
+                is UIMessagePart.Text -> "text(${part.text.length})"
+                is UIMessagePart.Reasoning -> "reasoning(${part.reasoning.length})"
+                is UIMessagePart.Tool -> "tool(${part.toolName})"
+                is UIMessagePart.Image -> "image"
+                is UIMessagePart.Audio -> "audio"
+                is UIMessagePart.Video -> "video"
+                is UIMessagePart.Document -> "document"
+                else -> part::class.simpleName.orEmpty().ifBlank { "unknown" }
+            }
+        }.ifBlank { "无 parts" }
+        return "finishReason=${choice.finishReason.orEmpty().ifBlank { "unknown" }} parts=$partTypes usage=${usage?.toString().orEmpty()}"
+    }
+
+    private fun buildEmptyResponseMessage(first: String, retry: String?): String {
+        val combined = listOfNotNull(first, retry).joinToString("；")
+        return when {
+            "reasoning(" in combined && "text(0)" !in combined ->
+                "模型只返回了思考内容，没有输出最终 JSON。请关闭该模型的纯思考/推理模式，或切换到更适合 JSON 输出的模型。"
+            "MAX" in combined.uppercase() || "LENGTH" in combined.uppercase() ->
+                "模型输出被长度限制截断，没有返回可用 JSON。请降低来源数量或切换更大输出上限的模型。"
+            "SAFETY" in combined.uppercase() || "BLOCK" in combined.uppercase() ->
+                "模型安全策略拦截了最终输出，没有返回可用 JSON。请换模型或换搜索源。"
+            else ->
+                "模型返回空内容，请重试或切换模型。（$combined）"
+        }
     }
 
     private fun Throwable.looksLikeMaxTokenRejection(): Boolean {
@@ -775,7 +853,7 @@ class DeepReadAgent(
         private const val DIRECT_FETCH_TIMEOUT_MS = 4_000L
         private const val DIRECT_FETCH_MAX_BYTES = 768_000L
         private const val OG_IMAGE_HTML_CHAR_LIMIT = 192_000
-        private const val MODEL_TIMEOUT_MS = 70_000L
+        private const val MODEL_TIMEOUT_MS = 180_000L
         private const val DEEP_READ_MODEL_MAX_TOKENS = 40_000
         private const val OVERVIEW_COMPACT_MAX_TOKENS = 1_200
         private const val DEEP_READ_REPAIR_MAX_TOKENS = 40_000
