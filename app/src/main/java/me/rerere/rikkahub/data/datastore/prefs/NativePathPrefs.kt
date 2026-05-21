@@ -29,6 +29,13 @@ import me.rerere.rikkahub.utils.toMutableStateFlow
  * renderer still consumes the JVM tree), turning it on without a renderer
  * swap is pure overhead.
  *
+ * `regex` default `true` is **safe because `Assistant.replaceRegexes`
+ * preflights the rule set** for JVM-only syntax (lookbehind / backref /
+ * possessive in patterns; literal-`$` / `$<name>` in replacements) — if
+ * any rule uses JVM-only constructs, the whole batch routes to the JVM
+ * fallback so semantic parity is preserved. See `RegexNativeSwitch` class
+ * KDoc + `containsJvmOnlyRegexSyntax` in Assistant.kt.
+ *
  * `sampleRate` defaults to `0` — diff sampling is off because there's no
  * dashboard to monitor and the rendering paths diverge cosmetically on the
  * markdown HTML stage even with the normalizer. Set > 0 explicitly when
@@ -47,9 +54,9 @@ import me.rerere.rikkahub.utils.toMutableStateFlow
 data class NativePathPrefsData(
     val office: Boolean = true,
     val highlight: Boolean = true,
-    val regex: Boolean = true,
+    val regex: Boolean = true,         // safe — Assistant.kt preflights JVM-only syntax
     val markdownHtml: Boolean = true,
-    val markdownAst: Boolean = false,
+    val markdownAst: Boolean = false,  // shadow-only, no user-facing win
     val sampleRate: Float = 0f,
 )
 

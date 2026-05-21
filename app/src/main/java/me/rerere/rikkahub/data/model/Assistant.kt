@@ -100,20 +100,14 @@ fun String.replaceRegexes(
     }
     if (applicable.isEmpty()) return this
 
-    // Phase 2 Step 3: route through RegexNativeSwitch. Default disabled →
-    // skip the entire JNI path (no array allocation) and go straight to JVM
-    // (review P1-1 / P2-3). Both paths skip individual rules whose regex
-    // fails to compile (silent log + acc passthrough) so per-rule semantic
-    // parity is the only correctness concern — caught by diff sampling per
-    // RegexNativeSwitch class KDoc.
-    //
-    // TODO: before flipping `regex=true` for any cohort, add a
-    //   config-save-time validator that scans every assistant rule for
-    //   JVM-only syntax (lookbehind `(?<=` `(?<!`, backref `\1`-`\9`,
-    //   possessive `*+`/`?+`/`++`) and warns the user so they understand the
-    //   semantic gap — diff sampling at sampleRate=0 doesn't catch this
-    //   class of divergence on its own.
-    if (RegexNativeSwitch.isEnabled()) {
+    // Phase 2 Step 3: route through RegexNativeSwitch when enabled AND no
+    // rule uses JVM-only syntax. Preflight is required because the Rust
+    // `regex` crate silently skips lookbehind / backref / possessive in
+    // patterns (and `\$` / `$<name>` in replacements), producing different
+    // output without throwing — fallback can't detect it. When the preflight
+    // flags any JVM-only rule we route the whole batch to JVM to preserve
+    // per-rule semantic parity. See `RegexNativeSwitch` class KDoc.
+    if (RegexNativeSwitch.isEnabled() && !containsJvmOnlyRegexSyntax(applicable)) {
         val patterns = Array(applicable.size) { applicable[it].findRegex }
         val replacements = Array(applicable.size) { applicable[it].replaceString }
         RegexNativeSwitch.applyOrNull(
@@ -126,6 +120,39 @@ fun String.replaceRegexes(
 
     return applyRegexesJvm(this, applicable)
 }
+
+/**
+ * Detect any rule that uses Java `Pattern` syntax the Rust `regex` crate
+ * doesn't support (and would silently skip, producing a divergent output).
+ *
+ * Detects, in **pattern** strings:
+ * - lookbehind: `(?<=...)`, `(?<!...)`
+ * - lookahead:  `(?=...)`, `(?!...)`
+ * - atomic group: `(?>...)`
+ * - backreference: `\1` through `\9` (only `\` followed by single digit;
+ *   `\10` etc. are rare and we accept under-coverage there)
+ * - possessive quantifier: `?+`, `*+`, `++`
+ *
+ * Detects, in **replacement** strings:
+ * - literal-dollar Java syntax: `\$`
+ * - named-group Java syntax: `$<name>` (Rust uses `${name}` or `$name`)
+ *
+ * Pure prefilter — no compilation, no DFA, no allocations beyond the
+ * `Regex.containsMatchIn` internal state. Safe to run per-message.
+ */
+private fun containsJvmOnlyRegexSyntax(rules: List<AssistantRegex>): Boolean {
+    return rules.any { rule ->
+        JVM_ONLY_PATTERN_SYNTAX.containsMatchIn(rule.findRegex) ||
+            JVM_ONLY_REPLACEMENT_SYNTAX.containsMatchIn(rule.replaceString)
+    }
+}
+
+private val JVM_ONLY_PATTERN_SYNTAX = Regex(
+    """\(\?<[=!]|\(\?[=!]|\(\?>|\\[1-9]|[?*+]\+"""
+)
+private val JVM_ONLY_REPLACEMENT_SYNTAX = Regex(
+    """\\\$|\$<"""
+)
 
 /** JVM regex pipeline preserved as the sole fallback path. Identical to the
  *  fold body that was inline before Phase 2 Step 3 — invalid patterns are
