@@ -2,11 +2,9 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-    // Rust JNI integration for the tree-sitter highlight crate. Drives
-    // cargo-ndk against ../native/highlight-parser and stages the resulting
-    // .so per ABI under build/rustJniLibs/android. Mirrors document/.
-    // See docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
+    // (Previously) org.mozilla.rust-android-gradle.rust-android — REMOVED for
+    // AGP 9 incompatibility (see document/build.gradle.kts header). Native
+    // build driven by the hand-rolled Exec task below.
 }
 
 android {
@@ -44,22 +42,44 @@ android {
     }
 }
 
-cargo {
-    module = "../native/highlight-parser"
-    libname = "highlight_parser"
-    // Narrowed to arm64 — matches app abi filters; see document/build.gradle.kts comment.
-    targets = listOf("arm64")
-    profile = "release"
-    apiLevel = 24
-    // extraCargoBuildArguments removed (P3 sweep) — `module` already points
-    // at the highlight-parser crate root, so --package is redundant.
-    targetDirectory = "../native/target"
-    verbose = true
+// ---------------------------------------------------------------------------
+// Rust JNI build — hand-rolled cargo-ndk invocation.
+// Mirrors the cargoBuildOfficeParsers / cargoBuildRegexTransformer pattern.
+// ---------------------------------------------------------------------------
+
+val androidNdkHome: String =
+    providers.environmentVariable("ANDROID_NDK_HOME").orNull
+        ?: providers.gradleProperty("android.ndkPath").orNull
+        ?: System.getProperty("android.ndk")
+        ?: "${System.getenv("ANDROID_HOME") ?: System.getProperty("user.home") + "/Library/Android/sdk"}/ndk/27.0.12077973"
+
+val cargoBuildHighlightParser = tasks.register<Exec>("cargoBuildHighlightParser") {
+    group = "rust"
+    description = "Build libhighlight_parser.so for arm64-v8a via cargo-ndk"
+    workingDir = file("../native/highlight-parser")
+    environment("ANDROID_NDK_HOME", androidNdkHome)
+    commandLine = listOf(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
+        "build", "--release",
+        "--manifest-path", file("../native/highlight-parser/Cargo.toml").absolutePath,
+    )
+    isIgnoreExitValue = false
+    onlyIf {
+        val cargoNdkAvailable = try {
+            ProcessBuilder("cargo", "ndk", "--version").start().waitFor() == 0
+        } catch (_: Throwable) { false }
+        if (!cargoNdkAvailable) {
+            logger.lifecycle("[rust] cargo-ndk not on PATH; skipping highlight-parser native build (JVM fallback will kick in at runtime)")
+        }
+        cargoNdkAvailable
+    }
 }
 
 afterEvaluate {
     tasks.named("preBuild").configure {
-        dependsOn("cargoBuild")
+        dependsOn(cargoBuildHighlightParser)
     }
 }
 

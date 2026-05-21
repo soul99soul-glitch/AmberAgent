@@ -64,11 +64,10 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
-    // Rust JNI integration for the markdown-parser crate. Stages
-    // libmarkdown_parser.so into the APK's jniLibs. See
-    // docs/RUST_NATIVE_SPIKE_PLAN.md §2.3 and the matching block in
-    // document/build.gradle.kts.
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
+    // (Previously) org.mozilla.rust-android-gradle.rust-android — REMOVED for
+    // AGP 9 incompatibility (see document/build.gradle.kts header). Native
+    // builds for libmarkdown_parser.so + libregex_transformer.so are driven
+    // by hand-rolled Exec tasks below.
 }
 
 android {
@@ -253,8 +252,9 @@ android {
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
     }
 
-    // Bring the cargo-built .so files (libmarkdown_parser.so) into the APK's
-    // jniLibs. See cargo { } block below + docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
+    // Bring the cargo-built .so files (libmarkdown_parser.so, libregex_transformer.so)
+    // into the APK's jniLibs. The Rust JNI block below registers the cargo-ndk
+    // Exec tasks that populate this dir. See docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
     sourceSets {
         getByName("main") {
             jniLibs.srcDirs("${layout.buildDirectory.get()}/rustJniLibs/android")
@@ -262,61 +262,58 @@ android {
     }
 }
 
-cargo {
-    module = "../native/markdown-parser"
-    libname = "markdown_parser"
-    // Narrowed to arm64 — matches app abi filters; see document/build.gradle.kts comment.
-    targets = listOf("arm64")
-    profile = "release"
-    apiLevel = 26
-    // extraCargoBuildArguments removed (P3 sweep) — `module` already points
-    // at the markdown-parser crate root, so --package is redundant.
-    targetDirectory = "../native/target"
-    verbose = true
-}
+// ---------------------------------------------------------------------------
+// Rust JNI build — hand-rolled cargo-ndk invocations.
+//
+// Replaces the Mozilla rust-android-gradle plugin (incompatible with AGP 9 —
+// see Codex Round 2 review). Two crates land .so files into `app/`'s jniLibs:
+//   - markdown-parser → libmarkdown_parser.so
+//   - regex-transformer → libregex_transformer.so
+// Output ABI: arm64-v8a only (matches `android.defaultConfig.ndk.abiFilters`
+// + `splits.abi.include`). When a future Mozilla-plugin release supports
+// AGP 9 + multiple crates per module, this block can be revisited.
+// ---------------------------------------------------------------------------
 
-// Second Rust crate (`regex-transformer`) — the Mozilla rust-android plugin
-// only supports ONE `cargo {}` block per Android module, so we hand-roll a
-// `cargo ndk` invocation that mirrors what the plugin does for markdown-parser
-// and stages the resulting .so files alongside it in build/rustJniLibs/android.
-// Cross-component review V2 P1 fix.
 val androidNdkHome: String =
     providers.environmentVariable("ANDROID_NDK_HOME").orNull
         ?: providers.gradleProperty("android.ndkPath").orNull
         ?: System.getProperty("android.ndk")
         ?: "${System.getenv("ANDROID_HOME") ?: System.getProperty("user.home") + "/Library/Android/sdk"}/ndk/27.0.12077973"
 
-val cargoBuildRegexTransformer = tasks.register<Exec>("cargoBuildRegexTransformer") {
-    group = "rust"
-    description = "Build libregex_transformer.so for arm64-v8a via cargo-ndk (matches app abi filters)"
-    workingDir = file("../native/regex-transformer")
-    environment("ANDROID_NDK_HOME", androidNdkHome)
-    commandLine = listOf(
-        "cargo", "ndk",
-        "-t", "arm64-v8a",
-        "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
-        "build", "--release",
-        "--manifest-path", file("../native/regex-transformer/Cargo.toml").absolutePath,
-    )
-    // Optional: skip silently if cargo-ndk isn't installed so CI without Rust
-    // doesn't blow up unrelated builds. Adapter will see no .so and fall back
-    // to JVM at runtime — same behaviour as if the build succeeded but the
-    // device's ABI wasn't bundled.
-    isIgnoreExitValue = false
-    onlyIf {
-        val cargoNdkAvailable = try {
-            ProcessBuilder("cargo", "ndk", "--version").start().waitFor() == 0
-        } catch (_: Throwable) { false }
-        if (!cargoNdkAvailable) {
-            logger.lifecycle("[rust] cargo-ndk not on PATH; skipping regex-transformer native build (JVM fallback will kick in at runtime)")
+/** Build one Rust crate into `app/build/rustJniLibs/android/<abi>/lib<name>.so`. */
+fun registerCargoBuild(taskName: String, crateDir: String, displayName: String) =
+    tasks.register<Exec>(taskName) {
+        group = "rust"
+        description = "Build lib${displayName}.so for arm64-v8a via cargo-ndk"
+        workingDir = file(crateDir)
+        environment("ANDROID_NDK_HOME", androidNdkHome)
+        commandLine = listOf(
+            "cargo", "ndk",
+            "-t", "arm64-v8a",
+            "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
+            "build", "--release",
+            "--manifest-path", file("$crateDir/Cargo.toml").absolutePath,
+        )
+        isIgnoreExitValue = false
+        onlyIf {
+            val cargoNdkAvailable = try {
+                ProcessBuilder("cargo", "ndk", "--version").start().waitFor() == 0
+            } catch (_: Throwable) { false }
+            if (!cargoNdkAvailable) {
+                logger.lifecycle("[rust] cargo-ndk not on PATH; skipping $displayName native build (JVM fallback will kick in at runtime)")
+            }
+            cargoNdkAvailable
         }
-        cargoNdkAvailable
     }
-}
+
+val cargoBuildMarkdownParser =
+    registerCargoBuild("cargoBuildMarkdownParser", "../native/markdown-parser", "markdown_parser")
+val cargoBuildRegexTransformer =
+    registerCargoBuild("cargoBuildRegexTransformer", "../native/regex-transformer", "regex_transformer")
 
 afterEvaluate {
     tasks.named("preBuild").configure {
-        dependsOn("cargoBuild")
+        dependsOn(cargoBuildMarkdownParser)
         dependsOn(cargoBuildRegexTransformer)
     }
 }

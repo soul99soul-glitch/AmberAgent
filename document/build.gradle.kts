@@ -1,9 +1,10 @@
 plugins {
     alias(libs.plugins.android.library)
-    // Rust JNI integration. Drives `cargo-ndk` against ../native/office-parsers
-    // and stages the resulting .so per ABI under build/rustJniLibs/android.
-    // See docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
-    id("org.mozilla.rust-android-gradle.rust-android") version "0.9.6"
+    // (Previously) org.mozilla.rust-android-gradle.rust-android v0.9.6 — REMOVED.
+    // That plugin still expects AGP's pre-9 `AppExtension` API which doesn't
+    // exist in AGP 9.2 (Codex Round 2 reject). The hand-rolled cargo-ndk
+    // Exec task below produces the same .so layout the plugin would have,
+    // with one less moving part to maintain across AGP upgrades.
 }
 
 android {
@@ -39,28 +40,48 @@ android {
     }
 }
 
-cargo {
-    module = "../native/office-parsers"
-    libname = "office_parsers"
-    // app currently ships arm64-v8a only (see app/build.gradle.kts ndk.abiFilters
-    // + splits.abi.include). Building arm + x86_64 here would just inflate CI
-    // without ending up in the APK. Narrow to arm64 — Codex review fix.
-    targets = listOf("arm64")
-    profile = "release"
-    apiLevel = 26
-    // Share target/ dir across all 3 crates in the workspace.
-    // extraCargoBuildArguments removed (P3 sweep) — `module` already points
-    // at the office-parsers crate root, so --package is redundant.
-    targetDirectory = "../native/target"
-    verbose = true
+// ---------------------------------------------------------------------------
+// Rust JNI build — hand-rolled cargo-ndk invocation.
+//
+// Mozilla's rust-android-gradle plugin (0.9.6) ties to AGP <9's `AppExtension`,
+// which AGP 9.2 dropped. Until a plugin maintainer ships AGP-9 support, drive
+// cargo-ndk ourselves. The task signature mirrors `cargoBuildRegexTransformer`
+// in app/build.gradle.kts so the pattern is one place to maintain.
+// ---------------------------------------------------------------------------
+
+val androidNdkHome: String =
+    providers.environmentVariable("ANDROID_NDK_HOME").orNull
+        ?: providers.gradleProperty("android.ndkPath").orNull
+        ?: System.getProperty("android.ndk")
+        ?: "${System.getenv("ANDROID_HOME") ?: System.getProperty("user.home") + "/Library/Android/sdk"}/ndk/27.0.12077973"
+
+val cargoBuildOfficeParsers = tasks.register<Exec>("cargoBuildOfficeParsers") {
+    group = "rust"
+    description = "Build liboffice_parsers.so for arm64-v8a via cargo-ndk"
+    workingDir = file("../native/office-parsers")
+    environment("ANDROID_NDK_HOME", androidNdkHome)
+    commandLine = listOf(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-o", file("${layout.buildDirectory.get()}/rustJniLibs/android").absolutePath,
+        "build", "--release",
+        "--manifest-path", file("../native/office-parsers/Cargo.toml").absolutePath,
+    )
+    isIgnoreExitValue = false
+    onlyIf {
+        val cargoNdkAvailable = try {
+            ProcessBuilder("cargo", "ndk", "--version").start().waitFor() == 0
+        } catch (_: Throwable) { false }
+        if (!cargoNdkAvailable) {
+            logger.lifecycle("[rust] cargo-ndk not on PATH; skipping office-parsers native build (JVM fallback will kick in at runtime)")
+        }
+        cargoNdkAvailable
+    }
 }
 
-// Make the `preBuild` task depend on `cargoBuild` so .so files are in place
-// before AAR is packaged. Wrapped in afterEvaluate because cargoBuild is
-// registered by the rust-android plugin after evaluation.
 afterEvaluate {
     tasks.named("preBuild").configure {
-        dependsOn("cargoBuild")
+        dependsOn(cargoBuildOfficeParsers)
     }
 }
 
