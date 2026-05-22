@@ -4,10 +4,15 @@ import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageAsset
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_INLINE
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroCaption
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroImageUrl
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.isComplete
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.withInferredSectionStates
@@ -32,7 +37,7 @@ class DeepReadSectionStateTest {
     }
 
     @Test
-    fun isCompleteRequiresAllSectionsReadyAndFinishFlag() {
+    fun isCompleteRequiresAllSectionsReadyFinishFlagAndVerification() {
         val partial = DeepReadOutput()
             .withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
             .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
@@ -45,12 +50,29 @@ class DeepReadSectionStateTest {
         assertFalse(readyButUnfinished.generationComplete)
 
         val complete = readyButUnfinished.copy(generationComplete = true)
-        assertTrue(complete.isComplete())
-        assertTrue(complete.generationComplete)
+        assertFalse(complete.isComplete())
+
+        val verifiedComplete = complete.copy(
+            verificationState = DeepReadSectionState(DeepReadSectionStatus.READY),
+        )
+        assertTrue(verifiedComplete.isComplete())
+        assertTrue(verifiedComplete.generationComplete)
+
+        val verifiedButUnfinished = verifiedComplete.copy(generationComplete = false)
+        assertFalse(verifiedButUnfinished.isComplete())
     }
 
     @Test
-    fun withInferredSectionStatesRecoversFromOldCache() {
+    fun legacyCompleteCacheWithoutVerificationIsNotComplete() {
+        val complete = DeepReadGenerationStage.entries.fold(DeepReadOutput(generationComplete = true)) { output, stage ->
+            output.withSectionStatus(stage, DeepReadSectionStatus.READY)
+        }.copy(generationComplete = true)
+
+        assertFalse(complete.isComplete())
+    }
+
+    @Test
+    fun withInferredSectionStatesRecoversSectionsButRequiresVerification() {
         val legacy = DeepReadOutput(
             summary = "这是一段足够长的中文摘要，足以判断 overview 已经完成。",
             timeline = listOf(TimelineEvent("date", "event")),
@@ -65,7 +87,8 @@ class DeepReadSectionStateTest {
         DeepReadGenerationStage.entries.forEach { stage ->
             assertEquals(DeepReadSectionStatus.READY, inferred.statusOf(stage))
         }
-        assertTrue(inferred.isComplete())
+        assertFalse(inferred.isComplete())
+        assertFalse(inferred.generationComplete)
     }
 
     @Test
@@ -95,5 +118,22 @@ class DeepReadSectionStateTest {
         assertEquals(DeepReadSectionStatus.READY, decoded.statusOf(DeepReadGenerationStage.OVERVIEW))
         assertEquals(DeepReadSectionStatus.FAILED, decoded.statusOf(DeepReadGenerationStage.NARRATIVE))
         assertEquals("时间轴失败", decoded.sectionStates[DeepReadGenerationStage.NARRATIVE]?.errorMessage)
+    }
+
+    @Test
+    fun displayHeroFallsBackToVerifiedInlineImageWhenExplicitHeroMissing() {
+        val imageUrl = "https://example.com/car.jpg"
+        val output = DeepReadOutput(
+            imageAssets = listOf(
+                DeepReadImageAsset(
+                    url = imageUrl,
+                    caption = "发布会现场图",
+                    confidence = IMAGE_CONFIDENCE_INLINE,
+                )
+            )
+        )
+
+        assertEquals(imageUrl, output.displayHeroImageUrl())
+        assertEquals("发布会现场图", output.displayHeroCaption())
     }
 }

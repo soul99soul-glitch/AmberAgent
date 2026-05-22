@@ -62,14 +62,17 @@ interface HotListDAO {
     @Query("SELECT * FROM deep_read_cache WHERE topic_id = :topicId")
     fun observeDeepRead(topicId: String): Flow<DeepReadCacheEntity?>
 
+    @Query("SELECT * FROM deep_read_cache ORDER BY updated_at DESC LIMIT :limit")
+    fun observeDeepReadHistory(limit: Int = 100): Flow<List<DeepReadCacheEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDeepRead(entity: DeepReadCacheEntity)
 
     @Query("DELETE FROM deep_read_cache WHERE topic_id = :topicId")
     suspend fun deleteDeepRead(topicId: String)
 
-    @Query("DELETE FROM deep_read_cache WHERE expires_at < :now")
-    suspend fun pruneExpiredDeepReads(now: Long): Int
+    @Query("DELETE FROM deep_read_cache WHERE expires_at < :historyCutoff")
+    suspend fun pruneExpiredDeepReads(historyCutoff: Long): Int
 
     @Query("SELECT * FROM hot_list_source ORDER BY sort_order ASC, display_name ASC")
     fun observeSources(): Flow<List<HotListSourceEntity>>

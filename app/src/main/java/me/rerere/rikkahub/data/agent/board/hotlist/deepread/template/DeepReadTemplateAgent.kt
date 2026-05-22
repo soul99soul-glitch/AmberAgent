@@ -321,7 +321,7 @@ class DeepReadTemplateAgent(
         """.trimIndent()
 
     companion object {
-        private const val MODEL_TIMEOUT_MS = 60_000L
-        private const val REPAIR_TIMEOUT_MS = 45_000L
+        private const val MODEL_TIMEOUT_MS = 120_000L
+        private const val REPAIR_TIMEOUT_MS = 90_000L
     }
 }

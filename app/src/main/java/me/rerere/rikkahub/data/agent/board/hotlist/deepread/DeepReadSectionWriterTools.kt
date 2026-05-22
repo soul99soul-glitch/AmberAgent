@@ -18,8 +18,9 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
-private const val OVERVIEW_SUMMARY_MAX_CHARS = 250
+private const val OVERVIEW_SUMMARY_STORAGE_MAX_CHARS = 1_200
 private const val MAX_DIAGRAM_NODES = 6
 private const val MAX_LINEAR_DIAGRAM_EDGES = 5
 private const val MAX_RELATION_DIAGRAM_EDGES = 6
@@ -41,11 +42,15 @@ class DeepReadSectionWriterTools(
     private val _writeCount = AtomicInteger(0)
     private val _requiredWriteCount = AtomicInteger(0)
     private val _verificationCount = AtomicInteger(0)
+    private val _verificationAttemptCount = AtomicInteger(0)
+    private val lastVerificationFailure = AtomicReference<String?>(null)
     private val verifiedWriteCount = AtomicInteger(-1)
     private val writeMutex = Mutex()
     val writeCount: Int get() = _writeCount.get()
     val requiredWriteCount: Int get() = _requiredWriteCount.get()
     val verificationCount: Int get() = _verificationCount.get()
+    val verificationAttemptCount: Int get() = _verificationAttemptCount.get()
+    val lastVerificationFailureReason: String? get() = lastVerificationFailure.get()
     val hasFreshVerification: Boolean
         get() = verificationCount > 0 && verifiedWriteCount.get() == writeCount
 
@@ -64,7 +69,7 @@ class DeepReadSectionWriterTools(
 
     suspend fun markRunning(stages: Collection<DeepReadGenerationStage>): DeepReadOutput =
         update { current ->
-            stages.fold(current) { output, stage ->
+            stages.fold(current.copy(verificationState = DeepReadSectionState())) { output, stage ->
                 if (output.statusOf(stage) == DeepReadSectionStatus.READY) {
                     output
                 } else {
@@ -84,12 +89,67 @@ class DeepReadSectionWriterTools(
 
     suspend fun markVerificationFailed(message: String): DeepReadOutput =
         update { current ->
-            val states = current.sectionStates.toMutableMap()
-            states[DeepReadGenerationStage.EXTENDED_READING] = DeepReadSectionState(
-                status = DeepReadSectionStatus.FAILED,
-                errorMessage = message.safeTake(220),
+            current.copy(
+                verificationState = DeepReadSectionState(
+                    status = DeepReadSectionStatus.FAILED,
+                    errorMessage = message.safeTake(220),
+                ),
+                generationComplete = false,
             )
-            current.copy(sectionStates = states, generationComplete = false)
+        }
+
+    suspend fun markVerificationRunning(): DeepReadOutput =
+        update { current ->
+            current.copy(
+                verificationState = DeepReadSectionState(DeepReadSectionStatus.RUNNING),
+                generationComplete = false,
+            )
+        }
+
+    suspend fun writeFallbackSection(
+        stage: DeepReadGenerationStage,
+        assistantText: String,
+        sources: List<DeepReadSource>,
+    ): DeepReadOutput =
+        update { current ->
+            if (current.statusOf(stage) == DeepReadSectionStatus.READY) return@update current
+            val links = sources.toReadingLinks()
+            val fallbackText = assistantText.fallbackBody(stage, sources, topicTitle)
+            val next = when (stage) {
+                DeepReadGenerationStage.OVERVIEW -> current.copy(
+                    summary = fallbackText.cleanText(OVERVIEW_SUMMARY_STORAGE_MAX_CHARS).takeIf { it.isNotBlank() }
+                        ?: current.summary,
+                    references = mergeReadingLinks(current.references, links, limit = 12),
+                )
+
+                DeepReadGenerationStage.NARRATIVE -> {
+                    val timeline = sources.toFallbackTimeline().takeIf { it.isNotEmpty() }
+                    current.copy(
+                        timeline = timeline ?: current.timeline,
+                        corePoints = fallbackText.toFallbackCorePoints().takeIf { it.isNotEmpty() } ?: current.corePoints,
+                        references = mergeReadingLinks(current.references, links, limit = 12),
+                    )
+                }
+
+                DeepReadGenerationStage.ANALYSIS -> current.copy(
+                    analysis = current.analysis.copy(
+                        implications = fallbackText.cleanText(1_600).takeIf { it.isNotBlank() }
+                            ?: current.analysis.implications,
+                    ),
+                    references = mergeReadingLinks(current.references, links, limit = 12),
+                )
+
+                DeepReadGenerationStage.EXTENDED_READING -> current.copy(
+                    extendedReading = mergeReadingLinks(current.extendedReading, links, limit = 10),
+                    references = mergeReadingLinks(current.references, links, limit = 12),
+                )
+            }
+            if (next.statusReadyFor(stage)) {
+                markRequiredWrite()
+                next.withSectionStatus(stage, DeepReadSectionStatus.READY)
+            } else {
+                current
+            }
         }
 
     suspend fun currentOutput(): DeepReadOutput =
@@ -107,7 +167,7 @@ class DeepReadSectionWriterTools(
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("topic_type", stringProp("event/opinion/product/person."))
-                    put("summary", stringProp("Chinese editorial overview, 120-250 Chinese characters."))
+                    put("summary", stringProp("Chinese editorial overview, around 120-250 Chinese characters; keep sentences complete."))
                     put("key_entities", stringArrayProp("Key people, companies, products, places, or institutions."))
                     put("references", readingLinksProp("Sources used in this section."))
                 },
@@ -121,7 +181,7 @@ class DeepReadSectionWriterTools(
                 val references = obj.readingLinks("references")
                 val next = current.copy(
                     topicType = obj.string("topic_type")?.safeTake(32) ?: current.topicType,
-                    summary = obj.string("summary")?.cleanText(OVERVIEW_SUMMARY_MAX_CHARS) ?: current.summary,
+                    summary = obj.string("summary")?.cleanText(OVERVIEW_SUMMARY_STORAGE_MAX_CHARS) ?: current.summary,
                     keyEntities = mergeStrings(current.keyEntities, obj.stringList("key_entities"), limit = 12),
                     references = mergeReadingLinks(current.references, references, limit = 12),
                 )
@@ -339,6 +399,7 @@ class DeepReadSectionWriterTools(
         },
         allowsAutoApproval = true,
         execute = { input ->
+            _verificationAttemptCount.incrementAndGet()
             val visibleText = currentOutput().verificationVisibleText()
             val gate = input.objectOrEmpty().verificationGate(
                 visibleText = visibleText,
@@ -348,6 +409,13 @@ class DeepReadSectionWriterTools(
             if (gate.accepted) {
                 _verificationCount.incrementAndGet()
                 verifiedWriteCount.set(writeCount)
+                lastVerificationFailure.set(null)
+                update { current ->
+                    current.copy(
+                        verificationState = DeepReadSectionState(DeepReadSectionStatus.READY),
+                        generationComplete = false,
+                    )
+                }
                 listOf(
                     UIMessagePart.Text(
                         buildJsonObject {
@@ -357,6 +425,7 @@ class DeepReadSectionWriterTools(
                     )
                 )
             } else {
+                lastVerificationFailure.set(gate.reason)
                 listOf(
                     UIMessagePart.Text(
                         buildJsonObject {
@@ -377,7 +446,14 @@ class DeepReadSectionWriterTools(
         allowsAutoApproval = true,
         execute = {
             val output = update { current ->
-                current.copy(generationComplete = current.sectionsReady() && hasFreshVerification)
+                current.copy(
+                    generationComplete = current.sectionsReady() && hasFreshVerification,
+                    verificationState = if (hasFreshVerification) {
+                        DeepReadSectionState(DeepReadSectionStatus.READY)
+                    } else {
+                        current.verificationState
+                    },
+                )
             }
             val missing = DeepReadGenerationStage.entries.filter { output.statusOf(it) != DeepReadSectionStatus.READY }
             listOf(
@@ -798,7 +874,14 @@ private fun JsonObject.verificationGate(
         return VerificationGate(false, "refuted claims must be corrected and re-verified before finish")
     }
 
-    val claims = objectList("checked_claims").mapNotNull { claim ->
+    val claimElements = array("checked_claims")
+    if (claimElements.size < 2) {
+        return VerificationGate(false, "checked_claims must include at least two concrete checked claims")
+    }
+    val claims = mutableListOf<VerifiedClaimGate>()
+    claimElements.forEachIndexed { index, element ->
+        val claim = runCatching { element.jsonObject }.getOrNull()
+            ?: return VerificationGate(false, "checked_claims[$index] must be an object")
         val text = claim.string("claim")?.cleanText(240).orEmpty()
         val visibleExcerpt = claim.string("visible_excerpt")?.cleanText(420).orEmpty()
         val status = claim.string("status")?.lowercase().orEmpty()
@@ -808,23 +891,31 @@ private fun JsonObject.verificationGate(
             .mapNotNull { runCatching { it.jsonPrimitive.contentOrNull?.trim() }.getOrNull() }
             .filter { it.startsWith("http://") || it.startsWith("https://") }
         if (text.length < 8 || status !in setOf("verified", "uncertain", "refuted") || note.length < 4) {
-            null
-        } else if (visibleExcerpt.length < 8 || !visibleText.containsLoose(visibleExcerpt)) {
-            return VerificationGate(false, "checked_claims.visible_excerpt must appear in the current visible draft")
+            return VerificationGate(
+                false,
+                "checked_claims[$index] must include claim, status, and note",
+            )
         } else if (evidenceUrls.isNotEmpty() && evidenceExcerpt.length < 8) {
             return VerificationGate(false, "evidence-backed claims must include evidence_excerpt")
-        } else if (evidenceUrls.isNotEmpty() && evidenceUrls.none { evidenceContains(it, evidenceExcerpt) }) {
-            return VerificationGate(false, "evidence_excerpt must appear in at least one evidence URL")
         } else {
-        val unknownEvidence = evidenceUrls.firstOrNull { !isEvidenceUrlAllowed(it) }
-        if (unknownEvidence != null) {
-            return VerificationGate(false, "evidence_urls must come from pre-fetched or actually visited sources: $unknownEvidence")
+            val unknownEvidence = evidenceUrls.firstOrNull { !isEvidenceUrlAllowed(it) }
+            if (unknownEvidence != null) {
+                return VerificationGate(
+                    false,
+                    "evidence_urls must come from pre-fetched or actually visited sources: $unknownEvidence",
+                )
+            }
+            if (evidenceUrls.isNotEmpty() && evidenceUrls.none { evidenceContains(it, evidenceExcerpt) }) {
+                return VerificationGate(false, "evidence_excerpt must appear in at least one evidence URL")
+            }
+            if (visibleExcerpt.length < 8) {
+                return VerificationGate(false, "checked_claims[$index] must include visible_excerpt from the draft")
+            }
+            if (!visibleText.containsLoose(visibleExcerpt)) {
+                return VerificationGate(false, "visible_excerpt must appear in the current draft")
+            }
+            claims += VerifiedClaimGate(status = status, evidenceUrls = evidenceUrls)
         }
-            VerifiedClaimGate(status = status, evidenceUrls = evidenceUrls)
-        }
-    }
-    if (claims.size < 2) {
-        return VerificationGate(false, "checked_claims must include at least two concrete checked claims")
     }
     if (claims.any { it.status == "refuted" }) {
         return VerificationGate(false, "refuted claims require correction and another verification pass")
@@ -933,6 +1024,121 @@ private fun mergeImageAssets(
         .filter { it.url.isHttpOrHttpsUrl() }
         .distinctBy { it.url.trim().trimEnd('/') }
         .take(limit)
+
+private fun List<DeepReadSource>.toReadingLinks(): List<ReadingLink> =
+    asSequence()
+        .filter { it.url.isHttpOrHttpsUrl() }
+        .map { source ->
+            ReadingLink(
+                title = source.title.cleanText(120).ifBlank { source.source ?: source.url },
+                url = source.url,
+                source = source.source,
+            )
+        }
+        .distinctBy { it.url.trim().trimEnd('/') }
+        .take(8)
+        .toList()
+
+private fun List<DeepReadSource>.toFallbackTimeline(): List<TimelineEvent> =
+    asSequence()
+        .filter { it.title.isNotBlank() || it.content.isNotBlank() }
+        .take(4)
+        .mapIndexed { index, source ->
+            val date = source.publishedAt?.takeIf { it.isNotBlank() }
+                ?: source.source?.takeIf { it.isNotBlank() }
+                ?: "来源 ${index + 1}"
+            val excerpt = source.content
+                .fallbackSentences(limit = 1)
+                .firstOrNull()
+                .orEmpty()
+            TimelineEvent(
+                date = date.cleanText(40),
+                event = listOf(source.title, excerpt)
+                    .filter { it.isNotBlank() }
+                    .joinToString("：")
+                    .cleanText(260),
+            )
+        }
+        .filter { it.event.isNotBlank() }
+        .toList()
+
+private fun String.fallbackBody(
+    stage: DeepReadGenerationStage,
+    sources: List<DeepReadSource>,
+    topicTitle: String,
+): String {
+    val cleaned = cleanAssistantFallback(stage.fallbackTextMax())
+    if (cleaned.isUsefulFallbackText()) return cleaned
+    val sourceText = sources.asSequence()
+        .mapNotNull { source ->
+            source.content
+                .fallbackSentences(limit = 2)
+                .joinToString(" ")
+                .ifBlank { null }
+        }
+        .firstOrNull()
+    if (!sourceText.isNullOrBlank()) return sourceText.cleanText(stage.fallbackTextMax())
+    return when (stage) {
+        DeepReadGenerationStage.OVERVIEW ->
+            "围绕「$topicTitle」，当前来源已经提供了可继续阅读的基础事实，但模型未按约定写入结构化概览。"
+
+        DeepReadGenerationStage.NARRATIVE ->
+            "围绕「$topicTitle」，现有来源显示事件已有多个公开节点，后续应优先沿时间线补齐关键进展。"
+
+        DeepReadGenerationStage.ANALYSIS ->
+            "围绕「$topicTitle」，核心分析应聚焦已公开事实、各方立场和可能影响，避免把未证实推断写成定论。"
+
+        DeepReadGenerationStage.EXTENDED_READING -> ""
+    }
+}
+
+private fun String.cleanAssistantFallback(max: Int): String {
+    val withoutFences = replace(Regex("(?s)```.*?```"), " ")
+    return withoutFences
+        .lines()
+        .map { it.trim().trimStart('#', '-', '*', ' ') }
+        .filterNot { line ->
+            line.contains("deep_read_") ||
+                (line.contains("调用") && line.contains("工具")) ||
+                line.equals("好的", ignoreCase = true)
+        }
+        .joinToString(" ")
+        .cleanText(max)
+}
+
+private fun String.isUsefulFallbackText(): Boolean {
+    val cjk = count { it in '\u4e00'..'\u9fff' }
+    return length >= 24 && cjk >= 12
+}
+
+private fun String.fallbackSentences(limit: Int): List<String> =
+    split(Regex("[。！？!?]\\s*|\\n+"))
+        .map { it.cleanText(220) }
+        .filter { it.isNotBlank() }
+        .take(limit)
+
+private fun String.toFallbackCorePoints(): List<CorePoint> =
+    fallbackSentences(limit = 4)
+        .map { sentence ->
+            CorePoint(
+                point = sentence.safeTake(42),
+                supporting = sentence.takeIf { it.length > 42 }?.cleanText(240),
+            )
+        }
+
+private fun DeepReadGenerationStage.fallbackTextMax(): Int = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> OVERVIEW_SUMMARY_STORAGE_MAX_CHARS
+    DeepReadGenerationStage.NARRATIVE -> 1_200
+    DeepReadGenerationStage.ANALYSIS -> 1_600
+    DeepReadGenerationStage.EXTENDED_READING -> 600
+}
+
+private fun DeepReadOutput.statusReadyFor(stage: DeepReadGenerationStage): Boolean = when (stage) {
+    DeepReadGenerationStage.OVERVIEW -> hasOverviewContent()
+    DeepReadGenerationStage.NARRATIVE -> hasNarrativeContent()
+    DeepReadGenerationStage.ANALYSIS -> hasAnalysisContent()
+    DeepReadGenerationStage.EXTENDED_READING -> hasExtendedReadingContent()
+}
 
 private fun DeepReadImageCandidate.selectionReason(topicTitle: String): String =
     when (confidence) {

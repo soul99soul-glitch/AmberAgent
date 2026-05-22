@@ -90,7 +90,8 @@ object DeepReadTemplateValidator {
     }
 
     private fun validateHeroImagePlaceholder(html: String) {
-        val allowedRanges = Regex("""(?is)<\s*img\b[^>]*\bsrc\s*=\s*(?:"(\{\{hero_image_url}})"|'(\{\{hero_image_url}})'|(\{\{hero_image_url}}))[^>]*>""")
+        val heroImageToken = Regex.escape(HERO_IMAGE_PLACEHOLDER)
+        val allowedRanges = Regex("""(?is)<\s*img\b[^>]*\bsrc\s*=\s*(?:"($heroImageToken)"|'($heroImageToken)'|($heroImageToken))[^>]*>""")
             .findAll(html)
             .flatMap { match ->
                 match.groups.drop(1).mapNotNull { group -> group?.range }
@@ -110,6 +111,7 @@ object DeepReadTemplateValidator {
         "extended_reading_html",
     )
 
-    private val PLACEHOLDER_PATTERN = Regex("""\{\{[a-zA-Z0-9_]+}}""")
-    private val HERO_IMAGE_TOKEN = Regex("""\{\{hero_image_url}}""")
+    private const val HERO_IMAGE_PLACEHOLDER = "{{hero_image_url}}"
+    private val PLACEHOLDER_PATTERN = Regex("""\{\{[a-zA-Z0-9_]+\}\}""")
+    private val HERO_IMAGE_TOKEN = Regex(Regex.escape(HERO_IMAGE_PLACEHOLDER))
 }

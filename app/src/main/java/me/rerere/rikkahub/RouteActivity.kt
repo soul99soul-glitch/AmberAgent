@@ -129,6 +129,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalWebMountPage
 import me.rerere.rikkahub.ui.pages.board.TodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadScreen
+import me.rerere.rikkahub.ui.pages.board.DeepReadHistoryPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadTemplateWorkbenchPage
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
@@ -603,11 +604,20 @@ class RouteActivity : ComponentActivity() {
                                     title = key.title,
                                     sourceUrl = key.sourceUrl,
                                     initialForceRegenerate = key.forceRegenerate,
+                                    fromHistory = key.fromHistory,
                                 )
+                            }
+
+                            entry<Screen.DeepReadHistory> {
+                                DeepReadHistoryPage()
                             }
 
                             entry<Screen.SettingTodayBoard> {
                                 SettingTodayBoardPage()
+                            }
+
+                            entry<Screen.SettingTodayBoardDetail> { key ->
+                                SettingTodayBoardPage(paneRoute = key.pane)
                             }
 
                             entry<Screen.DeepReadTemplateWorkbench> {
@@ -624,6 +634,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.MiniAppSettings> {
                                 MiniAppSettingsPage()
+                            }
+
+                            entry<Screen.MiniAppSettingsDetail> { key ->
+                                MiniAppSettingsPage(groupRoute = key.group)
                             }
 
                             entry<Screen.SettingSystemAccess> {
@@ -935,6 +949,9 @@ sealed interface Screen : NavKey {
     data object MiniAppSettings : Screen
 
     @Serializable
+    data class MiniAppSettingsDetail(val group: String) : Screen
+
+    @Serializable
     data object DeepReadTemplateWorkbench : Screen
 
     @Serializable
@@ -943,8 +960,15 @@ sealed interface Screen : NavKey {
         val title: String,
         val sourceUrl: String? = null,
         val forceRegenerate: Boolean = false,
+        val fromHistory: Boolean = false,
     ) : Screen
 
     @Serializable
+    data object DeepReadHistory : Screen
+
+    @Serializable
     data object SettingTodayBoard : Screen
+
+    @Serializable
+    data class SettingTodayBoardDetail(val pane: String) : Screen
 }

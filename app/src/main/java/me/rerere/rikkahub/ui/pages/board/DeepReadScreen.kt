@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -57,11 +58,12 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MAX
 import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MIN
 import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
+import me.rerere.rikkahub.data.agent.board.hotlist.DeepReadHistoryItem
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
@@ -74,6 +76,8 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatu
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroCaption
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroImageUrl
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.isComplete
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.errorOf
@@ -93,6 +97,7 @@ fun DeepReadScreen(
     title: String,
     sourceUrl: String? = null,
     initialForceRegenerate: Boolean = false,
+    fromHistory: Boolean = false,
 ) {
     val agent: DeepReadAgentRunManager = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
@@ -118,10 +123,28 @@ fun DeepReadScreen(
         fontScale = deepReadFontScale,
     )
 
-    val outputFlow = remember(topicId) {
-        hotListRepository.observeDeepRead(topicId).map { it?.withInferredSectionStates() }
+    val cacheEntryFlow = remember(topicId, fromHistory) {
+        hotListRepository.observeDeepReadEntry(topicId, includeExpired = fromHistory)
     }
-    val output by outputFlow.collectAsStateWithLifecycle(initialValue = null)
+    val initialCacheState = remember(topicId, fromHistory) {
+        val preview = hotListRepository.deepReadHistoryPreview(topicId).takeIf { fromHistory }
+        DeepReadCacheState(
+            loaded = !fromHistory || preview != null,
+            entry = preview,
+        )
+    }
+    val cacheState by produceState(
+        initialValue = initialCacheState,
+        key1 = cacheEntryFlow,
+    ) {
+        cacheEntryFlow.collect { entry ->
+            value = DeepReadCacheState(loaded = true, entry = entry)
+        }
+    }
+    val cacheEntry = cacheState.entry
+    val output = remember(cacheEntry) { cacheEntry?.output?.withInferredSectionStates() }
+    val historyExpired = cacheEntry?.expired == true
+    val historyLoading = fromHistory && !cacheState.loaded
     var runError by remember(topicId) { mutableStateOf<String?>(null) }
     var fullRunInFlight by remember(topicId) { mutableStateOf(false) }
     var retryingStages by remember(topicId) { mutableStateOf<Set<DeepReadGenerationStage>>(emptySet()) }
@@ -130,7 +153,8 @@ fun DeepReadScreen(
     val listState = rememberLazyListState()
 
     val anySectionRunning = output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
-    val generating = fullRunInFlight || anySectionRunning || retryingStages.isNotEmpty()
+    val verificationRunning = output?.verificationState?.status == DeepReadSectionStatus.RUNNING
+    val generating = fullRunInFlight || anySectionRunning || verificationRunning || retryingStages.isNotEmpty()
     val complete = output?.isComplete() == true
 
     fun runAll(force: Boolean = false) {
@@ -153,6 +177,7 @@ fun DeepReadScreen(
 
     fun runOne(stage: DeepReadGenerationStage) {
         if (stage in retryingStages) return
+        runError = null
         retryingStages = retryingStages + stage
         scope.launch {
             try {
@@ -163,8 +188,8 @@ fun DeepReadScreen(
         }
     }
 
-    LaunchedEffect(topicId, confirmed, initialForceRegenerate) {
-        if (confirmed) {
+    LaunchedEffect(topicId, confirmed, initialForceRegenerate, fromHistory) {
+        if (confirmed && !fromHistory) {
             val shouldForce = initialForceRegenerate && !initialForceConsumed
             if (shouldForce) initialForceConsumed = true
             runAll(force = shouldForce)
@@ -180,12 +205,17 @@ fun DeepReadScreen(
     val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
         customTemplate == null
     val templateSelected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
-    val firstFailureMessage = output?.sectionStates
-        ?.values
-        ?.firstOrNull { it.status == DeepReadSectionStatus.FAILED }
-        ?.errorMessage
+    val firstFailureMessage = output?.firstFailureMessage()
+    val firstFailedStage = output?.firstFailedStage()
+    val failureRetryLabel = if (firstFailedStage != null) "仅重试这一段" else "重试"
+    fun retryFirstFailure() {
+        firstFailedStage?.let(::runOne) ?: runAll(force = false)
+    }
+    fun retryInitialFailure() {
+        firstFailedStage?.let(::runOne) ?: runAll(force = true)
+    }
     val initialDisplayError = (runError ?: firstFailureMessage)
-        ?.takeIf { !generating && (output == null || output?.hasAnyReadySection() != true) }
+        ?.takeIf { !generating && (output == null || !output.hasAnyReadySection()) }
 
     Box(Modifier.fillMaxSize().background(palette.background)) {
         when {
@@ -209,10 +239,27 @@ fun DeepReadScreen(
                 },
             )
 
+            historyLoading -> Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding())
+
             initialDisplayError != null -> DeepReadError(
                 error = initialDisplayError,
                 modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                onRetry = ::retryInitialFailure,
+                retryLabel = failureRetryLabel,
+            )
+
+            fromHistory && output == null -> DeepReadError(
+                error = "历史内容无法读取或已不存在",
+                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
                 onRetry = { runAll(force = true) },
+                retryLabel = "重新生成",
+            )
+
+            fromHistory && output?.hasAnyReadySection() != true -> DeepReadError(
+                error = "这条历史还没有可显示的内容",
+                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                onRetry = { runAll(force = true) },
+                retryLabel = "重新生成",
             )
 
             templateSelected && !selectedCustomMissing -> {
@@ -248,6 +295,11 @@ fun DeepReadScreen(
                     when {
                         generating -> RunningStageNotice(
                             stages = data.sectionStates,
+                            verificationState = data.verificationState,
+                            modifier = noticeModifier,
+                        )
+                        historyExpired -> TemplateFallbackNotice(
+                            message = "内容已过 24 小时，可能需要重新生成",
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
@@ -257,7 +309,8 @@ fun DeepReadScreen(
                         )
                         firstFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
                             error = firstFailureMessage,
-                            onRetry = { runAll(force = true) },
+                            onRetry = ::retryFirstFailure,
+                            retryLabel = failureRetryLabel,
                             modifier = noticeModifier,
                         )
                     }
@@ -265,13 +318,14 @@ fun DeepReadScreen(
             }
 
             // Nothing usable yet — only initial fetch banner before first section persists.
-            output == null || !output!!.hasAnyReadySection() -> {
+            output == null || !output.hasAnyReadySection() -> {
                 val displayError = runError ?: firstFailureMessage?.takeIf { !generating }
                 if (displayError != null) {
                     DeepReadError(
                         error = displayError,
                         modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
-                        onRetry = { runAll(force = true) },
+                        onRetry = ::retryInitialFailure,
+                        retryLabel = failureRetryLabel,
                     )
                 } else {
                     val data = remember(output, generating) {
@@ -290,6 +344,7 @@ fun DeepReadScreen(
                         )
                         RunningStageNotice(
                             stages = data.sectionStates,
+                            verificationState = data.verificationState,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
@@ -300,7 +355,7 @@ fun DeepReadScreen(
             }
 
             else -> {
-                val data = output!!
+                val data = output
                 Box(Modifier.fillMaxSize()) {
                     if (complete && templateSelected) {
                         DeepReadTemplateArticle(
@@ -351,11 +406,22 @@ fun DeepReadScreen(
                         )
                         generating -> RunningStageNotice(
                             stages = data.sectionStates,
+                            verificationState = data.verificationState,
+                            modifier = noticeModifier,
+                        )
+                        historyExpired -> TemplateFallbackNotice(
+                            message = "内容已过 24 小时，可能需要重新生成",
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
                             error = runError.orEmpty(),
                             onRetry = { runAll(force = true) },
+                            modifier = noticeModifier,
+                        )
+                        firstFailureMessage != null && !complete -> DeepReadPartialErrorNotice(
+                            error = firstFailureMessage,
+                            onRetry = ::retryFirstFailure,
+                            retryLabel = failureRetryLabel,
                             modifier = noticeModifier,
                         )
                     }
@@ -364,6 +430,11 @@ fun DeepReadScreen(
         }
     }
 }
+
+private data class DeepReadCacheState(
+    val loaded: Boolean = false,
+    val entry: DeepReadHistoryItem? = null,
+)
 
 private fun DeepReadOutput.asVisibleGeneratingOutput(generating: Boolean): DeepReadOutput {
     if (sectionStates.isNotEmpty() || !generating) return this
@@ -379,11 +450,42 @@ private fun DeepReadOutput.asVisibleGeneratingOutput(generating: Boolean): DeepR
     return copy(sectionStates = states)
 }
 
+private fun DeepReadOutput.firstFailureMessage(): String? =
+    verificationState
+        .takeIf { it.status == DeepReadSectionStatus.FAILED }
+        ?.errorMessage
+        ?: sectionStates
+            .values
+            .firstOrNull { it.status == DeepReadSectionStatus.FAILED }
+            ?.errorMessage
+
+private fun DeepReadOutput.firstFailedStage(): DeepReadGenerationStage? =
+    DeepReadGenerationStage.entries.firstOrNull { stage ->
+        sectionStates[stage]?.status == DeepReadSectionStatus.FAILED
+    }
+
 @Composable
 private fun RunningStageNotice(
     stages: Map<DeepReadGenerationStage, me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState>,
+    verificationState: me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState,
     modifier: Modifier = Modifier,
 ) {
+    if (verificationState.status == DeepReadSectionStatus.RUNNING) {
+        Surface(
+            modifier = modifier,
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            shadowElevation = 4.dp,
+        ) {
+            Text(
+                "正在验真",
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        return
+    }
     val activeStage = DeepReadGenerationStage.entries.firstOrNull { stage ->
         stages[stage]?.status == DeepReadSectionStatus.RUNNING
     } ?: DeepReadGenerationStage.entries.firstOrNull { stage ->
@@ -405,7 +507,12 @@ private fun RunningStageNotice(
 }
 
 @Composable
-private fun DeepReadPartialErrorNotice(error: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun DeepReadPartialErrorNotice(
+    error: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    retryLabel: String = "重试",
+) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(22.dp),
@@ -429,7 +536,7 @@ private fun DeepReadPartialErrorNotice(error: String, onRetry: () -> Unit, modif
                 onClick = onRetry,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             ) {
-                Text("重试")
+                Text(retryLabel)
             }
         }
     }
@@ -980,8 +1087,12 @@ private fun MagazineHero(
     palette: MagazinePalette,
     fontFamily: FontFamily?,
 ) {
-    val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
-    val image = output.heroImageUrl?.takeIf { it in verifiedImageUrls && output.heroImageConfidence == "hero" }
+    val image = remember(output.heroImageUrl, output.heroImageConfidence, output.imageAssets) {
+        output.displayHeroImageUrl()
+    }
+    val imageCaption = remember(output.heroCaption, output.imageAssets, image) {
+        output.displayHeroCaption(image)
+    }
     var imageFailed by remember(image) { mutableStateOf(false) }
     val showImage = image != null && !imageFailed
     val sourceLabel = remember(output.references, output.extendedReading) {
@@ -1001,7 +1112,7 @@ private fun MagazineHero(
             ) {
                 AsyncImage(
                     model = image,
-                    contentDescription = output.heroCaption ?: title,
+                    contentDescription = imageCaption ?: title,
                     contentScale = ContentScale.Crop,
                     onError = { imageFailed = true },
                     modifier = Modifier
@@ -1029,7 +1140,7 @@ private fun MagazineHero(
                         .align(Alignment.BottomStart)
                         .padding(start = 30.dp, bottom = 38.dp, end = 30.dp),
                 )
-                output.heroCaption?.takeIf { it.isNotBlank() }?.let { caption ->
+                imageCaption?.let { caption ->
                     Text(
                         caption,
                         modifier = Modifier
@@ -1692,7 +1803,12 @@ private fun DeepReadLoading(
 }
 
 @Composable
-private fun DeepReadError(error: String, modifier: Modifier, onRetry: () -> Unit) {
+private fun DeepReadError(
+    error: String,
+    modifier: Modifier,
+    onRetry: () -> Unit,
+    retryLabel: String = "重试",
+) {
     val ui = remember(error) { formatDeepReadError(error) }
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -1738,7 +1854,7 @@ private fun DeepReadError(error: String, modifier: Modifier, onRetry: () -> Unit
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Button(onClick = onRetry) { Text("重试") }
+            Button(onClick = onRetry) { Text(retryLabel) }
         }
     }
 }

@@ -34,6 +34,8 @@ data class DeepReadOutput(
     val references: List<ReadingLink> = emptyList(),
     @SerialName("section_states")
     val sectionStates: Map<DeepReadGenerationStage, DeepReadSectionState> = emptyMap(),
+    @SerialName("verification_state")
+    val verificationState: DeepReadSectionState = DeepReadSectionState(),
 )
 
 @Serializable
@@ -60,11 +62,14 @@ fun DeepReadOutput.withSectionStatus(
     val nextStates = sectionStates.toMutableMap()
     nextStates[stage] = DeepReadSectionState(status, errorMessage)
     val merged = copy(sectionStates = nextStates)
-    return merged.copy(generationComplete = generationComplete && merged.sectionsReady())
+    return merged.copy(generationComplete = generationComplete && merged.isVerifiedComplete())
 }
 
 fun DeepReadOutput.isComplete(): Boolean =
-    generationComplete && sectionsReady()
+    generationComplete && isVerifiedComplete()
+
+fun DeepReadOutput.isVerifiedComplete(): Boolean =
+    sectionsReady() && verificationState.status == DeepReadSectionStatus.READY
 
 fun DeepReadOutput.sectionsReady(): Boolean =
     DeepReadGenerationStage.entries.all { sectionStates[it]?.status == DeepReadSectionStatus.READY }
@@ -97,7 +102,7 @@ fun DeepReadOutput.withInferredSectionStates(): DeepReadOutput {
         inferred[DeepReadGenerationStage.EXTENDED_READING] = DeepReadSectionState(DeepReadSectionStatus.READY)
     }
     val merged = copy(sectionStates = inferred)
-    return merged.copy(generationComplete = legacyComplete && merged.sectionsReady())
+    return merged.copy(generationComplete = legacyComplete && merged.isVerifiedComplete())
 }
 
 @Serializable
@@ -297,6 +302,20 @@ fun DeepReadOutput.verifiedImageUrls(): Set<String> =
         .map { it.url }
         .filter { it.startsWith("http://") || it.startsWith("https://") }
         .toSet()
+
+fun DeepReadOutput.displayHeroImageUrl(): String? {
+    val safeImages = verifiedImageUrls()
+    return heroImageUrl?.takeIf { it in safeImages && heroImageConfidence == IMAGE_CONFIDENCE_HERO }
+        ?: imageAssets.firstOrNull { asset ->
+            asset.url in safeImages && asset.confidence != IMAGE_CONFIDENCE_REJECT
+        }?.url
+}
+
+fun DeepReadOutput.displayHeroCaption(imageUrl: String? = displayHeroImageUrl()): String? {
+    if (imageUrl == null) return null
+    return heroCaption?.takeIf { heroImageUrl == imageUrl && it.isNotBlank() }
+        ?: imageAssets.firstOrNull { it.url == imageUrl }?.caption?.takeIf { it.isNotBlank() }
+}
 
 const val IMAGE_CONFIDENCE_HERO = "hero"
 const val IMAGE_CONFIDENCE_INLINE = "inline"

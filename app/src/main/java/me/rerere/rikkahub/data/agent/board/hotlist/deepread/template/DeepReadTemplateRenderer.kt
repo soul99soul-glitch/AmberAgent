@@ -9,7 +9,8 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagram
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroCaption
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroImageUrl
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.errorOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
@@ -62,7 +63,7 @@ object DeepReadTemplateRenderer {
             "topic_type" to output.topicType.uppercase().escapeHtml(),
             "source_label" to output.sourceLabel().escapeHtml(),
             "hero_image_url" to hero.escapeHtml(),
-            "hero_caption" to (output.heroCaption ?: output.imageAssets.firstOrNull { it.url == hero }?.caption).orEmpty().escapeHtml(),
+            "hero_caption" to output.displayHeroCaption(hero).orEmpty().escapeHtml(),
             "narrative_html" to output.narrativeHtml(safeImages),
             "timeline_html" to output.timelineHtml(safeImages),
             "core_points_html" to output.corePointsHtml(safeImages),
@@ -96,7 +97,7 @@ object DeepReadTemplateRenderer {
             appendLine("</style></head><body>")
             appendLine("<article>")
             if (hero != null) {
-                appendLine("<figure class=\"hero\"><img src=\"${hero.escapeHtml()}\"/><div class=\"hero-cut\"><div><span class=\"hero-type\">${output.topicType.uppercase().escapeHtml()}</span><span class=\"hero-source\">${output.sourceLabel().escapeHtml()}</span></div><figcaption>${(output.heroCaption ?: output.imageAssets.firstOrNull { it.url == hero }?.caption).orEmpty().escapeHtml()}</figcaption></div></figure>")
+                appendLine("<figure class=\"hero\"><img src=\"${hero.escapeHtml()}\"/><div class=\"hero-cut\"><div><span class=\"hero-type\">${output.topicType.uppercase().escapeHtml()}</span><span class=\"hero-source\">${output.sourceLabel().escapeHtml()}</span></div><figcaption>${output.displayHeroCaption(hero).orEmpty().escapeHtml()}</figcaption></div></figure>")
             }
             appendLine("<section class=\"headline\">${if (hero == null) "<p class=\"kicker\">${output.topicType.uppercase().escapeHtml()} · DEEP READ</p>" else ""}<h1>${title.escapeHtml()}</h1>${output.summaryHtml()}</section>")
             output.timelineHtml(safeImages).takeIf { it.isNotBlank() }?.let {
@@ -128,7 +129,7 @@ object DeepReadTemplateRenderer {
     private fun DeepReadOutput.safeImageUrls(): Set<String> = verifiedImageUrls()
 
     private fun DeepReadOutput.safeHeroUrl(safeImages: Set<String>): String? =
-        heroImageUrl?.takeIf { it in safeImages && heroImageConfidence == IMAGE_CONFIDENCE_HERO }
+        displayHeroImageUrl()?.takeIf { it in safeImages }
 
     private fun DeepReadOutput.safeLinkUrls(): Set<String> =
         (extendedReading + references)

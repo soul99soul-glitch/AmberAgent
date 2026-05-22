@@ -16,7 +16,7 @@ object DeepReadPrompt {
         when (stage) {
             DeepReadGenerationStage.OVERVIEW -> {
                 appendLine("- 只完成 topic_type、summary、key_entities。")
-                appendLine("- summary 要像杂志导语，120-250 字，说明为什么值得读；不要超过 250 字。")
+                appendLine("- summary 要像杂志导语，约 120-250 字，说明为什么值得读；完整句子优先，略超可以接受。")
                 appendLine("- 本阶段不要输出图片、引用、扩展阅读、时间轴或分析字段；这些由后续阶段补齐。")
                 appendLine("- 不要编造来源之外的事实。")
             }
@@ -119,7 +119,7 @@ object DeepReadPrompt {
             """
             {
               "topic_type": "event|opinion|product|person",
-              "summary": "250字以内摘要",
+              "summary": "约120-250字摘要，完整句子优先",
               "key_entities": ["实体"],
               "timeline": [{"date":"日期或时间","event":"事件","is_highlight":true,"image_url":"可为空","image_caption":"可为空"}],
               "core_points": [{"point":"核心论点/亮点","supporting":"支撑材料","image_url":"可为空","image_caption":"可为空"}],
@@ -148,7 +148,7 @@ object DeepReadPrompt {
                 DeepReadGenerationStage.OVERVIEW -> """
                     {
                       "topic_type": "event|opinion|product|person",
-                      "summary": "120-250字中文杂志导语，不超过250字",
+                      "summary": "约120-250字中文杂志导语，完整句子优先",
                       "key_entities": ["关键实体"]
                     }
                 """.trimIndent()
@@ -266,4 +266,5 @@ data class DeepReadSource(
     val publishedAt: String?,
     val images: List<String>,
     val imageCandidates: List<DeepReadImageCandidate> = emptyList(),
+    val evidenceText: String = "",
 )

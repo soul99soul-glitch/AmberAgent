@@ -382,6 +382,7 @@ internal fun ExperimentNote(
 @Composable
 internal fun ExperimentalSettingsScaffold(
     title: String,
+    navigationIcon: @Composable () -> Unit = { BackButton() },
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -390,7 +391,7 @@ internal fun ExperimentalSettingsScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title) },
-                navigationIcon = { BackButton() },
+                navigationIcon = navigationIcon,
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = workspace.paper,

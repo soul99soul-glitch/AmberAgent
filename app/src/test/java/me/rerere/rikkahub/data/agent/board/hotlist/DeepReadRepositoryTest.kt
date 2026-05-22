@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.board.hotlist
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -15,6 +16,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionWriterTools
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSource
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_INLINE
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.isComplete
@@ -63,6 +65,31 @@ class DeepReadRepositoryTest {
         val repo = HotListRepository(dao, json)
 
         assertNull(repo.getFreshDeepRead("bad", now = 1_500L))
+    }
+
+    @Test
+    fun historyIncludesExpiredRowsWithStatus() = runTest {
+        val dao = FakeHotListDao()
+        val repo = HotListRepository(dao, json)
+        val now = System.currentTimeMillis()
+        repo.saveDeepRead("fresh", "Fresh", DeepReadOutput(summary = "fresh summary"), now = now)
+        dao.upsertDeepRead(
+            DeepReadCacheEntity(
+                topicId = "expired",
+                title = "Expired",
+                outputJson = json.encodeToString(DeepReadOutput.serializer(), DeepReadOutput(summary = "expired summary")),
+                createdAt = 100L,
+                expiresAt = 200L,
+                updatedAt = now - 100L,
+            )
+        )
+
+        val history = repo.observeDeepReadHistory().first()
+
+        assertEquals(listOf("fresh", "expired"), history.map { it.topicId })
+        assertEquals(false, history.first { it.topicId == "fresh" }.expired)
+        assertEquals(true, history.first { it.topicId == "expired" }.expired)
+        assertEquals("expired summary", history.first { it.topicId == "expired" }.output?.summary)
     }
 
     @Test
@@ -176,9 +203,51 @@ class DeepReadRepositoryTest {
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.NARRATIVE))
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.ANALYSIS))
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.EXTENDED_READING))
+        assertEquals(DeepReadSectionStatus.READY, output?.verificationState?.status)
         assertTrue(output?.isComplete() == true)
         assertEquals("这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。", output?.summary)
         assertEquals("https://example.com/a", output?.extendedReading?.single()?.url)
+    }
+
+    @Test
+    fun sectionWriterScopedToolsExposeOnlyTargetSectionWriter() {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+
+        val toolNames = writer.tools(stages = setOf(DeepReadGenerationStage.ANALYSIS)).map { it.name }.toSet()
+
+        assertTrue("deep_read_write_analysis" in toolNames)
+        assertTrue("deep_read_verify_claims" in toolNames)
+        assertTrue("deep_read_finish" in toolNames)
+        assertTrue("deep_read_write_overview" !in toolNames)
+        assertTrue("deep_read_write_narrative" !in toolNames)
+        assertTrue("deep_read_write_extended_reading" !in toolNames)
+    }
+
+    @Test
+    fun fallbackSectionWriteTurnsMissingToolOutputIntoReadySection() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val sources = listOf(
+            DeepReadSource(
+                title = "来源标题",
+                url = "https://example.com/source",
+                source = "Example",
+                content = "第一段来源正文说明事件背景。第二段来源正文补充影响。",
+                publishedAt = "2026-05-22",
+                images = emptyList(),
+            )
+        )
+
+        val output = writer.writeFallbackSection(
+            stage = DeepReadGenerationStage.NARRATIVE,
+            assistantText = "事件先从产品发布开始，随后价格、配置和市场定位成为讨论焦点。",
+            sources = sources,
+        )
+
+        assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.NARRATIVE))
+        assertTrue(output.timeline.orEmpty().isNotEmpty())
+        assertEquals("https://example.com/source", output.references.single().url)
     }
 
     @Test
@@ -207,6 +276,8 @@ class DeepReadRepositoryTest {
         })
 
         assertEquals(0, writer.verificationCount)
+        assertEquals(1, writer.verificationAttemptCount)
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("refuted"))
         assertTrue(!writer.hasFreshVerification)
     }
 
@@ -237,6 +308,98 @@ class DeepReadRepositoryTest {
 
         assertEquals(0, writer.verificationCount)
         assertTrue(!writer.hasFreshVerification)
+    }
+
+    @Test
+    fun sectionWriterRequiresVisibleExcerptInsteadOfClaimFallback() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+        })
+        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
+            put("overall", "passed")
+            put("corrections_applied", false)
+            put("checked_claims", buildJsonArray {
+                add(buildJsonObject {
+                    put("claim", "这是经过来源核查后的概览正文")
+                    put("status", "verified")
+                    put("note", "来源支撑")
+                    put("evidence_excerpt", "来源支撑并可交叉核查")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+                add(buildJsonObject {
+                    put("claim", "为什么值得继续阅读")
+                    put("visible_excerpt", "为什么值得继续阅读")
+                    put("status", "verified")
+                    put("note", "来源支撑")
+                    put("evidence_excerpt", "来源支撑并可交叉核查")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+            })
+        })
+
+        assertEquals(0, writer.verificationCount)
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("visible_excerpt"))
+    }
+
+    @Test
+    fun finalVerificationFailureDoesNotClobberExtendedReadingSection() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_extended_reading").execute(buildJsonObject {
+            put("links", buildJsonArray {
+                add(buildJsonObject {
+                    put("title", "来源一")
+                    put("url", "https://example.com/a")
+                    put("source", "example.com")
+                })
+            })
+        })
+        writer.markVerificationFailed("最终验真未通过：证据摘录不匹配")
+
+        val output = repo.getFreshDeepRead("topic", title = "话题")
+        assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.EXTENDED_READING))
+        assertEquals(DeepReadSectionStatus.FAILED, output?.verificationState?.status)
+        assertTrue(output?.verificationState?.errorMessage.orEmpty().contains("证据摘录"))
+    }
+
+    @Test
+    fun sectionWriterRejectsMalformedClaimInsteadOfDroppingIt() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+        })
+        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
+            put("overall", "passed")
+            put("corrections_applied", false)
+            put("checked_claims", buildJsonArray {
+                add(buildJsonObject {
+                    put("claim", "这个格式不完整的声明不能被静默丢弃")
+                    put("status", "verified")
+                })
+                repeat(2) { index ->
+                    add(buildJsonObject {
+                        put("claim", "一个有来源支撑的核心声明$index")
+                        put("visible_excerpt", "这是经过来源核查后的概览正文")
+                        put("status", "verified")
+                        put("note", "来源支撑")
+                        put("evidence_excerpt", "来源支撑并可交叉核查")
+                        put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                    })
+                }
+            })
+        })
+
+        assertEquals(0, writer.verificationCount)
+        assertTrue(writer.lastVerificationFailureReason.orEmpty().contains("checked_claims[0]"))
     }
 
     @Test
@@ -400,7 +563,7 @@ class DeepReadRepositoryTest {
     }
 
     @Test
-    fun overviewToolCapsSummaryAt250Characters() = runTest {
+    fun overviewToolPreservesCompleteSummaryBeyondSoftGuideline() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
         val tools = writer.tools().associateBy { it.name }
@@ -411,7 +574,8 @@ class DeepReadRepositoryTest {
         })
 
         val output = repo.getFreshDeepRead("topic", title = "话题")
-        assertTrue(output?.summary.orEmpty().length <= 250)
+        assertEquals(longSummary, output?.summary)
+        assertTrue(output?.summary.orEmpty().length > 250)
         assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.OVERVIEW))
     }
 
@@ -615,6 +779,7 @@ private class FakeHotListDao : HotListDAO {
     private val sources = MutableStateFlow<List<HotListSourceEntity>>(emptyList())
     private val deepReads = mutableMapOf<String, DeepReadCacheEntity>()
     private val deepReadFlows = mutableMapOf<String, MutableStateFlow<DeepReadCacheEntity?>>()
+    private val deepReadFlowsSnapshot = MutableStateFlow(0)
 
     override fun observeProviderCaches(): Flow<List<HotListCacheEntity>> = providerCaches
 
@@ -649,18 +814,27 @@ private class FakeHotListDao : HotListDAO {
     override fun observeDeepRead(topicId: String): Flow<DeepReadCacheEntity?> =
         deepReadFlows.getOrPut(topicId) { MutableStateFlow(deepReads[topicId]) }
 
+    override fun observeDeepReadHistory(limit: Int): Flow<List<DeepReadCacheEntity>> =
+        deepReadFlowsSnapshot.map {
+            deepReads.values
+                .sortedByDescending { it.updatedAt }
+                .take(limit)
+        }
+
     override suspend fun upsertDeepRead(entity: DeepReadCacheEntity) {
         deepReads[entity.topicId] = entity
         deepReadFlows.getOrPut(entity.topicId) { MutableStateFlow(null) }.value = entity
+        deepReadFlowsSnapshot.value++
     }
 
     override suspend fun deleteDeepRead(topicId: String) {
         deepReads.remove(topicId)
         deepReadFlows.getOrPut(topicId) { MutableStateFlow(null) }.value = null
+        deepReadFlowsSnapshot.value++
     }
 
-    override suspend fun pruneExpiredDeepReads(now: Long): Int {
-        val expired = deepReads.values.filter { it.expiresAt < now }
+    override suspend fun pruneExpiredDeepReads(historyCutoff: Long): Int {
+        val expired = deepReads.values.filter { it.expiresAt < historyCutoff }
         expired.forEach { deleteDeepRead(it.topicId) }
         return expired.size
     }

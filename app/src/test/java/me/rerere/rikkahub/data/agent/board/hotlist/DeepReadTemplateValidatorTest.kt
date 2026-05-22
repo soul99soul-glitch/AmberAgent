@@ -95,7 +95,7 @@ class DeepReadTemplateValidatorTest {
     }
 
     @Test
-    fun rendererAllowsOnlyVerifiedImageAssets() {
+    fun rendererUsesOnlyVerifiedImageAssets() {
         val verified = "https://news.example.com/source.jpg"
         val invented = "https://tracker.example.com/invented.jpg"
         val invalid = "data:image/png;base64,abc"
@@ -123,7 +123,7 @@ class DeepReadTemplateValidatorTest {
         assertEquals(setOf(verified), rendered.allowedImageUrls)
         assertFalse(rendered.html.contains(invented))
         assertFalse(rendered.html.contains(invalid))
-        assertFalse(rendered.html.contains(verified))
+        assertTrue(rendered.html.contains(verified))
     }
 
     @Test

@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,7 +82,10 @@ import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 @Composable
-fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
+fun SettingTodayBoardPage(
+    paneRoute: String? = null,
+    vm: SettingVM = koinViewModel(),
+) {
     val boardRepository: BoardRepository = koinInject()
     val hotListRepository: HotListRepository = koinInject()
     val hotListScheduler: HotListScheduler = koinInject()
@@ -100,7 +104,7 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
     val board = settings.agentRuntime.todayBoard
     var sourceWeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var weightReloadKey by remember { mutableIntStateOf(0) }
-    var showAdvanced by rememberSaveable { mutableStateOf(false) }
+    val pane = TodayBoardSettingsPane.fromRoute(paneRoute)
     val templateFontCss = rememberDeepReadTemplateFontCss(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
@@ -221,156 +225,303 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
         }
     }
 
-    ExperimentalSettingsScaffold(title = "今日看板设置") { innerPadding ->
+    ExperimentalSettingsScaffold(
+        title = pane.title,
+    ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item {
-                ExperimentSectionCard(title = "热榜") {
-                    IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
-                        update { it.copy(hotListRefreshIntervalMinutes = value) }
+            when (pane) {
+                TodayBoardSettingsPane.ROOT -> {
+                    item {
+                        ExperimentSectionCard(title = "通用") {
+                            SourceSwitch("启用今日看板", "开启后定时分析信号、刷新热榜并生成回顾", board.enabled) {
+                                update { it.copy(enabled = !it.enabled) }
+                            }
+                            ExperimentDivider()
+                            DetailNavigationRow(
+                                title = "模型与后台",
+                                description = "${board.modelSummary(settings)} · ${board.backgroundStrategy.label()}",
+                                onClick = {
+                                    navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.GENERAL.route))
+                                },
+                            )
+                        }
                     }
-                    ExperimentDivider()
-                    SourceSwitch("仅 WiFi", "刷新热榜时只使用未计费网络", board.hotListWifiOnly) {
-                        update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
+
+                    item {
+                        ExperimentSectionCard(title = "热榜") {
+                            IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
+                                update { it.copy(hotListRefreshIntervalMinutes = value) }
+                            }
+                            ExperimentDivider()
+                            SourceSwitch("仅 WiFi", "刷新热榜时只使用未计费网络", board.hotListWifiOnly) {
+                                update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
+                            }
+                            ExperimentDivider()
+                            DetailNavigationRow(
+                                title = "来源、关注词与深度阅读",
+                                description = hotListSummary(board, customHotListSources, settings),
+                                onClick = {
+                                    navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.HOT_LIST.route))
+                                },
+                            )
+                        }
                     }
-                    ExperimentDivider()
-                    HotListSourceSettings(
-                        enabledBuiltIns = board.hotListEnabledSources,
-                        customSources = customHotListSources,
-                        onToggleBuiltIn = { source ->
-                            update {
-                                it.copy(
-                                    hotListEnabledSources = if (source in it.hotListEnabledSources) {
-                                        it.hotListEnabledSources - source
-                                    } else {
-                                        it.hotListEnabledSources + source
+
+                    item {
+                        ExperimentSectionCard(title = "今日回顾") {
+                            DetailNavigationRow(
+                                title = "信号来源与关注点",
+                                description = reviewSummary(board, focusRules),
+                                onClick = {
+                                    navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.REVIEW.route))
+                                },
+                            )
+                        }
+                    }
+                }
+
+                TodayBoardSettingsPane.GENERAL -> {
+                    item {
+                        ExperimentSectionCard(title = "通用") {
+                            BoardModelRow(board = board, settings = settings, update = ::update)
+                            ExperimentDivider()
+                            BackgroundStrategyRow(board.backgroundStrategy) { value ->
+                                update { it.copy(backgroundStrategy = value) }
+                            }
+                        }
+                    }
+                }
+
+                TodayBoardSettingsPane.HOT_LIST -> {
+                    item {
+                        ExperimentSectionCard(title = "热榜源") {
+                            HotListSourceSettings(
+                                enabledBuiltIns = board.hotListEnabledSources,
+                                customSources = customHotListSources,
+                                onToggleBuiltIn = { source ->
+                                    update {
+                                        it.copy(
+                                            hotListEnabledSources = if (source in it.hotListEnabledSources) {
+                                                it.hotListEnabledSources - source
+                                            } else {
+                                                it.hotListEnabledSources + source
+                                            }
+                                        )
                                     }
-                                )
-                            }
-                            hotListScheduler.runOnce()
-                        },
-                        onToggleCustom = ::toggleCustomHotListSource,
-                        onDeleteCustom = ::deleteCustomHotListSource,
-                        onAddNewsNowPresets = ::addNewsNowPresets,
-                        onSaveCustom = ::saveCustomHotListSource,
-                    )
-                    ExperimentDivider()
-                    HotListFocusKeywordEditor(
-                        keywords = board.hotListFocusKeywords,
-                        mode = board.hotListFilterMode,
-                        onKeywordsChange = { keywords -> update { it.copy(hotListFocusKeywords = keywords) } },
-                        onModeChange = { mode -> update { it.copy(hotListFilterMode = mode) } },
-                    )
-                    ExperimentDivider()
-                    SearchServiceSummary(
-                        enabledCount = settings.searchEnabledServiceIds.size,
-                        totalCount = settings.searchServices.size,
-                    )
-                }
-            }
-
-            item {
-                ExperimentSectionCard(title = "待办") {
-                    val notifPermissionOk = remember {
-                        runCatching {
-                            android.provider.Settings.Secure.getString(
-                                context.contentResolver,
-                                "enabled_notification_listeners"
-                            )?.contains(context.packageName) == true
-                        }.getOrDefault(false)
+                                    hotListScheduler.runOnce()
+                                },
+                                onToggleCustom = ::toggleCustomHotListSource,
+                                onDeleteCustom = ::deleteCustomHotListSource,
+                                onAddNewsNowPresets = ::addNewsNowPresets,
+                                onSaveCustom = ::saveCustomHotListSource,
+                            )
+                            ExperimentDivider()
+                            SearchServiceSummary(
+                                enabledCount = settings.searchEnabledServiceIds.size,
+                                totalCount = settings.searchServices.size,
+                            )
+                        }
                     }
-                    val calendarPermissionOk = remember {
-                        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
-                            PackageManager.PERMISSION_GRANTED
+                    item {
+                        ExperimentSectionCard(title = "关注筛选") {
+                            HotListFocusKeywordEditor(
+                                keywords = board.hotListFocusKeywords,
+                                mode = board.hotListFilterMode,
+                                onKeywordsChange = { keywords -> update { it.copy(hotListFocusKeywords = keywords) } },
+                                onModeChange = { mode -> update { it.copy(hotListFilterMode = mode) } },
+                            )
+                        }
                     }
-                    SourceSwitch(
-                        "系统通知",
-                        if (notifPermissionOk) "设备通知和应用提醒" else "⚠ 需要通知访问权限",
-                        BoardSignalSourceType.NOTIFICATION in board.enabledSources,
-                    ) { toggleSignalSource(BoardSignalSourceType.NOTIFICATION, ::update) }
-                    ExperimentDivider()
-                    SourceSwitch(
-                        "日历",
-                        if (calendarPermissionOk) "今日日程和会议" else "⚠ 需要日历读取权限",
-                        BoardSignalSourceType.CALENDAR in board.enabledSources,
-                    ) { toggleSignalSource(BoardSignalSourceType.CALENDAR, ::update) }
-                    ExperimentDivider()
-                    SourceSwitch("飞书消息", "未读消息和工作沟通", BoardSignalSourceType.FEISHU_MSG in board.enabledSources) {
-                        toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
-                    }
-                    ExperimentDivider()
-                    SourceSwitch("飞书文档", "文档雷达变更信号", BoardSignalSourceType.FEISHU_DOC in board.enabledSources) {
-                        toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
-                    }
-                    ExperimentDivider()
-                    SourceSwitch("聊天记录", "最近对话中的真实待办", BoardSignalSourceType.CHAT_HISTORY in board.enabledSources) {
-                        toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
-                    }
-                    ExperimentDivider()
-                    IncrementalSlider(board.incrementalSignalThreshold) { value ->
-                        update { it.copy(incrementalSignalThreshold = value) }
-                    }
-                    ExperimentDivider()
-                    FocusRulesEditor(
-                        rules = focusRules,
-                        onAdd = ::addFocusRule,
-                        onToggle = ::updateFocusRule,
-                        onDelete = ::deleteFocusRule,
-                    )
-                    ExperimentDivider()
-                    Row(
-                        Modifier.fillMaxWidth().clickable { showAdvanced = !showAdvanced }.padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(if (showAdvanced) "▾ 高级设置" else "▸ 高级设置", style = MaterialTheme.typography.titleSmall)
-                        Text("来源权重", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
-                    }
-                    if (showAdvanced) {
-                        SourceWeightsEditor(weights = sourceWeights, onChange = ::updateSourceWeight)
+                    item {
+                        ExperimentSectionCard(title = "深度阅读") {
+                            ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
+                            ExperimentDivider()
+                            DeepReadTemplateSettingsRow(
+                                board = board,
+                                customTemplates = customDeepReadTemplates,
+                                invalidTemplateCount = invalidDeepReadTemplateCount,
+                                fontCss = templateFontCss,
+                                fontRepository = fontRepository,
+                                onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
+                                onDelete = { template ->
+                                    scope.launch {
+                                        deepReadTemplateRepository.deleteTemplate(template.id)
+                                        if (board.deepReadTemplateId == template.id) {
+                                            update {
+                                                it.copy(
+                                                    deepReadTemplateId = me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds.COMPOSE_MAGAZINE
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                onCreateTemplate = { navController.navigate(Screen.DeepReadTemplateWorkbench) },
+                            )
+                        }
                     }
                 }
-            }
 
-            item {
-                ExperimentSectionCard(title = "通用") {
-                    SourceSwitch("启用今日看板", "开启后定时分析信号、刷新热榜并生成回顾", board.enabled) {
-                        update { it.copy(enabled = !it.enabled) }
-                    }
-                    ExperimentDivider()
-                    BoardModelRow(board = board, settings = settings, update = ::update)
-                    ExperimentDivider()
-                    ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
-                    ExperimentDivider()
-                    DeepReadTemplateSettingsRow(
-                        board = board,
-                        customTemplates = customDeepReadTemplates,
-                        invalidTemplateCount = invalidDeepReadTemplateCount,
-                        fontCss = templateFontCss,
-                        fontRepository = fontRepository,
-                        onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
-                        onDelete = { template ->
-                            scope.launch {
-                                deepReadTemplateRepository.deleteTemplate(template.id)
-                                if (board.deepReadTemplateId == template.id) {
-                                    update { it.copy(deepReadTemplateId = me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds.COMPOSE_MAGAZINE) }
-                                }
+                TodayBoardSettingsPane.REVIEW -> {
+                    item {
+                        ExperimentSectionCard(title = "信号来源") {
+                            val notifPermissionOk = remember {
+                                runCatching {
+                                    android.provider.Settings.Secure.getString(
+                                        context.contentResolver,
+                                        "enabled_notification_listeners"
+                                    )?.contains(context.packageName) == true
+                                }.getOrDefault(false)
                             }
-                        },
-                        onCreateTemplate = { navController.navigate(Screen.DeepReadTemplateWorkbench) },
-                    )
-                    ExperimentDivider()
-                    BackgroundStrategyRow(board.backgroundStrategy) { value ->
-                        update { it.copy(backgroundStrategy = value) }
+                            val calendarPermissionOk = remember {
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
+                                    PackageManager.PERMISSION_GRANTED
+                            }
+                            SourceSwitch(
+                                "系统通知",
+                                if (notifPermissionOk) "设备通知和应用提醒" else "需要通知访问权限",
+                                BoardSignalSourceType.NOTIFICATION in board.enabledSources,
+                            ) { toggleSignalSource(BoardSignalSourceType.NOTIFICATION, ::update) }
+                            ExperimentDivider()
+                            SourceSwitch(
+                                "日历",
+                                if (calendarPermissionOk) "今日日程和会议" else "需要日历读取权限",
+                                BoardSignalSourceType.CALENDAR in board.enabledSources,
+                            ) { toggleSignalSource(BoardSignalSourceType.CALENDAR, ::update) }
+                            ExperimentDivider()
+                            SourceSwitch("飞书消息", "未读消息和工作沟通", BoardSignalSourceType.FEISHU_MSG in board.enabledSources) {
+                                toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
+                            }
+                            ExperimentDivider()
+                            SourceSwitch("飞书文档", "文档雷达变更信号", BoardSignalSourceType.FEISHU_DOC in board.enabledSources) {
+                                toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
+                            }
+                            ExperimentDivider()
+                            SourceSwitch("聊天记录", "最近对话中的真实待办", BoardSignalSourceType.CHAT_HISTORY in board.enabledSources) {
+                                toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
+                            }
+                        }
+                    }
+                    item {
+                        ExperimentSectionCard(title = "生成规则") {
+                            IncrementalSlider(board.incrementalSignalThreshold) { value ->
+                                update { it.copy(incrementalSignalThreshold = value) }
+                            }
+                            ExperimentDivider()
+                            FocusRulesEditor(
+                                rules = focusRules,
+                                onAdd = ::addFocusRule,
+                                onToggle = ::updateFocusRule,
+                                onDelete = ::deleteFocusRule,
+                            )
+                        }
+                    }
+                    item {
+                        ExperimentSectionCard(title = "来源权重") {
+                            SourceWeightsEditor(weights = sourceWeights, onChange = ::updateSourceWeight)
+                        }
                     }
                 }
             }
         }
     }
 }
+
+private enum class TodayBoardSettingsPane(val route: String, val title: String) {
+    ROOT("root", "今日看板设置"),
+    GENERAL("general", "通用设置"),
+    HOT_LIST("hot_list", "热榜设置"),
+    REVIEW("review", "今日回顾设置"),
+    ;
+
+    companion object {
+        fun fromRoute(route: String?): TodayBoardSettingsPane =
+            entries.firstOrNull { it.route == route } ?: ROOT
+    }
+}
+
+@Composable
+private fun DetailNavigationRow(
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = workspaceColors().ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = workspaceColors().muted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text("›", style = MaterialTheme.typography.titleMedium, color = workspaceColors().muted)
+    }
+}
+
+private fun TodayBoardSetting.modelSummary(settings: me.rerere.rikkahub.data.datastore.Settings): String {
+    val boardModelUuid = boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+    val boardModel = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
+    return boardModel?.displayName ?: "跟随主聊天模型"
+}
+
+private fun hotListSummary(
+    board: TodayBoardSetting,
+    customSources: List<HotListSourceEntity>,
+    settings: me.rerere.rikkahub.data.datastore.Settings,
+): String {
+    val enabledSources = board.hotListEnabledSources.size + customSources.count { it.enabled }
+    val searchSummary = if (settings.searchEnabledServiceIds.isNotEmpty()) {
+        "搜索 ${settings.searchEnabledServiceIds.size}/${settings.searchServices.size}"
+    } else {
+        "未启用搜索"
+    }
+    return "${enabledSources} 个热榜源 · ${board.hotListFilterMode.label()} · $searchSummary"
+}
+
+private fun reviewSummary(
+    board: TodayBoardSetting,
+    focusRules: List<BoardFocusRuleEntity>,
+): String {
+    val enabledSourceCount = board.enabledSources.count { it in REVIEW_SIGNAL_SOURCES }
+    val activeRuleCount = focusRules.count { it.active }
+    return "$enabledSourceCount 个信号来源 · $activeRuleCount 个关注点 · 阈值 ${board.incrementalSignalThreshold} 条"
+}
+
+private fun TodayBoardHotListFilterMode.label(): String =
+    when (this) {
+        TodayBoardHotListFilterMode.ALL -> "全部"
+        TodayBoardHotListFilterMode.FOCUS_FIRST -> "关注优先"
+        TodayBoardHotListFilterMode.FOCUS_ONLY -> "只看关注"
+    }
+
+private fun TodayBoardBackgroundStrategy.label(): String =
+    when (this) {
+        TodayBoardBackgroundStrategy.SMART -> "智能后台"
+        TodayBoardBackgroundStrategy.WIFI_ONLY -> "仅 WiFi 后台"
+        TodayBoardBackgroundStrategy.FOREGROUND_ONLY -> "仅前台"
+    }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -734,4 +885,12 @@ private val BOARD_WEIGHT_SOURCES = listOf(
     BoardWeightSource(BoardSignalSourceType.FEISHU_MSG, "飞书消息", "未读消息、群聊和工作沟通"),
     BoardWeightSource(BoardSignalSourceType.FEISHU_DOC, "飞书文档", "文档更新、索引和变更信号"),
     BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "聊天记录", "最近对话中的真实待办和项目上下文"),
+)
+
+private val REVIEW_SIGNAL_SOURCES = setOf(
+    BoardSignalSourceType.NOTIFICATION,
+    BoardSignalSourceType.CALENDAR,
+    BoardSignalSourceType.FEISHU_MSG,
+    BoardSignalSourceType.FEISHU_DOC,
+    BoardSignalSourceType.CHAT_HISTORY,
 )

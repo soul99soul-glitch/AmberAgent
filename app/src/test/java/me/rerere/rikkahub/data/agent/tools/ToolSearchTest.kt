@@ -139,6 +139,29 @@ class ToolSearchTest {
     }
 
     @Test
+    fun modelCouncilCoreToolsStayResidentInLazyMode() {
+        val hiddenTools = (0 until 45).map { tool("hidden_tool_$it", "Hidden capability $it") }
+        val councilTools = listOf(
+            tool("model_council_status", "Show Model Council status."),
+            tool("model_council_start", "Start a Model Council run."),
+            tool("model_council_read", "Read a Model Council run."),
+            tool("model_council_wait", "Wait for a Model Council run."),
+            tool("model_council_cancel", "Cancel a Model Council run."),
+            tool("model_council_make_report", "Write a Model Council report."),
+        )
+        val exposure = ToolExposureState.from(hiddenTools + councilTools + tool(TOOL_SEARCH_TOOL_NAME))
+        val visible = exposure.toolsForStep().map { it.name }.toSet()
+
+        assertTrue(exposure.enabled)
+        assertTrue("model_council_status" in visible)
+        assertTrue("model_council_start" in visible)
+        assertTrue("model_council_read" in visible)
+        assertTrue("model_council_wait" in visible)
+        assertTrue("model_council_cancel" in visible)
+        assertFalse("model_council_make_report" in visible)
+    }
+
+    @Test
     fun toolsListOutputDoesNotExposeHiddenTools() {
         val hiddenTools = (0 until 45).map { tool("hidden_tool_$it", "Hidden capability $it") }
         val exposure = ToolExposureState.from(

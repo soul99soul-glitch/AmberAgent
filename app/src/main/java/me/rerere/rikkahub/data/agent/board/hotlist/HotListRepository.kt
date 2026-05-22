@@ -13,11 +13,14 @@ import me.rerere.rikkahub.data.db.entity.HotListCacheEntity
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
 import me.rerere.rikkahub.data.db.entity.HotTopicCacheEntity
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 class HotListRepository(
     private val dao: HotListDAO,
     private val json: Json,
 ) {
+    private val deepReadHistoryPreviews = ConcurrentHashMap<String, DeepReadHistoryItem>()
+
     fun observeDashboard(): Flow<HotListDashboard> = combine(
         dao.observeHotTopics(HOT_LIST_TOPIC_CACHE_LIMIT),
         dao.observeProviderCaches(),
@@ -35,9 +38,30 @@ class HotListRepository(
     fun observeSources(): Flow<List<HotListSourceEntity>> = dao.observeSources()
 
     fun observeDeepRead(topicId: String): Flow<DeepReadOutput?> =
+        observeDeepReadEntry(topicId).map { it?.output }
+
+    fun observeDeepReadEntry(
+        topicId: String,
+        includeExpired: Boolean = false,
+    ): Flow<DeepReadHistoryItem?> =
         dao.observeDeepRead(topicId).map { entity ->
-            entity?.toFreshDeepRead(json)
+            entity
+                ?.toHistoryItem(json)
+                ?.takeIf { includeExpired || !it.expired }
         }
+
+    fun observeDeepReadHistory(limit: Int = 100): Flow<List<DeepReadHistoryItem>> =
+        dao.observeDeepReadHistory(limit).map { entities ->
+            val now = System.currentTimeMillis()
+            entities.map { it.toHistoryItem(json, now) }
+        }
+
+    fun rememberDeepReadHistoryPreview(item: DeepReadHistoryItem) {
+        deepReadHistoryPreviews[item.topicId] = item
+    }
+
+    fun deepReadHistoryPreview(topicId: String): DeepReadHistoryItem? =
+        deepReadHistoryPreviews[topicId]
 
     suspend fun getProviderCache(providerId: String): HotListProviderSnapshot? =
         dao.getProviderCache(providerId)?.toSnapshot(json)
@@ -171,7 +195,7 @@ class HotListRepository(
     suspend fun clearDeepRead(topicId: String) = dao.deleteDeepRead(topicId)
 
     suspend fun pruneExpiredDeepReads(now: Long = System.currentTimeMillis()): Int =
-        dao.pruneExpiredDeepReads(now)
+        dao.pruneExpiredDeepReads(now - DEEP_READ_HISTORY_RETENTION_MS)
 
     suspend fun upsertSource(entity: HotListSourceEntity) = dao.upsertSource(entity)
 
@@ -179,6 +203,7 @@ class HotListRepository(
 
     companion object {
         const val DEEP_READ_TTL_MS = 24L * 60L * 60L * 1000L
+        const val DEEP_READ_HISTORY_RETENTION_MS = 7L * 24L * 60L * 60L * 1000L
 
         fun topicId(title: String): String = sha256(
             title.lowercase()
@@ -192,6 +217,16 @@ class HotListRepository(
                 .joinToString("") { "%02x".format(it) }
     }
 }
+
+data class DeepReadHistoryItem(
+    val topicId: String,
+    val title: String,
+    val output: DeepReadOutput?,
+    val createdAt: Long,
+    val expiresAt: Long,
+    val updatedAt: Long,
+    val expired: Boolean,
+)
 
 private fun HotListCacheEntity.toSnapshot(json: Json): HotListProviderSnapshot =
     HotListProviderSnapshot(
@@ -219,8 +254,25 @@ private fun HotTopicCacheEntity.toTopic(json: Json): HotTopic =
 
 private fun DeepReadCacheEntity.toFreshDeepRead(json: Json, now: Long = System.currentTimeMillis()): DeepReadOutput? {
     if (!DeepReadCachePolicy.isFresh(expiresAt, now)) return null
-    return runCatching { json.decodeFromString<DeepReadOutput>(outputJson) }.getOrNull()
+    return toDeepReadOutput(json)
 }
+
+private fun DeepReadCacheEntity.toHistoryItem(
+    json: Json,
+    now: Long = System.currentTimeMillis(),
+): DeepReadHistoryItem =
+    DeepReadHistoryItem(
+        topicId = topicId,
+        title = title,
+        output = toDeepReadOutput(json),
+        createdAt = createdAt,
+        expiresAt = expiresAt,
+        updatedAt = updatedAt,
+        expired = !DeepReadCachePolicy.isFresh(expiresAt, now),
+    )
+
+private fun DeepReadCacheEntity.toDeepReadOutput(json: Json): DeepReadOutput? =
+    runCatching { json.decodeFromString<DeepReadOutput>(outputJson) }.getOrNull()
 
 private fun List<HotListProviderSnapshot>.buildDisplayTitleCache(): Map<String, String> =
     flatMap { provider ->

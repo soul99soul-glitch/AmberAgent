@@ -304,6 +304,7 @@ class ToolExposureState private constructor(
             name in DISCOVERY_UTILITY_TOOLS -> true
             name in RESIDENT_EXACT_TOOLS -> true
             name.startsWith("subagent_") -> true
+            name in RESIDENT_MODEL_COUNCIL_TOOLS -> true
             name.startsWith("agent_task_") -> name in setOf("agent_task_list", "agent_task_read")
             category == "context" -> name in RESIDENT_CONTEXT_TOOLS
             else -> false
@@ -342,6 +343,14 @@ class ToolExposureState private constructor(
             "conversation_context_status",
             "conversation_search",
             "conversation_expand",
+        )
+
+        private val RESIDENT_MODEL_COUNCIL_TOOLS = setOf(
+            "model_council_status",
+            "model_council_start",
+            "model_council_read",
+            "model_council_wait",
+            "model_council_cancel",
         )
     }
 }

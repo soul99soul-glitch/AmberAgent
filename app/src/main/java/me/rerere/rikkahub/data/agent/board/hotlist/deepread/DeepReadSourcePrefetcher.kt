@@ -100,10 +100,7 @@ class DeepReadSourcePrefetcher(
                                         ?.let { result ->
                                             SearchBucket(
                                                 query = query,
-                                                items = result.items.withSearchAnswer(
-                                                    answer = result.answer,
-                                                    serviceName = service.deepReadServiceLabel(),
-                                                ),
+                                                items = result.items,
                                             )
                                         }
                                 }
@@ -159,6 +156,8 @@ class DeepReadSourcePrefetcher(
                             emptyList()
                         }
                         val content = sourceContentForSearchResult(item, scraped, direct).take(SOURCE_EXCERPT_LIMIT)
+                        val evidenceText = sourceEvidenceTextForSearchResult(item, scraped, direct)
+                            .take(SOURCE_EXCERPT_LIMIT)
                         val imageCandidates = buildImageCandidates(
                             topicTitle = topicTitle,
                             sourceUrl = item.url,
@@ -175,6 +174,7 @@ class DeepReadSourcePrefetcher(
                             url = item.url,
                             source = domainOf(item.url),
                             content = content,
+                            evidenceText = evidenceText,
                             publishedAt = item.publishedAt,
                             images = imageCandidates
                                 .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
@@ -266,6 +266,7 @@ class DeepReadSourcePrefetcher(
             }
         }.orEmpty()
         val content = (direct ?: source.content).take(SOURCE_EXCERPT_LIMIT)
+        val evidenceText = direct.orEmpty().take(SOURCE_EXCERPT_LIMIT)
         val imageCandidates = buildImageCandidates(
             topicTitle = topicTitle,
             sourceUrl = source.url,
@@ -280,6 +281,7 @@ class DeepReadSourcePrefetcher(
         )
         return source.copy(
             content = content,
+            evidenceText = evidenceText,
             images = imageCandidates
                 .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
                 .sortedByDescending { it.score }
@@ -379,6 +381,12 @@ class DeepReadSourcePrefetcher(
             }
         }
     }
+
+    private fun sourceEvidenceTextForSearchResult(
+        item: SearchResult.SearchResultItem,
+        scraped: String?,
+        direct: String?,
+    ): String = scraped ?: direct ?: item.text.trim()
 
     private suspend fun buildImageCandidates(
         topicTitle: String,
@@ -496,26 +504,6 @@ class DeepReadSourcePrefetcher(
         if (title.isBlank()) return false
         val trimmed = content.trim()
         return trimmed.length >= MIN_SEED_SOURCE_CHARS
-    }
-
-    private fun List<SearchResult.SearchResultItem>.withSearchAnswer(
-        answer: String?,
-        serviceName: String,
-    ): List<SearchResult.SearchResultItem> {
-        val summary = answer?.trim()?.takeIf { it.length >= MIN_SEARCH_ANSWER_CHARS } ?: return this
-        if (isEmpty()) return this
-        val first = first()
-        val content = buildString {
-            if (first.text.isNotBlank()) {
-                append(first.text.trim())
-                append("\n")
-            }
-            append("搜索服务综合摘要（")
-            append(serviceName)
-            append("）：")
-            append(summary)
-        }
-        return listOf(first.copy(text = content)) + drop(1)
     }
 
     private fun interleaveSearchResults(buckets: List<SearchBucket>): List<SearchHit> {
@@ -692,7 +680,6 @@ class DeepReadSourcePrefetcher(
         private const val SOURCE_EXCERPT_LIMIT = 2_400
         private const val MIN_SOURCE_CHARS = 280
         private const val MIN_SEARCH_SNIPPET_SOURCE_CHARS = 80
-        private const val MIN_SEARCH_ANSWER_CHARS = 80
         private const val MIN_SEED_SOURCE_CHARS = 15
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"

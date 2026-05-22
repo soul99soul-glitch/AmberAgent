@@ -68,6 +68,7 @@ import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.hugeicons.stroke.TransactionHistory
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.Screen.DeepRead
 import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
@@ -151,6 +152,9 @@ fun TodayBoardPage() {
                 },
                 navigationIcon = { BackButton() },
                 actions = {
+                    IconButton(onClick = { navController.navigate(Screen.DeepReadHistory) }) {
+                        Icon(HugeIcons.TransactionHistory, contentDescription = "深度阅读历史")
+                    }
                     IconButton(onClick = { navController.navigate(Screen.SettingTodayBoard) }) {
                         Icon(HugeIcons.Settings03, contentDescription = "设置")
                     }
