@@ -437,6 +437,7 @@ class WorkspaceManager(private val context: Context) {
 
     private fun copyDocumentToMirror(source: DocumentFile, targetParent: File, stats: MirrorSyncStats) {
         val targetName = safeMirrorName(source.name ?: return stats.skip())
+        if (isWorkspaceSyncExcluded(targetName)) return stats.skip()
         val target = safeMirrorChild(targetParent, targetName)
         if (source.isDirectory) {
             if (target.exists() && !target.isDirectory) target.deleteRecursively()
@@ -469,6 +470,7 @@ class WorkspaceManager(private val context: Context) {
         }
         requireInsideMirror(source)
         val targetName = safeMirrorName(source.name)
+        if (isWorkspaceSyncExcluded(targetName)) return stats.skip()
         if (source.isDirectory) {
             val targetDir = ensureDocumentDirectory(targetParent, targetName)
             stats.directories++
@@ -518,6 +520,10 @@ class WorkspaceManager(private val context: Context) {
         require(!name.contains("/") && !name.contains("\\")) { "Unsafe workspace file name: $name" }
         return name
     }
+
+    private fun isWorkspaceSyncExcluded(name: String): Boolean =
+        name == ".amberagent-external-cli-home" ||
+            name.startsWith(".amberagent-council-cli-")
 
     private fun requireInsideMirror(file: File) {
         val root = ensureMirrorRoot()

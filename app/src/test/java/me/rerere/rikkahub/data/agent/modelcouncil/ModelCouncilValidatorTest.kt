@@ -7,14 +7,17 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.uuid.Uuid
 
 class ModelCouncilValidatorTest {
+    private val externalCliHomeRoot = "/app/files/amberagent/external-cli-home"
     private val modelAId = Uuid.parse("11111111-1111-1111-1111-111111111111")
     private val modelBId = Uuid.parse("22222222-2222-2222-2222-222222222222")
     private val imageModelId = Uuid.parse("33333333-3333-3333-3333-333333333333")
@@ -243,24 +246,164 @@ class ModelCouncilValidatorTest {
             externalModel = "gemini-2.5-pro",
         )
 
-        val command = ModelCouncilExternalCliCommandBuilder.build(seat, "hello ' world", timeoutMs = 5_000L)
+        val command = ModelCouncilExternalCliCommandBuilder.build(
+            seat = seat,
+            prompt = "hello ' world",
+            timeoutMs = 5_000L,
+            externalCliHomeRoot = externalCliHomeRoot,
+        )
 
         assertTrue(command.contains("gemini --skip-trust --approval-mode plan --output-format text"))
-        assertTrue(command.contains("setsid gemini --skip-trust"))
-        assertTrue(command.contains("--model 'gemini-2.5-pro'"))
+        assertTrue(command.contains("setsid sh -lc"))
+        assertTrue(command.contains("--model gemini-2.5-pro"))
         assertTrue(command.contains("trap cleanup EXIT INT TERM"))
         assertTrue(command.contains("sleep 5"))
-        assertTrue(command.contains("pkill -TERM -P \"${'$'}cli_pid\""))
-        assertTrue(command.contains("kill -TERM \"-${'$'}cli_pid\""))
+        assertTrue(command.contains("pkill -TERM -P \"${'$'}target_pid\""))
+        assertTrue(command.contains("kill -TERM \"-${'$'}target_pid\""))
+        assertTrue(command.contains("cleanup() { stop_probe_tree; stop_cli_tree;"))
         assertTrue(command.contains("export HOME="))
+        assertTrue(command.contains("home_root='$externalCliHomeRoot/gemini_cli'"))
+        assertTrue(command.contains("export GEMINI_CLI_HOME=\"${'$'}home_root/.gemini\""))
+        assertTrue(command.contains("External CLI Gemini CLI is not ready"))
+        assertTrue(
+            command.indexOf("External CLI Gemini CLI is not ready") <
+                command.indexOf("__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__")
+        )
+        assertTrue(command.contains("export prompt_file"))
         assertTrue(command.contains("cd \"${'$'}tmp_root/work\""))
         assertTrue(command.contains("hello ' world"))
         assertTrue(command.contains("__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__"))
 
         val error = runCatching {
-            ModelCouncilExternalCliCommandBuilder.build(seat.copy(externalModel = "x; rm -rf /"), "hello", timeoutMs = 5_000L)
+            ModelCouncilExternalCliCommandBuilder.build(
+                seat = seat.copy(externalModel = "x; rm -rf /"),
+                prompt = "hello",
+                timeoutMs = 5_000L,
+                externalCliHomeRoot = externalCliHomeRoot,
+            )
         }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
+
+        val optionInjection = runCatching {
+            ModelCouncilExternalCliCommandBuilder.build(
+                seat = seat.copy(externalModel = "--help"),
+                prompt = "hello",
+                timeoutMs = 5_000L,
+                externalCliHomeRoot = externalCliHomeRoot,
+            )
+        }.exceptionOrNull()
+        assertTrue(optionInjection is IllegalArgumentException)
+    }
+
+    @Test
+    fun externalCliRegistryBuildsCommandsForSupportedTools() {
+        val expected = mapOf(
+            "gemini_cli" to "gemini --skip-trust --approval-mode plan --output-format text",
+            "antigravity_cli" to "agy --help",
+            "codex_cli" to "codex exec --sandbox read-only",
+            "claude_code" to "claude -p --output-format text",
+            "kimi_cli" to "kimi --print --final-message-only",
+        )
+
+        expected.forEach { (tool, snippet) ->
+            val seat = seat(tool, modelAId).copy(
+                runnerType = ModelCouncilSeatRunner.EXTERNAL_CLI,
+                externalTool = tool,
+                externalModel = "model-a",
+            )
+
+            val command = ModelCouncilExternalCliCommandBuilder.build(
+                seat = seat,
+                prompt = "reply ok",
+                timeoutMs = 5_000L,
+                externalCliHomeRoot = externalCliHomeRoot,
+            )
+
+            assertTrue("$tool command missing snippet", command.contains(snippet))
+            assertTrue("$tool command missing private home", command.contains("$externalCliHomeRoot/$tool"))
+            assertTrue("$tool command missing marker", command.contains("__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__"))
+            assertTrue("$tool command missing cleanup", command.contains("trap cleanup EXIT INT TERM"))
+            assertTrue("$tool command missing readiness probe", command.contains("probe_status"))
+        }
+    }
+
+    @Test
+    fun termuxExternalCliHomeStaysOutsideWorkspaceAndAppPrivateSandbox() {
+        val seat = seat("termux-codex", modelAId).copy(
+            runnerType = ModelCouncilSeatRunner.EXTERNAL_CLI,
+            externalTool = "codex_cli",
+            externalRuntime = "termux_external",
+        )
+
+        val command = ModelCouncilExternalCliCommandBuilder.build(
+            seat = seat,
+            prompt = "reply ok",
+            timeoutMs = 5_000L,
+            externalCliHomeRoot = externalCliHomeRoot,
+            runtime = TerminalRuntimeKind.TERMUX_EXTERNAL,
+        )
+
+        assertTrue(command.contains("home_root=\"${'$'}HOME/.amberagent/external-cli-home/codex_cli\""))
+        assertFalse(command.contains("home_root='$externalCliHomeRoot/codex_cli'"))
+        assertFalse(command.contains(".amberagent-external-cli-home/codex_cli"))
+    }
+
+    @Test
+    fun antigravityCliUsesAgyAndDoesNotAliasGeminiCli() {
+        val seat = seat("antigravity", modelAId).copy(
+            runnerType = ModelCouncilSeatRunner.EXTERNAL_CLI,
+            externalTool = "antigravity_cli",
+        )
+
+        val command = ModelCouncilExternalCliCommandBuilder.build(
+            seat = seat,
+            prompt = "hello",
+            timeoutMs = 5_000L,
+            externalCliHomeRoot = externalCliHomeRoot,
+        )
+
+        assertTrue(command.contains("command -v 'agy'"))
+        assertTrue(command.contains(".gemini/antigravity-cli"))
+        assertTrue(command.contains("Antigravity CLI is installed"))
+        assertFalse(command.contains("gemini --skip-trust"))
+    }
+
+    @Test
+    fun loginHintDetectsUrlsCodesAndUserActionWithoutMarkingReady() {
+        val claude = ExternalCliToolRegistry.detectLoginHint(
+            "If the browser does not open, visit https://claude.ai/oauth and paste code ABCD-1234."
+        )
+        val plain = ExternalCliToolRegistry.detectLoginHint("Everything is already authenticated.")
+
+        assertEquals("https://claude.ai/oauth", claude.url)
+        assertEquals("ABCD-1234", claude.code)
+        assertTrue(claude.needsUserAction)
+        assertEquals(null, plain.url)
+        assertFalse(plain.needsUserAction)
+    }
+
+    @Test
+    fun externalCliRunnerTypeAliasDoesNotFallBackToGemini() {
+        val council = ModelCouncilRuntimeSetting(enabled = true)
+
+        ExternalCliToolRegistry.supportedToolIds
+            .filterNot { it == EXTERNAL_CLI_DEFAULT_TOOL_ID }
+            .forEach { tool ->
+                val spec = ModelCouncilValidator.parseTask(
+                    input = taskInput(
+                        seatStrategy = "agent_planned",
+                        allowExternalCli = true,
+                        plannedSeats = buildJsonArray {
+                            add(plannedSeat(tool, "external", runnerType = tool))
+                            add(plannedSeat("Judge", "judge"))
+                        },
+                    ),
+                    settings = settings(council),
+                    councilSetting = council,
+                )
+
+                assertEquals(tool, spec.seats.first().externalTool)
+            }
     }
 
     @Test
@@ -309,6 +452,24 @@ class ModelCouncilValidatorTest {
 
         assertTrue(unsafeModel is IllegalArgumentException)
         assertTrue(unsafeModel!!.message!!.contains("Unsafe external_model"))
+
+        val unsupportedTool = runCatching {
+            ModelCouncilValidator.parseTask(
+                input = taskInput(
+                    seatStrategy = "agent_planned",
+                    allowExternalCli = true,
+                    plannedSeats = buildJsonArray {
+                        add(plannedSeat("Unknown", "external", runnerType = "external_cli", externalTool = "unknown_cli"))
+                        add(plannedSeat("Judge", "judge"))
+                    },
+                ),
+                settings = settings(council),
+                councilSetting = council,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(unsupportedTool is IllegalArgumentException)
+        assertTrue(unsupportedTool!!.message!!.contains("Unsupported external_tool"))
     }
 
     @Test

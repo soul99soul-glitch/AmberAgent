@@ -78,7 +78,7 @@ object ModelCouncilValidator {
                 }
 
                 ModelCouncilSeatRunner.EXTERNAL_CLI -> {
-                    require(seat.externalTool.ifBlank { "gemini_cli" } in SUPPORTED_EXTERNAL_TOOLS) {
+                    require(ExternalCliToolRegistry.isSupported(seat.externalTool)) {
                         "Unsupported external_tool for seat ${seat.name}: ${seat.externalTool}"
                     }
                     require(seat.externalModel.isBlank() || EXTERNAL_CLI_MODEL_ARG_REGEX.matches(seat.externalModel)) {
@@ -141,7 +141,7 @@ object ModelCouncilValidator {
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
                 reasoningLevel = seat.optionalReasoningLevel("seats[$index].reasoning_level"),
                 temperature = seat.optionalTemperature("seats[$index].temperature"),
-                externalTool = seat.stringOrBlank("external_tool"),
+                externalTool = seat.externalToolFor(runnerType),
                 externalRuntime = seat.stringOrBlank("external_runtime"),
                 externalModel = seat.stringOrBlank("external_model"),
             )
@@ -282,7 +282,7 @@ object ModelCouncilValidator {
                     ?: setting.outputBudgetChars).coerceIn(1_000, setting.outputBudgetChars.coerceAtLeast(1_000)),
                 reasoningLevel = seat.optionalReasoningLevel("planned_seats[$index].reasoning_level"),
                 temperature = seat.optionalTemperature("planned_seats[$index].temperature"),
-                externalTool = seat.stringOrBlank("external_tool"),
+                externalTool = seat.externalToolFor(runnerType),
                 externalRuntime = seat.stringOrBlank("external_runtime"),
                 externalModel = seat.stringOrBlank("external_model"),
             )
@@ -327,12 +327,20 @@ object ModelCouncilValidator {
         val runnerType = stringOrBlank("runner_type").lowercase(Locale.ROOT)
         val externalTool = stringOrBlank("external_tool")
         return when {
-            runnerType in setOf("external_cli", "cli", "gemini_cli") -> ModelCouncilSeatRunner.EXTERNAL_CLI
+            runnerType in setOf("external_cli", "cli") + ExternalCliToolRegistry.supportedToolIds ->
+                ModelCouncilSeatRunner.EXTERNAL_CLI
             runnerType in setOf("provider_model", "model", "llm", "") && externalTool.isBlank() ->
                 ModelCouncilSeatRunner.PROVIDER_MODEL
             runnerType.isBlank() && externalTool.isNotBlank() -> ModelCouncilSeatRunner.EXTERNAL_CLI
             else -> error("runner_type must be provider_model or external_cli")
         }
+    }
+
+    private fun JsonObject.externalToolFor(runnerType: ModelCouncilSeatRunner): String {
+        val explicit = stringOrBlank("external_tool")
+        if (runnerType != ModelCouncilSeatRunner.EXTERNAL_CLI || explicit.isNotBlank()) return explicit
+        val alias = stringOrBlank("runner_type").lowercase(Locale.ROOT)
+        return alias.takeIf(ExternalCliToolRegistry::isSupported).orEmpty()
     }
 
     private fun Settings.defaultCouncilModelPool(setting: ModelCouncilRuntimeSetting): List<Uuid> {
@@ -472,8 +480,7 @@ object ModelCouncilValidator {
         val model: Model,
     )
 
-    private val SUPPORTED_EXTERNAL_TOOLS = setOf("gemini_cli")
-    private val EXTERNAL_CLI_MODEL_ARG_REGEX = Regex("[A-Za-z0-9._:/+-]{1,120}")
+    private val EXTERNAL_CLI_MODEL_ARG_REGEX = Regex("[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}")
 
     private const val MAX_PLANNED_SEAT_NAME_CHARS = 40
     private const val MAX_PLANNED_SEAT_ROLE_CHARS = 80

@@ -1,10 +1,12 @@
 package me.rerere.rikkahub.data.agent.modelcouncil
 
+import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 
 /**
  * External-CLI [ModelCouncilTextRunner] alternative — runs the seat's reply by
@@ -14,7 +16,14 @@ import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
  */
 class ExternalCliModelCouncilRunner(
     private val terminalRuntime: TerminalRuntime,
+    context: Context,
+    private val settingsStore: SettingsAggregator,
 ) {
+    private val externalCliHomeRoot = context.filesDir
+        .resolve("amberagent/external-cli-home")
+        .also { it.mkdirs() }
+        .absolutePath
+
     suspend fun generate(
         seat: ModelCouncilSeat,
         systemPrompt: String,
@@ -25,10 +34,14 @@ class ExternalCliModelCouncilRunner(
     ): String {
         var terminalJobId: String? = null
         try {
+            val runtime = TerminalRuntimeKind.fromWire(seat.externalRuntime)
+                ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
             val command = ModelCouncilExternalCliCommandBuilder.build(
                 seat = seat,
                 prompt = buildExternalCliPrompt(systemPrompt, userPrompt),
                 timeoutMs = timeoutMs,
+                externalCliHomeRoot = externalCliHomeRoot,
+                runtime = runtime,
             )
             val output = StringBuilder()
             var inCliOutput = false
@@ -36,7 +49,7 @@ class ExternalCliModelCouncilRunner(
             val started = terminalRuntime.startJob(
                 command = command,
                 timeoutMillis = timeoutMs,
-                runtime = TerminalRuntimeKind.fromWire(seat.externalRuntime),
+                runtime = runtime,
                 toolName = "model_council_external_cli",
                 title = "Model Council 外部 CLI · ${seat.name}",
                 syncWorkspace = false,

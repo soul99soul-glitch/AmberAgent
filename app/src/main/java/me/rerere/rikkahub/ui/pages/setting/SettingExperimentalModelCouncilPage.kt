@@ -41,6 +41,8 @@ import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIM
 import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS
+import me.rerere.rikkahub.data.agent.modelcouncil.EXTERNAL_CLI_DEFAULT_TOOL_ID
+import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliToolRegistry
 import me.rerere.rikkahub.data.agent.modelcouncil.MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
@@ -112,7 +114,7 @@ fun SettingExperimentalModelCouncilPage(
         val seat = ModelCouncilSeat(
             seatId = Uuid.random().toString(),
             name = preset?.name ?: if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
-                "Gemini CLI 席位"
+                "外部 CLI 席位"
             } else {
                 "自定义席位 $customIndex"
             },
@@ -121,7 +123,7 @@ fun SettingExperimentalModelCouncilPage(
             runnerType = runnerType,
             systemPrompt = preset?.prompt ?: "请从这个席位的独特视角评估议题，给出清晰、可验证、不过度发散的判断。",
             outputBudgetChars = council.outputBudgetChars,
-            externalTool = if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) "gemini_cli" else "",
+            externalTool = if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) EXTERNAL_CLI_DEFAULT_TOOL_ID else "",
         )
         update { current -> current.copy(defaultSeats = current.defaultSeats + seat) }
     }
@@ -235,13 +237,13 @@ fun SettingExperimentalModelCouncilPage(
                             onClick = { addSeat(ModelCouncilSeatRunner.PROVIDER_MODEL) },
                         )
                         ExperimentActionButton(
-                            text = "添加 Gemini CLI 席位",
+                            text = "添加外部 CLI 席位",
                             enabled = chatModels.isNotEmpty() &&
                                 council.defaultSeats.size < council.maxSeats,
                             onClick = { addSeat(ModelCouncilSeatRunner.EXTERNAL_CLI) },
                         )
                     }
-                    ExperimentNote(text = "Gemini CLI 席位只会在本轮议会工具调用显式允许外部 CLI 时参与；启动本地终端进程前会要求人工确认。")
+                    ExperimentNote(text = "外部 CLI 席位只会在本轮议会工具调用显式允许外部 CLI 时参与；启动本地终端进程前会要求人工确认。")
                 }
             }
             item {
@@ -338,6 +340,10 @@ private fun ModelCouncilSeatEditor(
     val reasoningOptions = listOf<ReasoningLevel?>(null) + ReasoningLevel.entries
     val runtimeOptions = listOf("", "builtin_alpine", "android_shell", "termux_external")
     val selectedRuntime = seat.externalRuntime.takeIf { it in runtimeOptions }.orEmpty()
+    val externalToolOptions = ExternalCliToolRegistry.tools
+    val selectedExternalTool = externalToolOptions.firstOrNull {
+        it.id == ExternalCliToolRegistry.normalizeToolId(seat.externalTool)
+    } ?: externalToolOptions.first()
     val firstChatModel = remember(settingsProviders) {
         settingsProviders.flatMap { it.models }.firstOrNull { it.type == ModelType.CHAT }
     }
@@ -381,7 +387,7 @@ private fun ModelCouncilSeatEditor(
                     )
                     Text(
                         text = if (seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
-                            "外部 CLI · ${seat.externalTool.ifBlank { "gemini_cli" }}"
+                            "外部 CLI · ${selectedExternalTool.displayName}"
                         } else {
                             "模型席位 · ${ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role}"
                         },
@@ -423,7 +429,7 @@ private fun ModelCouncilSeatEditor(
                                     seat.modelId
                                 },
                                 externalTool = if (runner == ModelCouncilSeatRunner.EXTERNAL_CLI) {
-                                    seat.externalTool.ifBlank { "gemini_cli" }
+                                    seat.externalTool.ifBlank { EXTERNAL_CLI_DEFAULT_TOOL_ID }
                                 } else {
                                     ""
                                 },
@@ -433,7 +439,7 @@ private fun ModelCouncilSeatEditor(
                     optionToString = {
                         when (it) {
                             ModelCouncilSeatRunner.PROVIDER_MODEL -> "模型"
-                            ModelCouncilSeatRunner.EXTERNAL_CLI -> "Gemini CLI"
+                            ModelCouncilSeatRunner.EXTERNAL_CLI -> "外部 CLI"
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -471,6 +477,30 @@ private fun ModelCouncilSeatEditor(
                     )
                 }
             } else {
+                ModelCouncilPropertyRow(label = "CLI 类型") {
+                    Select(
+                        options = externalToolOptions,
+                        selectedOption = selectedExternalTool,
+                        onOptionSelected = { tool ->
+                            onSeatChanged(
+                                seat.copy(
+                                    externalTool = tool.id,
+                                    name = if (
+                                        seat.name.isBlank() ||
+                                        seat.name == "Gemini CLI 席位" ||
+                                        seat.name == "外部 CLI 席位"
+                                    ) {
+                                        "${tool.displayName} 席位"
+                                    } else {
+                                        seat.name
+                                    },
+                                )
+                            )
+                        },
+                        optionToString = { it.displayName },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 ModelCouncilPropertyRow(label = "运行时") {
                     Select(
                         options = runtimeOptions,
@@ -491,12 +521,12 @@ private fun ModelCouncilSeatEditor(
                 OutlinedTextField(
                     value = seat.externalModel,
                     onValueChange = { value -> onSeatChanged(seat.copy(externalModel = value.take(120))) },
-                    label = { Text("Gemini CLI 模型参数（可选）") },
-                    placeholder = { Text("例如 gemini-2.5-pro") },
+                    label = { Text("CLI 模型参数（可选）") },
+                    placeholder = { Text(selectedExternalTool.modelPlaceholder) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                ExperimentNote(text = "外部 CLI 席位会在终端运行时中隔离执行。手机上需要对应运行时能找到 gemini 命令。")
+                ExperimentNote(text = "外部 CLI 席位会在终端运行时中隔离执行。手机上需要对应运行时能找到 ${selectedExternalTool.binary} 命令；登录状态必须由该 CLI 的 probe 验证。")
             }
 
             OutlinedTextField(

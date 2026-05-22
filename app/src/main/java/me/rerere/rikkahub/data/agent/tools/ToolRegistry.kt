@@ -517,7 +517,8 @@ private fun JsonElement?.containsExternalCliSeat(): Boolean {
         val seat = runCatching { item.jsonObject }.getOrNull() ?: return@any false
         val runnerType = seat["runner_type"]?.jsonPrimitive?.contentOrNull?.lowercase(Locale.ROOT).orEmpty()
         val externalTool = seat["external_tool"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        runnerType in setOf("external_cli", "cli", "gemini_cli") || externalTool.isNotBlank()
+        runnerType in setOf("external_cli", "cli", "gemini_cli", "antigravity_cli", "codex_cli", "claude_code", "kimi_cli") ||
+            externalTool.isNotBlank()
     }
 }
 
