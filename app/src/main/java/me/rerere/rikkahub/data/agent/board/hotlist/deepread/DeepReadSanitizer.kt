@@ -6,16 +6,41 @@ object DeepReadSanitizer {
     fun sanitize(parsed: DeepReadOutput, sources: List<DeepReadSource>, topicTitle: String): DeepReadOutput {
         val sourceUrls = sources.map { it.url }.toSet()
         val sourceImages = sources
-            .flatMap { source -> source.images.map { image -> SourceImage(image, source.source) } }
+            .flatMap { source ->
+                val candidates = source.imageCandidates.ifEmpty {
+                    source.images.mapIndexed { index, image ->
+                        DeepReadImageScorer.fallbackCandidate(
+                            topicTitle = topicTitle,
+                            imageUrl = image,
+                            sourceUrl = source.url,
+                            sourceTitle = source.title,
+                            source = source.source,
+                            rank = index + 1,
+                        )
+                    }
+                }
+                candidates.map { candidate ->
+                    SourceImage(
+                        url = candidate.imageUrl,
+                        source = candidate.sourceService ?: source.source,
+                        confidence = candidate.confidence,
+                        score = candidate.score,
+                        riskFlags = candidate.riskFlags,
+                    )
+                }
+            }
+            .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
             .filter { it.url.isUsableDeepReadImageUrl() }
             .distinctBy { it.url.imageDedupKey() }
+            .sortedWith(compareByDescending<SourceImage> { it.confidence == IMAGE_CONFIDENCE_HERO }
+                .thenByDescending { it.score })
             .take(12)
-        val sourceImageUrls = sourceImages.map { it.url }.toSet()
+        val heroImageUrls = sourceImages.filter { it.confidence == IMAGE_CONFIDENCE_HERO }.map { it.url }.toSet()
         val safeReferences = parsed.references.filter { it.url in sourceUrls }
             .mapIndexed { index, link -> link.withChineseSafeTitle(topicTitle, index) }
         val safeExtended = parsed.extendedReading.filter { it.url in sourceUrls }
             .mapIndexed { index, link -> link.withChineseSafeTitle(topicTitle, index) }
-        val fallbackReading = sources.filter { it.url.startsWith("http") }.mapIndexed { index, source ->
+        val fallbackReading = sources.filter { it.url.isHttpOrHttpsUrl() }.mapIndexed { index, source ->
             ReadingLink(source.chineseSafeTitle(topicTitle, index), source.url, source.source)
         }
             .distinctBy { it.url }
@@ -27,11 +52,13 @@ object DeepReadSanitizer {
         )
         val safeAssetUrls = safeAssets.map { it.url }.toSet()
         val usedInlineImages = mutableSetOf<String>()
+        val heroUrl = parsed.heroImageUrl
+            ?.takeIf { it in heroImageUrls }
+            ?: safeAssets.firstOrNull { it.confidence == IMAGE_CONFIDENCE_HERO }?.url
 
         return parsed.copy(
-            heroImageUrl = parsed.heroImageUrl
-                ?.takeIf { it in sourceImageUrls }
-                ?: safeAssets.firstOrNull()?.url,
+            heroImageUrl = heroUrl,
+            heroImageConfidence = heroUrl?.let { IMAGE_CONFIDENCE_HERO },
             timeline = parsed.timeline?.mapIndexed { index, event ->
                 val url = event.imageUrl?.takeIf { it in safeAssetUrls }
                     ?.takeIf { usedInlineImages.add(it.imageDedupKey()) }
@@ -56,6 +83,7 @@ object DeepReadSanitizer {
             ),
             references = (safeReferences + fallbackReading).distinctBy { it.url }.take(10),
             extendedReading = safeExtended.ifEmpty { fallbackReading },
+            visualDiagnostics = parsed.visualDiagnostics ?: sourceImages.toDiagnostics(heroUrl),
         )
     }
 
@@ -72,6 +100,8 @@ object DeepReadSanitizer {
                     caption = asset.caption?.takeIf { it.hasCjk() }
                         ?: fallbackImageCaption(topicTitle, index),
                     source = asset.source ?: sourceByUrl[asset.url]?.source,
+                    confidence = sourceByUrl[asset.url]?.confidence,
+                    score = sourceByUrl[asset.url]?.score,
                     relatedTimelineIndex = asset.relatedTimelineIndex?.takeIf { idx ->
                         idx >= 0 && idx < parsed.timeline.orEmpty().size
                     },
@@ -82,7 +112,9 @@ object DeepReadSanitizer {
                 url = image.url,
                 caption = fallbackImageCaption(topicTitle, index),
                 source = image.source,
-                qualityHint = if (index == 0) "hero" else "context",
+                qualityHint = image.confidence,
+                confidence = image.confidence,
+                score = image.score,
             )
         }
         return (parsedAssets + fallbackAssets)
@@ -109,11 +141,14 @@ object DeepReadSanitizer {
 
     private fun String.isUsableDeepReadImageUrl(): Boolean {
         val lower = lowercase()
-        if (!lower.startsWith("http")) return false
+        if (!lower.isHttpOrHttpsUrl()) return false
         if (lower.contains("avatar") || lower.contains("logo") || lower.contains("icon")) return false
         if (lower.contains("pixel") || lower.contains("tracking") || lower.contains("spacer")) return false
         return true
     }
+
+    private fun String.isHttpOrHttpsUrl(): Boolean =
+        startsWith("http://") || startsWith("https://")
 
     private fun String.imageDedupKey(): String {
         val trimmed = trim()
@@ -170,5 +205,37 @@ object DeepReadSanitizer {
     private data class SourceImage(
         val url: String,
         val source: String?,
+        val confidence: String,
+        val score: Int,
+        val riskFlags: List<String>,
     )
+
+    private fun List<SourceImage>.toDiagnostics(heroUrl: String?): DeepReadVisualDiagnostics =
+        DeepReadVisualDiagnostics(
+            candidateCount = size,
+            heroSelection = firstOrNull { it.url == heroUrl }?.let { image ->
+                DeepReadImageSelection(
+                    imageUrl = image.url,
+                    confidence = image.confidence,
+                    score = image.score,
+                    reason = "App 复核通过：图片达到 hero 置信度，且未命中 logo/icon 风险。",
+                    riskFlags = image.riskFlags,
+                )
+            },
+            inlineSelections = filter { it.url != heroUrl }
+                .take(6)
+                .map { image ->
+                    DeepReadImageSelection(
+                        imageUrl = image.url,
+                        confidence = image.confidence,
+                        score = image.score,
+                        reason = if (image.confidence == IMAGE_CONFIDENCE_INLINE) {
+                            "App 复核：适合作为正文图，未达到头图阈值。"
+                        } else {
+                            "App 复核：可作为备用视觉资产。"
+                        },
+                        riskFlags = image.riskFlags,
+                    )
+                },
+        )
 }

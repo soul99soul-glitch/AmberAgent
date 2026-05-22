@@ -129,6 +129,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingExperimentalWebMountPage
 import me.rerere.rikkahub.ui.pages.board.TodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadScreen
+import me.rerere.rikkahub.ui.pages.board.DeepReadTemplateWorkbenchPage
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
@@ -609,6 +610,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingTodayBoardPage()
                             }
 
+                            entry<Screen.DeepReadTemplateWorkbench> {
+                                DeepReadTemplateWorkbenchPage()
+                            }
+
                             entry<Screen.MiniAppList> {
                                 MiniAppListPage()
                             }
@@ -928,6 +933,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object MiniAppSettings : Screen
+
+    @Serializable
+    data object DeepReadTemplateWorkbench : Screen
 
     @Serializable
     data class DeepRead(

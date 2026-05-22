@@ -17,6 +17,7 @@ class AgentToolSetFactory(
 
         val rawTools = buildList {
             addAll(researchRawTools)
+            add(localTools.timeTool)
             // Keep Deep Read hidden runs deterministic and auto-approvable. Subagents remain
             // available to normal chat, but hidden runs should not silently start background runs.
             addAll(writerTools)

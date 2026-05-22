@@ -122,11 +122,12 @@ class DeepReadSourcePrefetcher(
 
                 val scrapeServices = enabled.filter { it.supportsDeepReadScrape() }
                 val seedEnriched = seedSources.map { source ->
-                    async { enrichSeedSource(source) }
+                    async { enrichSeedSource(source, topicTitle) }
                 }.awaitAll()
                     .filter { it.isUsableSeedSource() }
-                val enriched = searchResults.mapIndexed { index, item ->
+                val enriched = searchResults.mapIndexed { index, hit ->
                     async {
+                        val item = hit.item
                         val shouldScrape = scrapeServices.isNotEmpty() && index < MAX_SCRAPE_RESULTS
                         val scraped = if (shouldScrape) {
                             scrapeWithServices(scrapeServices, item.url)
@@ -146,27 +147,42 @@ class DeepReadSourcePrefetcher(
                         } else {
                             null
                         }
-                        val metaImage = if (index < MAX_META_IMAGE_RESULTS) {
+                        val pageImages = if (index < MAX_META_IMAGE_RESULTS) {
                             try {
-                                fetchOpenGraphImage(item.url)
+                                fetchPageImages(item.url)
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (_: Throwable) {
-                                null
+                                emptyList()
                             }
                         } else {
-                            null
+                            emptyList()
                         }
+                        val content = sourceContentForSearchResult(item, scraped, direct).take(SOURCE_EXCERPT_LIMIT)
+                        val imageCandidates = buildImageCandidates(
+                            topicTitle = topicTitle,
+                            sourceUrl = item.url,
+                            sourceTitle = item.title,
+                            sourceService = domainOf(item.url),
+                            query = hit.query,
+                            rank = index + 1,
+                            searchImages = item.images,
+                            pageImages = pageImages,
+                            sourceText = content,
+                        )
                         DeepReadSource(
                             title = item.title,
                             url = item.url,
                             source = domainOf(item.url),
-                            content = sourceContentForSearchResult(item, scraped, direct).take(SOURCE_EXCERPT_LIMIT),
+                            content = content,
                             publishedAt = item.publishedAt,
-                            images = (item.images + listOfNotNull(metaImage))
-                                .filter { it.startsWith("http") }
+                            images = imageCandidates
+                                .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
+                                .sortedByDescending { it.score }
+                                .map { it.imageUrl }
                                 .distinct()
-                                .take(3),
+                                .take(6),
+                            imageCandidates = imageCandidates,
                         )
                     }
                 }.awaitAll()
@@ -213,7 +229,7 @@ class DeepReadSourcePrefetcher(
             .orEmpty()
             .toDeepReadSources(topicTitle)
         val userSeed = seedUrl
-            ?.takeIf { it.startsWith("http") }
+            ?.takeIf { it.isHttpOrHttpsUrl() }
             ?.let { url ->
                 DeepReadSource(
                     title = topicTitle,
@@ -228,8 +244,8 @@ class DeepReadSourcePrefetcher(
             .distinctBy { it.url.ifBlank { it.title } }
     }
 
-    private suspend fun enrichSeedSource(source: DeepReadSource): DeepReadSource {
-        val direct = source.url.takeIf { it.startsWith("http") }?.let { url ->
+    private suspend fun enrichSeedSource(source: DeepReadSource, topicTitle: String): DeepReadSource {
+        val direct = source.url.takeIf { it.isHttpOrHttpsUrl() }?.let { url ->
             try {
                 withTimeoutOrNull(DIRECT_FETCH_TIMEOUT_MS) { fetchReadableText(url) }
             } catch (error: CancellationException) {
@@ -239,19 +255,38 @@ class DeepReadSourcePrefetcher(
                 null
             }
         }
-        val metaImage = source.url.takeIf { it.startsWith("http") }?.let { url ->
+        val pageImages = source.url.takeIf { it.isHttpOrHttpsUrl() }?.let { url ->
             try {
-                withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) { fetchOpenGraphImage(url) }
+                withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) { fetchPageImages(url) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 Log.w(TAG, "deep read seed og image fetch failed: $url", error)
-                null
+                emptyList()
             }
-        }
+        }.orEmpty()
+        val content = (direct ?: source.content).take(SOURCE_EXCERPT_LIMIT)
+        val imageCandidates = buildImageCandidates(
+            topicTitle = topicTitle,
+            sourceUrl = source.url,
+            sourceTitle = source.title,
+            sourceService = source.source,
+            query = null,
+            rank = null,
+            searchImages = source.images,
+            pageImages = pageImages,
+            sourceText = content,
+            defaultKind = "hotlist_image",
+        )
         return source.copy(
-            content = (direct ?: source.content).take(SOURCE_EXCERPT_LIMIT),
-            images = (source.images + listOfNotNull(metaImage)).distinct().take(3),
+            content = content,
+            images = imageCandidates
+                .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
+                .sortedByDescending { it.score }
+                .map { it.imageUrl }
+                .distinct()
+                .take(6),
+            imageCandidates = imageCandidates,
         )
     }
 
@@ -297,7 +332,7 @@ class DeepReadSourcePrefetcher(
             ?.takeIf { it.isNotBlank() }
     }
 
-    private suspend fun fetchOpenGraphImage(url: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun fetchPageImages(url: String): List<PageImage> = withContext(Dispatchers.IO) {
         withTimeoutOrNull(OG_IMAGE_TIMEOUT_MS) {
             val request = Request.Builder()
                 .url(url)
@@ -305,15 +340,15 @@ class DeepReadSourcePrefetcher(
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withTimeoutOrNull null
+                if (!response.isSuccessful) return@withTimeoutOrNull emptyList()
                 response.body.charStream().use { reader ->
                     val buffer = CharArray(OG_IMAGE_HTML_CHAR_LIMIT)
                     val read = reader.read(buffer).coerceAtLeast(0)
-                    String(buffer, 0, read).extractOpenGraphImage()
+                    String(buffer, 0, read).extractPageImages()
                 }
             }
         }
-    }
+    }.orEmpty()
 
     private suspend fun fetchReadableText(url: String): String? = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -343,6 +378,111 @@ class DeepReadSourcePrefetcher(
                 append(snippet)
             }
         }
+    }
+
+    private suspend fun buildImageCandidates(
+        topicTitle: String,
+        sourceUrl: String,
+        sourceTitle: String,
+        sourceService: String?,
+        query: String?,
+        rank: Int?,
+        searchImages: List<String>,
+        pageImages: List<PageImage>,
+        sourceText: String,
+        defaultKind: String = "search_result_image",
+    ): List<DeepReadImageCandidate> {
+        val searchCandidates = searchImages.mapIndexedNotNull { index, imageUrl ->
+            imageUrl.takeIf { it.isHttpOrHttpsUrl() }?.let {
+                DeepReadImageCandidate(
+                    imageUrl = it,
+                    sourceUrl = sourceUrl,
+                    sourceTitle = sourceTitle,
+                    pageTitle = sourceTitle,
+                    candidateKind = defaultKind,
+                    sourceService = sourceService,
+                    query = query,
+                    rank = rank ?: index + 1,
+                )
+            }
+        }
+        val pageCandidates = pageImages.mapIndexed { index, image ->
+            DeepReadImageCandidate(
+                imageUrl = image.url,
+                sourceUrl = sourceUrl,
+                sourceTitle = sourceTitle,
+                pageTitle = sourceTitle,
+                alt = image.alt,
+                nearbyText = image.nearbyText,
+                candidateKind = image.kind,
+                sourceService = sourceService,
+                query = query,
+                rank = rank ?: index + 1,
+            )
+        }
+        return (pageCandidates + searchCandidates)
+            .distinctBy { it.imageUrl.trim() }
+            .take(MAX_IMAGE_CANDIDATES_PER_SOURCE)
+            .map { candidate ->
+                val withQuality = candidate.copy(quality = probeImageQuality(candidate.imageUrl))
+                DeepReadImageScorer.score(topicTitle, withQuality)
+            }
+            .sortedWith(compareByDescending<DeepReadImageCandidate> { it.confidence == IMAGE_CONFIDENCE_HERO }
+                .thenByDescending { it.confidence == IMAGE_CONFIDENCE_INLINE }
+                .thenByDescending { it.score })
+    }
+
+    private suspend fun probeImageQuality(url: String): DeepReadImageQuality = withContext(Dispatchers.IO) {
+        val probed = runCatching {
+            withTimeoutOrNull(IMAGE_PROBE_TIMEOUT_MS) {
+                val request = Request.Builder()
+                    .url(url)
+                    .head()
+                    .header("User-Agent", DESKTOP_USER_AGENT)
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    DeepReadImageQuality(
+                        contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(),
+                        byteSize = response.header("Content-Length")?.toLongOrNull(),
+                    )
+                }
+            }
+        }.getOrNull()
+        mergeQualityHints(probed ?: DeepReadImageQuality(), url.imageQualityHints())
+    }
+
+    private fun mergeQualityHints(
+        probed: DeepReadImageQuality,
+        hinted: DeepReadImageQuality,
+    ): DeepReadImageQuality =
+        DeepReadImageQuality(
+            width = probed.width ?: hinted.width,
+            height = probed.height ?: hinted.height,
+            contentType = probed.contentType ?: hinted.contentType,
+            byteSize = probed.byteSize ?: hinted.byteSize,
+        )
+
+    private fun String.imageQualityHints(): DeepReadImageQuality {
+        val lower = lowercase()
+        val queryWidth = Regex("""(?:[?&](?:w|width)=)(\d{2,5})""").find(lower)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val queryHeight = Regex("""(?:[?&](?:h|height)=)(\d{2,5})""").find(lower)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val pathSize = Regex("""(?:^|[^\d])(\d{2,5})[xX](\d{2,5})(?:[^\d]|$)""")
+            .find(this)
+            ?.let { match -> match.groupValues[1].toIntOrNull() to match.groupValues[2].toIntOrNull() }
+        val extType = when (lower.substringBefore('?').substringAfterLast('.', "")) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "ico" -> "image/x-icon"
+            "svg" -> "image/svg+xml"
+            else -> null
+        }
+        return DeepReadImageQuality(
+            width = queryWidth ?: pathSize?.first,
+            height = queryHeight ?: pathSize?.second,
+            contentType = extType,
+        )
     }
 
     private fun DeepReadSource.isUsableCollectedSource(): Boolean {
@@ -378,20 +518,18 @@ class DeepReadSourcePrefetcher(
         return listOf(first.copy(text = content)) + drop(1)
     }
 
-    private fun interleaveSearchResults(buckets: List<SearchBucket>): List<SearchResult.SearchResultItem> {
+    private fun interleaveSearchResults(buckets: List<SearchBucket>): List<SearchHit> {
         val queryGroups = buckets
-            .groupBy { it.query }
-            .values
-            .map { group -> group.flatMap { it.items }.distinctBy { it.url } }
+            .map { bucket -> bucket.items.distinctBy { it.url }.map { item -> SearchHit(bucket.query, item) } }
             .filter { it.isNotEmpty() }
-        val merged = mutableListOf<SearchResult.SearchResultItem>()
+        val merged = mutableListOf<SearchHit>()
         var index = 0
         while (merged.size < MAX_SEARCH_RESULTS && queryGroups.any { index < it.size }) {
-            queryGroups.forEach { items ->
-                if (merged.size < MAX_SEARCH_RESULTS && index < items.size) {
-                    val item = items[index]
-                    if (merged.none { it.url == item.url }) {
-                        merged += item
+            queryGroups.forEach { hits ->
+                if (merged.size < MAX_SEARCH_RESULTS && index < hits.size) {
+                    val hit = hits[index]
+                    if (merged.none { it.item.url == hit.item.url }) {
+                        merged += hit
                     }
                 }
             }
@@ -414,7 +552,14 @@ class DeepReadSourcePrefetcher(
             "$topicTitle background timeline context controversy",
             "$topicTitle latest news $currentYear",
             "$topicTitle official statement reactions analysis implications",
+            "$topicTitle 图片 现场图 截图",
+            "$topicTitle 发布会 PPT 演示 文稿 图片",
+            "$topicTitle screenshot presentation slide keynote",
         )
+        if (listOf("发布会", "ppt", "演示", "截图", "小米", "特斯拉", "八败两胜").any { it in lower || it in topicTitle }) {
+            queries += "$topicTitle PPT 截图 发布会 图"
+            queries += "$topicTitle 现场图 演示文稿"
+        }
         if (listOf("gemini", "google", "openai", "claude", "deepseek", "gpt", "llm", "大模型", "模型", "flash").any { it in lower }) {
             queries += "$topicTitle 发布 价格 跑分 性能 评价"
             queries += "$topicTitle pricing benchmark performance model card"
@@ -430,7 +575,7 @@ class DeepReadSourcePrefetcher(
 
     private fun List<HotTopicSource>.toDeepReadSources(topicTitle: String): List<DeepReadSource> =
         map { source ->
-            val url = source.url?.takeIf { it.startsWith("http") }.orEmpty()
+            val url = source.url?.takeIf { it.isHttpOrHttpsUrl() }.orEmpty()
             DeepReadSource(
                 title = source.presentationTitle,
                 url = url,
@@ -458,14 +603,45 @@ class DeepReadSourcePrefetcher(
     private fun domainOf(url: String): String? =
         runCatching { URI(url).host?.removePrefix("www.") }.getOrNull()
 
-    private fun String.extractOpenGraphImage(): String? =
-        listOf(
-            Regex("""property=["']og:image["'][^>]*content=["']([^"']+)["']""", RegexOption.IGNORE_CASE),
-            Regex("""name=["']twitter:image["'][^>]*content=["']([^"']+)["']""", RegexOption.IGNORE_CASE),
-            Regex("""content=["']([^"']+)["'][^>]*property=["']og:image["']""", RegexOption.IGNORE_CASE),
-        ).asSequence()
-            .flatMap { pattern -> pattern.findAll(this).map { it.groupValues[1] } }
-            .firstOrNull { it.startsWith("http") }
+    private fun String.extractPageImages(): List<PageImage> {
+        val og = listOf(
+            Regex("""property=["']og:image["'][^>]*content=["']([^"']+)["']""", RegexOption.IGNORE_CASE) to "og_image",
+            Regex("""name=["']twitter:image["'][^>]*content=["']([^"']+)["']""", RegexOption.IGNORE_CASE) to "twitter_image",
+            Regex("""content=["']([^"']+)["'][^>]*property=["']og:image["']""", RegexOption.IGNORE_CASE) to "og_image",
+        ).flatMap { (pattern, kind) ->
+            pattern.findAll(this).map { match -> PageImage(match.groupValues[1].htmlUnescape(), kind) }
+        }
+        val articleImages = Regex("""(?is)<img\b[^>]*>""")
+            .findAll(this)
+            .mapNotNull { match ->
+                val tag = match.value
+                val src = tag.attr("src")
+                    ?: tag.attr("data-src")
+                    ?: tag.attr("data-original")
+                    ?: tag.attr("data-lazy-src")
+                    ?: return@mapNotNull null
+                if (!src.isHttpOrHttpsUrl()) return@mapNotNull null
+                PageImage(
+                    url = src.htmlUnescape(),
+                    kind = "article_image",
+                    alt = tag.attr("alt")?.htmlUnescape(),
+                    nearbyText = tag.attr("title")?.htmlUnescape(),
+                )
+            }
+            .take(8)
+            .toList()
+        return (og + articleImages)
+            .filter { it.url.isHttpOrHttpsUrl() }
+            .distinctBy { it.url }
+            .take(10)
+    }
+
+    private fun String.attr(name: String): String? =
+        Regex("""(?is)\b${Regex.escape(name)}\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""")
+            .find(this)
+            ?.let { match ->
+                match.groupValues.drop(2).firstOrNull { it.isNotBlank() }?.trim()
+            }
 
     private fun String.extractReadableText(): String =
         replace(Regex("(?is)<(script|style|noscript|svg|canvas)\\b.*?</\\1>"), " ")
@@ -496,6 +672,7 @@ class DeepReadSourcePrefetcher(
         private const val SEARCH_TIMEOUT_MS = 8_000L
         private const val SCRAPE_TIMEOUT_MS = 5_000L
         private const val OG_IMAGE_TIMEOUT_MS = 2_000L
+        private const val IMAGE_PROBE_TIMEOUT_MS = 1_500L
         private const val DIRECT_FETCH_TIMEOUT_MS = 5_000L
         private const val DIRECT_FETCH_MAX_BYTES = 768_000L
         private const val OG_IMAGE_HTML_CHAR_LIMIT = 192_000
@@ -507,6 +684,7 @@ class DeepReadSourcePrefetcher(
         private const val SEARCH_RESULTS_PER_QUERY = 4
         private const val MAX_SCRAPE_RESULTS = 8
         private const val MAX_META_IMAGE_RESULTS = 6
+        private const val MAX_IMAGE_CANDIDATES_PER_SOURCE = 6
         private const val MAX_SEED_SOURCES = 4
         // Aligned with RunManager.PROMPT_SOURCE_LIMIT (12). Returning more than the
         // prompt shows would just hide tail sources from the model with no benefit.
@@ -530,6 +708,18 @@ class DeepReadSourcePrefetcher(
 private data class SearchBucket(
     val query: String,
     val items: List<SearchResult.SearchResultItem>,
+)
+
+private data class SearchHit(
+    val query: String,
+    val item: SearchResult.SearchResultItem,
+)
+
+private data class PageImage(
+    val url: String,
+    val kind: String,
+    val alt: String? = null,
+    val nearbyText: String? = null,
 )
 
 private fun Settings.enabledDeepReadSearchServices(): List<SearchServiceOptions> =
@@ -568,6 +758,9 @@ private fun SearchServiceOptions.isUsableDeepReadSearchFallback(): Boolean = whe
 
 private fun SearchServiceOptions.supportsDeepReadScrape(): Boolean =
     runCatching { SearchService.getService(this).scrapingParameters != null }.getOrDefault(false)
+
+private fun String.isHttpOrHttpsUrl(): Boolean =
+    startsWith("http://") || startsWith("https://")
 
 private fun SearchServiceOptions.deepReadServiceKey(): String = when (this) {
     is SearchServiceOptions.BingLocalOptions -> "bing"

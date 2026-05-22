@@ -43,6 +43,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MAX
+import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MIN
+import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_STEP
 import me.rerere.rikkahub.data.agent.board.BoardRepository
 import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.DEFAULT_HOT_LIST_FOCUS_KEYWORDS
@@ -57,7 +61,6 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.font.FontPackCategory
 import me.rerere.rikkahub.data.font.FontPackState
@@ -66,6 +69,7 @@ import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ui.NotionSlider
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.setting.ExperimentDivider
 import me.rerere.rikkahub.ui.pages.setting.ExperimentSectionCard
 import me.rerere.rikkahub.ui.pages.setting.ExperimentalSettingsScaffold
@@ -82,10 +86,10 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
     val hotListRepository: HotListRepository = koinInject()
     val hotListScheduler: HotListScheduler = koinInject()
     val deepReadTemplateRepository: DeepReadTemplateRepository = koinInject()
-    val deepReadTemplateAgent: DeepReadTemplateAgent = koinInject()
     val fontRepository: SlidesFontRepository = koinInject()
     val json: Json = koinInject()
     val context = LocalContext.current
+    val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val focusRules by boardRepository.observeFocusRules().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -97,8 +101,12 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
     var sourceWeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var weightReloadKey by remember { mutableIntStateOf(0) }
     var showAdvanced by rememberSaveable { mutableStateOf(false) }
-    var templateGenerating by rememberSaveable { mutableStateOf(false) }
-    var templateGenerationError by rememberSaveable { mutableStateOf<String?>(null) }
+    val templateFontCss = rememberDeepReadTemplateFontCss(
+        mode = board.boardReadingFontMode,
+        fontPackId = board.boardReadingFontPackId,
+        fontStates = fontStates,
+        fontScale = board.deepReadFontScale,
+    )
 
     LaunchedEffect(weightReloadKey) {
         sourceWeights = boardRepository.getAllWeights()
@@ -210,20 +218,6 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
         scope.launch {
             hotListRepository.deleteSource(source.id)
             hotListScheduler.runOnce()
-        }
-    }
-
-    fun generateDeepReadTemplate(name: String, brief: String) {
-        templateGenerating = true
-        templateGenerationError = null
-        scope.launch {
-            val result = deepReadTemplateAgent.generate(name, brief)
-            templateGenerating = false
-            result.onSuccess { template ->
-                update { it.copy(deepReadTemplateId = template.id) }
-            }.onFailure { error ->
-                templateGenerationError = error.message ?: "模板生成失败"
-            }
         }
     }
 
@@ -355,8 +349,8 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                         board = board,
                         customTemplates = customDeepReadTemplates,
                         invalidTemplateCount = invalidDeepReadTemplateCount,
-                        generating = templateGenerating,
-                        generationError = templateGenerationError,
+                        fontCss = templateFontCss,
+                        fontRepository = fontRepository,
                         onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
                         onDelete = { template ->
                             scope.launch {
@@ -366,7 +360,7 @@ fun SettingTodayBoardPage(vm: SettingVM = koinViewModel()) {
                                 }
                             }
                         },
-                        onGenerate = ::generateDeepReadTemplate,
+                        onCreateTemplate = { navController.navigate(Screen.DeepReadTemplateWorkbench) },
                     )
                     ExperimentDivider()
                     BackgroundStrategyRow(board.backgroundStrategy) { value ->
@@ -493,6 +487,23 @@ private fun ReadingFontRow(
             if (board.boardReadingFontMode == TodayBoardReadingFontMode.SLIDES_PACK && !selectedPackAvailable) {
                 Text("当前选择的字体包不可用，阅读页会自动回退内置宋体。", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
             }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("字号", style = MaterialTheme.typography.bodyMedium)
+                Text("${(board.deepReadFontScale * 100f).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+            }
+            NotionSlider(
+                value = board.deepReadFontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX),
+                onValueChangeFinished = { value ->
+                    update { it.copy(deepReadFontScale = value.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX)) }
+                },
+                valueRange = DEEP_READ_FONT_SCALE_MIN..DEEP_READ_FONT_SCALE_MAX,
+                snapStep = DEEP_READ_FONT_SCALE_STEP,
+                valueLabel = { value ->
+                    Text("${(value * 100f).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                },
+            )
         }
     }
 }

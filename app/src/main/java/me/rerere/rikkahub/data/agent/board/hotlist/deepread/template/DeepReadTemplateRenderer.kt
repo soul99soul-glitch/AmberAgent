@@ -8,6 +8,8 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagram
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.errorOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
@@ -53,9 +55,7 @@ object DeepReadTemplateRenderer {
     ): DeepReadRenderedTemplate {
         DeepReadTemplateRepository.validateCustomTemplate(templateHtml)
         val safeImages = output.safeImageUrls()
-        val hero = output.heroImageUrl?.takeIf { it in safeImages }
-            ?: output.imageAssets.firstOrNull { it.url in safeImages }?.url
-            ?: ""
+        val hero = output.safeHeroUrl(safeImages).orEmpty()
         val placeholders = mapOf(
             "title" to title.escapeHtml(),
             "summary" to output.summary.escapeHtml(),
@@ -63,8 +63,10 @@ object DeepReadTemplateRenderer {
             "source_label" to output.sourceLabel().escapeHtml(),
             "hero_image_url" to hero.escapeHtml(),
             "hero_caption" to (output.heroCaption ?: output.imageAssets.firstOrNull { it.url == hero }?.caption).orEmpty().escapeHtml(),
+            "narrative_html" to output.narrativeHtml(safeImages),
             "timeline_html" to output.timelineHtml(safeImages),
             "core_points_html" to output.corePointsHtml(safeImages),
+            "diagram_html" to output.diagramHtml(),
             "analysis_html" to output.analysisHtml(),
             "extended_reading_html" to output.extendedReadingHtml(),
             "font_css" to fontCss + "\n" + TEMPLATE_RUNTIME_CSS,
@@ -85,8 +87,7 @@ object DeepReadTemplateRenderer {
         fontCss: String = DEFAULT_FONT_CSS,
     ): DeepReadRenderedTemplate {
         val safeImages = output.safeImageUrls()
-        val hero = output.heroImageUrl?.takeIf { it in safeImages }
-            ?: output.imageAssets.firstOrNull { it.url in safeImages }?.url
+        val hero = output.safeHeroUrl(safeImages)
         val body = buildString {
             appendLine("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>")
             appendLine(fontCss)
@@ -98,12 +99,17 @@ object DeepReadTemplateRenderer {
                 appendLine("<figure class=\"hero\"><img src=\"${hero.escapeHtml()}\"/><div class=\"hero-cut\"><div><span class=\"hero-type\">${output.topicType.uppercase().escapeHtml()}</span><span class=\"hero-source\">${output.sourceLabel().escapeHtml()}</span></div><figcaption>${(output.heroCaption ?: output.imageAssets.firstOrNull { it.url == hero }?.caption).orEmpty().escapeHtml()}</figcaption></div></figure>")
             }
             appendLine("<section class=\"headline\">${if (hero == null) "<p class=\"kicker\">${output.topicType.uppercase().escapeHtml()} · DEEP READ</p>" else ""}<h1>${title.escapeHtml()}</h1>${output.summaryHtml()}</section>")
-            appendLine("<section><p class=\"section\">时间轴</p>")
-            appendLine(output.timelineHtml(safeImages))
-            appendLine("</section>")
-            appendLine("<section><p class=\"section\">关键脉络</p>")
-            appendLine(output.corePointsHtml(safeImages))
-            appendLine("</section>")
+            output.timelineHtml(safeImages).takeIf { it.isNotBlank() }?.let {
+                appendLine("<section><p class=\"section\">时间轴</p>")
+                appendLine(it)
+                appendLine("</section>")
+            }
+            output.corePointsHtml(safeImages).takeIf { it.isNotBlank() }?.let {
+                appendLine("<section><p class=\"section\">关键脉络</p>")
+                appendLine(it)
+                appendLine("</section>")
+            }
+            output.diagramHtml().takeIf { it.isNotBlank() }?.let { appendLine(it) }
             appendLine("<section><p class=\"section\">深度分析</p>")
             appendLine(output.analysisHtml())
             appendLine("</section>")
@@ -120,6 +126,9 @@ object DeepReadTemplateRenderer {
     }
 
     private fun DeepReadOutput.safeImageUrls(): Set<String> = verifiedImageUrls()
+
+    private fun DeepReadOutput.safeHeroUrl(safeImages: Set<String>): String? =
+        heroImageUrl?.takeIf { it in safeImages && heroImageConfidence == IMAGE_CONFIDENCE_HERO }
 
     private fun DeepReadOutput.safeLinkUrls(): Set<String> =
         (extendedReading + references)
@@ -155,6 +164,31 @@ object DeepReadTemplateRenderer {
         )
     }
 
+    private fun DeepReadOutput.narrativeHtml(safeImages: Set<String>): String {
+        if (statusOf(DeepReadGenerationStage.NARRATIVE) != DeepReadSectionStatus.READY) {
+            return sectionStateHtml(
+                stage = DeepReadGenerationStage.NARRATIVE,
+                runningText = "正在组织时间轴、关键脉络和中文叙事",
+                pendingText = "等待概览完成后补写事件脉络",
+            )
+        }
+        val timeline = timelineHtml(safeImages)
+        val points = corePointsHtml(safeImages)
+        if (timeline.isBlank() && points.isBlank()) return ""
+        return buildString {
+            if (timeline.isNotBlank()) {
+                append("<div class=\"narrative-part\"><p class=\"section\">时间轴</p>")
+                append(timeline)
+                append("</div>")
+            }
+            if (points.isNotBlank()) {
+                append("<div class=\"narrative-part\"><p class=\"section\">关键脉络</p>")
+                append(points)
+                append("</div>")
+            }
+        }
+    }
+
     private fun DeepReadOutput.timelineHtml(safeImages: Set<String>): String {
         if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.FAILED) {
             return sectionStateHtml(
@@ -165,6 +199,7 @@ object DeepReadTemplateRenderer {
         }
         val events = timeline.orEmpty()
         if (events.isEmpty()) {
+            if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) return ""
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
                 runningText = "正在组织时间轴叙事或故事性脉络",
@@ -200,6 +235,7 @@ object DeepReadTemplateRenderer {
         }
         val points = corePoints.orEmpty()
         if (points.isEmpty()) {
+            if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) return ""
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
                 runningText = "正在把来源消化成中文关键脉络",
@@ -222,6 +258,78 @@ object DeepReadTemplateRenderer {
                 }
                 append("</div>")
             }
+        }
+    }
+
+    private fun DeepReadOutput.diagramHtml(): String =
+        diagram?.takeIf { it.nodes.size >= 2 }?.renderDiagramHtml().orEmpty()
+
+    private fun DeepReadDiagram.renderDiagramHtml(): String {
+        val visibleNodes = nodes.take(6)
+        val nodeLabels = visibleNodes.associate { it.id to it.label }
+        val visibleEdges = edges
+            .filter { it.from in nodeLabels && it.to in nodeLabels }
+            .take(6)
+        val typeLabel = when (type) {
+            "causal_chain" -> "因果链"
+            "process_flow" -> "流程图"
+            "stakeholder_map" -> "关系图"
+            "system_structure" -> "结构图"
+            "comparison_matrix" -> "对比图"
+            else -> "图解"
+        }
+        val body = when (type) {
+            "causal_chain", "process_flow" -> renderDiagramSteps(visibleNodes)
+            else -> renderDiagramCards(visibleNodes)
+        }
+        return """
+            <section class="diagram-block">
+              <p class="section">$typeLabel</p>
+              <h2>${title.escapeHtml()}</h2>
+              <div class="diagram-frame">
+                $body
+                ${renderDiagramRelations(visibleEdges, nodeLabels)}
+              </div>
+              ${caption?.takeIf { it.isNotBlank() }?.let { "<p class=\"diagram-caption\">${it.escapeHtml()}</p>" }.orEmpty()}
+            </section>
+        """.trimIndent()
+    }
+
+    private fun renderDiagramSteps(nodes: List<me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagramNode>): String =
+        nodes.mapIndexed { index, node ->
+            """
+            <li class="diagram-step">
+              <span class="diagram-step-index">${"%02d".format(index + 1)}</span>
+              <div>
+                ${node.group?.takeIf { it.isNotBlank() }?.let { "<small class=\"diagram-group\">${it.escapeHtml()}</small>" }.orEmpty()}
+                <h3>${node.label.escapeHtml()}</h3>
+                ${node.note?.takeIf { it.isNotBlank() }?.let { "<p>${it.escapeHtml()}</p>" }.orEmpty()}
+              </div>
+            </li>
+            """.trimIndent()
+        }.joinToString(prefix = "<ol class=\"diagram-steps\">", postfix = "</ol>", separator = "\n")
+
+    private fun renderDiagramCards(nodes: List<me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagramNode>): String =
+        nodes.map { node ->
+            """
+            <div class="diagram-card">
+              ${node.group?.takeIf { it.isNotBlank() }?.let { "<small class=\"diagram-group\">${it.escapeHtml()}</small>" }.orEmpty()}
+              <h3>${node.label.escapeHtml()}</h3>
+              ${node.note?.takeIf { it.isNotBlank() }?.let { "<p>${it.escapeHtml()}</p>" }.orEmpty()}
+            </div>
+            """.trimIndent()
+        }.joinToString(prefix = "<div class=\"diagram-grid\">", postfix = "</div>", separator = "\n")
+
+    private fun renderDiagramRelations(
+        edges: List<me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagramEdge>,
+        nodeLabels: Map<String, String>,
+    ): String {
+        if (edges.isEmpty()) return ""
+        return edges.joinToString(prefix = "<ul class=\"diagram-relations\">", postfix = "</ul>", separator = "\n") { edge ->
+            val from = nodeLabels[edge.from] ?: edge.from
+            val to = nodeLabels[edge.to] ?: edge.to
+            val label = edge.label?.takeIf { it.isNotBlank() }?.let { "：${it.escapeHtml()}" }.orEmpty()
+            "<li><span>${from.escapeHtml()}</span><b>→</b><span>${to.escapeHtml()}</span>$label</li>"
         }
     }
 
@@ -342,6 +450,7 @@ object DeepReadTemplateRenderer {
         :root{
           --deep-read-serif:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;
           --deep-read-sans:"PingFang SC","Source Han Sans SC","Noto Sans SC",system-ui,sans-serif;
+          --deep-read-font-scale:1;
         }
     """
 
@@ -375,6 +484,22 @@ object DeepReadTemplateRenderer {
         .timeline-item figure,.core-point figure{margin:12px 0 4px;background:#f0f0ec;}
         .timeline-item img,.core-point img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
         .timeline-item figcaption,.core-point figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+        .diagram-block{padding:0 22px;margin-top:30px;}
+        .diagram-block h2{margin:4px 0 14px;font-size:18px;}
+        .diagram-frame{background:#f4f1ec;border-top:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px 12px 10px;}
+        .diagram-steps{list-style:none;margin:0;padding:0;}
+        .diagram-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid rgba(107,114,128,.18);}
+        .diagram-step:first-child{border-top:0;}
+        .diagram-step-index{font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;color:#ef4444;padding-top:2px;}
+        .diagram-grid{display:grid;grid-template-columns:1fr;gap:8px;margin:0;}
+        .diagram-card{background:#fafaf8;border:1px solid #ddd8cf;padding:11px 12px;}
+        .diagram-step h3,.diagram-card h3{font-size:15px;line-height:1.42;margin:0 0 5px;font-weight:500;}
+        .diagram-step p,.diagram-card p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:#6b7280;margin:0;}
+        .diagram-group{display:block;font-family:var(--deep-read-sans);letter-spacing:.14em;text-transform:uppercase;color:#991b1b;font-size:9px;margin-bottom:4px;}
+        .diagram-relations{list-style:none;margin:10px 0 0;padding:8px 0 0;border-top:1px solid rgba(107,114,128,.18);}
+        .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:#6b7280;margin:4px 0;}
+        .diagram-relations b{font-weight:500;color:#ef4444;margin:0 5px;}
+        .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:#6b7280;margin:10px 0 0;}
         blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid #ef4444;}
         .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid #ddd;padding:10px 0;text-decoration:none;color:inherit;}
         .reading span{font-family:var(--deep-read-sans);color:#ef4444;font-size:12px;letter-spacing:.12em;}
@@ -397,6 +522,22 @@ object DeepReadTemplateRenderer {
         .skeleton-line.wide{width:92%;}
         .skeleton-line{width:74%;}
         .skeleton-line.short{width:42%;}
+        .diagram-block{padding:0 22px;margin-top:30px;}
+        .diagram-block h2{margin:4px 0 14px;font-size:18px;}
+        .diagram-frame{background:#f4f1ec;border-top:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px 12px 10px;}
+        .diagram-steps{list-style:none;margin:0;padding:0;}
+        .diagram-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid rgba(107,114,128,.18);}
+        .diagram-step:first-child{border-top:0;}
+        .diagram-step-index{font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;color:#ef4444;padding-top:2px;}
+        .diagram-grid{display:grid;grid-template-columns:1fr;gap:8px;margin:0;}
+        .diagram-card{background:#fafaf8;border:1px solid #ddd8cf;padding:11px 12px;}
+        .diagram-step h3,.diagram-card h3{font-size:15px;line-height:1.42;margin:0 0 5px;font-weight:500;}
+        .diagram-step p,.diagram-card p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:#6b7280;margin:0;}
+        .diagram-group{display:block;font-family:var(--deep-read-sans);letter-spacing:.14em;text-transform:uppercase;color:#991b1b;font-size:9px;margin-bottom:4px;}
+        .diagram-relations{list-style:none;margin:10px 0 0;padding:8px 0 0;border-top:1px solid rgba(107,114,128,.18);}
+        .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:#6b7280;margin:4px 0;}
+        .diagram-relations b{font-weight:500;color:#ef4444;margin:0 5px;}
+        .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:#6b7280;margin:10px 0 0;}
     """
 
     private const val EMPTY_IMAGE_FALLBACK_CSS = """

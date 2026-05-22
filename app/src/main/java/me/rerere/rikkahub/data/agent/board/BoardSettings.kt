@@ -128,6 +128,10 @@ object DeepReadTemplateIds {
     fun custom(id: String): String = if (id.startsWith(CUSTOM_PREFIX)) id else "$CUSTOM_PREFIX$id"
 }
 
+const val DEEP_READ_FONT_SCALE_MIN = 0.85f
+const val DEEP_READ_FONT_SCALE_MAX = 1.25f
+const val DEEP_READ_FONT_SCALE_STEP = 0.05f
+
 /**
  * Canonical source types for BoardSignalEntity.sourceType. Kept as string constants rather
  * than an enum to allow future collectors (mail / github / rss) to be added without DB
@@ -178,6 +182,7 @@ data class TodayBoardSetting(
     val deepReadFirstUseConfirmed: Boolean = false,
     val boardReadingFontMode: TodayBoardReadingFontMode = TodayBoardReadingFontMode.SERIF,
     val boardReadingFontPackId: String? = null,
+    val deepReadFontScale: Float = 1.0f,
     val deepReadTemplateId: String = DeepReadTemplateIds.COMPOSE_MAGAZINE,
     val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
     val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,

@@ -19,17 +19,32 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val OVERVIEW_SUMMARY_MAX_CHARS = 250
+private const val MAX_DIAGRAM_NODES = 6
+private const val MAX_LINEAR_DIAGRAM_EDGES = 5
+private const val MAX_RELATION_DIAGRAM_EDGES = 6
+private const val DIAGRAM_TITLE_MAX_CHARS = 64
+private const val DIAGRAM_NODE_LABEL_MAX_CHARS = 34
+private const val DIAGRAM_NODE_NOTE_MAX_CHARS = 96
+private const val DIAGRAM_NODE_GROUP_MAX_CHARS = 40
+private const val DIAGRAM_EDGE_LABEL_MAX_CHARS = 42
+
 class DeepReadSectionWriterTools(
     private val repository: HotListRepository,
     private val topicId: String,
     private val topicTitle: String,
+    private val imageCandidates: List<DeepReadImageCandidate> = emptyList(),
+    private val isEvidenceUrlAllowed: (String) -> Boolean = { true },
+    private val evidenceContains: (String, String) -> Boolean = { _, _ -> true },
     private val allowTitleFallback: Boolean = true,
 ) {
     private val _writeCount = AtomicInteger(0)
+    private val _requiredWriteCount = AtomicInteger(0)
     private val _verificationCount = AtomicInteger(0)
     private val verifiedWriteCount = AtomicInteger(-1)
     private val writeMutex = Mutex()
     val writeCount: Int get() = _writeCount.get()
+    val requiredWriteCount: Int get() = _requiredWriteCount.get()
     val verificationCount: Int get() = _verificationCount.get()
     val hasFreshVerification: Boolean
         get() = verificationCount > 0 && verifiedWriteCount.get() == writeCount
@@ -39,6 +54,8 @@ class DeepReadSectionWriterTools(
         if (stages == null || DeepReadGenerationStage.NARRATIVE in stages) add(narrativeTool())
         if (stages == null || DeepReadGenerationStage.ANALYSIS in stages) add(analysisTool())
         if (stages == null || DeepReadGenerationStage.EXTENDED_READING in stages) add(extendedReadingTool())
+        add(visualsTool())
+        add(diagramTool())
         add(verificationTool())
         add(finishTool())
     }
@@ -90,10 +107,8 @@ class DeepReadSectionWriterTools(
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("topic_type", stringProp("event/opinion/product/person."))
-                    put("summary", stringProp("Chinese editorial overview, 250-700 Chinese characters."))
+                    put("summary", stringProp("Chinese editorial overview, 120-250 Chinese characters."))
                     put("key_entities", stringArrayProp("Key people, companies, products, places, or institutions."))
-                    put("hero_image_url", stringProp("Optional real source image URL. Use only real source/search image, never generated news scene."))
-                    put("hero_caption", stringProp("Optional Chinese caption for the hero image."))
                     put("references", readingLinksProp("Sources used in this section."))
                 },
                 required = listOf("summary"),
@@ -106,14 +121,12 @@ class DeepReadSectionWriterTools(
                 val references = obj.readingLinks("references")
                 val next = current.copy(
                     topicType = obj.string("topic_type")?.safeTake(32) ?: current.topicType,
-                    summary = obj.string("summary")?.cleanText(1_500) ?: current.summary,
+                    summary = obj.string("summary")?.cleanText(OVERVIEW_SUMMARY_MAX_CHARS) ?: current.summary,
                     keyEntities = mergeStrings(current.keyEntities, obj.stringList("key_entities"), limit = 12),
-                    heroImageUrl = obj.url("hero_image_url") ?: current.heroImageUrl,
-                    heroCaption = obj.string("hero_caption")?.cleanText(180) ?: current.heroCaption,
                     references = mergeReadingLinks(current.references, references, limit = 12),
                 )
                 if (!next.hasOverviewContent()) return@update current
-                _writeCount.incrementAndGet()
+                markRequiredWrite()
                 next.withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
             }
             if (output.statusOf(DeepReadGenerationStage.OVERVIEW) == DeepReadSectionStatus.READY) {
@@ -146,7 +159,7 @@ class DeepReadSectionWriterTools(
                     references = mergeReadingLinks(current.references, obj.readingLinks("references"), limit = 12),
                 )
                 if (!next.hasNarrativeContent()) return@update current
-                _writeCount.incrementAndGet()
+                markRequiredWrite()
                 next.withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
             }
             if (output.statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) {
@@ -185,7 +198,7 @@ class DeepReadSectionWriterTools(
                     references = mergeReadingLinks(current.references, obj.readingLinks("references"), limit = 12),
                 )
                 if (!next.hasAnalysisContent()) return@update current
-                _writeCount.incrementAndGet()
+                markRequiredWrite()
                 next.withSectionStatus(DeepReadGenerationStage.ANALYSIS, DeepReadSectionStatus.READY)
             }
             if (output.statusOf(DeepReadGenerationStage.ANALYSIS) == DeepReadSectionStatus.READY) {
@@ -217,10 +230,14 @@ class DeepReadSectionWriterTools(
                 val next = current.copy(
                     extendedReading = mergeReadingLinks(current.extendedReading, links, limit = 10),
                     references = mergeReadingLinks(current.references, links, limit = 12),
-                    imageAssets = mergeImageAssets(current.imageAssets, obj.imageAssets(), limit = 8),
+                    imageAssets = mergeImageAssets(
+                        current.imageAssets,
+                        obj.imageAssets().mapNotNull { it.withCandidateEvidence() },
+                        limit = 8,
+                    ),
                 )
                 if (!next.hasExtendedReadingContent()) return@update current
-                _writeCount.incrementAndGet()
+                markRequiredWrite()
                 next.withSectionStatus(DeepReadGenerationStage.EXTENDED_READING, DeepReadSectionStatus.READY)
             }
             if (output.statusOf(DeepReadGenerationStage.EXTENDED_READING) == DeepReadSectionStatus.READY) {
@@ -228,6 +245,82 @@ class DeepReadSectionWriterTools(
             } else {
                 missing("extended_reading", "links")
             }
+        },
+    )
+
+    private fun visualsTool() = Tool(
+        name = "deep_read_write_visuals",
+        description = "Internal Deep Read visual selector. Select hero/inline images only from the pre-fetched candidate pool; never submit arbitrary URLs.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("hero_image_url", stringProp("Optional candidate image URL. Must have hero confidence in the candidate pool."))
+                    put("hero_caption", stringProp("Chinese caption for selected hero image."))
+                    put("hero_reason", stringProp("Why this candidate matches the title and is not a logo/icon."))
+                    put("image_assets", imageAssetsProp())
+                },
+            )
+        },
+        allowsAutoApproval = true,
+        execute = { input ->
+            val obj = input.objectOrEmpty()
+            val output = update { current ->
+                val heroUrl = obj.url("hero_image_url")?.takeIf { isHeroCandidate(it) }
+                val incomingAssets = obj.imageAssets()
+                    .mapNotNull { asset -> asset.withCandidateEvidence() }
+                val heroCandidate = heroUrl?.let { candidateForUrl(it) }
+                val heroReason = obj.string("hero_reason")?.cleanText(240)
+                    ?: heroCandidate?.selectionReason(topicTitle)
+                val heroAsset = heroCandidate?.toImageAsset(
+                    caption = obj.string("hero_caption")?.cleanText(180),
+                    reason = heroReason,
+                )
+                val next = current.copy(
+                    heroImageUrl = heroUrl ?: current.heroImageUrl,
+                    heroCaption = obj.string("hero_caption")?.cleanText(180)?.takeIf { heroUrl != null } ?: current.heroCaption,
+                    heroImageConfidence = if (heroUrl != null) IMAGE_CONFIDENCE_HERO else current.heroImageConfidence,
+                    imageAssets = mergeImageAssets(current.imageAssets, listOfNotNull(heroAsset) + incomingAssets, limit = 8),
+                    visualDiagnostics = buildVisualDiagnostics(
+                        previous = current.visualDiagnostics,
+                        heroCandidate = heroCandidate,
+                        heroReason = heroReason,
+                        inlineAssets = incomingAssets,
+                    ),
+                )
+                if (heroUrl == null && incomingAssets.isEmpty()) return@update current
+                markVisibleWrite()
+                next
+            }
+            ok("visuals", output)
+        },
+    )
+
+    private fun diagramTool() = Tool(
+        name = "deep_read_write_diagram",
+        description = "Internal Deep Read diagram writer. Submit only a compact structured diagram spec; raw SVG/HTML/JS/external resources are forbidden. Use 3-6 short nodes and keep flow/causal diagrams to the main chain.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("type", stringProp("causal_chain/process_flow/stakeholder_map/system_structure/comparison_matrix."))
+                    put("title", stringProp("Short Chinese title."))
+                    put("reason", stringProp("Why this topic benefits from a diagram."))
+                    put("nodes", diagramNodesProp())
+                    put("edges", diagramEdgesProp())
+                    put("caption", stringProp("Optional Chinese caption."))
+                },
+                required = listOf("type", "title", "nodes"),
+            )
+        },
+        allowsAutoApproval = true,
+        execute = { input ->
+            val obj = input.objectOrEmpty()
+            val diagram = obj.diagram()
+            val output = update { current ->
+                if (diagram == null) return@update current
+                markVisibleWrite()
+                current.copy(diagram = diagram)
+            }
+            if (diagram != null) ok("diagram", output) else missing("diagram", "type, title, nodes")
         },
     )
 
@@ -246,7 +339,12 @@ class DeepReadSectionWriterTools(
         },
         allowsAutoApproval = true,
         execute = { input ->
-            val gate = input.objectOrEmpty().verificationGate()
+            val visibleText = currentOutput().verificationVisibleText()
+            val gate = input.objectOrEmpty().verificationGate(
+                visibleText = visibleText,
+                isEvidenceUrlAllowed = isEvidenceUrlAllowed,
+                evidenceContains = evidenceContains,
+            )
             if (gate.accepted) {
                 _verificationCount.incrementAndGet()
                 verifiedWriteCount.set(writeCount)
@@ -293,6 +391,90 @@ class DeepReadSectionWriterTools(
             )
         },
     )
+
+    private fun isHeroCandidate(url: String): Boolean =
+        candidateForUrl(url)?.confidence == IMAGE_CONFIDENCE_HERO
+
+    private fun markRequiredWrite() {
+        _writeCount.incrementAndGet()
+        _requiredWriteCount.incrementAndGet()
+    }
+
+    private fun markVisibleWrite() {
+        _writeCount.incrementAndGet()
+    }
+
+    private fun candidateForUrl(url: String): DeepReadImageCandidate? =
+        imageCandidates.firstOrNull { it.imageUrl == url }
+
+    private fun DeepReadImageAsset.withCandidateEvidence(): DeepReadImageAsset? {
+        val candidate = candidateForUrl(url) ?: return null
+        if (candidate.confidence == IMAGE_CONFIDENCE_REJECT) return null
+        return copy(
+            source = source ?: candidate.sourceService,
+            confidence = candidate.confidence,
+            score = candidate.score,
+            qualityHint = qualityHint ?: candidate.confidence,
+            selectionReason = selectionReason ?: candidate.selectionReason(topicTitle),
+        )
+    }
+
+    private fun DeepReadImageCandidate.toImageAsset(
+        caption: String? = null,
+        reason: String? = null,
+    ): DeepReadImageAsset =
+        DeepReadImageAsset(
+            url = imageUrl,
+            caption = caption,
+            source = sourceService,
+            qualityHint = confidence,
+            confidence = confidence,
+            score = score,
+            selectionReason = reason ?: selectionReason(topicTitle),
+        )
+
+    private fun buildVisualDiagnostics(
+        previous: DeepReadVisualDiagnostics?,
+        heroCandidate: DeepReadImageCandidate?,
+        heroReason: String?,
+        inlineAssets: List<DeepReadImageAsset>,
+    ): DeepReadVisualDiagnostics =
+        DeepReadVisualDiagnostics(
+            candidateCount = imageCandidates.size.coerceAtLeast(previous?.candidateCount ?: 0),
+            heroSelection = heroCandidate?.let {
+                DeepReadImageSelection(
+                    imageUrl = it.imageUrl,
+                    confidence = it.confidence,
+                    score = it.score,
+                    reason = heroReason ?: it.selectionReason(topicTitle),
+                    riskFlags = it.riskFlags,
+                )
+            } ?: previous?.heroSelection,
+            inlineSelections = (previous?.inlineSelections.orEmpty() + inlineAssets.mapNotNull { asset ->
+                candidateForUrl(asset.url)?.let { candidate ->
+                    DeepReadImageSelection(
+                        imageUrl = candidate.imageUrl,
+                        confidence = candidate.confidence,
+                        score = candidate.score,
+                        reason = asset.selectionReason ?: candidate.selectionReason(topicTitle),
+                        riskFlags = candidate.riskFlags,
+                    )
+                }
+            }).distinctBy { it.imageUrl }.take(6),
+            rejectedImages = (previous?.rejectedImages.orEmpty() + imageCandidates
+                .filter { it.confidence == IMAGE_CONFIDENCE_REJECT }
+                .sortedByDescending { it.score }
+                .take(6)
+                .map {
+                    DeepReadImageSelection(
+                        imageUrl = it.imageUrl,
+                        confidence = it.confidence,
+                        score = it.score,
+                        reason = it.selectionReason(topicTitle),
+                        riskFlags = it.riskFlags,
+                    )
+                }).distinctBy { it.imageUrl }.take(6),
+        )
 
     private suspend fun update(transform: (DeepReadOutput) -> DeepReadOutput): DeepReadOutput = writeMutex.withLock {
         val current = currentOutput()
@@ -406,8 +588,36 @@ private fun imageAssetsProp() = buildJsonObject {
             put("url", stringProp("Real source/search image URL."))
             put("caption", stringProp("Chinese caption."))
             put("source", stringProp("Source name/domain."))
-            put("quality_hint", stringProp("hero/context/chart/etc."))
+            put("quality_hint", stringProp("hero/inline/context/chart/etc."))
+            put("selection_reason", stringProp("Why this candidate is useful for the article."))
         })
+    })
+}
+
+private fun diagramNodesProp() = buildJsonObject {
+    put("type", "array")
+    put("items", buildJsonObject {
+        put("type", "object")
+        put("properties", buildJsonObject {
+            put("id", stringProp("Stable short id, e.g. n1."))
+            put("label", stringProp("Short Chinese node label, one phrase."))
+            put("note", stringProp("Optional Chinese detail, one compact sentence."))
+            put("group", stringProp("Optional group/lane label."))
+        })
+        put("required", JsonArray(listOf(JsonPrimitive("id"), JsonPrimitive("label"))))
+    })
+}
+
+private fun diagramEdgesProp() = buildJsonObject {
+    put("type", "array")
+    put("items", buildJsonObject {
+        put("type", "object")
+        put("properties", buildJsonObject {
+            put("from", stringProp("Source node id."))
+            put("to", stringProp("Target node id."))
+            put("label", stringProp("Optional short Chinese edge label."))
+        })
+        put("required", JsonArray(listOf(JsonPrimitive("from"), JsonPrimitive("to"))))
     })
 }
 
@@ -417,8 +627,10 @@ private fun verifiedClaimsProp() = buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
             put("claim", stringProp("Core claim checked."))
+            put("visible_excerpt", stringProp("Exact visible excerpt from the current Deep Read draft that this claim verifies."))
             put("status", stringProp("verified/uncertain/refuted."))
             put("note", stringProp("Chinese verification note."))
+            put("evidence_excerpt", stringProp("Exact excerpt from one evidence URL that supports or refutes this claim."))
             put("evidence_urls", buildJsonObject {
                 put("type", "array")
                 put("items", buildJsonObject { put("type", "string") })
@@ -513,10 +725,71 @@ private fun JsonObject.imageAssets(): List<DeepReadImageAsset> =
             caption = obj.string("caption")?.cleanText(180),
             source = obj.string("source")?.cleanText(80),
             qualityHint = obj.string("quality_hint")?.cleanText(60),
+            selectionReason = obj.string("selection_reason")?.cleanText(240),
         )
     }.take(8)
 
-private fun JsonObject.verificationGate(): VerificationGate {
+private fun JsonObject.diagram(): DeepReadDiagram? {
+    val type = string("type")?.lowercase()?.takeIf {
+        it in setOf("causal_chain", "process_flow", "stakeholder_map", "system_structure", "comparison_matrix")
+    } ?: return null
+    val title = string("title")?.cleanText(DIAGRAM_TITLE_MAX_CHARS) ?: return null
+    val nodes = objectList("nodes").mapNotNull { obj ->
+        val id = obj.string("id")?.cleanText(32) ?: return@mapNotNull null
+        val label = obj.string("label")?.cleanText(DIAGRAM_NODE_LABEL_MAX_CHARS) ?: return@mapNotNull null
+        DeepReadDiagramNode(
+            id = id,
+            label = label,
+            note = obj.string("note")?.cleanText(DIAGRAM_NODE_NOTE_MAX_CHARS),
+            group = obj.string("group")?.cleanText(DIAGRAM_NODE_GROUP_MAX_CHARS),
+        )
+    }.distinctBy { it.id }.take(MAX_DIAGRAM_NODES)
+    if (nodes.size < 2) return null
+    val nodeIds = nodes.map { it.id }.toSet()
+    val rawEdges = objectList("edges").mapNotNull { obj ->
+        val from = obj.string("from")?.cleanText(32) ?: return@mapNotNull null
+        val to = obj.string("to")?.cleanText(32) ?: return@mapNotNull null
+        if (from !in nodeIds || to !in nodeIds || from == to) return@mapNotNull null
+        DeepReadDiagramEdge(
+            from = from,
+            to = to,
+            label = obj.string("label")?.cleanText(DIAGRAM_EDGE_LABEL_MAX_CHARS),
+        )
+    }
+    val edges = rawEdges.normalizedDiagramEdges(type = type, nodeIds = nodes.map { it.id })
+    return DeepReadDiagram(
+        type = type,
+        title = title,
+        reason = string("reason")?.cleanText(220),
+        nodes = nodes,
+        edges = edges,
+        caption = string("caption")?.cleanText(180),
+    )
+}
+
+private fun List<DeepReadDiagramEdge>.normalizedDiagramEdges(
+    type: String,
+    nodeIds: List<String>,
+): List<DeepReadDiagramEdge> {
+    val nodeIndex = nodeIds.withIndex().associate { it.value to it.index }
+    val unique = distinctBy { "${it.from}->${it.to}" }
+    if (type == "process_flow" || type == "causal_chain") {
+        return unique
+            .filter { edge ->
+                val fromIndex = nodeIndex[edge.from] ?: return@filter false
+                val toIndex = nodeIndex[edge.to] ?: return@filter false
+                toIndex - fromIndex == 1
+            }
+            .take(MAX_LINEAR_DIAGRAM_EDGES)
+    }
+    return unique.take(MAX_RELATION_DIAGRAM_EDGES)
+}
+
+private fun JsonObject.verificationGate(
+    visibleText: String,
+    isEvidenceUrlAllowed: (String) -> Boolean,
+    evidenceContains: (String, String) -> Boolean,
+): VerificationGate {
     val overall = string("overall")?.lowercase()
     if (overall !in setOf("passed", "has_uncertain", "has_refuted")) {
         return VerificationGate(false, "overall must be passed, has_uncertain, or has_refuted")
@@ -527,14 +800,26 @@ private fun JsonObject.verificationGate(): VerificationGate {
 
     val claims = objectList("checked_claims").mapNotNull { claim ->
         val text = claim.string("claim")?.cleanText(240).orEmpty()
+        val visibleExcerpt = claim.string("visible_excerpt")?.cleanText(420).orEmpty()
         val status = claim.string("status")?.lowercase().orEmpty()
         val note = claim.string("note")?.cleanText(240).orEmpty()
+        val evidenceExcerpt = claim.string("evidence_excerpt")?.cleanText(700).orEmpty()
         val evidenceUrls = claim.array("evidence_urls")
             .mapNotNull { runCatching { it.jsonPrimitive.contentOrNull?.trim() }.getOrNull() }
             .filter { it.startsWith("http://") || it.startsWith("https://") }
         if (text.length < 8 || status !in setOf("verified", "uncertain", "refuted") || note.length < 4) {
             null
+        } else if (visibleExcerpt.length < 8 || !visibleText.containsLoose(visibleExcerpt)) {
+            return VerificationGate(false, "checked_claims.visible_excerpt must appear in the current visible draft")
+        } else if (evidenceUrls.isNotEmpty() && evidenceExcerpt.length < 8) {
+            return VerificationGate(false, "evidence-backed claims must include evidence_excerpt")
+        } else if (evidenceUrls.isNotEmpty() && evidenceUrls.none { evidenceContains(it, evidenceExcerpt) }) {
+            return VerificationGate(false, "evidence_excerpt must appear in at least one evidence URL")
         } else {
+        val unknownEvidence = evidenceUrls.firstOrNull { !isEvidenceUrlAllowed(it) }
+        if (unknownEvidence != null) {
+            return VerificationGate(false, "evidence_urls must come from pre-fetched or actually visited sources: $unknownEvidence")
+        }
             VerifiedClaimGate(status = status, evidenceUrls = evidenceUrls)
         }
     }
@@ -558,6 +843,52 @@ private data class VerifiedClaimGate(
     val status: String,
     val evidenceUrls: List<String>,
 )
+
+private fun DeepReadOutput.verificationVisibleText(): String = buildString {
+    appendLine(summary)
+    appendLine(keyEntities.joinToString(" "))
+    timeline.orEmpty().forEach { event ->
+        appendLine(event.date)
+        appendLine(event.event)
+        appendLine(event.imageCaption.orEmpty())
+    }
+    corePoints.orEmpty().forEach { point ->
+        appendLine(point.point)
+        appendLine(point.supporting.orEmpty())
+        appendLine(point.imageCaption.orEmpty())
+    }
+    appendLine(analysis.coreDispute.orEmpty())
+    analysis.perspectives.forEach { perspective ->
+        appendLine(perspective.holder.orEmpty())
+        appendLine(perspective.viewpoint)
+    }
+    appendLine(analysis.implications.orEmpty())
+    analysis.quotes.forEach { quote ->
+        appendLine(quote.text)
+        appendLine(quote.attribution.orEmpty())
+    }
+    appendLine(heroCaption.orEmpty())
+    imageAssets.forEach { asset -> appendLine(asset.caption.orEmpty()) }
+    diagram?.let { diagram ->
+        appendLine(diagram.title)
+        appendLine(diagram.reason.orEmpty())
+        diagram.nodes.forEach { node ->
+            appendLine(node.label)
+            appendLine(node.note.orEmpty())
+            appendLine(node.group.orEmpty())
+        }
+        diagram.edges.forEach { edge -> appendLine(edge.label.orEmpty()) }
+        appendLine(diagram.caption.orEmpty())
+    }
+    extendedReading.forEach { link -> appendLine("${link.title} ${link.source.orEmpty()} ${link.url}") }
+    references.forEach { link -> appendLine("${link.title} ${link.source.orEmpty()} ${link.url}") }
+}
+
+private fun String.containsLoose(needle: String): Boolean =
+    normalizeForVerification().contains(needle.normalizeForVerification())
+
+private fun String.normalizeForVerification(): String =
+    replace(Regex("\\s+"), " ").trim()
 
 private fun String.cleanText(max: Int): String =
     replace(Regex("\\s+"), " ").trim().safeTake(max)
@@ -589,7 +920,7 @@ private fun mergeReadingLinks(
     limit: Int,
 ): List<ReadingLink> =
     (existing + incoming)
-        .filter { it.url.startsWith("http") }
+        .filter { it.url.isHttpOrHttpsUrl() }
         .distinctBy { it.url.trim().trimEnd('/') }
         .take(limit)
 
@@ -599,9 +930,16 @@ private fun mergeImageAssets(
     limit: Int,
 ): List<DeepReadImageAsset> =
     (existing + incoming)
-        .filter { it.url.startsWith("http") }
+        .filter { it.url.isHttpOrHttpsUrl() }
         .distinctBy { it.url.trim().trimEnd('/') }
         .take(limit)
+
+private fun DeepReadImageCandidate.selectionReason(topicTitle: String): String =
+    when (confidence) {
+        IMAGE_CONFIDENCE_HERO -> "候选图与「$topicTitle」的标题实体或事件词匹配，且未命中 logo/icon 风险。"
+        IMAGE_CONFIDENCE_INLINE -> "候选图可作为正文上下文图，但标题相关性不足以做头图。"
+        else -> riskFlags.takeIf { it.isNotEmpty() }?.joinToString("、") ?: "图片相关性或质量不足。"
+    }
 
 private fun DeepReadOutput.hasOverviewContent(): Boolean =
     summary.trim().length >= 40
@@ -616,4 +954,7 @@ private fun DeepReadOutput.hasAnalysisContent(): Boolean =
         analysis.quotes.any { it.text.trim().length >= 8 }
 
 private fun DeepReadOutput.hasExtendedReadingContent(): Boolean =
-    extendedReading.any { it.url.startsWith("http") }
+    extendedReading.any { it.url.isHttpOrHttpsUrl() }
+
+private fun String.isHttpOrHttpsUrl(): Boolean =
+    startsWith("http://") || startsWith("https://")

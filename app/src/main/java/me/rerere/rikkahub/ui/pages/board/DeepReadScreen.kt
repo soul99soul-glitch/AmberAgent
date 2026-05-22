@@ -1,11 +1,5 @@
 package me.rerere.rikkahub.ui.pages.board
 
-import android.annotation.SuppressLint
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -51,23 +46,26 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
+import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MAX
+import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MIN
 import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
-import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagram
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
@@ -85,13 +83,9 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTem
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.font.FontPackState
 import me.rerere.rikkahub.data.font.SlidesFontRepository
-import me.rerere.rikkahub.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
-import java.io.ByteArrayInputStream
-import java.io.File
 
 @Composable
 fun DeepReadScreen(
@@ -111,6 +105,7 @@ fun DeepReadScreen(
     val invalidTemplateCount by templateRepository.observeInvalidTemplateCount().collectAsStateWithLifecycle()
     val confirmed = settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed
     val board = settings.agentRuntime.todayBoard
+    val deepReadFontScale = board.deepReadFontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX)
     val readingFontFamily = rememberBoardReadingFontFamily(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
@@ -120,6 +115,7 @@ fun DeepReadScreen(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
         fontStates = fontStates,
+        fontScale = deepReadFontScale,
     )
 
     val outputFlow = remember(topicId) {
@@ -197,6 +193,7 @@ fun DeepReadScreen(
                 modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
                 palette = palette,
                 fontFamily = readingFontFamily,
+                fontScale = deepReadFontScale,
                 onConfirm = {
                     scope.launch {
                         settingsStore.update { current ->
@@ -230,12 +227,14 @@ fun DeepReadScreen(
                         fontCss = templateFontCss,
                         customTemplateHtml = customTemplate?.html,
                         fontRepository = fontRepository,
+                        fontScale = deepReadFontScale,
                         fallback = {
                             DeepReadArticle(
                                 title = title,
                                 output = data,
                                 palette = palette,
                                 fontFamily = readingFontFamily,
+                                fontScale = deepReadFontScale,
                                 listState = listState,
                                 onRetrySection = ::runOne,
                             )
@@ -285,6 +284,7 @@ fun DeepReadScreen(
                             output = data,
                             palette = palette,
                             fontFamily = readingFontFamily,
+                            fontScale = deepReadFontScale,
                             listState = listState,
                             onRetrySection = ::runOne,
                         )
@@ -310,12 +310,14 @@ fun DeepReadScreen(
                             fontCss = templateFontCss,
                             customTemplateHtml = customTemplate?.html,
                             fontRepository = fontRepository,
+                            fontScale = deepReadFontScale,
                             fallback = {
                                 DeepReadArticle(
                                     title = title,
                                     output = data,
                                     palette = palette,
                                     fontFamily = readingFontFamily,
+                                    fontScale = deepReadFontScale,
                                     listState = listState,
                                     onRetrySection = ::runOne,
                                 )
@@ -327,6 +329,7 @@ fun DeepReadScreen(
                             output = data,
                             palette = palette,
                             fontFamily = readingFontFamily,
+                            fontScale = deepReadFontScale,
                             listState = listState,
                             onRetrySection = ::runOne,
                         )
@@ -448,7 +451,6 @@ private fun TemplateFallbackNotice(message: String, modifier: Modifier = Modifie
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun DeepReadTemplateArticle(
     title: String,
@@ -457,6 +459,7 @@ private fun DeepReadTemplateArticle(
     fontCss: String,
     customTemplateHtml: String? = null,
     fontRepository: SlidesFontRepository,
+    fontScale: Float,
     fallback: @Composable () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -479,87 +482,21 @@ private fun DeepReadTemplateArticle(
         return
     }
     key(rendered.html.hashCode()) {
-        AndroidView(
+        DeepReadStaticTemplateWebView(
+            html = rendered.html,
             modifier = Modifier
                 .fillMaxSize()
                 .background(palette.background)
                 .statusBarsPadding()
                 .navigationBarsPadding(),
-            factory = { context ->
-                WebView(context).apply {
-                    settings.javaScriptEnabled = false
-                    settings.domStorageEnabled = false
-                    settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                    settings.allowFileAccess = false
-                    settings.allowContentAccess = false
-                    settings.loadsImagesAutomatically = true
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldInterceptRequest(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                        ): WebResourceResponse? {
-                            val url = request?.url?.toString().orEmpty()
-                            val mainFrame = request?.isForMainFrame == true
-                            if (mainFrame && url == DEEP_READ_TEMPLATE_BASE_URL) return null
-                            if (!mainFrame) {
-                                interceptBuiltInDeepReadFont(view, url)?.let { return it }
-                                fontRepository.interceptFontRequest(request)?.let { return it }
-                                if (url in rendered.allowedImageUrls) return null
-                            }
-                            return emptyWebResponse()
-                        }
-
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                        ): Boolean {
-                            val url = request?.url?.toString().orEmpty()
-                            if (url == DEEP_READ_TEMPLATE_BASE_URL) return false
-                            val scheme = request?.url?.scheme
-                            if ((scheme == "http" || scheme == "https") && url in rendered.allowedLinkUrls) {
-                                runCatching { uriHandler.openUri(url) }
-                                return true
-                            }
-                            return true
-                        }
-
-                        override fun onReceivedError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            error: android.webkit.WebResourceError?,
-                        ) {
-                            super.onReceivedError(view, request, error)
-                            val url = request?.url?.toString().orEmpty()
-                            when {
-                                request?.isForMainFrame == true -> failed = true
-                                url in rendered.allowedImageUrls -> failedImageUrls = failedImageUrls + url
-                            }
-                        }
-
-                        override fun onReceivedHttpError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            errorResponse: WebResourceResponse?,
-                        ) {
-                            super.onReceivedHttpError(view, request, errorResponse)
-                            val url = request?.url?.toString().orEmpty()
-                            if (request?.isForMainFrame == true) {
-                                failed = true
-                            } else if (url in rendered.allowedImageUrls) {
-                                failedImageUrls = failedImageUrls + url
-                            }
-                        }
-                    }
-                    loadDataWithBaseURL(
-                        DEEP_READ_TEMPLATE_BASE_URL,
-                        rendered.html,
-                        "text/html",
-                        "utf-8",
-                        null,
-                    )
-                }
-            },
-            update = {},
+            baseUrl = DEEP_READ_TEMPLATE_BASE_URL,
+            allowedImageUrls = rendered.allowedImageUrls,
+            allowedLinkUrls = rendered.allowedLinkUrls,
+            fontRepository = fontRepository,
+            textScale = fontScale,
+            onOpenLink = { url -> runCatching { uriHandler.openUri(url) } },
+            onMainFrameError = { failed = true },
+            onImageError = { url -> failedImageUrls = failedImageUrls + url },
         )
     }
 }
@@ -568,6 +505,7 @@ private fun DeepReadOutput.withoutTemplateImages(urls: Set<String>): DeepReadOut
     if (urls.isEmpty()) return this
     return copy(
         heroImageUrl = heroImageUrl?.takeUnless { it in urls },
+        heroImageConfidence = if (heroImageUrl != null && heroImageUrl in urls) null else heroImageConfidence,
         imageAssets = imageAssets.filterNot { it.url in urls },
         timeline = timeline?.map { event ->
             if (event.imageUrl in urls) {
@@ -586,9 +524,6 @@ private fun DeepReadOutput.withoutTemplateImages(urls: Set<String>): DeepReadOut
     )
 }
 
-private fun emptyWebResponse(): WebResourceResponse =
-    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-
 private fun openHttpUrl(uriHandler: androidx.compose.ui.platform.UriHandler, url: String) {
     val scheme = runCatching { android.net.Uri.parse(url).scheme }.getOrNull()
     if (scheme == "http" || scheme == "https") {
@@ -596,41 +531,34 @@ private fun openHttpUrl(uriHandler: androidx.compose.ui.platform.UriHandler, url
     }
 }
 
-private const val DEEP_READ_TEMPLATE_BASE_URL = "https://amberagent.local/deepread/"
-private const val DEEP_READ_BUILTIN_SERIF_FONT_URL = "https://amberagent.local/deepread-fonts/noto_serif_sc.otf"
-private const val DEEP_READ_SLIDES_FONT_HOST = "amberagent.local"
-
-private fun interceptBuiltInDeepReadFont(view: WebView?, url: String): WebResourceResponse? {
-    if (url != DEEP_READ_BUILTIN_SERIF_FONT_URL) return null
-    val input = view?.context?.resources?.openRawResource(R.font.noto_serif_sc) ?: return emptyWebResponse()
-    return WebResourceResponse("font/otf", null, input)
-}
-
 @Composable
 private fun DeepReadConfirmation(
     modifier: Modifier,
     palette: MagazinePalette,
     fontFamily: FontFamily?,
+    fontScale: Float,
     onConfirm: () -> Unit,
 ) {
-    Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            Text(
-                "深度阅读会消耗更多 tokens",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
-                    .withReadingFont(fontFamily),
-            )
-            Text(
-                "每次生成约消耗 3 万 tokens。同一话题 24 小时内优先使用缓存。",
-                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted)
-                    .withReadingFont(fontFamily),
-            )
-            Button(onClick = onConfirm) {
-                Text("继续生成")
+    DeepReadScaledText(fontScale) {
+        Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                Text(
+                    "深度阅读会消耗更多 tokens",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
+                        .withReadingFont(fontFamily),
+                )
+                Text(
+                    "每次生成约消耗 3 万 tokens。同一话题 24 小时内优先使用缓存。",
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted)
+                        .withReadingFont(fontFamily),
+                )
+                Button(onClick = onConfirm) {
+                    Text("继续生成")
+                }
             }
         }
     }
@@ -643,75 +571,103 @@ private fun DeepReadArticle(
     output: DeepReadOutput,
     palette: MagazinePalette,
     fontFamily: FontFamily?,
+    fontScale: Float,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onRetrySection: (DeepReadGenerationStage) -> Unit,
 ) {
     val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
-    LazyColumn(
-        state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .background(palette.background)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-        contentPadding = PaddingValues(
-            top = 8.dp,
-            bottom = 40.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(48.dp),
-    ) {
-        item {
-            MagazineHeroFrame(
-                title = title,
-                output = output,
-                status = output.statusOf(DeepReadGenerationStage.OVERVIEW),
-                errorMessage = output.errorOf(DeepReadGenerationStage.OVERVIEW),
-                onRetry = { onRetrySection(DeepReadGenerationStage.OVERVIEW) },
-                palette = palette,
-                fontFamily = fontFamily,
-            )
-        }
-
-        item {
-            ArticleInset {
-                NarrativeFrame(
+    DeepReadScaledText(fontScale) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(palette.background)
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            contentPadding = PaddingValues(
+                top = 8.dp,
+                bottom = 40.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(48.dp),
+        ) {
+            item {
+                MagazineHeroFrame(
+                    title = title,
                     output = output,
-                    verifiedImageUrls = verifiedImageUrls,
-                    status = output.statusOf(DeepReadGenerationStage.NARRATIVE),
-                    errorMessage = output.errorOf(DeepReadGenerationStage.NARRATIVE),
-                    onRetry = { onRetrySection(DeepReadGenerationStage.NARRATIVE) },
+                    status = output.statusOf(DeepReadGenerationStage.OVERVIEW),
+                    errorMessage = output.errorOf(DeepReadGenerationStage.OVERVIEW),
+                    onRetry = { onRetrySection(DeepReadGenerationStage.OVERVIEW) },
                     palette = palette,
                     fontFamily = fontFamily,
                 )
             }
-        }
 
-        item {
-            ArticleInset {
-                AnalysisFrame(
-                    analysis = output.analysis,
-                    status = output.statusOf(DeepReadGenerationStage.ANALYSIS),
-                    errorMessage = output.errorOf(DeepReadGenerationStage.ANALYSIS),
-                    onRetry = { onRetrySection(DeepReadGenerationStage.ANALYSIS) },
-                    palette = palette,
-                    fontFamily = fontFamily,
-                )
+            item {
+                ArticleInset {
+                    NarrativeFrame(
+                        output = output,
+                        verifiedImageUrls = verifiedImageUrls,
+                        status = output.statusOf(DeepReadGenerationStage.NARRATIVE),
+                        errorMessage = output.errorOf(DeepReadGenerationStage.NARRATIVE),
+                        onRetry = { onRetrySection(DeepReadGenerationStage.NARRATIVE) },
+                        palette = palette,
+                        fontFamily = fontFamily,
+                    )
+                }
             }
-        }
 
-        item {
-            ArticleInset {
-                ReadingFrame(
-                    links = output.extendedReading,
-                    status = output.statusOf(DeepReadGenerationStage.EXTENDED_READING),
-                    errorMessage = output.errorOf(DeepReadGenerationStage.EXTENDED_READING),
-                    onRetry = { onRetrySection(DeepReadGenerationStage.EXTENDED_READING) },
-                    palette = palette,
-                    fontFamily = fontFamily,
-                )
+            output.diagram?.takeIf { it.nodes.size >= 2 }?.let { diagram ->
+                item {
+                    ArticleInset {
+                        DiagramSection(
+                            diagram = diagram,
+                            palette = palette,
+                            fontFamily = fontFamily,
+                        )
+                    }
+                }
+            }
+
+            item {
+                ArticleInset {
+                    AnalysisFrame(
+                        analysis = output.analysis,
+                        status = output.statusOf(DeepReadGenerationStage.ANALYSIS),
+                        errorMessage = output.errorOf(DeepReadGenerationStage.ANALYSIS),
+                        onRetry = { onRetrySection(DeepReadGenerationStage.ANALYSIS) },
+                        palette = palette,
+                        fontFamily = fontFamily,
+                    )
+                }
+            }
+
+            item {
+                ArticleInset {
+                    ReadingFrame(
+                        links = output.extendedReading,
+                        status = output.statusOf(DeepReadGenerationStage.EXTENDED_READING),
+                        errorMessage = output.errorOf(DeepReadGenerationStage.EXTENDED_READING),
+                        onRetry = { onRetrySection(DeepReadGenerationStage.EXTENDED_READING) },
+                        palette = palette,
+                        fontFamily = fontFamily,
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun DeepReadScaledText(
+    fontScale: Float,
+    content: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
+    val safeScale = fontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX)
+    CompositionLocalProvider(
+        LocalDensity provides Density(density.density, density.fontScale * safeScale),
+        content = content,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1025,7 +981,7 @@ private fun MagazineHero(
     fontFamily: FontFamily?,
 ) {
     val verifiedImageUrls = remember(output.imageAssets) { output.verifiedImageUrls() }
-    val image = output.heroImageUrl?.takeIf { it in verifiedImageUrls }
+    val image = output.heroImageUrl?.takeIf { it in verifiedImageUrls && output.heroImageConfidence == "hero" }
     var imageFailed by remember(image) { mutableStateOf(false) }
     val showImage = image != null && !imageFailed
     val sourceLabel = remember(output.references, output.extendedReading) {
@@ -1369,6 +1325,107 @@ private fun CorePointsSection(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DiagramSection(
+    diagram: DeepReadDiagram,
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    val label = when (diagram.type) {
+        "causal_chain" -> "因果链"
+        "process_flow" -> "流程图"
+        "stakeholder_map" -> "关系图"
+        "system_structure" -> "结构图"
+        "comparison_matrix" -> "对比图"
+        else -> "图解"
+    }
+    val nodeLabels = diagram.nodes.associate { it.id to it.label }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionKicker(label, palette)
+        Text(
+            diagram.title,
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
+                .withReadingFont(fontFamily),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(palette.surface.copy(alpha = 0.56f), RoundedCornerShape(8.dp))
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            diagram.nodes.take(8).forEachIndexed { index, node ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+                    Text(
+                        "%02d".format(index + 1),
+                        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.6.sp),
+                        color = palette.accent,
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            node.label,
+                            style = MaterialTheme.typography.titleSmall.withReadingFont(fontFamily),
+                            color = palette.ink,
+                        )
+                        node.group?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.6.sp)
+                                    .withReadingFont(fontFamily),
+                                color = palette.accent,
+                            )
+                        }
+                        node.note?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp)
+                                    .withReadingFont(fontFamily),
+                                color = palette.muted,
+                            )
+                        }
+                    }
+                }
+            }
+            diagram.edges.take(12).takeIf { it.isNotEmpty() }?.let { edges ->
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(palette.muted.copy(alpha = 0.18f))
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    edges.forEach { edge ->
+                        val from = nodeLabels[edge.from] ?: edge.from
+                        val to = nodeLabels[edge.to] ?: edge.to
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "$from -> $to",
+                                style = MaterialTheme.typography.labelMedium.withReadingFont(fontFamily),
+                                color = palette.ink,
+                            )
+                            edge.label?.takeIf { it.isNotBlank() }?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp)
+                                        .withReadingFont(fontFamily),
+                                    color = palette.muted,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        diagram.caption?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily),
+                color = palette.muted,
+            )
         }
     }
 }
@@ -1756,76 +1813,6 @@ private fun defaultDeepReadErrorSuggestion(httpCode: String?, message: String): 
 
 private fun TextStyle.withReadingFont(fontFamily: FontFamily?): TextStyle =
     if (fontFamily == null) this else copy(fontFamily = fontFamily)
-
-@Composable
-private fun rememberDeepReadTemplateFontCss(
-    mode: TodayBoardReadingFontMode,
-    fontPackId: String?,
-    fontStates: List<FontPackState>,
-): String = remember(mode, fontPackId, fontStates) {
-    when (mode) {
-        TodayBoardReadingFontMode.SYSTEM -> deepReadFontVars(
-            serif = "\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif",
-            sans = "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif",
-        )
-
-        TodayBoardReadingFontMode.SERIF -> """
-            @font-face{
-              font-family:"AmberDeepReadSerif";
-              src:url("$DEEP_READ_BUILTIN_SERIF_FONT_URL") format("opentype");
-              font-weight:400;
-              font-style:normal;
-              font-display:swap;
-            }
-            ${deepReadFontVars(
-            serif = "\"AmberDeepReadSerif\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif",
-            sans = "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif",
-        )}
-        """.trimIndent()
-
-        TodayBoardReadingFontMode.SLIDES_PACK -> {
-            val state = fontStates
-                .firstOrNull { it.pack.id == fontPackId && it.installed }
-                ?.takeIf { File(it.installedPath.orEmpty()).isFile }
-            if (state == null) {
-                deepReadFontVars(
-                    serif = "\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif",
-                    sans = "\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif",
-                )
-            } else {
-                val family = "AmberDeepRead-${state.pack.id}"
-                val format = when (state.pack.fileName.substringAfterLast('.', "").lowercase()) {
-                    "otf" -> "opentype"
-                    "ttf" -> "truetype"
-                    "woff" -> "woff"
-                    "woff2" -> "woff2"
-                    else -> "truetype"
-                }
-                val source = "https://$DEEP_READ_SLIDES_FONT_HOST/fonts/${state.pack.id}/${state.pack.fileName}"
-                val serif = "\"$family\",\"Noto Serif SC\",\"Source Han Serif SC\",\"Songti SC\",serif"
-                val sans = "\"$family\",\"PingFang SC\",\"Source Han Sans SC\",\"Noto Sans SC\",system-ui,sans-serif"
-                """
-                    @font-face{
-                      font-family:"$family";
-                      src:url("$source") format("$format");
-                      font-weight:400;
-                      font-style:normal;
-                      font-display:swap;
-                    }
-                    ${deepReadFontVars(serif = serif, sans = sans)}
-                """.trimIndent()
-            }
-        }
-    }
-}
-
-private fun deepReadFontVars(serif: String, sans: String): String =
-    """
-        :root{
-          --deep-read-serif:$serif;
-          --deep-read-sans:$sans;
-        }
-    """.trimIndent()
 
 @Composable
 private fun magazinePalette(): MagazinePalette {

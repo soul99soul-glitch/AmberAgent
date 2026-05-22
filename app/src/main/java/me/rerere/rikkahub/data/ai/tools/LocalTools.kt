@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
 import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
@@ -43,6 +44,7 @@ class LocalTools(
     private val settingsStore: SettingsAggregator,
     private val imageGenerationRepository: ImageGenerationRepository,
     private val promptConfigRepository: AgentPromptConfigRepository,
+    private val deepReadPlaybookRepository: DeepReadPlaybookRepository,
 ) {
     val javascriptTool by lazy { createJavascriptTool() }
 
@@ -71,6 +73,8 @@ class LocalTools(
     val askUserTool by lazy { createAskUserTool() }
 
     val deepReadOpenTool by lazy { createDeepReadOpenTool(eventBus) }
+
+    private val deepReadPlaybookTools by lazy { DeepReadPlaybookTools(deepReadPlaybookRepository) }
 
     /**
      * Registry-introspection tools — the pair (`tools_list`, `tool_policy_explain`)
@@ -174,6 +178,7 @@ class LocalTools(
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
         tools.add(agentPromptConfigTool)
+        tools.addAll(deepReadPlaybookTools.getTools())
         tools.add(deepReadOpenTool)
 
         // generate_image auto-appears whenever the current assistant — or the

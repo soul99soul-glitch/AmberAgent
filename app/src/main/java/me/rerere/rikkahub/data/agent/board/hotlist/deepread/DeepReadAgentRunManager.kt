@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent.board.hotlist.deepread
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -10,7 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.ui.UIMessage
@@ -26,6 +29,8 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
+import java.net.URI
+import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
@@ -36,10 +41,36 @@ class DeepReadAgentRunManager(
     private val hotListRepository: HotListRepository,
     private val toolSetFactory: AgentToolSetFactory,
     private val sourcePrefetcher: DeepReadSourcePrefetcher,
+    private val playbookRepository: DeepReadPlaybookRepository,
     private val appScope: AppScope,
 ) {
     private val mutexes = ConcurrentHashMap<String, Mutex>()
     private val backgroundRuns = ConcurrentHashMap.newKeySet<String>()
+
+    suspend fun runPreview(
+        topicTitle: String,
+        seedUrl: String,
+    ): Result<DeepReadOutput> {
+        val normalizedSeedUrl = seedUrl.takeIf { it.isHttpOrHttpsUrl() }
+            ?: return Result.failure(IllegalArgumentException("新闻 Demo 只支持 http/https URL"))
+        val topicId = previewTopicId(normalizedSeedUrl)
+        return topicMutex(topicId).withLock {
+            try {
+                hotListRepository.clearDeepRead(topicId)
+                generateStages(
+                    topicId = topicId,
+                    topicTitle = topicTitle,
+                    stages = DeepReadGenerationStage.entries,
+                    seedUrl = normalizedSeedUrl,
+                    force = true,
+                )
+            } finally {
+                withContext(NonCancellable) {
+                    runCatching { hotListRepository.clearDeepRead(topicId) }
+                }
+            }
+        }
+    }
 
     suspend fun run(
         topicId: String,
@@ -119,18 +150,6 @@ class DeepReadAgentRunManager(
             return Result.failure(IllegalStateException("深度阅读需要配置支持工具调用的模型"))
         }
         val model = resolvedModel.withBoardRequestOptions(settings)
-        val writer = DeepReadSectionWriterTools(
-            repository = hotListRepository,
-            topicId = topicId,
-            topicTitle = topicTitle,
-            allowTitleFallback = seedUrl.isNullOrBlank(),
-        )
-        val writerTools = writer.tools(stages = stages.toSet())
-        val tools = toolSetFactory.forDeepRead(settings, writerTools)
-        val scrapeWebAvailable = tools.any { it.name == "scrape_web" }
-        val hiddenSettings = settings.toIsolatedSubAgentSettings()
-        val assistant = DeepReadHiddenAssistantFactory.create(settings)
-
         val prefetchedSources = sourcePrefetcher.collect(
             topicId = topicId,
             topicTitle = topicTitle,
@@ -143,6 +162,26 @@ class DeepReadAgentRunManager(
             return Result.failure(IllegalStateException(message))
         }
         Log.i(TAG, "deep read prefetch ready: ${prefetchedSources.size} sources for topic=$topicId")
+        val evidenceRegistry = DeepReadEvidenceRegistry()
+        prefetchedSources.forEach { source ->
+            evidenceRegistry.mark(source.url, source.content)
+        }
+        val writer = DeepReadSectionWriterTools(
+            repository = hotListRepository,
+            topicId = topicId,
+            topicTitle = topicTitle,
+            imageCandidates = prefetchedSources.flatMap { it.imageCandidates },
+            isEvidenceUrlAllowed = evidenceRegistry::isAllowed,
+            evidenceContains = evidenceRegistry::containsEvidence,
+            allowTitleFallback = seedUrl.isNullOrBlank(),
+        )
+        val writerTools = writer.tools(stages = stages.toSet())
+        val tools = toolSetFactory.forDeepRead(settings, writerTools)
+            .map { it.withEvidenceRecording(evidenceRegistry) }
+        val scrapeWebAvailable = tools.any { it.name == "scrape_web" }
+        val hiddenSettings = settings.toIsolatedSubAgentSettings()
+        val assistant = DeepReadHiddenAssistantFactory.create(settings)
+        val playbook = playbookRepository.read()
 
         return runCatching {
             writer.markRunning(stages)
@@ -162,12 +201,13 @@ class DeepReadAgentRunManager(
                             seedUrl = seedUrl,
                             scrapeWebAvailable = scrapeWebAvailable,
                             prefetchedSources = prefetchedSources,
+                            playbookMarkdown = playbook.markdown,
                         )
                     )
                 )
                 try {
                     repeat(MAX_SUPERVISOR_PASSES) { pass ->
-                        val beforeWrites = writer.writeCount
+                        val beforeWrites = writer.requiredWriteCount
                         messages = withTimeout(collectRunTimeoutFor(singleStage)) {
                             collectRun(
                                 settings = hiddenSettings,
@@ -182,7 +222,7 @@ class DeepReadAgentRunManager(
                         if (writer.currentOutput().statusOf(stage) == DeepReadSectionStatus.READY) {
                             return
                         }
-                        if (writer.writeCount == beforeWrites) {
+                        if (writer.requiredWriteCount == beforeWrites) {
                             messages = messages + UIMessage.user(buildWriterReminder(singleStage, pass))
                         }
                     }
@@ -216,7 +256,7 @@ class DeepReadAgentRunManager(
             suspend fun runVerificationPass() {
                 val current = writer.currentOutput()
                 val verifyMessages = listOf(
-                    UIMessage.user(buildVerificationReminder(topicTitle, current)),
+                    UIMessage.user(buildVerificationReminder(topicTitle, current, prefetchedSources, evidenceRegistry)),
                 )
                 try {
                     withTimeout(VERIFICATION_COLLECT_RUN_TIMEOUT_MS) {
@@ -380,10 +420,14 @@ class DeepReadAgentRunManager(
         seedUrl: String?,
         scrapeWebAvailable: Boolean,
         prefetchedSources: List<DeepReadSource>,
+        playbookMarkdown: String,
     ): String = buildString {
         appendLine("今天日期：${LocalDate.now()}")
         appendLine("话题标题：$topicTitle")
         appendLine("目标段落：${stages.joinToString(" → ") { it.label }}")
+        appendLine()
+        appendLine("## Deep Read Playbook（本地规则，只读）")
+        appendLine(playbookMarkdown.take(PLAYBOOK_PROMPT_LIMIT))
         seedUrl?.takeIf { it.isNotBlank() }?.let { url ->
             appendLine("用户指定来源 URL：$url")
             appendLine("该 URL 已在预抓阶段尝试读取，优先使用预抓正文；如下面预抓正文为空再 search_web/scrape_web 补充。")
@@ -407,11 +451,13 @@ class DeepReadAgentRunManager(
         appendLine("4. 本轮只生成目标段落，不要改写或重写未列入目标的段落。")
         appendLine("5. 完成研究后立即调用对应 writer tool：")
         stages.forEach { stage -> appendLine("   - ${stage.writerToolName()}：${stage.label}") }
-        appendLine("6. 全部 writer 完成后，系统会要求验真：调用 deep_read_verify_claims（至少 2 条带 evidence_urls 的核心声明），再 deep_read_finish。")
+        appendLine("6. 图片只能从 image_candidates 中选择：需要头图或正文图时调用 deep_read_write_visuals。低置信图不要做头图；没有 hero 级候选就留空。")
+        appendLine("7. 如果话题存在复杂因果、流程、利益相关方、系统结构或对比矩阵，调用 deep_read_write_diagram 提交结构化图解；不需要图解时完全不要调用。")
+        appendLine("8. 全部 writer 完成后，系统会要求验真：调用 deep_read_verify_claims（至少 2 条带 evidence_urls 的核心声明），再 deep_read_finish。")
         appendLine()
         appendLine("## 段落要求")
         if (DeepReadGenerationStage.OVERVIEW in stages) {
-            appendLine("- 概览：250-700 字中文杂志导语，说明事件是什么、为什么值得读、哪些事实已核查。")
+            appendLine("- 概览：120-250 字中文杂志导语，说明事件是什么、为什么值得读、哪些事实已核查；不要超过 250 字。")
         }
         if (DeepReadGenerationStage.NARRATIVE in stages) {
             appendLine("- 时间轴叙事：事件型写 timeline；观点/产品/人物型可写 core_points，但要有故事性和演化脉络。")
@@ -422,6 +468,8 @@ class DeepReadAgentRunManager(
         if (DeepReadGenerationStage.EXTENDED_READING in stages) {
             appendLine("- 扩展阅读：只放真实来源链接和真实图片资产。")
         }
+        appendLine("- 视觉：头图必须来自候选池且 confidence=hero；inline 候选只能作为正文图。不得提交任意 URL、站点 logo、favicon、媒体图标或头像。")
+        appendLine("- 图解：只提交 3-6 个短节点的 diagram spec；流程/因果只写主链路，避免网状交叉关系。禁止 raw SVG/HTML/JS/外链资源。图解不参与段落完成状态，不需要就隐藏。")
         appendLine()
         appendLine("正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。")
     }
@@ -438,6 +486,19 @@ class DeepReadAgentRunManager(
             appendLine("- source: ${source.source ?: "-"}")
             source.publishedAt?.takeIf { it.isNotBlank() }?.let { appendLine("- published_at: $it") }
             if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
+            val candidates = source.imageCandidates
+                .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
+                .take(5)
+            if (candidates.isNotEmpty()) {
+                appendLine("- image_candidates:")
+                candidates.forEach { candidate ->
+                    val risks = candidate.riskFlags.takeIf { it.isNotEmpty() }?.joinToString("|") ?: "-"
+                    appendLine(
+                        "  - ${candidate.confidence} score=${candidate.score} kind=${candidate.candidateKind} " +
+                            "risk=$risks url=${candidate.imageUrl} alt=${candidate.alt.orEmpty().take(80)}"
+                    )
+                }
+            }
             val excerpt = source.content.take(PROMPT_SOURCE_EXCERPT_LIMIT).replace("\n", " ").trim()
             if (excerpt.isNotBlank()) appendLine("- excerpt: $excerpt")
             appendLine()
@@ -451,20 +512,43 @@ class DeepReadAgentRunManager(
         appendLine("如果来源不足，只把当前段落写为 FAILED 的决定留给系统；不要用自由文本交差。")
     }
 
-    private fun buildVerificationReminder(topicTitle: String, currentOutput: DeepReadOutput): String = buildString {
+    private fun buildVerificationReminder(
+        topicTitle: String,
+        currentOutput: DeepReadOutput,
+        prefetchedSources: List<DeepReadSource>,
+        evidenceRegistry: DeepReadEvidenceRegistry,
+    ): String = buildString {
         appendLine("Final verification reminder:")
         appendLine("话题「$topicTitle」的四个段落已经写入。请在最终 finish 前执行验真 skill。")
         appendLine()
+        appendPrefetchedSources(prefetchedSources)
+        appendLine()
         appendArticleContext(currentOutput)
+        appendLine()
+        appendLine("## 当前允许 evidence_urls")
+        evidenceRegistry.allowedUrls().take(40).forEach { url -> appendLine("- $url") }
         appendLine()
         appendLine("验真要求：")
         appendLine("1. 基于上面的当前稿件全文，抽取影响最大的 3-5 个核心子声明。")
         appendLine("2. 用已获得来源（含预抓 URL）核查这些声明；仅当声明在所有已抓来源中都找不到对应证据时，才再调 search_web / scrape_web 补充。")
         appendLine("3. 如果发现不确定或被证伪的声明，先调用对应 deep_read_write_* 修正段落。")
-        appendLine("4. deep_read_verify_claims 至少提供 2 条带 evidence_urls 的核心声明。evidence_urls **只能来自**：(a) 上面「已预抓取来源」列表中的 URL（只要该声明在该来源正文里有依据），或 (b) 你在本轮 search_web/scrape_web 实际访问过的 URL。**不要写未访问过的猜测 URL**。未带来源 URL 的声明不会计入验真门槛。")
-        appendLine("5. 然后调用 deep_read_verify_claims，最后调用 deep_read_finish。")
+        appendLine("4. deep_read_verify_claims 至少提供 2 条带 evidence_urls 的核心声明。每条声明必须包含 visible_excerpt（当前稿件里的原文摘录）和 evidence_excerpt（对应来源正文/摘要里的原文摘录）。")
+        appendLine("5. evidence_urls **只能来自**：(a) 上面「已预抓取来源」列表中的 URL（只要该 evidence_excerpt 在该来源正文里），或 (b) 你在本轮 search_web/scrape_web 实际访问过且返回过 evidence_excerpt 的 URL。未带来源 URL 的声明不会计入验真门槛。")
+        appendLine("6. 然后调用 deep_read_verify_claims，最后调用 deep_read_finish。")
         appendLine()
         appendLine("仍然不要输出完整 JSON 或 Markdown 长文。")
+    }
+
+    private fun Tool.withEvidenceRecording(registry: DeepReadEvidenceRegistry): Tool {
+        if (name !in EVIDENCE_RECORDING_TOOL_NAMES) return this
+        val original = this
+        return copy(
+            execute = { input ->
+                val parts = original.execute(input)
+                registry.markToolResult(original.name, input, parts)
+                parts
+            }
+        )
     }
 
     private fun StringBuilder.appendArticleContext(output: DeepReadOutput) {
@@ -480,21 +564,53 @@ class DeepReadAgentRunManager(
             return
         }
         if (current.summary.isNotBlank()) {
-            appendLine("overview.summary: ${current.summary.take(1_000)}")
+            appendLine("overview.summary: ${current.summary}")
         }
         if (current.keyEntities.isNotEmpty()) {
             appendLine("overview.key_entities: ${current.keyEntities.take(12).joinToString(" / ")}")
         }
+        current.heroImageUrl?.takeIf { it.isNotBlank() }?.let { imageUrl ->
+            appendLine("visual.hero: $imageUrl")
+            appendLine("visual.hero_confidence: ${current.heroImageConfidence.orEmpty()}")
+            current.heroCaption?.takeIf { it.isNotBlank() }?.let { caption ->
+                appendLine("visual.hero_caption: $caption")
+            }
+            current.visualDiagnostics?.heroSelection?.let { selection ->
+                appendLine("visual.hero_reason: ${selection.reason.take(320)}")
+                appendLine("visual.hero_risks: ${selection.riskFlags.take(8).joinToString(" / ")}")
+            }
+        }
+        current.imageAssets.take(8).takeIf { it.isNotEmpty() }?.let { assets ->
+            appendLine("visual.inline_assets:")
+            assets.forEach { asset ->
+                appendLine(
+                    "- ${asset.confidence.orEmpty()} score=${asset.score ?: 0} " +
+                        "${asset.url} ${asset.caption.orEmpty()}"
+                )
+            }
+        }
         current.timeline.orEmpty().take(8).takeIf { it.isNotEmpty() }?.let { timeline ->
             appendLine("narrative.timeline:")
             timeline.forEachIndexed { index, event ->
-                appendLine("- ${index + 1}. ${event.date}: ${event.event.take(600)}")
+                appendLine("- ${index + 1}. ${event.date}: ${event.event}")
+                if (!event.imageUrl.isNullOrBlank() || !event.imageCaption.isNullOrBlank()) {
+                    appendLine(
+                        "  image: ${event.imageUrl.orEmpty()} " +
+                            event.imageCaption.orEmpty()
+                    )
+                }
             }
         }
         current.corePoints.orEmpty().take(8).takeIf { it.isNotEmpty() }?.let { points ->
             appendLine("narrative.core_points:")
             points.forEachIndexed { index, point ->
-                appendLine("- ${index + 1}. ${point.point.take(300)} ${point.supporting.orEmpty().take(500)}")
+                appendLine("- ${index + 1}. ${point.point} ${point.supporting.orEmpty()}")
+                if (!point.imageUrl.isNullOrBlank() || !point.imageCaption.isNullOrBlank()) {
+                    appendLine(
+                        "  image: ${point.imageUrl.orEmpty()} " +
+                            point.imageCaption.orEmpty()
+                    )
+                }
             }
         }
         if (
@@ -505,28 +621,51 @@ class DeepReadAgentRunManager(
         ) {
             appendLine("analysis:")
             current.analysis.coreDispute?.takeIf { it.isNotBlank() }?.let {
-                appendLine("- core_dispute: ${it.take(700)}")
+                appendLine("- core_dispute: $it")
             }
             current.analysis.perspectives.take(8).forEach { perspective ->
-                appendLine("- perspective(${perspective.holder.orEmpty()}): ${perspective.viewpoint.take(700)}")
+                appendLine("- perspective(${perspective.holder.orEmpty()}): ${perspective.viewpoint}")
             }
             current.analysis.implications?.takeIf { it.isNotBlank() }?.let {
-                appendLine("- implications: ${it.take(900)}")
+                appendLine("- implications: $it")
             }
             current.analysis.quotes.take(6).forEach { quote ->
-                appendLine("- quote(${quote.attribution.orEmpty()}): ${quote.text.take(300)}")
+                appendLine("- quote(${quote.attribution.orEmpty()}): ${quote.text}")
+            }
+        }
+        current.diagram?.takeIf { it.nodes.size >= 2 }?.let { diagram ->
+            appendLine("diagram:")
+            appendLine("- type: ${diagram.type}")
+            appendLine("- title: ${diagram.title}")
+            diagram.reason?.takeIf { it.isNotBlank() }?.let { appendLine("- reason: $it") }
+            appendLine("- nodes:")
+            diagram.nodes.take(8).forEach { node ->
+                val group = node.group?.takeIf { it.isNotBlank() }?.let { " group=$it" }.orEmpty()
+                appendLine(
+                    "  - ${node.id}$group: ${node.label} " +
+                        node.note.orEmpty()
+                )
+            }
+            if (diagram.edges.isNotEmpty()) {
+                appendLine("- edges:")
+                diagram.edges.take(12).forEach { edge ->
+                    appendLine("  - ${edge.from} -> ${edge.to}: ${edge.label.orEmpty()}")
+                }
+            }
+            diagram.caption?.takeIf { it.isNotBlank() }?.let { caption ->
+                appendLine("- caption: $caption")
             }
         }
         current.extendedReading.take(10).takeIf { it.isNotEmpty() }?.let { links ->
             appendLine("extended_reading:")
             links.forEach { link ->
-                appendLine("- ${link.title.take(180)} | ${link.source.orEmpty()} | ${link.url}")
+                appendLine("- ${link.title} | ${link.source.orEmpty()} | ${link.url}")
             }
         }
         current.references.take(12).takeIf { it.isNotEmpty() }?.let { links ->
             appendLine("references:")
             links.forEach { link ->
-                appendLine("- ${link.title.take(180)} | ${link.source.orEmpty()} | ${link.url}")
+                appendLine("- ${link.title} | ${link.source.orEmpty()} | ${link.url}")
             }
         }
     }
@@ -565,8 +704,20 @@ class DeepReadAgentRunManager(
     private fun collectRunTimeoutFor(stages: List<DeepReadGenerationStage>): Long =
         COLLECT_RUN_BASE_TIMEOUT_MS + stages.size * COLLECT_RUN_PER_STAGE_TIMEOUT_MS
 
+    private fun previewTopicId(seedUrl: String): String =
+        PREVIEW_TOPIC_PREFIX + MessageDigest.getInstance("SHA-256")
+            .digest(seedUrl.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+            .take(16)
+
+    private fun String.isHttpOrHttpsUrl(): Boolean {
+        val uri = runCatching { URI(this) }.getOrNull() ?: return false
+        return (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()
+    }
+
     companion object {
         private const val TAG = "DeepReadAgentRunManager"
+        private const val PREVIEW_TOPIC_PREFIX = "template-demo-"
         private const val MAX_GENERATION_STEPS = 32
         private const val MAX_SUPERVISOR_PASSES = 2
 
@@ -584,6 +735,8 @@ class DeepReadAgentRunManager(
         // search_web on the same URL.
         private const val PROMPT_SOURCE_LIMIT = 12
         private const val PROMPT_SOURCE_EXCERPT_LIMIT = 2_000
+        private const val PLAYBOOK_PROMPT_LIMIT = 12_000
+        private val EVIDENCE_RECORDING_TOOL_NAMES = setOf("search_web", "scrape_web")
     }
 }
 

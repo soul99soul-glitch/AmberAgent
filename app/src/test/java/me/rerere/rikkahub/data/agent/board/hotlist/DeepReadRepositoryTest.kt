@@ -10,10 +10,13 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageCandidate
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionWriterTools
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_INLINE
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.isComplete
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
 import me.rerere.rikkahub.data.db.dao.HotListDAO
@@ -149,14 +152,18 @@ class DeepReadRepositoryTest {
             put("checked_claims", buildJsonArray {
                 add(buildJsonObject {
                     put("claim", "事件进入公开讨论阶段")
+                    put("visible_excerpt", "事件进入公开讨论阶段")
                     put("status", "verified")
                     put("note", "已有来源支撑")
+                    put("evidence_excerpt", "已有来源支撑并可交叉核查")
                     put("evidence_urls", buildJsonArray { add("https://example.com/a") })
                 })
                 add(buildJsonObject {
                     put("claim", "核心分歧已经在分析段落中降格表达")
+                    put("visible_excerpt", "核心分歧在于各方如何解释事件影响")
                     put("status", "verified")
                     put("note", "分析段落没有保留被证伪声明")
+                    put("evidence_excerpt", "分析段落没有保留被证伪声明")
                     put("evidence_urls", buildJsonArray { add("https://example.com/a") })
                 })
             })
@@ -231,6 +238,375 @@ class DeepReadRepositoryTest {
         assertEquals(0, writer.verificationCount)
         assertTrue(!writer.hasFreshVerification)
     }
+
+    @Test
+    fun sectionWriterRejectsUnseenEvidenceUrls() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(
+            repository = repo,
+            topicId = "topic",
+            topicTitle = "话题",
+            isEvidenceUrlAllowed = { it == "https://example.com/allowed" },
+        )
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+        })
+        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
+            put("overall", "passed")
+            put("corrections_applied", false)
+            put("checked_claims", buildJsonArray {
+                add(buildJsonObject {
+                    put("claim", "一个有来源支撑的核心声明")
+                    put("visible_excerpt", "这是经过来源核查后的概览正文")
+                    put("status", "verified")
+                    put("note", "来源支撑")
+                    put("evidence_excerpt", "来源支撑并可交叉核查")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/allowed") })
+                })
+                add(buildJsonObject {
+                    put("claim", "另一个核心声明也必须来自允许来源")
+                    put("visible_excerpt", "为什么值得继续阅读")
+                    put("status", "verified")
+                    put("note", "来源支撑")
+                    put("evidence_excerpt", "来源支撑并可交叉核查")
+                    put("evidence_urls", buildJsonArray { add("https://evil.example.com/made-up") })
+                })
+            })
+        })
+
+        assertEquals(0, writer.verificationCount)
+        assertTrue(!writer.hasFreshVerification)
+    }
+
+    @Test
+    fun sectionWriterRejectsUnsupportedEvidenceExcerpt() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(
+            repository = repo,
+            topicId = "topic",
+            topicTitle = "话题",
+            isEvidenceUrlAllowed = { it == "https://example.com/a" },
+            evidenceContains = { _, _ -> false },
+        )
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+        })
+        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
+            put("overall", "passed")
+            put("corrections_applied", false)
+            put("checked_claims", buildJsonArray {
+                add(buildJsonObject {
+                    put("claim", "一个有来源支撑的核心声明")
+                    put("visible_excerpt", "这是经过来源核查后的概览正文")
+                    put("status", "verified")
+                    put("note", "来源支撑")
+                    put("evidence_excerpt", "来源正文里并不存在这段")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+                add(buildJsonObject {
+                    put("claim", "另一个核心声明也需要证据摘录")
+                    put("visible_excerpt", "为什么值得继续阅读")
+                    put("status", "verified")
+                    put("note", "来源支撑")
+                    put("evidence_excerpt", "另一段不存在的来源文字")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+            })
+        })
+
+        assertEquals(0, writer.verificationCount)
+        assertTrue(!writer.hasFreshVerification)
+    }
+
+    @Test
+    fun visualsToolOnlyAcceptsCandidatePoolImages() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val hero = "https://news.example.com/hero.jpg"
+        val inline = "https://news.example.com/inline.jpg"
+        val writer = DeepReadSectionWriterTools(
+            repository = repo,
+            topicId = "topic",
+            topicTitle = "话题",
+            imageCandidates = listOf(
+                imageCandidate(hero, IMAGE_CONFIDENCE_HERO, 80),
+                imageCandidate(inline, IMAGE_CONFIDENCE_INLINE, 28),
+            ),
+        )
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_visuals").execute(buildJsonObject {
+            put("hero_image_url", hero)
+            put("hero_caption", "真实头图")
+            put("hero_reason", "标题强匹配")
+            put("image_assets", buildJsonArray {
+                add(buildJsonObject {
+                    put("url", inline)
+                    put("caption", "正文图")
+                    put("selection_reason", "上下文图")
+                })
+                add(buildJsonObject {
+                    put("url", "https://invented.example.com/fake.jpg")
+                    put("caption", "假图")
+                })
+            })
+        })
+
+        val output = repo.getFreshDeepRead("topic", title = "话题")
+        assertEquals(hero, output?.heroImageUrl)
+        assertEquals(IMAGE_CONFIDENCE_HERO, output?.heroImageConfidence)
+        assertEquals(listOf(hero, inline), output?.imageAssets?.map { it.url })
+        assertEquals(hero, output?.visualDiagnostics?.heroSelection?.imageUrl)
+
+        tools.getValue("deep_read_write_visuals").execute(buildJsonObject {
+            put("image_assets", buildJsonArray {
+                add(buildJsonObject {
+                    put("url", inline)
+                    put("caption", "正文图二次选择")
+                    put("selection_reason", "继续作为正文图")
+                })
+            })
+        })
+
+        val updated = repo.getFreshDeepRead("topic", title = "话题")
+        assertEquals(hero, updated?.heroImageUrl)
+        assertEquals(hero, updated?.visualDiagnostics?.heroSelection?.imageUrl)
+    }
+
+    @Test
+    fun overviewToolDoesNotSelectHeroImage() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val hero = "https://news.example.com/hero.jpg"
+        val writer = DeepReadSectionWriterTools(
+            repository = repo,
+            topicId = "topic",
+            topicTitle = "话题",
+            imageCandidates = listOf(imageCandidate(hero, IMAGE_CONFIDENCE_HERO, 80)),
+        )
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+            put("hero_image_url", hero)
+            put("hero_caption", "不应由 overview 写入")
+        })
+
+        val output = repo.getFreshDeepRead("topic", title = "话题")
+        assertNull(output?.heroImageUrl)
+        assertEquals(emptyList<String>(), output?.imageAssets?.map { it.url })
+    }
+
+    @Test
+    fun overviewToolCapsSummaryAt250Characters() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+        val longSummary = "这是一个用于验证概览长度限制的中文句子，包含事件背景、影响和关键事实。".repeat(12)
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", longSummary)
+        })
+
+        val output = repo.getFreshDeepRead("topic", title = "话题")
+        assertTrue(output?.summary.orEmpty().length <= 250)
+        assertEquals(DeepReadSectionStatus.READY, output?.statusOf(DeepReadGenerationStage.OVERVIEW))
+    }
+
+    @Test
+    fun diagramToolDoesNotMarkGenerationComplete() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_diagram").execute(buildJsonObject {
+            put("type", "process_flow")
+            put("title", "流程图")
+            put("nodes", buildJsonArray {
+                add(buildJsonObject {
+                    put("id", "a")
+                    put("label", "起点")
+                })
+                add(buildJsonObject {
+                    put("id", "b")
+                    put("label", "结果")
+                })
+            })
+            put("edges", buildJsonArray {
+                add(buildJsonObject {
+                    put("from", "a")
+                    put("to", "b")
+                    put("label", "导致")
+                })
+            })
+        })
+
+        val output = repo.getFreshDeepRead("topic", title = "话题")
+        assertEquals("流程图", output?.diagram?.title)
+        assertTrue(output?.isComplete() != true)
+        assertEquals(DeepReadSectionStatus.PENDING, output?.statusOf(DeepReadGenerationStage.OVERVIEW))
+    }
+
+    @Test
+    fun diagramToolCompactsDenseSpecsBeforePersisting() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_diagram").execute(buildJsonObject {
+            put("type", "process_flow")
+            put("title", "国产大模型适配国产算力：政策与产业演进路径")
+            put("nodes", buildJsonArray {
+                (1..8).forEach { index ->
+                    add(buildJsonObject {
+                        put("id", "n$index")
+                        put("label", "第${index}个很长很长的节点标题用于验证不会把整段正文塞进图解里")
+                        put("note", "这是一段很长的节点说明，用来模拟模型把正文塞进图解节点导致移动端渲染拥挤的情况。".repeat(4))
+                    })
+                }
+            })
+            put("edges", buildJsonArray {
+                add(buildJsonObject {
+                    put("from", "n1")
+                    put("to", "n5")
+                    put("label", "跨层级关系应该被流程图主链路过滤掉")
+                })
+                (1..7).forEach { index ->
+                    add(buildJsonObject {
+                        put("from", "n$index")
+                        put("to", "n${index + 1}")
+                        put("label", "进入下一阶段并继续推进产业适配")
+                    })
+                }
+            })
+        })
+
+        val diagram = repo.getFreshDeepRead("topic", title = "话题")?.diagram
+        assertEquals(6, diagram?.nodes?.size)
+        assertTrue(diagram?.nodes.orEmpty().all { it.label.length <= 34 && it.note.orEmpty().length <= 96 })
+        assertEquals(listOf("n1->n2", "n2->n3", "n3->n4", "n4->n5", "n5->n6"), diagram?.edges?.map { "${it.from}->${it.to}" })
+        assertTrue(diagram?.edges.orEmpty().all { it.label.orEmpty().length <= 42 })
+    }
+
+    @Test
+    fun optionalVisualAndDiagramWritesRequireFreshVerificationBeforeFinish() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val hero = "https://news.example.com/hero.jpg"
+        val writer = DeepReadSectionWriterTools(
+            repository = repo,
+            topicId = "topic",
+            topicTitle = "话题",
+            imageCandidates = listOf(imageCandidate(hero, IMAGE_CONFIDENCE_HERO, 80)),
+        )
+        val tools = writer.tools().associateBy { it.name }
+
+        tools.getValue("deep_read_write_overview").execute(buildJsonObject {
+            put("summary", "这是经过来源核查后的概览正文，说明事件是什么、为什么值得继续阅读，以及哪些关键事实已经被来源支撑。")
+        })
+        tools.getValue("deep_read_write_narrative").execute(buildJsonObject {
+            put("timeline", buildJsonArray {
+                add(buildJsonObject {
+                    put("date", "2026-05-21")
+                    put("event", "事件进入公开讨论阶段，多个来源给出了可交叉核查的时间线。")
+                })
+            })
+        })
+        tools.getValue("deep_read_write_analysis").execute(buildJsonObject {
+            put("core_dispute", "核心分歧在于各方如何解释事件影响，以及哪些事实能够被独立来源持续支撑。")
+        })
+        tools.getValue("deep_read_write_extended_reading").execute(buildJsonObject {
+            put("links", buildJsonArray {
+                add(buildJsonObject {
+                    put("title", "来源一")
+                    put("url", "https://example.com/a")
+                    put("source", "example.com")
+                })
+            })
+        })
+        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
+            put("overall", "passed")
+            put("corrections_applied", false)
+            put("checked_claims", buildJsonArray {
+                add(buildJsonObject {
+                    put("claim", "事件进入公开讨论阶段")
+                    put("visible_excerpt", "事件进入公开讨论阶段")
+                    put("status", "verified")
+                    put("note", "已有来源支撑")
+                    put("evidence_excerpt", "已有来源支撑并可交叉核查")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+                add(buildJsonObject {
+                    put("claim", "核心分歧已经在分析段落中降格表达")
+                    put("visible_excerpt", "核心分歧在于各方如何解释事件影响")
+                    put("status", "verified")
+                    put("note", "分析段落没有保留被证伪声明")
+                    put("evidence_excerpt", "分析段落没有保留被证伪声明")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+            })
+        })
+        assertTrue(writer.hasFreshVerification)
+
+        tools.getValue("deep_read_write_visuals").execute(buildJsonObject {
+            put("hero_image_url", hero)
+            put("hero_caption", "真实头图")
+        })
+        tools.getValue("deep_read_write_diagram").execute(buildJsonObject {
+            put("type", "process_flow")
+            put("title", "流程图")
+            put("nodes", buildJsonArray {
+                add(buildJsonObject {
+                    put("id", "a")
+                    put("label", "起点")
+                })
+                add(buildJsonObject {
+                    put("id", "b")
+                    put("label", "结果")
+                })
+            })
+        })
+
+        assertTrue(!writer.hasFreshVerification)
+        tools.getValue("deep_read_finish").execute(buildJsonObject { })
+        assertTrue(repo.getFreshDeepRead("topic", title = "话题")?.isComplete() != true)
+
+        tools.getValue("deep_read_verify_claims").execute(buildJsonObject {
+            put("overall", "passed")
+            put("corrections_applied", false)
+            put("checked_claims", buildJsonArray {
+                add(buildJsonObject {
+                    put("claim", "图解只表达已写入的流程关系")
+                    put("visible_excerpt", "核心分歧在于各方如何解释事件影响")
+                    put("status", "verified")
+                    put("note", "图解节点没有引入新事实")
+                    put("evidence_excerpt", "图解节点没有引入新事实")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+                add(buildJsonObject {
+                    put("claim", "头图来自候选池且没有使用任意外部 URL")
+                    put("visible_excerpt", "这是经过来源核查后的概览正文")
+                    put("status", "verified")
+                    put("note", "图片 URL 已由候选池复核")
+                    put("evidence_excerpt", "图片 URL 已由候选池复核")
+                    put("evidence_urls", buildJsonArray { add("https://example.com/a") })
+                })
+            })
+        })
+        tools.getValue("deep_read_finish").execute(buildJsonObject { })
+        assertTrue(repo.getFreshDeepRead("topic", title = "话题")?.isComplete() == true)
+    }
+
+    private fun imageCandidate(url: String, confidence: String, score: Int): DeepReadImageCandidate =
+        DeepReadImageCandidate(
+            imageUrl = url,
+            sourceUrl = "https://news.example.com/a",
+            sourceTitle = "来源标题",
+            candidateKind = "article_image",
+            confidence = confidence,
+            score = score,
+        )
 }
 
 private class FakeHotListDao : HotListDAO {

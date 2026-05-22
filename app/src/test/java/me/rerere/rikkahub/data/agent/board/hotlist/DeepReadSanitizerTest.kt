@@ -2,15 +2,19 @@ package me.rerere.rikkahub.data.agent.board.hotlist
 
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageCandidate
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepQuote
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageAsset
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSanitizer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSource
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_INLINE
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DeepReadSanitizerTest {
@@ -42,7 +46,7 @@ class DeepReadSanitizerTest {
 
         val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "AI 热点")
 
-        assertEquals("https://news.example.com/a.jpg", sanitized.heroImageUrl)
+        assertNull(sanitized.heroImageUrl)
         assertFalse(sanitized.references.any { it.url.contains("invented") })
         assertEquals(listOf("real quoted sentence from the source"), sanitized.analysis.quotes.map { it.text })
         assertEquals(listOf(source.url), sanitized.extendedReading.map { it.url })
@@ -61,6 +65,9 @@ class DeepReadSanitizerTest {
                 sourceImage,
                 "https://news.example.com/logo.png",
                 "https://news.example.com/tracking-pixel.gif",
+            ),
+            imageCandidates = listOf(
+                imageCandidate(sourceImage, IMAGE_CONFIDENCE_INLINE),
             ),
         )
         val parsed = DeepReadOutput(
@@ -106,6 +113,7 @@ class DeepReadSanitizerTest {
         val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "AI 热点")
 
         assertEquals(listOf(sourceImage), sanitized.imageAssets.map { it.url })
+        assertNull(sanitized.heroImageUrl)
         assertEquals(sourceImage, sanitized.timeline?.get(0)?.imageUrl)
         assertEquals("来源现场图片", sanitized.timeline?.get(0)?.imageCaption)
         assertEquals(null, sanitized.timeline?.get(1)?.imageUrl)
@@ -124,6 +132,11 @@ class DeepReadSanitizerTest {
             content = "body",
             publishedAt = null,
             images = listOf(image, sameImage, otherImage),
+            imageCandidates = listOf(
+                imageCandidate(image, IMAGE_CONFIDENCE_HERO, score = 80),
+                imageCandidate(sameImage, IMAGE_CONFIDENCE_HERO, score = 76),
+                imageCandidate(otherImage, IMAGE_CONFIDENCE_INLINE, score = 24),
+            ),
         )
         val parsed = DeepReadOutput(
             summary = "这是中文摘要，足够用于深度阅读",
@@ -167,6 +180,7 @@ class DeepReadSanitizerTest {
         val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "AI 热点")
 
         assertEquals(image, sanitized.heroImageUrl)
+        assertEquals(IMAGE_CONFIDENCE_HERO, sanitized.heroImageConfidence)
         assertEquals(image, sanitized.timeline?.get(0)?.imageUrl)
         assertEquals(null, sanitized.timeline?.get(1)?.imageUrl)
         assertEquals(null, sanitized.corePoints?.get(0)?.imageUrl)
@@ -185,6 +199,10 @@ class DeepReadSanitizerTest {
             content = "body",
             publishedAt = null,
             images = listOf(imageA, imageB),
+            imageCandidates = listOf(
+                imageCandidate(imageA, IMAGE_CONFIDENCE_INLINE, score = 30),
+                imageCandidate(imageB, IMAGE_CONFIDENCE_INLINE, score = 29),
+            ),
         )
         val parsed = DeepReadOutput(
             summary = "这是中文摘要，足够用于深度阅读",
@@ -215,4 +233,92 @@ class DeepReadSanitizerTest {
         assertEquals(imageB, sanitized.timeline?.get(1)?.imageUrl)
         assertEquals(listOf(imageA, imageB), sanitized.imageAssets.map { it.url })
     }
+
+    @Test
+    fun rejectsLogoAsHeroEvenWhenModelSelectsIt() {
+        val logo = "https://static.36kr.com/logo.png"
+        val source = DeepReadSource(
+            title = "三十六氪报道",
+            url = "https://36kr.com/p/123",
+            source = "36kr.com",
+            content = "body",
+            publishedAt = null,
+            images = listOf(logo),
+            imageCandidates = listOf(imageCandidate(logo, "reject", score = 1, riskFlags = listOf("site_brand_asset"))),
+        )
+        val parsed = DeepReadOutput(
+            summary = "这是中文摘要，足够用于深度阅读",
+            heroImageUrl = logo,
+            imageAssets = listOf(DeepReadImageAsset(url = logo, caption = "不该出现")),
+        )
+
+        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "三十六氪报道")
+
+        assertNull(sanitized.heroImageUrl)
+        assertEquals(emptyList<String>(), sanitized.imageAssets.map { it.url })
+    }
+
+    @Test
+    fun strongTitleMatchedImageCanBecomeHero() {
+        val hero = "https://cdn.example.com/xiaomi-tesla-babai-liangsheng-ppt.jpg"
+        val source = DeepReadSource(
+            title = "小米发布会回应八败两胜与特斯拉对比",
+            url = "https://news.example.com/xiaomi",
+            source = "news.example.com",
+            content = "小米发布会展示八败两胜 PPT，并提及特斯拉。",
+            publishedAt = null,
+            images = listOf(hero),
+            imageCandidates = listOf(imageCandidate(hero, IMAGE_CONFIDENCE_HERO, score = 82)),
+        )
+        val parsed = DeepReadOutput(
+            summary = "这是中文摘要，足够用于深度阅读",
+            heroImageUrl = hero,
+            imageAssets = listOf(DeepReadImageAsset(url = hero, caption = "小米发布会 PPT")),
+        )
+
+        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "小米 八败两胜 特斯拉 PPT 发布会 图")
+
+        assertEquals(hero, sanitized.heroImageUrl)
+        assertEquals(IMAGE_CONFIDENCE_HERO, sanitized.heroImageConfidence)
+    }
+
+    @Test
+    fun fallbackSourceImageDoesNotBecomeHeroFromTitleAlone() {
+        val weakImage = "https://cdn.example.com/share-default.jpg"
+        val source = DeepReadSource(
+            title = "小米 八败两胜 特斯拉 PPT 发布会 图",
+            url = "https://news.example.com/xiaomi",
+            source = "news.example.com",
+            content = "小米发布会展示八败两胜 PPT，并提及特斯拉。",
+            publishedAt = null,
+            images = listOf(weakImage),
+            imageCandidates = emptyList(),
+        )
+        val parsed = DeepReadOutput(
+            summary = "这是中文摘要，足够用于深度阅读",
+            heroImageUrl = weakImage,
+            imageAssets = listOf(DeepReadImageAsset(url = weakImage, caption = "弱相关默认图")),
+        )
+
+        val sanitized = DeepReadSanitizer.sanitize(parsed, listOf(source), "小米 八败两胜 特斯拉 PPT 发布会 图")
+
+        assertNull(sanitized.heroImageUrl)
+    }
+
+    private fun imageCandidate(
+        url: String,
+        confidence: String,
+        score: Int = 24,
+        riskFlags: List<String> = emptyList(),
+    ): DeepReadImageCandidate =
+        DeepReadImageCandidate(
+            imageUrl = url,
+            sourceUrl = "https://news.example.com/a",
+            sourceTitle = "来源标题",
+            candidateKind = "article_image",
+            sourceService = "news.example.com",
+            confidence = confidence,
+            score = score,
+            riskFlags = riskFlags,
+        )
 }

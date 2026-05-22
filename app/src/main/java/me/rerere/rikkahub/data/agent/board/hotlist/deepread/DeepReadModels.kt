@@ -24,8 +24,13 @@ data class DeepReadOutput(
     val heroImageUrl: String? = null,
     @SerialName("hero_caption")
     val heroCaption: String? = null,
+    @SerialName("hero_image_confidence")
+    val heroImageConfidence: String? = null,
     @SerialName("image_assets")
     val imageAssets: List<DeepReadImageAsset> = emptyList(),
+    val diagram: DeepReadDiagram? = null,
+    @SerialName("visual_diagnostics")
+    val visualDiagnostics: DeepReadVisualDiagnostics? = null,
     val references: List<ReadingLink> = emptyList(),
     @SerialName("section_states")
     val sectionStates: Map<DeepReadGenerationStage, DeepReadSectionState> = emptyMap(),
@@ -156,6 +161,102 @@ data class DeepReadImageAsset(
     val relatedTimelineIndex: Int? = null,
     @SerialName("quality_hint")
     val qualityHint: String? = null,
+    val confidence: String? = null,
+    val score: Int? = null,
+    @SerialName("selection_reason")
+    val selectionReason: String? = null,
+)
+
+@Serializable
+data class DeepReadImageCandidate(
+    @SerialName("image_url")
+    val imageUrl: String,
+    @SerialName("source_url")
+    val sourceUrl: String,
+    @SerialName("source_title")
+    val sourceTitle: String,
+    @SerialName("page_title")
+    val pageTitle: String? = null,
+    val alt: String? = null,
+    @SerialName("nearby_text")
+    val nearbyText: String? = null,
+    @SerialName("candidate_kind")
+    val candidateKind: String,
+    @SerialName("source_service")
+    val sourceService: String? = null,
+    val query: String? = null,
+    val rank: Int? = null,
+    val quality: DeepReadImageQuality = DeepReadImageQuality(),
+    val score: Int = 0,
+    val confidence: String = IMAGE_CONFIDENCE_REJECT,
+    @SerialName("risk_flags")
+    val riskFlags: List<String> = emptyList(),
+)
+
+@Serializable
+data class DeepReadImageQuality(
+    val width: Int? = null,
+    val height: Int? = null,
+    @SerialName("content_type")
+    val contentType: String? = null,
+    @SerialName("byte_size")
+    val byteSize: Long? = null,
+)
+
+@Serializable
+data class DeepReadImageSelection(
+    @SerialName("image_url")
+    val imageUrl: String,
+    val confidence: String,
+    val score: Int,
+    val reason: String,
+    @SerialName("risk_flags")
+    val riskFlags: List<String> = emptyList(),
+)
+
+@Serializable
+data class DeepReadVisualDiagnostics(
+    @SerialName("candidate_count")
+    val candidateCount: Int = 0,
+    @SerialName("hero_selection")
+    val heroSelection: DeepReadImageSelection? = null,
+    @SerialName("inline_selections")
+    val inlineSelections: List<DeepReadImageSelection> = emptyList(),
+    @SerialName("rejected_images")
+    val rejectedImages: List<DeepReadImageSelection> = emptyList(),
+)
+
+@Serializable
+data class DeepReadDiagram(
+    val type: String,
+    val title: String,
+    val reason: String? = null,
+    val nodes: List<DeepReadDiagramNode> = emptyList(),
+    val edges: List<DeepReadDiagramEdge> = emptyList(),
+    val caption: String? = null,
+)
+
+@Serializable
+data class DeepReadDiagramNode(
+    val id: String,
+    val label: String,
+    val note: String? = null,
+    val group: String? = null,
+)
+
+@Serializable
+data class DeepReadDiagramEdge(
+    val from: String,
+    val to: String,
+    val label: String? = null,
+)
+
+@Serializable
+data class DeepReadPlaybookSnapshot(
+    val revision: String,
+    val markdown: String,
+    @SerialName("updated_at")
+    val updatedAt: Long,
 )
 
 data class DeepReadState(
@@ -192,9 +293,14 @@ fun DeepReadOutput.hasEnoughChinese(): Boolean {
 
 fun DeepReadOutput.verifiedImageUrls(): Set<String> =
     imageAssets
+        .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
         .map { it.url }
-        .filter { it.startsWith("http") }
+        .filter { it.startsWith("http://") || it.startsWith("https://") }
         .toSet()
+
+const val IMAGE_CONFIDENCE_HERO = "hero"
+const val IMAGE_CONFIDENCE_INLINE = "inline"
+const val IMAGE_CONFIDENCE_REJECT = "reject"
 
 private fun DeepReadOutput.visibleTextForLanguageCheck(): String = articleTextForQualityCheck()
 

@@ -89,8 +89,8 @@ class DeepReadTemplateRepository(
             if (missing.isNotEmpty()) {
                 throw DeepReadTemplateValidationException("Template missing placeholders: ${missing.joinToString()}")
             }
-            if ("{{timeline_html}}" !in html && "{{core_points_html}}" !in html) {
-                throw DeepReadTemplateValidationException("Template must include {{timeline_html}} or {{core_points_html}}")
+            if ("{{narrative_html}}" !in html && "{{timeline_html}}" !in html && "{{core_points_html}}" !in html) {
+                throw DeepReadTemplateValidationException("Template must include {{narrative_html}}, {{timeline_html}}, or {{core_points_html}}")
             }
         }
     }

@@ -23,6 +23,37 @@ class DeepReadTemplateAgent(
     private val json: Json,
 ) {
     suspend fun generate(name: String, brief: String): Result<DeepReadTemplatePackage> {
+        val draft = generateDraft(name, brief)
+        return draft.fold(
+            onSuccess = { runCatching { saveGeneratedTemplate(it, name) } },
+            onFailure = { Result.failure(it) },
+        )
+    }
+
+    suspend fun generateDraft(name: String, brief: String): Result<DeepReadTemplatePackage> =
+        generateTemplateDraft(
+            name = name,
+            prompt = buildPrompt(name, brief),
+            repairPrompt = { raw, error -> buildRepairPrompt(name, brief, raw, error) },
+        )
+
+    suspend fun reviseDraft(
+        currentTemplate: DeepReadTemplatePackage,
+        instruction: String,
+    ): Result<DeepReadTemplatePackage> =
+        generateTemplateDraft(
+            name = currentTemplate.name,
+            prompt = buildRevisionPrompt(currentTemplate, instruction),
+            repairPrompt = { raw, error ->
+                buildRevisionRepairPrompt(currentTemplate, instruction, raw, error)
+            },
+        )
+
+    private suspend fun generateTemplateDraft(
+        name: String,
+        prompt: String,
+        repairPrompt: (previousOutput: String, validationError: String) -> String,
+    ): Result<DeepReadTemplatePackage> {
         val settings = settingsStore.settingsFlow.value
         val model = settings.agentRuntime.todayBoard.boardModelId
             ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
@@ -46,29 +77,25 @@ class DeepReadTemplateAgent(
             val raw = withTimeout(MODEL_TIMEOUT_MS) {
                 providerInstance.generateText(
                     providerSetting = provider,
-                    messages = listOf(systemMessage, UIMessage.user(buildPrompt(name, brief))),
+                    messages = listOf(systemMessage, UIMessage.user(prompt)),
                     params = params,
                 )
             }.choices.firstOrNull()?.message?.toText().orEmpty()
-            val decoded = parsePackage(raw)
-                ?: return Result.failure(IllegalStateException("模型没有输出可用模板 JSON"))
-            val saved = runCatching { saveGeneratedTemplate(decoded, name) }
+            val draft = runCatching { parseAndNormalizeDraft(raw, name) }
                 .recoverCatching { firstError ->
                     val repairedRaw = withTimeout(REPAIR_TIMEOUT_MS) {
                         providerInstance.generateText(
                             providerSetting = provider,
                             messages = listOf(
                                 systemMessage,
-                                UIMessage.user(buildRepairPrompt(name, brief, raw, firstError.message.orEmpty())),
+                                UIMessage.user(repairPrompt(raw, firstError.message.orEmpty())),
                             ),
                             params = params,
                         )
                     }.choices.firstOrNull()?.message?.toText().orEmpty()
-                    val repaired = parsePackage(repairedRaw)
-                        ?: throw IllegalStateException("模板修复失败：模型没有输出可用 JSON")
-                    saveGeneratedTemplate(repaired, name)
+                    parseAndNormalizeDraft(repairedRaw, name)
                 }.getOrThrow()
-            Result.success(saved)
+            Result.success(draft)
         } catch (error: DeepReadTemplateValidationException) {
             Result.failure(IllegalStateException(error.userMessage()))
         } catch (error: IllegalArgumentException) {
@@ -82,6 +109,31 @@ class DeepReadTemplateAgent(
         } catch (error: Throwable) {
             Result.failure(error)
         }
+    }
+
+    private fun normalizeDraftTemplate(
+        template: DeepReadTemplatePackage,
+        requestedName: String,
+    ): DeepReadTemplatePackage {
+        val normalized = template.copy(
+            id = "draft",
+            name = requestedName.ifBlank { template.name }.trim().take(48).ifBlank { "自定义模板" },
+            description = template.description.trim().take(160),
+            html = template.html.trim(),
+            createdByAi = true,
+            schemaVersion = 1,
+        )
+        DeepReadTemplateRepository.validateCustomTemplate(normalized.html)
+        return normalized
+    }
+
+    private fun parseAndNormalizeDraft(
+        raw: String,
+        requestedName: String,
+    ): DeepReadTemplatePackage {
+        val decoded = parsePackage(raw)
+            ?: throw IllegalStateException("模型没有输出可用模板 JSON")
+        return normalizeDraftTemplate(decoded, requestedName)
     }
 
     private suspend fun saveGeneratedTemplate(
@@ -115,14 +167,83 @@ class DeepReadTemplateAgent(
 
         必须遵守：
         - html 必须是完整 HTML 文档，内联 CSS。
-        - 禁止 JavaScript、iframe、form、button、外链 CSS、@import、CSS url()、真实 href/src 外链。
+        - 禁止 JavaScript、iframe、form、button、SVG、canvas、math、audio/video、外链 CSS、@import、CSS url()、真实 href/src 外链。
+        - 禁止 srcset、poster、事件处理器、交互控件和任何脚本动画。
         - 必须包含 {{title}}、{{summary}}、{{analysis_html}}、{{extended_reading_html}}。
-        - 必须包含 {{timeline_html}} 或 {{core_points_html}} 至少一个。
+        - 必须包含 {{narrative_html}}；若要兼容旧式分栏，也可以额外使用 {{timeline_html}} 或 {{core_points_html}}。
         - 块级占位符只能放在标签内容里，不能放进属性或 style。
         - 图片只能使用 <img src="{{hero_image_url}}" ...>。
         - 不要写真实新闻正文，只写模板结构和 CSS。
 
         上一次输出如下，仅供你修正，不要照抄错误：
+        ${previousOutput.take(9000)}
+        """.trimIndent()
+
+    private fun buildRevisionPrompt(
+        currentTemplate: DeepReadTemplatePackage,
+        instruction: String,
+    ): String =
+        """
+        请基于当前 AmberAgent 深度阅读模板，按用户的新要求修改版式。只输出完整 JSON，不要解释。
+
+        当前模板名：${currentTemplate.name.ifBlank { "自定义模板" }}
+        用户修改要求：${instruction.ifBlank { "在保持可读性和信息密度的前提下优化版式。" }}
+
+        当前 HTML：
+        ${currentTemplate.html.take(36000)}
+
+        输出 JSON：
+        {
+          "id": "draft",
+          "name": "模板名",
+          "description": "一句话说明",
+          "html": "<!doctype html>...",
+          "createdByAi": true,
+          "schemaVersion": 1
+        }
+
+        必须遵守：
+        - 输出完整 HTML 文档和内联 CSS，不要输出片段或 diff。
+        - 模板只负责版式，不写真实新闻正文、不写示例新闻事实。
+        - 禁止 JavaScript、事件处理器、iframe、form、button、SVG、canvas、math、audio/video/source/picture、srcset、poster、@import、CSS url()、真实 href/src 外链。
+        - 必须保留 {{title}}、{{summary}}、{{analysis_html}}、{{extended_reading_html}}。
+        - 必须保留 {{narrative_html}}；兼容旧模板时可额外保留 {{timeline_html}} 或 {{core_points_html}}。
+        - 推荐保留 {{diagram_html}} 和 {{font_css}}；App 会在 WebView 层统一处理字体和字号，不要写 JS 调字号。
+        - 图片只能使用 <img src="{{hero_image_url}}" ...>。
+        - 块级占位符不能放进标签属性或 style。
+        """.trimIndent()
+
+    private fun buildRevisionRepairPrompt(
+        currentTemplate: DeepReadTemplatePackage,
+        instruction: String,
+        previousOutput: String,
+        validationError: String,
+    ): String =
+        """
+        你刚才修订的深度阅读模板没有通过 App 校验。
+
+        校验错误：
+        ${validationError.ifBlank { "未知校验错误" }}
+
+        请基于当前模板和用户修改要求，重新输出一份完整、合法、可预览的 JSON。只输出 JSON，不要解释。
+
+        当前模板名：${currentTemplate.name.ifBlank { "自定义模板" }}
+        用户修改要求：${instruction.ifBlank { "优化模板版式" }}
+
+        必须遵守：
+        - html 必须是完整 HTML 文档，内联 CSS。
+        - 禁止 JavaScript、事件处理器、iframe、form、button、SVG、canvas、math、audio/video/source/picture、srcset、poster、@import、CSS url()、真实 href/src 外链。
+        - 必须包含 {{title}}、{{summary}}、{{analysis_html}}、{{extended_reading_html}}。
+        - 必须包含 {{narrative_html}}；可以额外使用 {{timeline_html}} 或 {{core_points_html}}。
+        - 推荐包含 {{diagram_html}} 和 {{font_css}}。
+        - 图片只能使用 <img src="{{hero_image_url}}" ...>。
+        - 块级占位符只能放在标签内容里，不能放进属性或 style。
+        - 模板内容只负责版式，不生成新闻事实。
+
+        当前模板 HTML：
+        ${currentTemplate.html.take(7000)}
+
+        上一次无效输出：
         ${previousOutput.take(9000)}
         """.trimIndent()
 
@@ -133,7 +254,7 @@ class DeepReadTemplateAgent(
             "missing placeholders" in text -> "模板缺少必要占位符，请重新生成"
             "Block placeholder" in text -> "模板把内容占位符放错了位置，请重新生成"
             "Hard-coded external" in text -> "模板包含外链资源，请重新生成"
-            "External" in text || "not allowed" in text -> "模板包含不允许的 HTML/CSS 能力，请重新生成"
+            "External" in text || "not allowed" in text || "CSS URLs" in text -> "模板包含不允许的 HTML/CSS 能力，请重新生成"
             text.isBlank() -> "模板生成失败，请重试"
             else -> text
         }
@@ -186,11 +307,11 @@ class DeepReadTemplateAgent(
         }
 
         硬性要求：
-        - html 必须是完整 HTML 文档，内联 CSS，禁止 JavaScript、iframe、form、button、外链 CSS、@import、CSS url()。
-        - 必须包含占位符 {{title}}、{{summary}}、{{analysis_html}}、{{extended_reading_html}}，且 {{timeline_html}} / {{core_points_html}} 至少包含一个。
-        - 推荐支持这些占位符：{{topic_type}}、{{source_label}}、{{hero_image_url}}、{{hero_caption}}、{{timeline_html}}、{{core_points_html}}、{{analysis_html}}、{{extended_reading_html}}、{{font_css}}。
+        - html 必须是完整 HTML 文档，内联 CSS，禁止 JavaScript、事件处理器、iframe、form、button、SVG、canvas、math、audio/video/source/picture、srcset、poster、外链 CSS、@import、CSS url()。
+        - 必须包含占位符 {{title}}、{{summary}}、{{analysis_html}}、{{extended_reading_html}}，且 {{narrative_html}} / {{timeline_html}} / {{core_points_html}} 至少包含一个。
+        - 推荐支持这些占位符：{{topic_type}}、{{source_label}}、{{hero_image_url}}、{{hero_caption}}、{{narrative_html}}、{{timeline_html}}、{{core_points_html}}、{{diagram_html}}、{{analysis_html}}、{{extended_reading_html}}、{{font_css}}。
         - 如果使用 hero 图片，只能写 <img src="{{hero_image_url}}" ...>；不要写真实图片 URL。
-        - 块级占位符 {{timeline_html}}、{{core_points_html}}、{{analysis_html}}、{{extended_reading_html}} 必须放在正文节点中，不能放进标签属性或 style。
+        - 块级占位符 {{narrative_html}}、{{timeline_html}}、{{core_points_html}}、{{diagram_html}}、{{analysis_html}}、{{extended_reading_html}} 必须放在正文节点中，不能放进标签属性或 style。
         - 不要写任何固定 href/src 外链；扩展阅读链接只能来自 {{extended_reading_html}}。
         - 模板内容只负责版式，不生成新闻事实，不写示例新闻正文。
         - 移动端优先，正文 14-15px、line-height 1.68 左右；可用斜切 Hero、红色时间轴、灰色 metadata。

@@ -16,7 +16,7 @@ object DeepReadPrompt {
         when (stage) {
             DeepReadGenerationStage.OVERVIEW -> {
                 appendLine("- 只完成 topic_type、summary、key_entities。")
-                appendLine("- summary 要像杂志导语，120-200 字，说明为什么值得读。")
+                appendLine("- summary 要像杂志导语，120-250 字，说明为什么值得读；不要超过 250 字。")
                 appendLine("- 本阶段不要输出图片、引用、扩展阅读、时间轴或分析字段；这些由后续阶段补齐。")
                 appendLine("- 不要编造来源之外的事实。")
             }
@@ -119,7 +119,7 @@ object DeepReadPrompt {
             """
             {
               "topic_type": "event|opinion|product|person",
-              "summary": "200字以内摘要",
+              "summary": "250字以内摘要",
               "key_entities": ["实体"],
               "timeline": [{"date":"日期或时间","event":"事件","is_highlight":true,"image_url":"可为空","image_caption":"可为空"}],
               "core_points": [{"point":"核心论点/亮点","supporting":"支撑材料","image_url":"可为空","image_caption":"可为空"}],
@@ -148,7 +148,7 @@ object DeepReadPrompt {
                 DeepReadGenerationStage.OVERVIEW -> """
                     {
                       "topic_type": "event|opinion|product|person",
-                      "summary": "120-200字中文杂志导语",
+                      "summary": "120-250字中文杂志导语，不超过250字",
                       "key_entities": ["关键实体"]
                     }
                 """.trimIndent()
@@ -198,6 +198,18 @@ object DeepReadPrompt {
             appendLine("- source: ${source.source ?: "-"}")
             if (source.publishedAt != null) appendLine("- published_at: ${source.publishedAt}")
             if (source.images.isNotEmpty()) appendLine("- images: ${source.images.joinToString(", ")}")
+            val candidates = source.imageCandidates
+                .filter { it.confidence != IMAGE_CONFIDENCE_REJECT }
+                .take(4)
+            if (candidates.isNotEmpty()) {
+                appendLine("- image_candidates:")
+                candidates.forEach { candidate ->
+                    appendLine(
+                        "  - ${candidate.confidence} score=${candidate.score} kind=${candidate.candidateKind} url=${candidate.imageUrl} " +
+                            "alt=${candidate.alt.orEmpty().take(80)}"
+                    )
+                }
+            }
             appendLine("- excerpt: ${source.content.take(excerptLimit).replace("\n", " ")}")
             appendLine()
         }
@@ -253,4 +265,5 @@ data class DeepReadSource(
     val content: String,
     val publishedAt: String?,
     val images: List<String>,
+    val imageCandidates: List<DeepReadImageCandidate> = emptyList(),
 )
