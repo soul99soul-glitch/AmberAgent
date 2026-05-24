@@ -18,8 +18,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import me.rerere.hugeicons.stroke.ArrowRight01
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,13 +30,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -52,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -67,6 +71,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -100,13 +105,9 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(text = stringResource(R.string.setting_provider_page_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_provider_page_title),
+                navigationIcon = { BackButton() },
                 actions = {
                     ImportProviderButton {
                         vm.updateSettings(
@@ -128,11 +129,10 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -504,93 +504,78 @@ private fun ProviderItem(
     isLast: Boolean,
     modifier: Modifier = Modifier,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
+    onDelete: () -> Unit,  // 保留参数兼容，但行内已不再显示删除按钮，删除移到 detail 页
 ) {
     val workspace = workspaceColors()
-    // Outer-corner rounding: only the first and last items get the big group
-    // corners; middle items go fully square so the 1dp gap between rows
-    // reads as a clean divider rather than a "stair-step" hairline.
-    val cornerOuter = 12.dp
-    val cornerInner = 0.dp
-    val topCorner = if (isFirst) cornerOuter else cornerInner
-    val bottomCorner = if (isLast) cornerOuter else cornerInner
-
-    // Enabled providers get a very light blue fill + a slightly bluer border;
-    // disabled providers get a very light red fill + slightly redder border.
-    // Picks the existing palette colors (blueContainer #EAF4FF / redContainer
-    // #FFEFED) so the page no longer reads as "all white, all the same".
-    val containerColor = if (provider.enabled) workspace.blueContainer else workspace.redContainer
-    val borderColor = if (provider.enabled) {
-        workspace.blue.copy(alpha = 0.22f)
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3: 整行 background 用主题色区分启用/禁用 —— enabled = accent 18% 半透 (Paper 深褐 /
+    //   Whisper 天蓝 / Plain 深灰 / Midnight 冷靛蓝), disabled = 默认 surface 不变色.
+    //   logo 36dp 区不再单独贴色块, 完全融入整行色调.
+    val rowBg = if (provider.enabled) {
+        chatTheme.accent.copy(alpha = 0.18f).compositeOver(chatTheme.surface)
     } else {
-        workspace.red.copy(alpha = 0.22f)
+        chatTheme.surface
     }
     androidx.compose.material3.Surface(
         onClick = onEdit,
         modifier = modifier,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(
-            topStart = topCorner,
-            topEnd = topCorner,
-            bottomStart = bottomCorner,
-            bottomEnd = bottomCorner,
+            topStart = if (isFirst) 18.dp else 0.dp,
+            topEnd = if (isFirst) 18.dp else 0.dp,
+            bottomStart = if (isLast) 18.dp else 0.dp,
+            bottomEnd = if (isLast) 18.dp else 0.dp,
         ),
-        color = containerColor,
-        contentColor = workspace.ink,
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        color = rowBg,
+        contentColor = chatTheme.ink,
+        border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AutoAIIcon(
-                name = provider.name,
+        Box {
+            Row(
                 modifier = Modifier
-                    .size(32.dp)
-                    .then(
-                        if (!provider.enabled) Modifier.alpha(0.45f) else Modifier
-                    ),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = provider.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (provider.enabled) workspace.ink else workspace.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    // Status dot — 6dp circle anchored on the same color as
-                    // the card border for visual coherence (blue on enabled
-                    // cards, red on disabled cards). Replaces the heavy
-                    // colored Tag with a small inline indicator.
-                    androidx.compose.foundation.Canvas(
-                        modifier = Modifier.size(6.dp),
-                    ) {
-                        drawCircle(
-                            color = if (provider.enabled) workspace.blue else workspace.red,
-                        )
-                    }
-                    Text(
-                        text = stringResource(
-                            if (provider.enabled) R.string.setting_provider_page_enabled
-                            else R.string.setting_provider_page_disabled
+                // V3: logo 用 40dp 圆形 (CircleShape) bg, 比之前 36dp 圆角矩形更扩.
+                // enabled = accent 30% spot (跟主题, 在 row bg 之上叠加更浓主题色),
+                // disabled = transparent. AutoAIIcon 28dp 占比 ~70% 不显得拥挤.
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(
+                            if (provider.enabled) {
+                                chatTheme.accent.copy(alpha = 0.30f)
+                            } else {
+                                androidx.compose.ui.graphics.Color.Transparent
+                            }
                         ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = workspace.muted,
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AutoAIIcon(
+                        name = provider.name,
+                        // color=Transparent 让 AIIcon 内置 Surface 圆形 bg 隐形, 避免跟外层 40dp
+                        // CircleShape 形成"双重圆环" (内层 24dp 圆 + 外层 40dp 圆).
+                        color = androidx.compose.ui.graphics.Color.Transparent,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .then(
+                                if (!provider.enabled) Modifier.alpha(0.45f) else Modifier
+                            ),
                     )
+                }
+                // name + 模型计数
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     Text(
-                        text = "·",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = workspace.faint,
+                        text = provider.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (provider.enabled) chatTheme.ink else chatTheme.inkFaint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = stringResource(
@@ -598,21 +583,33 @@ private fun ProviderItem(
                             provider.models.size,
                         ),
                         style = MaterialTheme.typography.labelSmall,
-                        color = workspace.muted,
+                        color = chatTheme.inkFaint,
                     )
                 }
-            }
-            // Card tap enters edit, so only the destructive delete stays as
-            // a tappable icon — small, muted, no surrounding box.
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(32.dp),
-            ) {
+                // 仅 disabled 显示灰胶囊（"已禁用"），enabled 状态不显示
+                if (!provider.enabled) {
+                    me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill(
+                        text = stringResource(R.string.setting_provider_page_disabled),
+                        tone = me.rerere.rikkahub.ui.components.ui.WorkspaceTone.Neutral,
+                    )
+                }
+                // chevron-right (进入 detail)
                 Icon(
-                    imageVector = HugeIcons.Delete01,
-                    contentDescription = stringResource(R.string.delete),
+                    imageVector = HugeIcons.ArrowRight01,
+                    contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = workspace.muted,
+                    tint = chatTheme.inkFaint,
+                )
+            }
+            // V3 hairline divider — 仅非 last 行显示，模拟"单卡 + hairline 分隔"
+            if (!isLast) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 14.dp)
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(chatTheme.hair),
                 )
             }
         }

@@ -256,7 +256,8 @@ internal fun ExperimentDivider() {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 46.dp)
+            // V3 settings-experimental.jsx HairDivider indent={60} —— 让 divider 对齐到 leading icon 右边线
+            .padding(start = 60.dp)
             .height(1.dp),
         color = workspace.hairline,
     ) {}
@@ -283,14 +284,17 @@ internal fun ExperimentActionButton(
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // V3: primary 按钮跟主题 (Paper 砖红 / Whisper 天蓝 / Plain 黑 / Midnight 靛蓝),
+    // 不再硬编码 workspace.blue.
     val container = when {
         !enabled -> workspace.row
-        primary -> workspace.blue
+        primary -> scheme.primary
         else -> workspace.paper
     }
     val contentColor = when {
         !enabled -> workspace.faint
-        primary -> MaterialTheme.colorScheme.onPrimary
+        primary -> scheme.onPrimary
         else -> workspace.ink
     }
     Surface(
@@ -344,11 +348,13 @@ internal fun ExperimentBooleanPill(
     ready: Boolean,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // V3: ready 跟主题 (Paper 砖红 / Whisper 天蓝 等), 不硬编码 workspace.blue
     Surface(
         shape = RoundedCornerShape(999.dp),
-        color = if (ready) workspace.blue.copy(alpha = 0.1f) else workspace.row,
-        contentColor = if (ready) workspace.blue else workspace.muted,
-        border = BorderStroke(1.dp, if (ready) workspace.blue.copy(alpha = 0.22f) else workspace.hairline),
+        color = if (ready) scheme.primaryContainer else workspace.row,
+        contentColor = if (ready) scheme.primary else workspace.muted,
+        border = BorderStroke(1.dp, if (ready) scheme.primary.copy(alpha = 0.22f) else workspace.hairline),
     ) {
         Text(
             text = "$label ${if (ready) stringResource(R.string.setting_experimental_ready) else stringResource(R.string.setting_experimental_missing)}",

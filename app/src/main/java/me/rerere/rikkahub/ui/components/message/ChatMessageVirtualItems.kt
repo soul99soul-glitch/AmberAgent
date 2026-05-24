@@ -39,6 +39,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
 import me.rerere.rikkahub.utils.base64Encode
+import me.rerere.rikkahub.utils.copyMessageToClipboard
 import java.util.Locale
 
 internal const val ChatMessageVirtualMarkdownMinChars = 600
@@ -475,8 +476,13 @@ private fun ChatMessageVirtualFooter(
             }
         }
 
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
+        // V3: 隐藏 Nerd Line (跟 ChatMessage.kt 同步). ContextRing popover 有相同数据.
+        @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+        val SHOW_NERD_LINE = false
+        if (SHOW_NERD_LINE) {
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
+            }
         }
     }
 
@@ -491,22 +497,12 @@ private fun ChatMessageVirtualFooter(
             onSelectAndCopy = {
                 showSelectCopySheet = true
             },
+            onCopy = {
+                context.copyMessageToClipboard(message)
+            },
+            onRegenerate = onRegenerate,
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
-            onWebViewPreview = {
-                val textContent = message.parts
-                    .filterIsInstance<UIMessagePart.Text>()
-                    .joinToString("\n\n") { it.text }
-                    .trim()
-                if (textContent.isNotBlank()) {
-                    val htmlContent = buildMarkdownPreviewHtml(
-                        context = context,
-                        markdown = textContent,
-                        colorScheme = colorScheme
-                    )
-                    navController.navigate(Screen.WebView(content = htmlContent.base64Encode()))
-                }
-            },
             onDismissRequest = {
                 showActionsSheet = false
             }

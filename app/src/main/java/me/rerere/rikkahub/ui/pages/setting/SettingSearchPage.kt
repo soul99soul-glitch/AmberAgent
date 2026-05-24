@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -36,6 +35,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import me.rerere.search.SearchServiceOptions
@@ -53,13 +54,9 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.setting_page_search_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_page_search_title),
+                navigationIcon = { BackButton() },
                 actions = {
                     IconButton(
                         onClick = {
@@ -76,11 +73,10 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = workspaceColors().canvas
     ) {
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
             // Three fixed items live before the configurable service rows in this LazyColumn:

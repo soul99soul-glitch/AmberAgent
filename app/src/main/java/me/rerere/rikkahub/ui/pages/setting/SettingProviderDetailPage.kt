@@ -5,12 +5,21 @@ import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.hugeicons.stroke.SlidersHorizontal
 import me.rerere.hugeicons.stroke.Share01
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Icon
@@ -110,27 +119,42 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             )
         },
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = pager.currentPage == 0,
-                    label = { Text(stringResource(id = R.string.setting_provider_page_configuration)) },
-                    icon = { Icon(HugeIcons.SlidersHorizontal, null) },
-                    onClick = {
-                        scope.launch {
-                            pager.animateScrollToPage(0)
-                        }
-                    }
+            // V3 provider-screens.jsx: 顶 hairline 的 2-flex tab（不是 M3 NavigationBar 重壳）
+            val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(chatTheme.surface)
+                    .windowInsetsPadding(WindowInsets.navigationBars),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(chatTheme.hair),
                 )
-                NavigationBarItem(
-                    selected = pager.currentPage == 1,
-                    label = { Text(stringResource(id = R.string.setting_provider_page_models)) },
-                    icon = { Icon(HugeIcons.Package01, null) },
-                    onClick = {
-                        scope.launch {
-                            pager.animateScrollToPage(1)
-                        }
-                    }
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                ) {
+                    V3DetailTab(
+                        label = stringResource(id = R.string.setting_provider_page_configuration),
+                        icon = HugeIcons.SlidersHorizontal,
+                        selected = pager.currentPage == 0,
+                        chatTheme = chatTheme,
+                        onClick = { scope.launch { pager.animateScrollToPage(0) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                    V3DetailTab(
+                        label = stringResource(id = R.string.setting_provider_page_models),
+                        icon = HugeIcons.Package01,
+                        selected = pager.currentPage == 1,
+                        chatTheme = chatTheme,
+                        onClick = { scope.launch { pager.animateScrollToPage(1) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     ) {
@@ -164,6 +188,43 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                     )
                 }
             }
+        }
+    }
+}
+
+/** V3 provider-screens.jsx detail tab —— hairline 顶 + icon + label，selected 时 accent 色 + accent 底色 indicator */
+@Composable
+private fun V3DetailTab(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    chatTheme: me.rerere.rikkahub.ui.pages.chat.ChatTheme,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.foundation.layout.Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        androidx.compose.foundation.layout.Row(
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(18.dp),
+                tint = if (selected) chatTheme.accent else chatTheme.inkSoft,
+            )
+            androidx.compose.material3.Text(
+                text = label,
+                fontSize = 14.sp,
+                fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Medium else androidx.compose.ui.text.font.FontWeight.Normal,
+                color = if (selected) chatTheme.accent else chatTheme.inkSoft,
+                letterSpacing = 0.2.sp,
+            )
         }
     }
 }

@@ -37,6 +37,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -596,12 +597,13 @@ private fun HtmlCodeBlock(element: Element) {
 @Composable
 private fun HtmlBlockquote(element: Element, onClickCitation: (String) -> Unit) {
     ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
+        // Bug fix: drawWithContent + drawRect 把 bg 画在 content 之上盖住文字, 深色下看不清.
+        // 改 drawBehind, bgColor alpha 0.2→0.12 减轻蒙层感.
         val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-        val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+        val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)
         Column(
             modifier = Modifier
-                .drawWithContent {
-                    drawContent()
+                .drawBehind {
                     drawRect(color = bgColor, size = size)
                     drawRect(color = borderColor, size = Size(10f, size.height))
                 }

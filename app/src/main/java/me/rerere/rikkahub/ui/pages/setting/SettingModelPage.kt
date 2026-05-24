@@ -25,7 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -40,9 +39,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -83,13 +84,14 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
-import me.rerere.rikkahub.ui.components.ai.hasUsableAuth
+import me.rerere.ai.provider.hasUsableAuth
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceDivider
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTextButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -104,20 +106,10 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.setting_model_page_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_model_page_title),
+                navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
-                    titleContentColor = workspace.ink,
-                    navigationIconContentColor = workspace.muted,
-                ),
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -187,19 +179,56 @@ private fun DefaultChatModelSetting(
     settings: Settings,
     vm: SettingVM,
 ) {
-    SettingModelRow(
-        title = stringResource(R.string.setting_model_page_chat_model),
-        description = stringResource(R.string.setting_model_page_chat_model_desc),
-        icon = HugeIcons.Message01,
-        tone = WorkspaceTone.Accent,
+    // V3 设计稿 (settings-models.jsx): hero card 36/20 accent leadingIcon + 15sp W500 title
+    // + 12.5sp inkFaint desc + 12dp 间距 + paddingLeft 50 + inline 22dp logo + 14.5sp accent model
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 14.dp),
     ) {
-        ModelPickerRow(
-            description = null,
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            WorkspaceLeadingIcon(
+                icon = HugeIcons.Message01,
+                size = 36.dp,
+                iconSize = 20.dp,
+                tone = WorkspaceTone.Accent,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.setting_model_page_chat_model),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = stringResource(R.string.setting_model_page_chat_model_desc),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 12.5.sp,
+                        letterSpacing = 0.2.sp,
+                    ),
+                    color = workspaceColors().muted,
+                    modifier = Modifier.padding(top = 3.dp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        ModelSelector(
             modelId = settings.chatModelId,
+            type = ModelType.CHAT,
             providers = settings.providers,
-            onSelect = {
-                vm.updateSettings(settings.copy(chatModelId = it.id))
-            },
+            inline = true,
+            onSelect = { vm.updateSettings(settings.copy(chatModelId = it.id)) },
+            modifier = Modifier
+                .padding(top = 12.dp, start = 50.dp)
+                .fillMaxWidth(),
         )
     }
 }
@@ -820,13 +849,10 @@ private fun ModelPickerRow(
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
 ) {
-    // Pure picker row — no trailing slot. The "参数" button used to live here
-    // which shifted the ModelSelector's horizontal position based on whether
-    // a button was present; that's now hoisted to SettingModelRow.trailing so
-    // every picker row across the page lines up.
+    // V3 settings-models.jsx 辅助任务 row：inline ModelSelector + paddingLeft 42dp 对齐 leadingIcon 右边
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (description != null) {
             Text(
@@ -841,12 +867,15 @@ private fun ModelPickerRow(
             type = modelType,
             onSelect = onSelect,
             providers = providers,
+            inline = true,
             allowClear = allowClear,
             emptyLabel = emptyLabel,
             clearContentDescription = clearContentDescription,
             preferredInputModality = preferredInputModality,
             onClear = onClear,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .padding(start = 42.dp)
+                .fillMaxWidth(),
         )
     }
 }

@@ -2,6 +2,8 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -14,8 +16,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -58,6 +63,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,15 +83,19 @@ import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AiMagic
+import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Favourite
 import me.rerere.hugeicons.stroke.Image03
+import me.rerere.hugeicons.stroke.Message01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Text
 import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Wrench01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -112,11 +122,19 @@ fun ModelSelector(
     modifier: Modifier = Modifier,
     onlyIcon: Boolean = false,
     compact: Boolean = false,
+    minimalText: Boolean = false,
+    /** V3 settings-models.jsx inline 触发器：logo 块 + accent 模型名 + chevron-down。
+     *  优先级排在 minimalText / compact 之后（互斥）。 */
+    inline: Boolean = false,
     allowClear: Boolean = false,
     emptyLabel: String? = null,
     clearContentDescription: String? = null,
     preferredInputModality: Modality? = null,
     onClear: (() -> Unit)? = null,
+    // Phase 3.5 thinking-level segment：仅 chat 主入口（ChatPage TopBar / ChatInput）传入这两个
+    // 参数即可在 active model 卡片下显示 reasoning 切换段；其他调用方默认 null 即不渲染
+    currentAssistant: me.rerere.rikkahub.data.model.Assistant? = null,
+    onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
     onSelect: (Model) -> Unit
 ) {
     var popup by remember { mutableStateOf(false) }
@@ -128,7 +146,73 @@ fun ModelSelector(
     val model = modelId?.let { modelIndex[it]?.model }
 
     if (!onlyIcon) {
-        if (compact) {
+        if (minimalText) {
+            // V3: 去掉 "⌄" chevron 字符 (用户反馈不需要), 同时把 ripple 改成胶囊形
+            // (.clip(CircleShape) before .clickable 让 ripple 跟随胶囊裁剪而非矩形)
+            Row(
+                modifier = modifier
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .clickable { popup = true }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = model?.displayName
+                        ?: emptyLabel
+                        ?: stringResource(R.string.model_list_select_model),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                    ),
+                    color = workspaceColors().ink,
+                )
+            }
+        } else if (inline) {
+            // settings-models.jsx 设计稿：22dp logo + 14.5sp accent W500 model name + 12dp chevron-down
+            val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+            Row(
+                modifier = modifier.clickable { popup = true },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // V3: 去掉 logo 小方框 (用户反馈"图标太小不匹配方框, 去掉"). 直接 model 名 + 下拉.
+                Text(
+                    text = model?.displayName
+                        ?: emptyLabel
+                        ?: stringResource(R.string.model_list_select_model),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.2.sp,
+                    color = theme.accent,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Icon(
+                    imageVector = HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    tint = theme.accent,
+                    modifier = Modifier.size(12.dp),
+                )
+                if (allowClear && model != null) {
+                    IconButton(
+                        onClick = { onClear?.invoke() ?: onSelect(Model()) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = clearContentDescription ?: "Clear",
+                            tint = theme.inkFaint,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
+        } else if (compact) {
             val workspace = workspaceColors()
             val chipShape = RoundedCornerShape(8.dp)
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
@@ -224,11 +308,32 @@ fun ModelSelector(
 
     if (popup) {
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        // V3 Whisper：28dp 顶圆角 + 白底 + 自定义 36dp/4dp 拖拽手柄；模型列表本身
+        // 暂保留旧实现，后续 phase 再按 model-picker.jsx 重做 active card / segment。
         ModalBottomSheet(
             onDismissRequest = {
                 popup = false
             },
             sheetState = state,
+            shape = RoundedCornerShape(
+                topStart = 28.dp,
+                topEnd = 28.dp,
+                bottomStart = 0.dp,
+                bottomEnd = 0.dp,
+            ),
+            containerColor = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.surface,
+            scrimColor = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.sheetBackdrop,
+            dragHandle = {
+                // V3 model-picker.jsx:57 drag handle 40×4dp
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp, bottom = 4.dp)
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.dragHandle),
+                )
+            },
         ) {
             Column(
                 modifier = Modifier
@@ -245,8 +350,13 @@ fun ModelSelector(
                     providers = filteredProviderSettings,
                     modelType = type,
                     preferredInputModality = preferredInputModality,
-                    onSelect = {
-                        onSelect(it)
+                    currentAssistant = currentAssistant,
+                    onUpdateAssistant = onUpdateAssistant,
+                    onSelect = { selectedModel ->
+                        // V3 改: 之前为了"切 model 顺手改 reasoning"保持 picker 不关,
+                        // 但 reasoning 已搬到 slash panel footer, 这里恢复"选即关".
+                        // 副作用: 生图 picker 第一次选模型不再卡住, 不会被误点 × 清成 sentinel.
+                        onSelect(selectedModel)
                         scope.launch {
                             state.hide()
                             popup = false
@@ -327,6 +437,8 @@ private fun ColumnScope.ModelList(
     providers: List<ProviderSetting>,
     modelType: ModelType,
     preferredInputModality: Modality? = null,
+    currentAssistant: me.rerere.rikkahub.data.model.Assistant? = null,
+    onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
     onSelect: (Model) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -462,26 +574,12 @@ private fun ColumnScope.ModelList(
             .fillMaxWidth()
             .padding(horizontal = 8.dp),
     ) {
-        OutlinedTextField(
+        // V3: 统一 drawer Amber 下方搜索栏样式 (WorkspaceSearchField)
+        me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField(
             value = searchKeywords,
             onValueChange = { searchKeywords = it },
+            placeholder = stringResource(R.string.model_list_search_placeholder),
             modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.model_list_search_placeholder),
-                )
-            },
-            shape = RoundedCornerShape(50),
-            colors = TextFieldDefaults.colors(
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-            ),
-            leadingIcon = {
-                Icon(HugeIcons.Search01, null)
-            },
-            maxLines = 1,
         )
     }
 
@@ -519,126 +617,114 @@ private fun ColumnScope.ModelList(
                 items = favoriteModels,
                 key = { "favorite:" + it.first.id.toString() }
             ) { (model, provider) ->
-                ReorderableItem(
-                    state = reorderableState,
-                    key = "favorite:" + model.id.toString()
-                ) { isDragging ->
-                    ModelItem(
-                        model = model,
-                        onSelect = onSelect,
-                        modifier = Modifier
-                            .scale(if (isDragging) 0.95f else 1f)
-                            .animateItem(),
-                        providerSetting = provider,
-                        select = model.id == currentModel,
-                        onDismiss = {
-                            onDismiss()
-                        },
-                        tail = {
-                            IconButton(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        settingsStore.update { settings ->
-                                            settings.copy(
-                                                favoriteModels = settings.favoriteModels.filter { it != model.id }
-                                            )
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    HeartIcon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        },
-                        dragHandle = {
-                            Icon(
-                                imageVector = HugeIcons.DragDropHorizontal,
-                                contentDescription = null,
-                                modifier = Modifier.longPressDraggableHandle(
-                                    onDragStarted = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-                                    },
-                                    onDragStopped = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                    }
-                                )
-                            )
-                        }
-                    )
-                }
-            }
-        }
-
-        providers.fastForEach { providerSetting ->
-            item(key = "header:${providerSetting.id}") {
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 8.dp)
-                        .padding(bottom = 4.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = providerSetting.name,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-
-            items(
-                items = searchFilteredModelsByProvider[providerSetting.id].orEmpty(),
-                key = { it.id }
-            ) { model ->
-                val favorite = settings.value.favoriteModels.contains(model.id)
+                // V3: 移除拖拽 handle（用户反馈实用性低）—— 不再包 ReorderableItem
                 ModelItem(
                     model = model,
                     onSelect = onSelect,
                     modifier = Modifier.animateItem(),
-                    providerSetting = providerSetting,
-                    select = currentModel == model.id,
-                    onDismiss = {
-                        onDismiss()
-                    },
+                    providerSetting = provider,
+                    select = model.id == currentModel,
+                    onDismiss = { onDismiss() },
                     tail = {
                         IconButton(
                             onClick = {
                                 coroutineScope.launch {
                                     settingsStore.update { settings ->
-                                        if (favorite) {
-                                            settings.copy(
-                                                favoriteModels = settings.favoriteModels.filter { it != model.id }
-                                            )
-
-                                        } else {
-                                            settings.copy(
-                                                favoriteModels = settings.favoriteModels + model.id
-                                            )
-                                        }
+                                        settings.copy(
+                                            favoriteModels = settings.favoriteModels.filter { it != model.id }
+                                        )
                                     }
                                 }
                             }
                         ) {
-                            if (favorite) {
-                                Icon(
-                                    HeartIcon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
+                            Icon(
+                                HeartIcon,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent,
+                            )
+                        }
+                    },
+                )
+            }
+        }
+
+        // V3 重构 v2: 不分家 — active 和同 provider 其他 model 都在一张 group card 内
+        // 只有 active 行用 accentSoft 高亮 + 段控内嵌；非 active 行 surface 普通样式
+        providers.fastForEach { providerSetting ->
+            val groupModels = searchFilteredModelsByProvider[providerSetting.id].orEmpty()
+            if (groupModels.isEmpty()) return@fastForEach
+
+            // provider 名 accent label —— 与卡片左边线对齐 (4dp 偏移让视觉略缩进)
+            item(key = "header:${providerSetting.id}") {
+                Text(
+                    text = providerSetting.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 0.3.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, top = 8.dp),
+                )
+            }
+
+            // 单张 group 卡 + 内部 hairline 分隔; active 行 accentSoft 高亮 + 段控
+            // 不加 horizontal padding，让宽度跟 LazyColumn content padding 走，与 收藏 卡对齐
+            item(key = "group:${providerSetting.id}") {
+                val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+                Card(
+                    modifier = Modifier.animateItem(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = chatTheme.surface,
+                        contentColor = chatTheme.ink,
+                    ),
+                    border = BorderStroke(1.dp, chatTheme.hair),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                ) {
+                    Column {
+                        groupModels.forEachIndexed { idx, model ->
+                            val isActive = model.id == currentModel
+                            val hasReasoning = model.abilities.contains(me.rerere.ai.provider.ModelAbility.REASONING)
+                            if (idx > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = 14.dp)
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(chatTheme.hair),
                                 )
-                            } else {
-                                Icon(
-                                    imageVector = HugeIcons.Favourite,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
+                            }
+                            val favorite = settings.value.favoriteModels.contains(model.id)
+                            Column(
+                                modifier = if (isActive) Modifier.background(chatTheme.accentSoft) else Modifier,
+                            ) {
+                                ModelItemRow(
+                                    model = model,
+                                    providerSetting = providerSetting,
+                                    isActive = isActive,
+                                    onSelect = onSelect,
+                                    onDismiss = onDismiss,
+                                    tail = {
+                                        FavoriteToggleIcon(
+                                            favorite = favorite,
+                                            isActive = isActive,
+                                            onToggle = {
+                                                coroutineScope.launch {
+                                                    settingsStore.update { s ->
+                                                        if (favorite) s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
+                                                        else s.copy(favoriteModels = s.favoriteModels + model.id)
+                                                    }
+                                                }
+                                            },
+                                        )
+                                    },
                                 )
+                                // V3: thinking-level segment 已搬到 SlashCommandPanel footer,
+                                // 这里不再渲染. 保留 currentAssistant / onUpdateAssistant 入参以兼容
+                                // 旧 callsite (避免 ripple). hasReasoning 也保留 (将来 picker tail 可能再用).
+                                @Suppress("UNUSED_VARIABLE") val _hasReasoning = hasReasoning
                             }
                         }
                     }
-                )
+                }
             }
         }
     }
@@ -667,27 +753,54 @@ private fun ColumnScope.ModelList(
             }
     }
     if (providers.isNotEmpty()) {
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 8.dp),
-            state = providerBadgeListState
-        ) {
-            items(providers) { provider ->
-                AssistChip(
-                    onClick = {
-                        val position = providerPositions[provider.id] ?: 0
-                        coroutineScope.launch {
-                            lazyListState.animateScrollToItem(position)
-                        }
-                    },
-                    label = {
-                        Text(provider.name)
-                    },
-                    leadingIcon = {
-                        AutoAIIcon(name = provider.name, modifier = Modifier.size(16.dp))
-                    },
-                )
+        val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+        // V3 model-picker.jsx ProviderChips: 12dp 圆角矩形 + 18×18 logo + 名 + hairline 边
+        // 顶部 hairline 分隔 chip 区 与 model list
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(chatTheme.hair),
+            )
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, bottom = 14.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                state = providerBadgeListState,
+            ) {
+                items(providers) { provider ->
+                    // V3: 简化层级 — 999 capsule 外框 + logo (无内嵌 18dp Box + 5dp 圆角矩形).
+                    Row(
+                        modifier = Modifier
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(chatTheme.surface)
+                            .border(
+                                BorderStroke(1.dp, chatTheme.hair),
+                                androidx.compose.foundation.shape.CircleShape,
+                            )
+                            .clickable {
+                                val position = providerPositions[provider.id] ?: 0
+                                coroutineScope.launch {
+                                    lazyListState.animateScrollToItem(position)
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        // V3: 去掉 provider 图标, 胶囊只剩 provider 名 (用户偏好)
+                        Text(
+                            text = provider.name,
+                            fontSize = 12.5.sp,
+                            color = chatTheme.ink,
+                            letterSpacing = 0.2.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
         }
     }
@@ -702,82 +815,130 @@ private fun ModelItem(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     tail: @Composable RowScope.() -> Unit = {},
-    dragHandle: @Composable (RowScope.() -> Unit)? = null
+    dragHandle: @Composable (RowScope.() -> Unit)? = null,
+    // V3 active 模型的 thinking-level segment（slot）
+    thinkingSegment: (@Composable () -> Unit)? = null,
 ) {
     val navController = LocalNavController.current
     val interactionSource = remember { MutableInteractionSource() }
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3 model-picker.jsx: active 卡片 accentSoft 填底 + accent 文字 + 边线 22% accent
+    // 非 active 用 surface + ink + hair 边线
+    // V3: clickable 移到 Card 外层 modifier — 之前在内部 Column 上, 选中 ripple 只在 padding
+    //   之内, Card border 内但 padding 外的边角区域点不到, 看着"选中区分裂".
     Card(
-        modifier = modifier,
+        modifier = modifier.combinedClickable(
+            enabled = true,
+            onLongClick = {
+                onDismiss()
+                navController.navigate(
+                    Screen.SettingProviderDetail(providerSetting.id.toString())
+                )
+            },
+            onClick = { onSelect(model) },
+            interactionSource = interactionSource,
+            indication = LocalIndication.current,
+        ),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (select) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            contentColor = if (select) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-        )
+            containerColor = if (select) chatTheme.accentSoft else chatTheme.surface,
+            contentColor = if (select) chatTheme.accent else chatTheme.ink,
+        ),
+        border = if (select) {
+            androidx.compose.foundation.BorderStroke(
+                1.dp,
+                chatTheme.accent.copy(alpha = 0.22f),
+            )
+        } else {
+            androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair)
+        },
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 16.dp)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .combinedClickable(
-                        enabled = true,
-                        onLongClick = {
-                            onDismiss()
-                            navController.navigate(
-                                Screen.SettingProviderDetail(
-                                    providerSetting.id.toString()
-                                )
-                            )
-                        },
-                        onClick = { onSelect(model) },
-                        interactionSource = interactionSource,
-                        indication = LocalIndication.current
-                    ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                ) {
-                    AutoAIIcon(
-                        name = model.modelId,
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .size(32.dp)
-                    )
-                }
-                Column(
+                AutoAIIcon(
+                    name = model.modelId,
+                    modifier = Modifier.size(28.dp),
+                )
+                // V3: model 名 12.5sp + 删 V3CapabilityIcons (能力图标对用户意义不大)
+                Text(
+                    text = model.displayName,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                        lineHeight = 15.sp,
+                    ),
+                    color = if (select) chatTheme.accent else chatTheme.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = model.displayName,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        ModelTypeTag(model = model)
-
-                        ModelModalityTag(model = model)
-
-                        ModelAbilityTag(model = model)
-                    }
-                }
+                )
                 tail()
             }
-            dragHandle?.let { it() }
+            // ── 第二行：thinking-level segment（仅 active + REASONING 时显示）
+            thinkingSegment?.let {
+                Box(modifier = Modifier.padding(top = 6.dp)) {
+                    it()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * V3 model-picker.jsx CapIcon —— 14dp monochrome stroke 风的 capability 图标行。
+ * 每个模型固定显示 chat，按 abilities 加 tool/sci，按 modalities 加 T>I/I>T 等。
+ */
+@Composable
+private fun V3CapabilityIcons(model: Model, tint: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // chat — 所有 CHAT 模型默认显示
+        if (model.type == ModelType.CHAT) {
+            Icon(
+                imageVector = HugeIcons.Message01,
+                contentDescription = "chat",
+                modifier = Modifier.size(14.dp),
+                tint = tint,
+            )
+        }
+        // T>T or T>I —— 按 input/output modalities 推断
+        val hasImg = model.outputModalities.fastAny { it == Modality.IMAGE } ||
+            model.inputModalities.fastAny { it == Modality.IMAGE }
+        Icon(
+            imageVector = if (hasImg) HugeIcons.Image03 else HugeIcons.Text,
+            contentDescription = if (hasImg) "image" else "text",
+            modifier = Modifier.size(14.dp),
+            tint = tint,
+        )
+        // tool wrench —— TOOL ability
+        if (model.abilities.contains(me.rerere.ai.provider.ModelAbility.TOOL)) {
+            Icon(
+                imageVector = HugeIcons.Wrench01,
+                contentDescription = "tool",
+                modifier = Modifier.size(14.dp),
+                tint = tint,
+            )
+        }
+        // sci/magic —— REASONING ability（设计稿是原子/sci 图标，库里最接近 AiMagic）
+        if (model.abilities.contains(me.rerere.ai.provider.ModelAbility.REASONING)) {
+            Icon(
+                imageVector = HugeIcons.AiMagic,
+                contentDescription = "reasoning",
+                modifier = Modifier.size(14.dp),
+                tint = tint,
+            )
         }
     }
 }
@@ -877,38 +1038,187 @@ private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
     return isCodexOAuthProvider() && model.isCodexOAuthReviewModel()
 }
 
+// V3: hasUsableAuth 已迁到 me.rerere.ai.provider.hasUsableAuth (ai/ProviderSetting.kt),
+// picker (这里) 和 data 层 fallback 共用同一份判定 (避免 picker 显示但 fallback 漏选
+// 出无 auth 的模型). 调用方直接 import me.rerere.ai.provider.hasUsableAuth.
+
 /**
- * True when the provider has enough credentials to actually serve a request.
+ * Phase 3.5 thinking-level segment —— model-picker.jsx 的 ThinkingLevel 段控。
  *
- * Used by the image-generation model picker so that auto-seeded entries
- * (gpt-image-2 in the default OpenAI provider, gemini-3.1-flash-image-preview
- * in the default Gemini provider) stay hidden until the user has filled in
- * an API key — without this, a fresh install shows "Nano Banana 2" as a
- * pickable option even though selecting it would 401 on every call.
+ * 设计稿用 off/on/low/med/high/xhigh/max 等不同模型不同段集。Kotlin 这边统一用
+ * [ReasoningLevel] 7 个值，但 XHIGH 跟 HIGH 视觉太接近，UI 上跳过；展示 6 段：
+ *   OFF | AUTO | LOW | MEDIUM | HIGH | MAX
  *
- * Chat / OCR / translation pickers deliberately don't apply this filter
- * (those have always shown models from key-less providers, presumably for
- * exploratory configuration).
+ * 主题感知：active 段填 chatTheme.accent + onAccent 文字；非 active 文字 chatTheme.ink；
+ *           容器 chatTheme.searchBarBg + hair 1dp 描边。
  */
-internal fun ProviderSetting.hasUsableAuth(): Boolean {
-    if (!enabled) return false
-    return when (this) {
-        is ProviderSetting.OpenAI -> when (authMode) {
-            // OAuth modes use a separately-managed token; the user-typed key
-            // field is irrelevant for these.
-            OpenAIAuthMode.CODEX_OAUTH -> true
-            else -> apiKey.isNotBlank()
-        }
-        is ProviderSetting.Google -> when (authMode) {
-            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> true
-            GoogleAuthMode.API_KEY -> when {
-                apiKey.isNotBlank() -> true
-                // Vertex AI + service-account path uses a private-key blob
-                // instead of an API key. Treat that as configured too.
-                vertexAI && useServiceAccount && privateKey.isNotBlank() -> true
-                else -> false
+/**
+ * 按模型推断 reasoning level 段集。
+ *
+ * 来源：
+ *  - DeepSeek: off/high/max (https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)
+ *  - OpenAI gpt-5: low/medium/high/xhigh
+ *  - Anthropic claude: low/medium/high/xhigh/max
+ *  - Kimi / GLM: off/auto (2 段)
+ *  - 默认: off/auto/low/med/high/max (6 段)
+ */
+internal fun reasoningLevelsForModel(model: Model): List<Pair<me.rerere.ai.core.ReasoningLevel, String>> {
+    val id = model.modelId.lowercase()
+    return when {
+        id.contains("deepseek") -> listOf(
+            me.rerere.ai.core.ReasoningLevel.OFF to "off",
+            me.rerere.ai.core.ReasoningLevel.HIGH to "high",
+            me.rerere.ai.core.ReasoningLevel.MAX to "max",
+        )
+        // Claude (Anthropic) extended thinking + adaptive auto：
+        // Anthropic 在 claude-sonnet-4.5 / opus-4.1 起暴露 thinking_budget=auto，模型自己
+        // 决定多少 token 用来思考（无人工指定 budget）。设计稿 model-picker.jsx 标 auto
+        // 作为首段，方便用户日常聊天直接选 "让 Claude 自己决定" 而不用挑 low/med/high。
+        // 段集：auto / low / med / high / xhigh / max (6 段)
+        id.contains("claude") -> listOf(
+            me.rerere.ai.core.ReasoningLevel.AUTO to "auto",
+            me.rerere.ai.core.ReasoningLevel.LOW to "low",
+            me.rerere.ai.core.ReasoningLevel.MEDIUM to "med",
+            me.rerere.ai.core.ReasoningLevel.HIGH to "high",
+            me.rerere.ai.core.ReasoningLevel.XHIGH to "xhigh",
+            me.rerere.ai.core.ReasoningLevel.MAX to "max",
+        )
+        id.contains("gpt") || id.contains("o1") || id.contains("o3") || id.contains("o4") -> listOf(
+            me.rerere.ai.core.ReasoningLevel.LOW to "low",
+            me.rerere.ai.core.ReasoningLevel.MEDIUM to "med",
+            me.rerere.ai.core.ReasoningLevel.HIGH to "high",
+            me.rerere.ai.core.ReasoningLevel.XHIGH to "xhigh",
+        )
+        id.contains("kimi") || id.contains("glm") || id.contains("zhipu") -> listOf(
+            me.rerere.ai.core.ReasoningLevel.OFF to "off",
+            me.rerere.ai.core.ReasoningLevel.AUTO to "auto",
+        )
+        else -> listOf(
+            me.rerere.ai.core.ReasoningLevel.OFF to "off",
+            me.rerere.ai.core.ReasoningLevel.AUTO to "auto",
+        )
+    }
+}
+
+@Composable
+internal fun ThinkingLevelSegment(
+    levels: List<Pair<me.rerere.ai.core.ReasoningLevel, String>>,
+    current: me.rerere.ai.core.ReasoningLevel,
+    onChange: (me.rerere.ai.core.ReasoningLevel) -> Unit,
+) {
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3 紧凑段控: 外 padding 1.5dp + 内段 vertical 1dp + 字号 10sp (再压扁一档)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(theme.surface)
+            .border(
+                BorderStroke(1.dp, theme.hair),
+                shape = androidx.compose.foundation.shape.CircleShape,
+            )
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        levels.forEach { (level, label) ->
+            val isActive = level == current
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (isActive) theme.accent else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable { onChange(level) }
+                    .padding(vertical = 5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.2.sp,
+                    lineHeight = 13.sp,
+                    color = if (isActive) theme.onAccent else theme.ink,
+                    maxLines = 1,
+                )
             }
         }
-        is ProviderSetting.Claude -> apiKey.isNotBlank()
+    }
+}
+
+/** V3 grouped 卡内的 model 行 —— ModelItem 但去掉外层 Card 包装，仅渲染内容行。
+ *  设计稿：同 provider 多 model 在一张 SubCard 内用 hairline 分隔，所以单行不需要自己的 Card。
+ */
+@Composable
+private fun ModelItemRow(
+    model: Model,
+    providerSetting: ProviderSetting,
+    onSelect: (Model) -> Unit,
+    onDismiss: () -> Unit,
+    isActive: Boolean = false,
+    tail: @Composable RowScope.() -> Unit = {},
+) {
+    val navController = LocalNavController.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                enabled = true,
+                onLongClick = {
+                    onDismiss()
+                    navController.navigate(
+                        Screen.SettingProviderDetail(providerSetting.id.toString())
+                    )
+                },
+                onClick = { onSelect(model) },
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+            )
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        AutoAIIcon(
+            name = model.modelId,
+            modifier = Modifier.size(28.dp),
+        )
+        // V3: model 名 12.5sp + 删 V3CapabilityIcons (能力图标对用户意义不大)
+        Text(
+            text = model.displayName,
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.2.sp,
+                lineHeight = 15.sp,
+            ),
+            color = if (isActive) chatTheme.accent else chatTheme.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        tail()
+    }
+}
+
+/** 收藏图标 —— 主题色感知的心形 */
+@Composable
+private fun FavoriteToggleIcon(
+    favorite: Boolean,
+    isActive: Boolean,
+    onToggle: () -> Unit,
+) {
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    IconButton(onClick = onToggle) {
+        Icon(
+            imageVector = if (favorite) HeartIcon else HugeIcons.Favourite,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = when {
+                favorite -> chatTheme.accent
+                isActive -> chatTheme.accent
+                else -> chatTheme.inkSoft
+            },
+        )
     }
 }

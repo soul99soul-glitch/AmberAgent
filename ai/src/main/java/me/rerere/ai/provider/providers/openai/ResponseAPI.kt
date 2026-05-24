@@ -120,9 +120,43 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<MessageChunk> = callbackFlow {
+        // V3 fix: ResponseAPI 在 delta / done / completed 各事件构造的 UIMessage 都用 fresh
+        // Uuid.random(). MessageStreamAccumulator.replaceActive 会把 active 整个换掉 (parts
+        // 全替换为 message.parts), 导致两个问题:
+        //   1) 新 id → ChatService merge by-id 找不到 → APPEND orphan node → 用户看到双
+        //      message + 多行 action button
+        //   2) replaceActive 把 acc 累积的 parts 重置 → 内容"闪一下消失", 只剩 action row
+        // 解法 (2 步):
+        //   - id 标准化: 所有 emit chunk 的 ASSISTANT id 都用流 scope sharedId
+        //   - 阻止 replaceActive: 把 done/completed 的 message=...,delta=null 转成空 delta,
+        //     accumulator 走 append 路径 (no-op 因为 parts 是空), 保留已累积内容
+        val streamAssistantId = kotlin.uuid.Uuid.random()
+        fun MessageChunk.normalizeAssistantId(): MessageChunk = copy(
+            choices = choices.map { choice ->
+                val delta = choice.delta
+                val msg = choice.message
+                when {
+                    delta != null && delta.role == MessageRole.ASSISTANT ->
+                        choice.copy(delta = delta.copy(id = streamAssistantId))
+                    // ASSISTANT "done" / "completed" event (delta=null, message=完整文本):
+                    // 转成空 delta (parts=emptyList), 阻止 replaceActive 重置 active.
+                    // delta 累积已含完整文本, message 是冗余 finish marker.
+                    delta == null && msg != null && msg.role == MessageRole.ASSISTANT ->
+                        choice.copy(
+                            delta = UIMessage(
+                                id = streamAssistantId,
+                                role = MessageRole.ASSISTANT,
+                                parts = emptyList(),
+                            ),
+                            message = null,
+                        )
+                    else -> choice
+                }
+            }
+        )
         if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
             streamCodexText(providerSetting, messages, params).collect { chunk ->
-                trySend(chunk)
+                trySend(chunk.normalizeAssistantId())
             }
             close()
             return@callbackFlow
@@ -162,7 +196,7 @@ class ResponseAPI(
                 val json = json.parseToJsonElement(data).jsonObject
                 val chunk = parseResponseDelta(json)
                 if (chunk != null) {
-                    trySend(chunk)
+                    trySend(chunk.normalizeAssistantId())
                 }
                 if (type == "response.completed") {
                     close()

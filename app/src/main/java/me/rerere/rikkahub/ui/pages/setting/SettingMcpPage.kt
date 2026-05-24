@@ -39,7 +39,6 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -87,6 +86,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
@@ -124,13 +124,9 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.setting_mcp_page_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_mcp_page_title),
+                navigationIcon = { BackButton() },
                 actions = {
                     IconButton(
                         onClick = {
@@ -148,13 +144,6 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
-                    titleContentColor = workspace.ink,
-                    navigationIconContentColor = workspace.muted,
-                    actionIconContentColor = workspace.blue,
-                )
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),

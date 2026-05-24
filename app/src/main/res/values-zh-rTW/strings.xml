@@ -603,8 +603,8 @@
   <string name="setting_display_page_show_line_numbers_title">顯示行號</string>
   <string name="setting_display_page_show_message_jumper_desc">在捲動聊天列表時，在右側顯示快速跳轉按鈕</string>
   <string name="setting_display_page_show_message_jumper_title">消息導航按鈕</string>
-  <string name="setting_display_page_show_model_name_desc">是否在聊天消息中顯示模型名稱</string>
-  <string name="setting_display_page_show_model_name_title">顯示模型名稱</string>
+  <string name="setting_display_page_show_model_name_desc">是否在聊天訊息中顯示 Agent 名稱</string>
+  <string name="setting_display_page_show_model_name_title">顯示 Agent 名稱</string>
   <string name="setting_display_page_show_thinking_content_desc">是否在生成時預設展開並顯示思考過程</string>
   <string name="setting_display_page_show_thinking_content_title">顯示思考內容</string>
   <string name="setting_display_page_show_token_usage_desc">顯示token用量和消息數量</string>
@@ -703,8 +703,8 @@
   <string name="setting_page_chat_storage_desc">%1$d 個檔案，%2$.2f MB</string>
   <string name="setting_page_code_display_settings">程式碼顯示</string>
   <string name="setting_page_color_mode">顏色模式</string>
-  <string name="setting_page_color_mode_dark">深色</string>
-  <string name="setting_page_color_mode_light">淺色</string>
+  <string name="setting_page_color_mode_dark">深色模式</string>
+  <string name="setting_page_color_mode_light">淺色模式</string>
   <string name="setting_page_color_mode_system">跟隨系統</string>
   <string name="setting_page_config">配置</string>
   <string name="setting_page_config_api_desc">你還沒有配置API和模型，請先配置</string>

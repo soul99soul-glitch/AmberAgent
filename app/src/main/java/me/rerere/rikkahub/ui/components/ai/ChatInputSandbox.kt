@@ -53,6 +53,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -418,18 +419,24 @@ internal fun SandboxPeekBar(
     onNext: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    // V3 convo-tool-result.jsx ToolResultPreview spec:
+    //   设计稿 asymmetric padding (start=14 end=32 top=10 bottom=8); 父级 ChatInput
+    //   已加 horizontal=8 padding + spacedBy 8dp, 我们只控 horizontal (start=6 end=24).
+    //   bottom 给 0 (让卡片紧贴下面的 ChatInput 输入框), top 维持轻量缓冲.
+    //   gap=10, align Bottom; 缩略图 72×96 (3:4 竖向); ResultPill 22dp 高 999 圆角
     Row(
         modifier = modifier
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .padding(start = 6.dp, end = 24.dp, top = 4.dp, bottom = 0.dp),
         verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         AgentOperationPreviewPeek(
             activity = activity,
             onOpen = onOpen,
             modifier = Modifier
-                .width(118.dp)
-                .height(78.dp),
+                .width(72.dp)
+                .height(96.dp),
         )
         SandboxStepPeek(
             activity = activity,
@@ -437,9 +444,7 @@ internal fun SandboxPeekBar(
             onCancel = onCancel,
             onPrevious = onPrevious,
             onNext = onNext,
-            modifier = Modifier
-                .weight(1f)
-                .height(38.dp),
+            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -452,11 +457,12 @@ private fun AgentOperationPreviewPeek(
 ) {
     val previewUrl = activity.operationPreviewUrl()
     val workspace = workspaceColors()
+    // V3 convo-tool-result.jsx PreviewThumb: 8dp 圆角 + previewBg surface + 1dp hair edge + 单层柔影 0.06
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable { onOpen() },
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         color = workspace.paper,
         contentColor = workspace.ink,
         shadowElevation = 1.dp,
@@ -657,46 +663,55 @@ private fun SandboxStepPeek(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3 convo-tool-result.jsx ResultPill spec:
+    //   高度 22dp (3dp 上下 padding + 16dp leading badge)
+    //   999 圆角 fillMaxWidth + toolPillBg + 1dp toolPillEdge
+    //   inline "tool · query" 11.5sp letter 0.2 W500/W400
+    //   右侧 9dp chevrons + 10.5sp tabular-nums
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(CircleShape)
             .clickable { onOpen() },
-        shape = RoundedCornerShape(10.dp),
-        color = workspace.paper,
+        shape = CircleShape,
+        color = theme.toolPillBg,
         contentColor = workspace.ink,
-        shadowElevation = 1.dp,
+        shadowElevation = 0.dp,
         tonalElevation = 0.dp,
-        border = BorderStroke(1.dp, workspace.hairline),
+        border = BorderStroke(1.dp, theme.toolPillEdge),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(start = 3.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SandboxStepStatusIcon(status = activity.status)
             Text(
                 text = activity.title,
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = 10.5.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                letterSpacing = 0.2.sp,
+                color = theme.toolLabelInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (onCancel != null) {
                 IconButton(
                     onClick = onCancel,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(18.dp),
                 ) {
                     Icon(
                         imageVector = HugeIcons.Cancel01,
                         contentDescription = stringResource(R.string.stop),
-                        tint = Color(0xFFE09A1B),
-                        modifier = Modifier.size(12.dp),
+                        tint = workspace.amber,
+                        modifier = Modifier.size(10.dp),
                     )
                 }
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 SandboxStepArrow(
                     enabled = onPrevious != null,
@@ -705,8 +720,9 @@ private fun SandboxStepPeek(
                 )
                 Text(
                     text = activity.stepProgressText(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = workspace.muted,
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.4.sp,
+                    color = theme.inkSoft,
                     maxLines = 1,
                 )
                 SandboxStepArrow(
@@ -725,9 +741,11 @@ private fun SandboxStepArrow(
     onClick: (() -> Unit)?,
     left: Boolean,
 ) {
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3 spec: 9dp chevrons stroke 2.4 inkSoft
     Box(
         modifier = Modifier
-            .size(20.dp)
+            .size(16.dp)
             .clip(CircleShape)
             .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
         contentAlignment = Alignment.Center,
@@ -735,19 +753,28 @@ private fun SandboxStepArrow(
         Icon(
             imageVector = if (left) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
             contentDescription = null,
-            modifier = Modifier.size(12.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 0.92f else 0.28f),
+            modifier = Modifier.size(9.dp),
+            tint = theme.inkSoft.copy(alpha = if (enabled) 1f else 0.28f),
         )
     }
 }
 
 @Composable
 private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
+    // V3 ResultPill spec: 16dp accent 实心圆 + 10dp 白勾。失败/取消保留状态色映射。
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val workspace = workspaceColors()
+    val (bg, ink) = when (status) {
+        ToolActivityStatus.SUCCEEDED -> theme.toolDoneBg to theme.toolDoneBadgeInk
+        ToolActivityStatus.FAILED -> workspace.red to Color.White
+        ToolActivityStatus.CANCELLED -> workspace.muted to Color.White
+        else -> theme.toolDoneBg to theme.toolDoneBadgeInk // RUNNING / WAITING 用 accent 表示进行中
+    }
     Surface(
-        modifier = Modifier.size(20.dp),
+        modifier = Modifier.size(16.dp),
         shape = CircleShape,
-        color = sandboxStatusContainerColor(status),
-        contentColor = sandboxStatusOnContainerColor(status),
+        color = bg,
+        contentColor = ink,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -755,10 +782,11 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
                     ToolActivityStatus.SUCCEEDED -> HugeIcons.Tick01
                     ToolActivityStatus.FAILED,
                     ToolActivityStatus.CANCELLED -> HugeIcons.Cancel01
-                    else -> HugeIcons.Code
+                    else -> HugeIcons.Tick01 // 运行中也显示勾 (表示已开始/在进行)
                 },
                 contentDescription = null,
-                modifier = Modifier.size(12.dp),
+                tint = ink,
+                modifier = Modifier.size(10.dp),
             )
         }
     }

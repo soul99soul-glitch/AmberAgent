@@ -91,7 +91,10 @@ fun UIAvatar(
     editContainerColor: Color = MaterialTheme.colorScheme.tertiaryContainer,
     editContentColor: Color = MaterialTheme.colorScheme.onTertiaryContainer,
     onUpdate: ((Avatar) -> Unit)? = null,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    // 显示右下角铅笔徽标。false 时点头像仍可换头像，只是不画铅笔小图标
+    // (V3 drawer footer 用 false —— 设计稿头像是干净圆头像，无铅笔徽标)
+    showEditBadge: Boolean = true,
 ) {
     if (onUpdate == null) {
         UIAvatarFrame(
@@ -135,7 +138,7 @@ fun UIAvatar(
         containerColor = containerColor,
         editContainerColor = editContainerColor,
         editContentColor = editContentColor,
-        showEditIcon = true,
+        showEditIcon = showEditBadge,
         onClick = {
             onClick?.invoke()
             showPickOption = true

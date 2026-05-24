@@ -44,6 +44,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -922,12 +924,14 @@ private fun MarkdownNode(
         // 引用块
         MarkdownElementTypes.BLOCK_QUOTE -> {
             ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
+                // Bug fix: 之前用 drawWithContent + drawRect 把 bg 画在 content 之上 (蒙层覆盖
+                // 文字), 深色下文字几乎看不见. 改 drawBehind 让 bg 画在 content 之后.
+                // 同时降低 bgColor alpha (0.2 → 0.12), 在深色下也清爽.
                 val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)
                 Column(
                     modifier = Modifier
-                        .drawWithContent {
-                            drawContent()
+                        .drawBehind {
                             drawRect(
                                 color = bgColor, size = size
                             )
@@ -1825,6 +1829,17 @@ internal fun shouldMarkLeafAsFadeEligible(
  * [ranges] is empty — preserves Color.Unspecified parity with the
  * pre-refactor leaf-text fast path.
  */
+/**
+ * V3: 给 fade 中的字符加 baselineShift 模拟"从下方浮上来"(Codex 同款).
+ * alpha=0 → shift = -0.15 (字在 baseline 下方 ~15% font size ≈ 2-3px)
+ * alpha=1 → shift = 0 (归位)
+ * BaselineShift 是 SpanStyle 字段, 不影响 line height (Compose 已 clamp).
+ */
+private fun fadingSpanStyle(baseColor: Color, alpha: Float): SpanStyle = SpanStyle(
+    color = baseColor.copy(alpha = alpha),
+    baselineShift = BaselineShift(-(1f - alpha) * 0.15f),
+)
+
 internal fun applyRevealOverlay(
     static: AnnotatedString,
     ranges: List<AnnotatedString.Range<String>>,
@@ -1865,7 +1880,7 @@ internal fun applyRevealOverlay(
                         runAlpha = alpha
                     } else if (alpha != runAlpha) {
                         addStyle(
-                            style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                            style = fadingSpanStyle(baseColor, runAlpha),
                             start = runStart,
                             end = i,
                         )
@@ -1877,7 +1892,7 @@ internal fun applyRevealOverlay(
                     // accumulated run. The revealed codepoint itself
                     // needs no style.
                     addStyle(
-                        style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                        style = fadingSpanStyle(baseColor, runAlpha),
                         start = runStart,
                         end = i,
                     )
@@ -1887,7 +1902,7 @@ internal fun applyRevealOverlay(
             }
             if (runStart >= 0) {
                 addStyle(
-                    style = SpanStyle(color = baseColor.copy(alpha = runAlpha)),
+                    style = fadingSpanStyle(baseColor, runAlpha),
                     start = runStart,
                     end = rangeEnd,
                 )

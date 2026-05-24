@@ -2,18 +2,31 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
@@ -37,19 +50,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,12 +77,15 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
@@ -82,6 +103,7 @@ import me.rerere.rikkahub.data.ai.tools.parseDeepReadSlashCommand
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
@@ -93,6 +115,7 @@ import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.SandboxActivitySheet
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
@@ -173,11 +196,13 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             windowAdaptiveInfo.height >= 600.dp
     val isBigScreen =
         compactTwoPane || windowAdaptiveInfo.width >= 1100.dp
+    // V3 convo-history.jsx 全屏 history (380×832 phone artboard 全宽)，手机端 drawer 拉出来
+    // 覆盖整屏；大屏 (tablet) 保留侧边栏宽度. 用户偏好全屏覆盖, 关闭用系统返回 / 滑动手势.
     val drawerWidth = when {
         compactTwoPane && !comfortableTwoPane -> 240.dp
         comfortableTwoPane && windowAdaptiveInfo.width < 1100.dp -> 252.dp
         isBigScreen -> 304.dp
-        else -> 336.dp
+        else -> windowAdaptiveInfo.width  // 手机端：全屏覆盖
     }
 
     val inputState = vm.inputState
@@ -500,11 +525,51 @@ private fun ChatPageContent(
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
     val pendingQueueCount = pendingUserMessages.size
 
-    Surface(
-        color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.fillMaxSize()
-    ) {
+    // 用 Box 强制 z-order：chatTheme.bg → bloom → Scaffold（透明）
+    // 之前 Surface(color=paper) 包 bloom 时，Material3 Scaffold 内 Surface 可能再画一层
+    // tonal tint 把 bloom 盖住，导致真机看不到光晕。
+    // 必须用 LocalChatTheme.current.bg 而非 workspaceColors().paper —— 后者在浅色模式
+    // 硬编码 Color.White (WorkspaceStyle.kt:107)，会把 Paper #FDFAF3 / Plain #FFFFFF 都
+    // 强行变白，导致用户切到 Paper 看到的还是白底。
+    val chatThemeForBg = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val chatThemeBg = chatThemeForBg.bg
+    Box(modifier = Modifier.fillMaxSize().background(chatThemeBg)) {
         AssistantBackground(setting = setting)
+        // V3 Whisper：空白态满强度 bloom；进入对话按设计稿"蓝光晕去掉 → 干净浅灰白"。
+        // 转场用 700ms tween 缓慢淡出，避免发送瞬间硬切。
+        // Paper/Midnight 设计稿 (themes.jsx haloConvo) 要求对话态保留 faint 底光氛围
+        // → showBloomInConvo=true 时降到 0.25 而非 0；Whisper/Plain 仍然完全淡出
+        //
+        // 切换 conversation 时 init=false 期间 messageNodes 快照可能是空 (异步还没填), bloom
+        // 会误判为"空白态"开始 700ms 渐变到 1f, 内容到了又反向, 用户看到光晕来回闪. 修复:
+        // init=false 时 bloom 锁定在对话态值 (低), 等 initialized=true 真实状态明确再切.
+        // review P3 #4: 之前每次 recomposition 重算 + messageNodes 瞬态空快照会触发 700ms
+        // 反复 fade up/down. 改为只在 (initialized / conversation.id / messageNodes 真实空否
+        // / 主题切换) 四个关键 key 变化时重算, 流式 chunk 引起的 recomp 不再扰动 bloom.
+        val isMessageListEmpty = conversation.messageNodes.isEmpty()
+        val bloomTarget by remember(
+            timelineLoadState.initialized,
+            conversation.id,
+            isMessageListEmpty,
+            chatThemeForBg.showBloomInConvo,
+        ) {
+            derivedStateOf {
+                when {
+                    !timelineLoadState.initialized -> if (chatThemeForBg.showBloomInConvo) 0.25f else 0f
+                    isMessageListEmpty -> 1f
+                    chatThemeForBg.showBloomInConvo -> 0.25f
+                    else -> 0f
+                }
+            }
+        }
+        val bloomIntensity by animateFloatAsState(
+            targetValue = bloomTarget,
+            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+            label = "bloomFade",
+        )
+        if (setting.getCurrentAssistant().background == null && bloomIntensity > 0.001f) {
+            WhisperBottomBloom(intensity = bloomIntensity)
+        }
         Scaffold(
             topBar = {
                 TopBar(
@@ -512,12 +577,25 @@ private fun ChatPageContent(
                     conversation = conversation,
                     bigScreen = bigScreen,
                     drawerState = drawerState,
+                    currentChatModel = currentChatModel,
                     previewMode = previewMode,
                     onNewChat = {
                         navigateToChatPage(navController)
                     },
                     onClickMenu = {
                         previewMode = !previewMode
+                    },
+                    onUpdateChatModel = {
+                        vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
+                    },
+                    onUpdateAssistant = { updated ->
+                        vm.updateSettings(
+                            setting.copy(
+                                assistants = setting.assistants.map { a ->
+                                    if (a.id == updated.id) updated else a
+                                }
+                            )
+                        )
                     },
                     onUpdateTitle = {
                         vm.updateTitle(it)
@@ -644,6 +722,27 @@ private fun ChatPageContent(
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
+            Box(modifier = Modifier.fillMaxSize()) {
+            // V3: timeline 未初始化时 (conversation 刚切换), 用 spinner 完全覆盖整个 chat 区域,
+            //   不渲染 ChatList / hero 这些底层内容. 加载完 (initialized=true) 才显示真实内容,
+            //   避免"空白态闪一下再切到历史对话"的副作用.
+            if (!timelineLoadState.initialized) {
+                val chatTheme = LocalChatTheme.current
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(chatTheme.bg),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        color = chatTheme.accent,
+                        trackColor = chatTheme.accent.copy(alpha = 0.16f),
+                        strokeWidth = 2.4.dp,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            } else {
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
@@ -779,6 +878,63 @@ private fun ChatPageContent(
                 },
                 chatTimelinePlan = chatTimelinePlan,
             )
+            // V3 convo-screen.jsx:27-32 底部 56dp fade scrim ——
+            // 长消息滚动接近 composer pill 时溶解到 bg，不硬切边线
+            // 仅对话态显示（空白态不需要）
+            if (conversation.messageNodes.isNotEmpty()) {
+                val chatBg = LocalChatTheme.current.bg
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0.00f to chatBg.copy(alpha = 0f),
+                                0.75f to chatBg,
+                                1.00f to chatBg,
+                            )
+                        )
+                )
+            }
+
+            // V3 空白态: hero 问候语 (此 else 分支已守护 initialized=true, 不会闪现)
+            // review P2 #3: 之前 (isEmpty && loadingJob==null) 在 "loading && empty" 中间态没 UI,
+            // 401/慢响应时整屏空白看着像卡死. 改成 isEmpty 时 hero 一直保留 (loading 时 hero 上叠
+            // 半透蒙层 spinner 反馈), 直到第一个 chunk 落 (messageNodes 非空) 再切到 ChatList.
+            if (conversation.messageNodes.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val nick = setting.displaySetting.userNickname.trim()
+                    val heroText = if (nick.isNotEmpty()) "Hi $nick，\n今天想聊点什么？" else "今天想聊点什么？"
+                    val chatTheme = LocalChatTheme.current
+                    Text(
+                        text = heroText,
+                        color = chatTheme.ink.copy(alpha = if (loadingJob != null) 0.45f else 1f),
+                        fontSize = chatTheme.heroSize.sp,
+                        fontWeight = FontWeight(chatTheme.heroWeight),
+                        letterSpacing = chatTheme.heroLetter.sp,
+                        lineHeight = (chatTheme.heroSize * 1.4f).sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                    if (loadingJob != null) {
+                        // 上叠 spinner 给 "loading && empty" 中间态一个反馈
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = chatTheme.accent,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .padding(top = (chatTheme.heroSize * 2.5f).dp.coerceAtMost(80.dp)),
+                        )
+                    }
+                }
+            }
+            }  // end if (!initialized) else branch (ChatList + hero)
+            }  // end outer Box (fillMaxSize)
         }
 
         if (sandboxOverlayOpen && sandboxActivity != null) {
@@ -1249,123 +1405,141 @@ private fun TopBar(
     conversation: Conversation,
     drawerState: DrawerState,
     bigScreen: Boolean,
+    currentChatModel: Model?,
     previewMode: Boolean,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
+    onUpdateChatModel: (Model) -> Unit,
+    onUpdateAssistant: (Assistant) -> Unit,
     onUpdateTitle: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val toaster = LocalToaster.current
-    val workspace = workspaceColors()
-    val titleState = useEditState<String> {
-        onUpdateTitle(it)
-    }
-
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = workspace.paper.copy(alpha = 0.94f),
-            scrolledContainerColor = workspace.paper,
-            navigationIconContentColor = workspace.muted,
-            titleContentColor = workspace.ink,
-            actionIconContentColor = workspace.muted,
-        ),
-        navigationIcon = {
-            if (!bigScreen) {
-                WorkspaceIconButton(
-                    onClick = {
-                        scope.launch { drawerState.open() }
-                    },
-                    icon = HugeIcons.Menu03,
-                    size = 42.dp,
-                    iconSize = 24.dp,
-                    showBorder = false,
-                    contentDescription = "Messages",
-                )
-            }
-        },
-        title = {
-            val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
-            Text(
-                text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
-                modifier = Modifier
-                    .padding(start = 6.dp)
-                    .clickable {
-                        if (conversation.messageNodes.isNotEmpty()) {
-                            titleState.open(conversation.title)
-                        } else {
-                            toaster.show(editTitleWarning, type = ToastType.Warning)
-                        }
-                    },
-                maxLines = 1,
-                style = MaterialTheme.typography.titleLarge,
-                color = workspace.ink,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        actions = {
+    // V3 phone-screen.jsx header 没有 surface —— 直接坐在 bloom 之上
+    // 之前用 workspace.paper@96% (legacy 硬编码白底) 把 halo 顶层盖住，所以 Paper
+    // 主题下用户反馈"顶栏没变暖纸色"——其实是被白 Surface 罩住了
+    Surface(
+        color = Color.Transparent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(start = 20.dp, end = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(
-                modifier = Modifier.padding(end = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                WorkspaceIconButton(
-                    onClick = {
-                        onClickMenu()
-                    },
-                    icon = if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet,
-                    contentDescription = "Chat Options",
-                    size = 44.dp,
-                    iconSize = 24.dp,
+                if (!bigScreen) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            // V3: ripple 改圆形 (默认矩形 ripple 跟 36dp 方块大小一致, 看着丑)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .clickable { scope.launch { drawerState.open() } },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalAlignment = Alignment.Start,
+                        ) {
+                            AmberHeaderLine(width = 22.dp)
+                            AmberHeaderLine(width = 14.dp)
+                            AmberHeaderLine(width = 19.dp)
+                        }
+                    }
+                }
+                ModelSelector(
+                    modelId = settings.getCurrentAssistant().chatModelId ?: settings.chatModelId,
+                    providers = settings.providers,
+                    type = ModelType.CHAT,
+                    minimalText = true,
+                    modifier = Modifier.weight(1f, fill = false),
+                    currentAssistant = settings.getCurrentAssistant(),
+                    onUpdateAssistant = onUpdateAssistant,
+                    onSelect = onUpdateChatModel,
                 )
+            }
 
-                WorkspaceIconButton(
-                    onClick = {
-                        onNewChat()
-                    },
-                    icon = HugeIcons.MessageAdd01,
-                    contentDescription = "New Message",
-                    tone = WorkspaceTone.Accent,
-                    size = 44.dp,
-                    iconSize = 24.dp,
-                    containerColor = workspace.paper,
-                )
-            }
-        },
-    )
-    titleState.EditStateContent { title, onUpdate ->
-        AlertDialog(
-            onDismissRequest = {
-                titleState.dismiss()
-            },
-            title = {
-                Text(stringResource(R.string.chat_page_edit_title))
-            },
-            text = {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = onUpdate,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        titleState.confirm()
-                    }
-                ) {
-                    Text(stringResource(R.string.chat_page_save))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                // V3 Whisper：进入对话后顶栏右侧多出 22dp Context Ring（仅有消息时）。
+                // 真实 used/total —— 取最后一条 assistant 消息的 usage
+                // V3 review P2 #2: 之前用 totalTokens (= 该轮 prompt+completion 加起来), 跟 ring
+                // 的"上下文占用"语义不符 (短问题 totalTokens 小 → ring 缩水, 反而误导). 改用
+                // promptTokens (下一轮 LLM 实际加载的上下文长度), 也是用户最直观的"已占用".
+                if (conversation.messageNodes.isNotEmpty()) {
+                    val lastAssistant = conversation.currentMessages
+                        .lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+                    val lastUsage = lastAssistant?.usage
+                    val usedK = ((lastUsage?.promptTokens ?: 0) / 1000).coerceAtLeast(0)
+                    // total: 模型 context window 估值，未取到时按 200K 默认（大多数现代模型）
+                    val totalK = currentChatModel?.let {
+                        // TODO: Model 数据加 contextWindow 字段后用真实值；当前 200K 保守估计
+                        200
+                    } ?: 200
+                    // V3: 接真实 token 数据给 popup. 速度算的是端到端 (含网络/排队), 不是
+                    // 模型纯推理. createdAt 是 message 第一字符落地时刻, finishedAt 是最后字符,
+                    // 所以差值 = 全部 streaming 时长.
+                    val elapsedMs = if (lastAssistant?.finishedAt != null) {
+                        val createdInstant = lastAssistant.createdAt
+                            .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault())
+                        val finishedInstant = lastAssistant.finishedAt!!
+                            .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault())
+                        (finishedInstant.toEpochMilliseconds() - createdInstant.toEpochMilliseconds())
+                            .takeIf { it > 0 }
+                    } else null
+                    ContextRing(
+                        used = usedK,
+                        total = totalK,
+                        lastTurnTotalTokens = lastUsage?.totalTokens,
+                        lastTurnCachedTokens = lastUsage?.cachedTokens,
+                        lastTurnPromptTokens = lastUsage?.promptTokens,
+                        lastTurnElapsedMs = elapsedMs,
+                    )
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        titleState.dismiss()
-                    }
+                // V3 Whisper：phone-screen.jsx 注释 "naked compose icon — no
+                // surrounding circle"，仅渲染 26dp ink 描线图标，无背景圆。
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        // V3: ripple 改圆形
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .clickable { onNewChat() },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(stringResource(R.string.chat_page_cancel))
+                    Icon(
+                        imageVector = HugeIcons.MessageAdd01,
+                        contentDescription = "New Message",
+                        tint = LocalChatTheme.current.ink,
+                        modifier = Modifier.size(26.dp),
+                    )
                 }
             }
-        )
+        }
     }
 }
+
+@Composable
+private fun AmberHeaderLine(width: androidx.compose.ui.unit.Dp) {
+    // 主题感知 ink 色 —— legacy workspaceColors().ink 在浅色硬编码 #1F1F1F，
+    // Paper 主题下需要 #2A241B 才能跟 bg/halo 协调
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(1.6.dp)
+            .background(LocalChatTheme.current.ink, RoundedCornerShape(1.dp))
+    )
+}
+
+// V3 Whisper 空白态本应为纯净留白 + 底部光晕；之前的 EmptyChatHero（宝石 + 问候）
+// 是误读 phone-screen.jsx 未被 Hero 引用的 AmberMark 导致的；移除。
+// AmberMark.kt 文件保留作未来 agent avatar 等场景的备用组件。

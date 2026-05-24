@@ -122,6 +122,8 @@ private fun AgentWaitingDot(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
+    // V3: 用 chatTheme.accent 替代硬编码 workspace.blue, 跟 4 主题 (Whisper蓝/Plain黑/Paper砖红/Midnight冷靛) 联动.
+    val accent = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent
     val transition = rememberInfiniteTransition(label = "agent_waiting_dot")
     val dotScale by transition.animateFloat(
         initialValue = 0.82f,
@@ -159,14 +161,14 @@ private fun AgentWaitingDot(
                 .size(16.dp)
                 .scale(dotScale)
                 .clip(CircleShape)
-                .background(workspace.blue.copy(alpha = haloAlpha))
+                .background(accent.copy(alpha = haloAlpha))
         )
         Box(
             modifier = Modifier
                 .size(7.dp)
                 .scale(dotScale)
                 .clip(CircleShape)
-                .background(workspace.blue.copy(alpha = dotAlpha))
+                .background(accent.copy(alpha = dotAlpha))
         )
     }
 }

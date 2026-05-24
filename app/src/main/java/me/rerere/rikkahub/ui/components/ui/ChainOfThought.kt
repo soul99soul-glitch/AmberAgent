@@ -68,29 +68,44 @@ private val LocalCardColor = staticCompositionLocalOf { Color.White }
 @Composable
 fun <T> ChainOfThought(
     modifier: Modifier = Modifier,
+    // V3 设计稿: ChainOfThought wrapper 不要外框 (Card + surfaceColorAtElevation 是
+    //   "灰色背景框")。每个 step 自己负责自己的引用样式 (reasoning 用 thinkRule 左竖线,
+    //   工具用 capsule 等). 透明 + 0 elevation = 视觉无框, 还保留 Card semantics
+    //   (rounded corners 不需要; 留给可能的未来需要).
     cardColors: CardColors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
+        containerColor = Color.Transparent,
     ),
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
     collapsedAdaptiveWidth: Boolean = false,
     animateContentChanges: Boolean = true,
+    // V3 设计稿: 单 reasoning step 时不需要 wrapper 竖线 (内层 ReasoningContent 已自带
+    //   引用竖线), 重复两道线观感差. 多 step 链条仍保留 wrapper 竖线作时间线 visual.
+    drawTimeline: Boolean = true,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
+    // V3: cardColors 透明时, icon 后面用 scheme.background 遮挡, 避免 wrapper timeline
+    // 竖线穿过 icon center. (LocalCardColor 之前是 cardColors.containerColor, 透明时遮挡失效)
+    val maskColor = if (cardColors.containerColor == Color.Transparent) {
+        MaterialTheme.colorScheme.background
+    } else {
+        cardColors.containerColor
+    }
     CompositionLocalProvider(
-        LocalCardColor provides cardColors.containerColor
+        LocalCardColor provides maskColor
     ) {
         Card(
             modifier = modifier,
             colors = cardColors,
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    // V3: padding 内缩到 0 (外框已透明, 不需要 inner padding)
                     .then(
                         if (animateContentChanges) {
                             Modifier.animateContentSize(
@@ -153,18 +168,25 @@ fun <T> ChainOfThought(
                     }
                 }
 
-                val lineColor = MaterialTheme.colorScheme.outlineVariant
+                // V3: 左竖线用 chatTheme.thinkRule 替代 outlineVariant (faint 灰)
+                // 这样思考链条左线跟主题 accent 走（Whisper 蓝 / Paper 砖红 / Plain 黑 / Midnight 靛蓝）
+                // drawTimeline=false 时跳过竖线（reasoning-only 时由 ReasoningContent 自带引用线，wrapper 不重复画）
+                val lineColor = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.thinkRule
                 val scope = remember { ChainOfThoughtScopeImpl() }
                 Box(
-                    modifier = Modifier.drawBehind {
-                        val x = 12.dp.toPx()
-                        val offsetPx = 18.dp.toPx()
-                        drawLine(
-                            color = lineColor,
-                            start = Offset(x, offsetPx),
-                            end = Offset(x, size.height - offsetPx),
-                            strokeWidth = 1.dp.toPx()
-                        )
+                    modifier = if (drawTimeline) {
+                        Modifier.drawBehind {
+                            val x = 12.dp.toPx()
+                            val offsetPx = 18.dp.toPx()
+                            drawLine(
+                                color = lineColor,
+                                start = Offset(x, offsetPx),
+                                end = Offset(x, size.height - offsetPx),
+                                strokeWidth = 2.dp.toPx()
+                            )
+                        }
+                    } else {
+                        Modifier
                     }
                 ) {
                     Column {
@@ -230,6 +252,9 @@ interface ChainOfThoughtScope {
         onClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
         contentVisible: Boolean = expanded,
+        /** true 时 content 起始 X 跟 step icon center (12dp) 对齐 (而非默认 32dp label 缩进).
+         *  reasoning step 用 true, 让 ReasoningContent 引用竖线 X = wrapper timeline X. */
+        flushContent: Boolean = false,
         content: (@Composable () -> Unit)? = null,
     )
 }
@@ -268,6 +293,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         onClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
+        flushContent: Boolean,
         content: @Composable (() -> Unit)?
     ) {
         ChainOfThoughtStepContent(
@@ -279,6 +305,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             expanded = expanded,
             onExpandedChange = onExpandedChange,
             contentVisible = contentVisible,
+            flushContent = flushContent,
             content = content,
         )
     }
@@ -293,6 +320,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
         contentVisible: Boolean,
+        flushContent: Boolean = false,
         content: @Composable (() -> Unit)?
     ) {
         val hasContent = content != null
@@ -399,8 +427,31 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 }
             }
 
-            // 展开内容（缩进对齐 label）
-            if (contentVisible && hasContent) {
+            // 展开内容：默认缩进对齐 label (32dp). flushContent=true 时缩进对齐 step icon
+            // center (12dp), 让 reasoning content 引用竖线和 wrapper timeline 同 X.
+            // 用 AnimatedVisibility 加 expand+fade 过渡, 替代之前直接 if-render 的硬切.
+            val contentStartPadding = if (flushContent) 12.dp else 32.dp
+            androidx.compose.animation.AnimatedVisibility(
+                visible = contentVisible && hasContent,
+                enter = androidx.compose.animation.expandVertically(
+                    animationSpec = androidx.compose.animation.core.tween(
+                        durationMillis = 220,
+                        easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                    ),
+                    expandFrom = androidx.compose.ui.Alignment.Top,
+                ) + androidx.compose.animation.fadeIn(
+                    animationSpec = androidx.compose.animation.core.tween(180),
+                ),
+                exit = androidx.compose.animation.shrinkVertically(
+                    animationSpec = androidx.compose.animation.core.tween(
+                        durationMillis = 180,
+                        easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                    ),
+                    shrinkTowards = androidx.compose.ui.Alignment.Top,
+                ) + androidx.compose.animation.fadeOut(
+                    animationSpec = androidx.compose.animation.core.tween(140),
+                ),
+            ) {
                 Box(
                     modifier = Modifier
                         .then(
@@ -410,9 +461,9 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                                 Modifier
                             }
                         )
-                        .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
+                        .padding(start = contentStartPadding, top = 4.dp, bottom = 8.dp)
                 ) {
-                    content()
+                    content?.invoke()
                 }
             }
         }

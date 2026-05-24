@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -56,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -168,10 +171,10 @@ fun ChatInput(
     val coroutineScope = rememberCoroutineScope()
     val workspace = workspaceColors()
     val hazeTintColor = workspace.paper
-    // Plan B redesign: bumped from 8dp to 22dp so the composer reads as a
-    // "floating card" and the bottom corners no longer collide visually with
-    // phones that have a heavily rounded display edge.
-    val composerShape = RoundedCornerShape(22.dp)
+    // SendOrb 自身 76dp, 顶着 Row 实际高度 = max(60, 76) = 76dp.
+    // corner 38dp = 76/2 = 单行/空状态时完美半圆胶囊.
+    // 多行扩高 N>76dp 时, 38dp < N/2, 两端不再完美半圆 (长方圆角). 这正是用户要的.
+    val composerShape = RoundedCornerShape(38.dp)
     val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE && !timelineScrolling
     val suggestionFillPulse = remember(conversation.id) { Animatable(0f) }
 
@@ -484,8 +487,11 @@ fun ChatInput(
                 // 22dp rounded corners clear of devices with aggressive screen
                 // rounding so the card never looks "bitten" at the bottom.
                 .padding(bottom = 6.dp)
-                .padding(horizontal = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                // 调整: composer 左右 8→12dp 离屏幕边线稍远一些 (不再"贴边")
+                .padding(horizontal = 12.dp),
+            // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
+            // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             sandboxActivity?.let { activity ->
                 SandboxPeekBar(
@@ -499,9 +505,11 @@ fun ChatInput(
             }
 
             val pulseFraction = suggestionFillPulse.value
+            // V3 review P3 #8: suggestion pulse 用 chatTheme.accent (跟 4 主题色协调)
+            val chatThemeForPulse = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
             val composerBorderColor = lerp(
                 start = workspace.hairline,
-                stop = workspace.blue.copy(alpha = 0.42f),
+                stop = chatThemeForPulse.accent.copy(alpha = 0.42f),
                 fraction = pulseFraction,
             )
             val composerContainerColor = if (useComposerBlur) {
@@ -509,14 +517,46 @@ fun ChatInput(
             } else {
                 lerp(
                     start = hazeTintColor,
-                    stop = workspace.blueContainer,
+                    stop = chatThemeForPulse.accentSoft,
                     fraction = pulseFraction * 0.22f,
                 )
             }
 
+            // V3 composer pill 阴影策略：
+            //   浅色主题 (Whisper/Plain/Paper)：Material shadow 12dp + chatTheme.composerShadow
+            //     的墨灰/暖棕投影，在浅底上"浮"出 pill 感
+            //   深色主题 (Midnight)：Material shadow ambient/spot 改 Color.Black 强制黑投影，
+            //     避免 default 白色 shadow 在 Midnight #0B0E14 上变成"白晕". border 调成顶轻底重
+            //     (5% 白 → 16% 白) 模拟 pill "落"在背景上 (下沉感) 而非顶部 rim light.
+            val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+            val composerFill = chatTheme.surface
+            val composerBorder: androidx.compose.ui.graphics.Brush = if (chatTheme.isDark) {
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    listOf(
+                        Color(0x0DE8EAEF),  // 顶 ~5% 白 (细)
+                        Color(0x29E8EAEF),  // 底 ~16% 白 (粗) - 落地感
+                    )
+                )
+            } else {
+                androidx.compose.ui.graphics.SolidColor(chatTheme.surfaceEdge)
+            }
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // Bug fix: 之前 fixed height(68.dp) 把 TextField maxHeightInLines=5 给框死了,
+                    // 用户输入多行时被遮挡. 改 heightIn(min=60dp) 让 composer 跟随 TextField 高度扩展.
+                    // 60dp 比之前 68dp 略矮一些, 单行胶囊看着不那么"高大".
+                    .heightIn(min = 60.dp)
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = composerShape,
+                        clip = false,
+                        // 深色模式下 ambient/spot 必须强制 Color.Black, 否则 default 白色 shadow
+                        // 在 Midnight 上扩散成"白晕"看着像反向高光. 浅色用 chatTheme.composerShadow
+                        // (墨灰/暖棕) 保持原效果.
+                        ambientColor = if (chatTheme.isDark) Color.Black else chatTheme.composerShadow,
+                        spotColor = if (chatTheme.isDark) Color.Black else chatTheme.composerShadow,
+                    )
                     .clip(composerShape)
                     .then(
                         if (useComposerBlur) Modifier.hazeEffect(
@@ -528,160 +568,114 @@ fun ChatInput(
                 shape = composerShape,
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, composerBorderColor),
-                color = composerContainerColor,
+                border = BorderStroke(1.dp, composerBorder),
+                color = if (useComposerBlur) Color.Transparent else composerFill,
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                Row(
+                    modifier = Modifier
+                        // Bug fix: fillMaxSize() 在 Surface heightIn(min=68dp) 无 max 约束时会
+                        // 反过来撑爆 Surface 到屏幕最大. 改 fillMaxWidth() 高度跟随子内容.
+                        .fillMaxWidth()
+                        // Bug fix: 用户反复反馈光标位置仍偏右. 继续压缩:
+                        //   Row start 12 → 8dp / Row spacedBy 4 → 0dp / TextField offset(-8dp)
+                        //   抵消 M3 TextField 内部 fixed 16dp content padding.
+                        // (TextField 用 absoluteOffset 视觉左移, 不影响布局尺寸, 不会跟旁边元素重叠.)
+                        .padding(start = 8.dp, end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
-                    if (state.messageContent.isNotEmpty()) {
-                        MediaFileInputRow(state = state)
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .clickable { expandToggle(ExpandState.Files) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (expand == ExpandState.Files) HugeIcons.Cancel01 else HugeIcons.Add01,
+                                contentDescription = stringResource(R.string.more_options),
+                                tint = workspace.ink,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
                     }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(20.dp)
+                            .background(workspace.hairline),
+                    )
 
                     TextInputRow(
                         state = state,
                         onSendMessage = { sendMessage() },
                         onUsageClick = { showUsageSheet = true },
                         onCompactContext = onCompactContext,
+                        // 用 absoluteOffset 把 TextField 整体视觉左移 8dp, 抵消 M3 TextField
+                        // 不可直接修改的 16dp leading content padding. 不影响 layout 尺寸,
+                        // 故不会跟 / 按钮 / send orb 重叠.
+                        modifier = Modifier
+                            .weight(1f)
+                            .absoluteOffset(x = (-8).dp),
+                        minimalChrome = true,
+                        onUpdateAssistant = onUpdateAssistant,
                     )
 
-                    Row(
+                    // V3: 用 Text("/") 字符替代 Canvas line, 跟 SlashCommandLeadingMark
+                    // (TextField leadingIcon 内的 "/" 字符) 用同一字体, 两个斜杠角度一致.
+                    // toggle 语义: 仅在文本为空 / 已 "/" 开头 (即 panel 已显示) 时 toggle.
+                    // 用户已输普通文本时点击 = no-op, 避免吞掉/污染用户内容 (review P2 #1 修复).
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(ComposerModelGroupHeight),
-                            contentAlignment = Alignment.BottomStart,
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
-                                horizontalAlignment = Alignment.Start,
-                            ) {
-                                ContextUsageIndicator(
-                                    conversation = conversation,
-                                    contextCompacts = contextCompacts,
-                                    compactLifecycleState = compactLifecycleState,
-                                    model = chatModel,
-                                    modifier = Modifier.padding(start = 3.dp),
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.Bottom,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    // Plan A core fix: weight(1f, fill=false) lets the
-                                    // model chip take whatever leftover width remains
-                                    // after the reasoning chip claims its natural size,
-                                    // so the reasoning chip is NEVER clipped — and long
-                                    // model names ellipsize via the chip's existing
-                                    // maxLines=1 + Ellipsis overflow rule.
-                                    ModelSelector(
-                                        modelId = assistant.chatModelId ?: settings.chatModelId,
-                                        providers = settings.providers,
-                                        onSelect = {
-                                            onUpdateChatModel(it)
-                                            dismissExpand()
-                                        },
-                                        type = ModelType.CHAT,
-                                        compact = true,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                    )
-                                    ReasoningLevelChip(
-                                        reasoningLevel = assistant.reasoningLevel,
-                                        model = chatModel,
-                                        provider = chatProvider,
-                                        onUpdateReasoningLevel = {
-                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                        },
-                                    )
-                                }
-                            }
-                        }
-
-                        ActionIconButton(
-                            onClick = {
-                                expandToggle(ExpandState.Files)
-                            },
-                            accent = expand == ExpandState.Files,
-                        ) {
-                            Icon(
-                                imageVector = if (expand == ExpandState.Files) HugeIcons.Cancel01 else HugeIcons.Add01,
-                                contentDescription = stringResource(R.string.more_options),
-                                modifier = Modifier.size(ComposerButtonIconSize),
-                            )
-                        }
-
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(ComposerButtonSize)
-                                .clip(RoundedCornerShape(8.dp))
-                                .combinedClickable(
-                                    enabled = loading || !state.isEmpty(),
-                                    onClick = {
-                                        dismissExpand()
-                                        sendMessage()
-                                    }, onLongClick = {
-                                        dismissExpand()
-                                        sendMessageWithoutAnswer()
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .clickable {
+                                val cur = state.textContent.text.toString()
+                                when {
+                                    cur.isEmpty() -> state.setMessageText("/")
+                                    cur == "/" -> state.setMessageText("")  // 仅 toggle 关闭
+                                    cur.startsWith("/") -> {
+                                        // 已 "/" 开头 + 有查询字符 → 收起 panel, 保留用户输入 (去 "/")
+                                        state.setMessageText(cur.removePrefix("/"))
                                     }
-                                )
-                        ) {
-                            val isQueueSend = loading && !state.isEmpty()
-                            // Pull empty state down to nearly-transparent + heavily-faded
-                            // icon so the send button visibly recedes when there is
-                            // nothing to send. Active states (blue when ready / blue
-                            // when queueing / amber when streaming) keep full
-                            // saturation, so the transition into "go" reads as a
-                            // distinct state change instead of a faint hairline tweak.
-                            val targetContainer = when {
-                                isQueueSend -> workspace.blue
-                                loading -> workspace.amberContainer
-                                state.isEmpty() -> Color.Transparent
-                                else -> workspace.blue
-                            }
-                            val targetContent = when {
-                                isQueueSend -> Color.White
-                                loading -> workspace.amber
-                                state.isEmpty() -> workspace.faint.copy(alpha = 0.55f)
-                                else -> Color.White
-                            }
-                            val targetBorder = if (state.isEmpty()) workspace.hairline else Color.Transparent
-                            val containerColor by animateColorAsState(targetContainer, label = "sendContainer")
-                            val contentColor by animateColorAsState(targetContent, label = "sendContent")
-                            val borderColor by animateColorAsState(targetBorder, label = "sendBorder")
-                            Surface(
-                                modifier = Modifier.fillMaxSize(),
-                                shape = RoundedCornerShape(8.dp),
-                                color = containerColor,
-                                border = BorderStroke(1.dp, borderColor),
-                                content = {})
-                            if (loading && state.isEmpty()) {
-                                KeepScreenOn()
-                                Icon(
-                                    imageVector = HugeIcons.Cancel01,
-                                    contentDescription = stringResource(R.string.stop),
-                                    tint = contentColor,
-                                    modifier = Modifier.size(ComposerButtonIconSize),
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = HugeIcons.ArrowUp02,
-                                    contentDescription = stringResource(R.string.send),
-                                    tint = contentColor,
-                                    modifier = Modifier.size(ComposerButtonIconSize),
-                                )
-                            }
-                        }
+                                    // 用户已输普通文本 → no-op (避免污染)
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.material3.Text(
+                            text = "/",
+                            fontSize = 22.sp,
+                            color = workspace.muted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
                     }
+
+                    if (loading && state.isEmpty()) {
+                        KeepScreenOn()
+                    }
+                    me.rerere.rikkahub.ui.pages.chat.SendOrb(
+                        isEmpty = state.isEmpty(),
+                        loading = loading,
+                        onClick = {
+                            dismissExpand()
+                            sendMessage()
+                        },
+                        onLongClick = {
+                            dismissExpand()
+                            sendMessageWithoutAnswer()
+                        },
+                    )
                 }
+            }
+
+            if (state.messageContent.isNotEmpty()) {
+                MediaFileInputRow(state = state)
             }
 
             // Expanded content
@@ -743,8 +737,9 @@ private fun ActionIconButton(
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        color = if (accent) workspace.blueContainer else workspace.paper,
-        contentColor = if (accent) workspace.blue else workspace.ink,
+        // V3 review P3 #8: action icon button 切 chatTheme.accent 跟主题
+        color = if (accent) me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accentSoft else workspace.paper,
+        contentColor = if (accent) me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent else workspace.ink,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Box(

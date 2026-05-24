@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -366,33 +367,26 @@ private fun AskOptionChip(
     label: String,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    // V3 claude design spec: 999 圆角胶囊 / 白底 + 6% 墨灰边 + 极淡 1px 2px 接触阴影
+    // 13.5sp ink + 字距 0.2 + padding 8/14
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val shape = androidx.compose.foundation.shape.CircleShape
     Surface(
         onClick = onClick,
         shape = shape,
-        color = if (selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-        },
-        contentColor = if (selected) {
-            MaterialTheme.colorScheme.onPrimary
-        } else {
-            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-        },
+        color = if (selected) chatTheme.accent else chatTheme.surface,
+        contentColor = if (selected) chatTheme.onAccent else chatTheme.ink,
         border = if (selected) {
             null
         } else {
-            BorderStroke(
-                width = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-            )
+            BorderStroke(width = 1.dp, color = chatTheme.surfaceEdge)
         },
         tonalElevation = 0.dp,
-        shadowElevation = if (selected) 1.dp else 0.dp,
+        // V3: 选中态去掉强阴影，未选中保留极淡 1dp 接触阴影
+        shadowElevation = if (selected) 0.dp else 1.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
@@ -406,6 +400,10 @@ private fun AskOptionChip(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium.copy(
+                    // V3 spec: 13.5sp + 字距 0.2 + 行高 1.3
+                    fontSize = 13.5.sp,
+                    letterSpacing = 0.2.sp,
+                    lineHeight = 17.5.sp,
                     fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                 ),
             )

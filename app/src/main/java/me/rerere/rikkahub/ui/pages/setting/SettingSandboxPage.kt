@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -49,6 +48,8 @@ import me.rerere.rikkahub.data.agent.terminal.TermuxRuntimeStatus
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -93,15 +94,14 @@ fun SettingSandboxPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_sandbox_page_title)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_sandbox_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -223,7 +223,7 @@ fun SettingSandboxPage(
                                             stringResource(R.string.setting_sandbox_terminal_runtime_termux)
                                     }
                                 },
-                                modifier = Modifier.width(120.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -245,7 +245,7 @@ fun SettingSandboxPage(
                                     )
                                 },
                                 optionToString = { stringResource(R.string.setting_sandbox_terminal_jobs_value, it) },
-                                modifier = Modifier.width(120.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -269,7 +269,7 @@ fun SettingSandboxPage(
                                 optionToString = {
                                     stringResource(R.string.setting_sandbox_terminal_output_value, it / 1024)
                                 },
-                                modifier = Modifier.width(120.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -293,7 +293,7 @@ fun SettingSandboxPage(
                                 optionToString = {
                                     stringResource(R.string.setting_sandbox_terminal_install_timeout_value, it / 60_000L)
                                 },
-                                modifier = Modifier.width(120.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )

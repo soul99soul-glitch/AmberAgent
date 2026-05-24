@@ -41,6 +41,7 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
+import me.rerere.rikkahub.utils.copyMessageToClipboard
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.utils.base64Encode
 import java.util.Locale
@@ -113,12 +114,18 @@ fun ChatMessage(
                 }
 
                 MessageRole.USER -> {
-                    ChatMessageUserAvatar(
-                        message = message,
-                        avatar = settings.userAvatar,
-                        nickname = settings.userNickname,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    // V3: 隐藏 user 头像 / 昵称——用户跟自己的 AI 聊天不需要展示"我是谁".
+                    // 不删代码: 如果以后想恢复, 把 SHOW_USER_AVATAR 改 true 即可.
+                    @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+                    val SHOW_USER_AVATAR = false
+                    if (SHOW_USER_AVATAR) {
+                        ChatMessageUserAvatar(
+                            message = message,
+                            avatar = settings.userAvatar,
+                            nickname = settings.userNickname,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 else -> Unit
@@ -136,6 +143,9 @@ fun ChatMessage(
                 onToolAnswer = onToolAnswer,
                 onOpenWorkspaceFile = onOpenWorkspaceFile,
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
+                onUserMessageLongClick = if (message.role == MessageRole.USER) {
+                    { showActionsSheet = true }
+                } else null,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
                 onMiniAppModify = onMiniAppModify,
             )
@@ -155,7 +165,11 @@ fun ChatMessage(
         }
 
         if (message.role == MessageRole.USER) {
-            if (showActions) {
+            // V3: user 消息下方不显示 复制/重试/菜单 按钮行——这些操作改为长按消息胶囊弹 menu sheet.
+            // 不删代码: 如果以后想恢复, 把 SHOW_USER_ACTION_BUTTONS 改 true 即可.
+            @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+            val SHOW_USER_ACTION_BUTTONS = false
+            if (SHOW_USER_ACTION_BUTTONS && showActions) {
                 ChatMessageActionButtons(
                     message = message,
                     onRegenerate = onRegenerate,
@@ -192,8 +206,14 @@ fun ChatMessage(
             }
         }
 
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
+        // V3: 隐藏 "7.3K tokens / 3.3K cached / 196 tokens / 87.1 tok/s / 2.3s" Nerd Line.
+        // 这些数据顶栏 ContextRing popover 已有, 消息下方再展示一行有点冗余. 改 SHOW_NERD_LINE = true 恢复.
+        @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+        val SHOW_NERD_LINE = false
+        if (SHOW_NERD_LINE) {
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
+            }
         }
     }
     if (showActionsSheet) {
@@ -207,22 +227,12 @@ fun ChatMessage(
             onSelectAndCopy = {
                 showSelectCopySheet = true
             },
+            onCopy = {
+                context.copyMessageToClipboard(message)
+            },
+            onRegenerate = onRegenerate,
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
-            onWebViewPreview = {
-                val textContent = message.parts
-                    .filterIsInstance<UIMessagePart.Text>()
-                    .joinToString("\n\n") { it.text }
-                    .trim()
-                if (textContent.isNotBlank()) {
-                    val htmlContent = buildMarkdownPreviewHtml(
-                        context = context,
-                        markdown = textContent,
-                        colorScheme = colorScheme
-                    )
-                    navController.navigate(Screen.WebView(content = htmlContent.base64Encode()))
-                }
-            },
             onDismissRequest = {
                 showActionsSheet = false
             }

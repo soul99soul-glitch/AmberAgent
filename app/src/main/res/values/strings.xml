@@ -667,8 +667,8 @@
   <string name="setting_display_page_show_line_numbers_title">Show Line Numbers</string>
   <string name="setting_display_page_show_message_jumper_desc">Display quick jump buttons on the right when scrolling the chat list</string>
   <string name="setting_display_page_show_message_jumper_title">Show Message Jumper</string>
-  <string name="setting_display_page_show_model_name_desc">Whether to display model names in chat messages</string>
-  <string name="setting_display_page_show_model_name_title">Show Model Name</string>
+  <string name="setting_display_page_show_model_name_desc">Whether to display the Agent name in chat messages</string>
+  <string name="setting_display_page_show_model_name_title">Show Agent Name</string>
   <string name="setting_display_page_show_thinking_content_desc">Whether to expand and show the thinking process by default during generation</string>
   <string name="setting_display_page_show_thinking_content_title">Show Thinking Content</string>
   <string name="setting_display_page_show_token_usage_desc">Display token usage and message count</string>

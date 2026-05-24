@@ -93,6 +93,18 @@ fun ColumnScope.ChatMessageActionButtons(
         }
     }
 
+    // V3 instrumentation (DEBUG only): 用户报 SVG 类 message 下方 actions 重复出现两行.
+    // 代码路径互斥 (Message vs VirtualMessage entry) — 双行只能来自上游 MessageNode 重复.
+    // gate 在 BuildConfig.DEBUG 后 release 不再写 logcat (review P3 #9 修复).
+    if (me.rerere.rikkahub.BuildConfig.DEBUG) {
+        androidx.compose.runtime.SideEffect {
+            android.util.Log.w(
+                "AmberActions",
+                "render msg=${message.id} role=${message.role} parts=${message.parts.size}"
+            )
+        }
+    }
+
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         itemVerticalAlignment = Alignment.CenterVertically,
@@ -139,7 +151,10 @@ fun ColumnScope.ChatMessageActionButtons(
                 },
             )
 
-            if (onTranslate != null) {
+            // V3: 隐藏翻译按钮 (用户暂不需要). 改 SHOW_TRANSLATE = true 即可恢复.
+            @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+            val SHOW_TRANSLATE = false
+            if (SHOW_TRANSLATE && onTranslate != null) {
                 MessageActionIconButton(
                     imageVector = HugeIcons.Translate,
                     contentDescription = stringResource(R.string.translate),
@@ -227,9 +242,12 @@ fun ChatMessageActionsSheet(
     onShare: () -> Unit,
     onFork: () -> Unit,
     onSelectAndCopy: () -> Unit,
+    /** V3: 一键复制整条消息到剪贴板 (跟旧 actions row 上的 copy 按钮等价). */
+    onCopy: (() -> Unit)? = null,
+    /** V3: 重新生成 / 重试 (user 消息时即从该位置重发, assistant 时即重新生成). */
+    onRegenerate: (() -> Unit)? = null,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
-    onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
     ModalBottomSheet(
@@ -259,6 +277,31 @@ fun ChatMessageActionsSheet(
                 shadowElevation = 0.dp,
             ) {
                 Column {
+                    // V3: copy 提到第一项 (跟旧 actions row 顺序一致)
+                    if (onCopy != null) {
+                        MessageActionRow(
+                            icon = HugeIcons.Copy01,
+                            text = stringResource(R.string.copy),
+                            workspace = workspace,
+                            onClick = {
+                                onDismissRequest()
+                                onCopy()
+                            },
+                        )
+                        MessageActionDivider(workspace)
+                    }
+                    if (onRegenerate != null) {
+                        MessageActionRow(
+                            icon = HugeIcons.Refresh03,
+                            text = stringResource(R.string.regenerate),
+                            workspace = workspace,
+                            onClick = {
+                                onDismissRequest()
+                                onRegenerate()
+                            },
+                        )
+                        MessageActionDivider(workspace)
+                    }
                     MessageActionRow(
                         icon = HugeIcons.TextSelection,
                         text = stringResource(R.string.select_and_copy),
@@ -268,18 +311,7 @@ fun ChatMessageActionsSheet(
                             onSelectAndCopy()
                         },
                     )
-                    if (hasTextContent) {
-                        MessageActionDivider(workspace)
-                        MessageActionRow(
-                            icon = HugeIcons.WebDesign01,
-                            text = stringResource(R.string.render_with_webview),
-                            workspace = workspace,
-                            onClick = {
-                                onDismissRequest()
-                                onWebViewPreview()
-                            },
-                        )
-                    }
+                    // V3: 移除 "render_with_webview" (网页视图渲染) 项
                     MessageActionDivider(workspace)
                     MessageActionRow(
                         icon = HugeIcons.Edit01,

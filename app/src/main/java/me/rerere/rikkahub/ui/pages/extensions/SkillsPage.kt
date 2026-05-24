@@ -25,7 +25,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
+import me.rerere.hugeicons.stroke.MoreVertical
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -229,7 +234,8 @@ private fun SkillLibraryStatusCard(
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        // V3 settings-skills.jsx Skill 库 card 圆角 18dp
+        shape = RoundedCornerShape(18.dp),
         color = colors.paper,
         contentColor = colors.ink,
         border = workspaceBorder(),
@@ -237,19 +243,19 @@ private fun SkillLibraryStatusCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 WorkspaceLeadingIcon(
                     icon = HugeIcons.Puzzle,
                     tone = WorkspaceTone.Neutral,
-                    size = 30.dp,
-                    iconSize = 18.dp,
+                    size = 34.dp,
+                    iconSize = 20.dp,
                 )
                 Column(
                     modifier = Modifier.weight(1f),
@@ -260,8 +266,10 @@ private fun SkillLibraryStatusCard(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // V3 settings-skills.jsx: 三 pill 中只有"已启用"用 accentSoft + accent，
+                        // 不要绿色。设计稿原注释 "single accent color, no green"
                         WorkspaceStatusPill("已安装 $installedCount")
-                        WorkspaceStatusPill("已启用 $enabledCount", tone = WorkspaceTone.Success)
+                        WorkspaceStatusPill("已启用 $enabledCount", tone = WorkspaceTone.Accent)
                         WorkspaceStatusPill("未启用 $disabledCount")
                     }
                 }
@@ -364,24 +372,27 @@ private fun SkillCard(
     onDelete: () -> Unit,
 ) {
     val colors = workspaceColors()
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3 settings-skills.jsx: 单 Skill 卡 18dp 圆角 + surface 底 + hair 边线
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
-        contentColor = colors.ink,
+        shape = RoundedCornerShape(18.dp),
+        color = chatTheme.surface,
+        contentColor = chatTheme.ink,
+        border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
                 icon = HugeIcons.Puzzle,
                 tone = WorkspaceTone.Neutral,
-                size = 30.dp,
-                iconSize = 18.dp,
+                size = 34.dp,
+                iconSize = 20.dp,
             )
             Column(
                 modifier = Modifier
@@ -411,39 +422,73 @@ private fun SkillCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    WorkspaceStatusPill(
-                        text = if (enabled) "已启用" else "未启用",
-                        tone = if (enabled) WorkspaceTone.Success else WorkspaceTone.Neutral,
-                    )
-                    if (skill.skillDir.resolve("mcp.json").exists()) {
-                        WorkspaceStatusPill(
-                            text = "包含 MCP 配置",
-                            tone = WorkspaceTone.Accent,
-                        )
+                // V3 settings-skills.jsx: 仅 disabled 行显示"未启用"小灰胶囊；MCP skill 显示 accent "MCP" 胶囊
+                if (!enabled || skill.skillDir.resolve("mcp.json").exists()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!enabled) {
+                            WorkspaceStatusPill(
+                                text = "未启用",
+                                tone = WorkspaceTone.Neutral,
+                            )
+                        }
+                        if (skill.skillDir.resolve("mcp.json").exists()) {
+                            WorkspaceStatusPill(
+                                text = "MCP",
+                                tone = WorkspaceTone.Accent,
+                            )
+                        }
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                WorkspaceIconButton(
-                    onClick = onOptimize,
-                    icon = HugeIcons.MagicWand01,
-                    contentDescription = "规整化为移动端",
-                    tone = WorkspaceTone.Accent,
-                    showBorder = false,
-                    containerColor = Color.Transparent,
+            // V3 settings-skills.jsx: 单行右侧仅 chevron-right；操作（规整化/删除）改用 overflow 菜单
+            var showMenu by remember { mutableStateOf(false) }
+            Box {
+                Icon(
+                    imageVector = HugeIcons.MoreVertical,
+                    contentDescription = "更多操作",
+                    tint = chatTheme.inkSoft,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable { showMenu = true },
                 )
-                WorkspaceIconButton(
-                    onClick = onDelete,
-                    icon = HugeIcons.Delete01,
-                    contentDescription = stringResource(R.string.delete),
-                    tone = WorkspaceTone.Danger,
-                    showBorder = false,
-                    containerColor = Color.Transparent,
-                )
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("规整化为移动端") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = HugeIcons.MagicWand01,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = chatTheme.accent,
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onOptimize()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.delete)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = HugeIcons.Delete01,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = colors.red,
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onDelete()
+                        },
+                    )
+                }
             }
         }
     }

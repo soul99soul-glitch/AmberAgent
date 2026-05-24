@@ -22,7 +22,6 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -55,6 +54,7 @@ import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
@@ -85,12 +85,14 @@ private fun <T> WorkspaceSegmentedChoice(
     onSelected: (T) -> Unit,
     label: @Composable (T) -> Unit,
 ) {
+    // V3: 改胶囊形状 (CircleShape) — 之前是 6dp 圆角矩形, 视觉太"框框"
     val workspace = workspaceColors()
+    val capsuleShape = androidx.compose.foundation.shape.CircleShape
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .border(1.dp, workspace.hairline, RoundedCornerShape(6.dp))
-            .padding(2.dp),
+            .clip(capsuleShape)
+            .border(1.dp, workspace.hairline, capsuleShape)
+            .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         options.forEach { option ->
@@ -98,7 +100,7 @@ private fun <T> WorkspaceSegmentedChoice(
             Surface(
                 onClick = { onSelected(option) },
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(4.dp),
+                shape = capsuleShape,
                 color = if (isSelected) workspace.row else Color.Transparent,
                 contentColor = if (isSelected) workspace.ink else workspace.muted,
             ) {
@@ -140,21 +142,10 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.setting_display_page_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_display_page_title),
+                navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
-                    titleContentColor = workspace.ink,
-                    navigationIconContentColor = workspace.muted,
-                    actionIconContentColor = workspace.blue,
-                )
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -177,19 +168,53 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
                     )
                     if (BuildConfig.NOTION_LIKE) {
+                        // V3: 用聊天主题切换器替代旧的 "Notion style" 静态条目
+                        val themeOptions = listOf(
+                            "WHISPER" to "微光",
+                            "PLAIN" to "素白",
+                            "PAPER" to "暖纸",
+                        )
+                        val currentTheme = themeOptions.firstOrNull {
+                            it.first == displaySetting.chatThemeChoice
+                        } ?: themeOptions[0]
                         ListItem(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(
                                     RoundedCornerShape(
-                                        topStart = 8.dp,
-                                        topEnd = 8.dp,
+                                        topStart = 16.dp,
+                                        topEnd = 16.dp,
                                         bottomStart = 2.dp,
                                         bottomEnd = 2.dp
                                     )
                                 ),
-                            headlineContent = { Text("Notion style") },
-                            supportingContent = { Text("浅色纸面 / 深色工作区 + 蓝色强调") },
+                            headlineContent = { Text("聊天主题") },
+                            supportingContent = {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("微光 / 素白 / 暖纸 三套浅色主题; 深色模式自动 Midnight")
+                                    WorkspaceSegmentedChoice(
+                                        options = themeOptions,
+                                        selected = currentTheme,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onSelected = { (key, _) ->
+                                            updateDisplaySetting(
+                                                displaySetting.copy(chatThemeChoice = key)
+                                            )
+                                        },
+                                        label = { (_, name) ->
+                                            Text(
+                                                text = name,
+                                                maxLines = 1,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        },
+                                    )
+                                }
+                            },
                             colors = CustomColors.listItemColors,
                         )
                     } else {
@@ -198,8 +223,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 .fillMaxWidth()
                                 .clip(
                                     RoundedCornerShape(
-                                        topStart = 8.dp,
-                                        topEnd = 8.dp,
+                                        topStart = 16.dp,
+                                        topEnd = 16.dp,
                                         bottomStart = 2.dp,
                                         bottomEnd = 2.dp
                                     )
@@ -234,10 +259,10 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             .fillMaxWidth()
                             .clip(
                                 RoundedCornerShape(
-                                    topStart = 4.dp,
-                                    topEnd = 4.dp,
-                                    bottomStart = 8.dp,
-                                    bottomEnd = 8.dp
+                                    topStart = 2.dp,
+                                    topEnd = 2.dp,
+                                    bottomStart = 16.dp,
+                                    bottomEnd = 16.dp
                                 )
                             ),
                         headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
@@ -324,6 +349,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         modifier = Modifier.padding(horizontal = 8.dp),
                         title = { Text(stringResource(R.string.setting_page_message_display_settings)) },
                     ) {
+                        // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_desc)) },

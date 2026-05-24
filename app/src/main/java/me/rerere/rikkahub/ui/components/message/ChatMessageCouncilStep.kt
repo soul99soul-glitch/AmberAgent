@@ -405,22 +405,24 @@ private fun CouncilRoundDivider(label: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // V3 review P3 #8: Council marker 切 chatTheme.accent 适配 Paper/Midnight
+        val chatAccent = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent
         Surface(
             shape = RoundedCornerShape(50),
-            color = workspace.blue.copy(alpha = 0.12f),
-            border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.24f)),
+            color = chatAccent.copy(alpha = 0.12f),
+            border = BorderStroke(1.dp, chatAccent.copy(alpha = 0.24f)),
         ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = workspace.blue,
+                color = chatAccent,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             )
         }
         HorizontalDivider(
             modifier = Modifier.weight(1f),
-            color = workspace.blue.copy(alpha = 0.20f),
+            color = chatAccent.copy(alpha = 0.20f),
         )
     }
 }
@@ -459,7 +461,7 @@ private fun CouncilObjectiveCard(objective: String) {
                     Text(
                         text = if (expanded) "收起" else "展开",
                         style = MaterialTheme.typography.labelSmall,
-                        color = workspace.blue,
+                        color = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent,
                     )
                 }
             }
