@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.components.message
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,6 +84,8 @@ internal fun MessagePartsBlock(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
+    /** V3: 长按 user 消息胶囊触发 menu sheet（复制/重试/编辑/分享/收藏/删除）. */
+    onUserMessageLongClick: (() -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
 ) {
@@ -144,6 +147,10 @@ internal fun MessagePartsBlock(
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                         animateContentChanges = loading,
+                        // V3: wrapper 不画 timeline. 改由 ReasoningContent 内部自带 quote
+                        // line, 这样 reasoning step 有竖线、tool call step 没竖线 (符合
+                        // 语义 — tool 是平级独立调用, 不该被串起来).
+                        drawTimeline = false,
                     ) { step ->
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {
@@ -208,32 +215,42 @@ internal fun MessagePartsBlock(
                     is UIMessagePart.Text -> {
                         MessageSelectionContainer {
                                 if (role == MessageRole.USER) {
-                                    // 2026-05-14: removed `.animateContentSizeIf(loading)` —
-                                    // user messages don't change after send, so the loading
-                                    // gate here was always inert except during the brief moment
-                                    // before the assistant reply started. Cost > benefit.
+                                    // V3 Whisper user bubble: full capsule, neutral gray #F2F4F7,
+                                    // subtle rgba(15,20,25,0.06) 1px edge, no left stripe.
+                                    // chat1.md L549 final: borderRadius 999 + padding 10/18.
+                                    // V3: 长按弹 menu sheet（复制/重试/编辑/分享/...). 短按维持 edit 兼容旧行为.
+                                    // DisableSelection 屏蔽 Android 系统的 text selection toolbar
+                                    // (复制/全选/朗读/搜索) ——避免跟我们的 menu sheet 两个面板同时出现.
+                                    androidx.compose.foundation.text.selection.DisableSelection {
+                                    // V3 修: CircleShape (radius = height/2) 多行时 radius 跟随高度暴涨,
+                                    // 让整个 bubble 变成大圆球 (user 报"修改小程序"长消息变球). 改用
+                                    // RoundedCornerShape 固定 19dp ≈ single-line 高度/2, 单行视觉仍是
+                                    // capsule, 多行只是高度增加 (圆角形状不变).
+                                    val userBubbleShape = androidx.compose.foundation.shape.RoundedCornerShape(19.dp)
                                     Surface(
                                         modifier = Modifier
-                                            .widthIn(max = 560.dp),
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = workspace.note,
-                                        contentColor = workspace.ink,
+                                            // V3 convo-user.jsx:paddingLeft:60 —— 长消息保留 60dp
+                                            // 最小左留白避免铺满至左边线，保持右对齐 editorial 感
+                                            .padding(start = 60.dp)
+                                            .widthIn(max = 560.dp)
+                                            .clip(userBubbleShape)
+                                            .combinedClickable(
+                                                onClick = { onUserMessageClick?.invoke() },
+                                                onLongClick = { onUserMessageLongClick?.invoke() },
+                                            ),
+                                        shape = userBubbleShape,
+                                        color = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.userBubble,
+                                        contentColor = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.ink,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
-                                        border = BorderStroke(1.dp, workspace.hairline),
-                                        onClick = { onUserMessageClick?.invoke() },
+                                        border = BorderStroke(
+                                            1.dp,
+                                            me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.userBubbleEdge,
+                                        ),
                                     ) {
                                         Column(
                                             modifier = Modifier
-                                                .drawWithContent {
-                                                    drawRoundRect(
-                                                        color = workspace.blue,
-                                                        topLeft = Offset.Zero,
-                                                        size = Size(width = 3.dp.toPx(), height = size.height),
-                                                    )
-                                                    drawContent()
-                                                }
-                                                .padding(start = 15.dp, end = 12.dp, top = 9.dp, bottom = 9.dp)
+                                                .padding(horizontal = 18.dp, vertical = 10.dp)
                                         ) {
                                             MarkdownBlock(
                                                 content = GenerativeUiPlanner.stripVisualRouteTagsForDisplay(
@@ -248,6 +265,7 @@ internal fun MessagePartsBlock(
                                             )
                                         }
                                     }
+                                    } // end DisableSelection
                                 } else {
                                     // True only when this Text block is the very last block
                                     // in the message AND generation is ongoing. See lastBlockIdx
@@ -347,9 +365,10 @@ internal fun MessagePartsBlock(
                             },
                             modifier = Modifier,
                             shape = RoundedCornerShape(50),
-                            color = workspace.blueContainer.copy(alpha = 0.72f),
-                            contentColor = workspace.blue,
-                            border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.12f)),
+                            // V3 review P3 #8: 切 chatTheme.accent 系列, 适配 Paper/Midnight
+                            color = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accentSoft,
+                            contentColor = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent,
+                            border = BorderStroke(1.dp, me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.accent.copy(alpha = 0.12f)),
                         ) {
                             ProvideTextStyle(MaterialTheme.typography.labelSmall) {
                                 Row(

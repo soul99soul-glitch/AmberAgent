@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -170,14 +171,22 @@ fun GenerativeWidgetCard(
         )
     }
 
+    // V3: 画板风 widget 卡片. 之前用 colorScheme.surface + outlineVariant 1dp 在 Paper/Midnight
+    // 主题下会显示成"硬黑框 + 浅底", 跟设计稿不符. 改为 chatTheme.widgetCanvas (比 bg 略深,
+    // 暗色略浅), 默认无描边; 若主题显式给了 widgetCanvasBorder 才画 1dp 描边.
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val widgetSurfaceColor = chatTheme.widgetCanvas.takeIf { it.isSpecified } ?: MaterialTheme.colorScheme.surface
+    val widgetBorder = chatTheme.widgetCanvasBorder
+        .takeIf { it.alpha > 0f }
+        ?.let { BorderStroke(1.dp, it) }
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .clickable(enabled = canOpenExpanded) { showExpanded = true },
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = widgetSurfaceColor,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+        border = widgetBorder,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {

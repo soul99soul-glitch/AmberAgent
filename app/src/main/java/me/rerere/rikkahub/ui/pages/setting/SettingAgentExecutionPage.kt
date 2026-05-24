@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -32,6 +31,8 @@ import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -50,15 +51,14 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_agent_execution_page_title)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_agent_execution_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -99,7 +99,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                             stringResource(R.string.setting_page_agent_operation_preview_hidden)
                                     }
                                 },
-                                modifier = Modifier.width(116.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -145,7 +145,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_tool_loop_steps_value, it)
                                 },
-                                modifier = Modifier.width(120.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -264,7 +264,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_live_mode_refresh_interval_value, it / 1_000f)
                                 },
-                                modifier = Modifier.width(104.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -291,7 +291,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_live_mode_max_nodes_value, it)
                                 },
-                                modifier = Modifier.width(104.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )
@@ -365,7 +365,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_generation_retry_count_value, it)
                                 },
-                                modifier = Modifier.width(104.dp),
+                                // V3 ValueChip 内容自适应,
                             )
                         },
                     )

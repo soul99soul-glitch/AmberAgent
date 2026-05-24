@@ -220,8 +220,11 @@ private fun ConversationItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val workspace = workspaceColors()
+    // V3 convo-history.jsx:177 active = accentSoft + accent ink；旧 blueContainer 在 Paper
+    // 主题下不跟主题。改读 LocalChatTheme.accentSoft
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     val backgroundColor = if (selected) {
-        workspace.blueContainer
+        chatTheme.accentSoft
     } else {
         Color.Transparent
     }
@@ -251,7 +254,8 @@ private fun ConversationItem(
             Text(
                 text = conversation.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (selected) workspace.blue else workspace.ink,
+                // V3 convo-history.jsx:177 active 文字色 = accent (跟主题)
+                color = if (selected) chatTheme.accent else workspace.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -360,8 +364,12 @@ private fun ConversationRunningIndicator(
         ),
         label = "conversation-running-alpha",
     )
-    val workspace = workspaceColors()
-    val runningColor = workspace.blue
+    // V3: 侧边栏 conversation running indicator. 之前 ring=workspace.blue + dot=workspace.green
+    // 双硬编码色, 在 Paper/Midnight 主题下跟整体冲突. 改用 chatTheme.accent (ring 脉冲) +
+    // modelStatusDot (绿点 — 已是主题色 token, Whisper 绿 / Paper 棕灰 / Midnight 暖绿 / Plain 灰).
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val runningColor = chatTheme.accent
+    val dotColor = chatTheme.modelStatusDot
 
     Box(
         modifier = modifier
@@ -384,7 +392,7 @@ private fun ConversationRunningIndicator(
         Box(
             modifier = Modifier
                 .clip(CircleShape)
-                .background(workspace.green)
+                .background(dotColor)
                 .size(6.dp),
         )
     }

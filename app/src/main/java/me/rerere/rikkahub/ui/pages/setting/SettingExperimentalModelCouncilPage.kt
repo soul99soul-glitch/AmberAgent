@@ -584,7 +584,7 @@ private fun <T> ModelCouncilSelectRow(
             selectedOption = selected,
             onOptionSelected = onSelected,
             optionToString = optionToString,
-            modifier = Modifier.width(112.dp),
+            // V3 ValueChip 内容自适应,
         )
     }
 }

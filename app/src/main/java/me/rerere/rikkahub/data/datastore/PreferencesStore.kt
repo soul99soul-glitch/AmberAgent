@@ -9,7 +9,9 @@ import kotlinx.serialization.Transient
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.hasUsableAuth
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
@@ -349,6 +351,9 @@ data class DisplaySetting(
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val enableVolumeKeyScroll: Boolean = false,
     val volumeKeyScrollRatio: Float = 1.0f,
+    // V3 Phase 4.5：用户在设置里手选的浅色聊天主题（WHISPER / PLAIN / PAPER）。
+    // 深色模式下被 MIDNIGHT 强制覆盖，与此字段无关。
+    val chatThemeChoice: String = "WHISPER",
 )
 
 @Serializable
@@ -426,9 +431,36 @@ fun Settings.getCurrentChatModel(): Model? {
  * Resolve the image-generation model for the current assistant: per-assistant
  * override first, then global setting. Returns null when neither is set, in
  * which case the generate_image tool is not exposed to the main chat model.
+ *
+ * V3 修: 全局 imageGenerationModelId 是 non-null Uuid (默认 Uuid.random()), 用户从未设置时
+ * 落到一个永远查不到 model 的随机 id 上, 然后 generate_image 工具一律抛 "not configured".
+ * 同时 SettingModelPage 的 onClear 把它重置为 DEFAULT_AUTO_MODEL_ID (sentinel uuid).
+ * 这两种情形 (随机 init uuid / DEFAULT_AUTO_MODEL_ID) 都视为"未配置", 显式返回 null,
+ * 让 ImageGenTool 走兜底: 找第一个 IMAGE-type 模型, 否则才报错.
  */
 fun Settings.getCurrentImageGenerationModel(): Model? {
-    return findModelById(this.getCurrentAssistant().imageGenerationModelId ?: this.imageGenerationModelId)
+    // V3 review P3 #10: assistant override 与 global 都可能存 DEFAULT_AUTO_MODEL_ID sentinel
+    // ("自动"语义) 或 stale Uuid. 优先级 = assistant 有效 id > global 有效 id > 兜底 IMAGE model.
+    // 关键: resolveValid 必须 `type == IMAGE` 验证 — 用户在 picker 之外 (如手加 model 默认 CHAT)
+    // 选了 chat-type id 时不要返回, 让兜底找内置 IMAGE-type (如 Codex OAuth 自带的 image model).
+    // 这是用户报"deepseek/gpt5.5 都调不来 gpt-image-2"的根因 — 手加的 gpt-image-2 type=CHAT,
+    // 命中第一/二级 → 当成"已配置"返回 → 但调 image API 失败.
+    fun Uuid?.resolveValid(): Model? {
+        if (this == null || this == DEFAULT_AUTO_MODEL_ID) return null
+        return findModelById(this)?.takeIf { it.type == ModelType.IMAGE }
+    }
+    val assistantPick = this.getCurrentAssistant().imageGenerationModelId.resolveValid()
+    if (assistantPick != null) return assistantPick
+    val globalPick = this.imageGenerationModelId.resolveValid()
+    if (globalPick != null) return globalPick
+    // 兜底: 全局任一有可用 auth 的 provider 暴露的 IMAGE 类型模型. 跟 SettingModelPage
+    // picker 同一份 hasUsableAuth 判定 (Codex review P2 修复: 之前只看 enabled 会把
+    // seed 的 gpt-image-2 暴露给没配 OpenAI key 的 user, 触发 401).
+    return this.providers
+        .asSequence()
+        .filter { it.hasUsableAuth() }
+        .flatMap { it.models.asSequence() }
+        .firstOrNull { it.type == ModelType.IMAGE }
 }
 
 fun Settings.resolveTaskChatModel(modelId: Uuid): Model? {

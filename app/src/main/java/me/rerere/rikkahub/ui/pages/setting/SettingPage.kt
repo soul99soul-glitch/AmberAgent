@@ -24,7 +24,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,6 +64,7 @@ import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.WorkspaceLeadingIcon
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.Navigator
@@ -92,14 +92,9 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(text = stringResource(R.string.settings))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
-                scrollBehavior = scrollBehavior,
+            WorkspaceTopBar(
+                title = stringResource(R.string.settings),
+                navigationIcon = { BackButton() },
                 actions = {
                     if (settings.developerMode) {
                         IconButton(
@@ -111,13 +106,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
-                    titleContentColor = workspace.ink,
-                    navigationIconContentColor = workspace.muted,
-                    actionIconContentColor = workspace.muted,
-                )
+                scrollBehavior = scrollBehavior,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -167,7 +156,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                         ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
                                     }
                                 },
-                                modifier = Modifier.width(150.dp)
+                                // V3 ValueChip 内容自适应（不硬宽 150dp）
                             )
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_color_mode)) },
@@ -257,12 +246,18 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_tts_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
                     )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingWeb) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.ServerStack01) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_web_server_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_web_server)) },
-                    )
+                    // V3: 隐藏 "Web 服务器 / 外部服务器" 入口 (用户暂不需要).
+                    // 改 SHOW_WEB_SERVER = true 即可恢复.
+                    @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+                    val SHOW_WEB_SERVER = false
+                    if (SHOW_WEB_SERVER) {
+                        item(
+                            onClick = { navController.navigate(Screen.SettingWeb) },
+                            leadingContent = { SettingLeadingIcon(HugeIcons.ServerStack01) },
+                            supportingContent = { Text(stringResource(R.string.setting_page_web_server_desc)) },
+                            headlineContent = { Text(stringResource(R.string.setting_page_web_server)) },
+                        )
+                    }
                 }
             }
 
@@ -310,10 +305,11 @@ private fun SettingLeadingIcon(
     icon: ImageVector,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
+    // V3 settings-screen.jsx: stroke icon 21dp 无底色容器
     WorkspaceLeadingIcon(
         icon = icon,
-        size = 30.dp,
-        iconSize = 15.dp,
+        size = 32.dp,
+        iconSize = 21.dp,
         tone = tone,
     )
 }

@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -610,10 +612,23 @@ internal fun ChatListNormal(
         )
     }
 
+    // V3 Whisper：空白态让 ChatPage 的 bloom 透上来；有消息则淡入纯白覆盖。
+    // 用 paper(#FFFFFF) 而非 canvas(#F7F7F5)，避免与 TopBar 之间出现灰白分界线。
+    // Paper/Midnight 主题 (showBloomInConvo=true) 对话态需要保留底层 bloom，
+    // 把 canvasAlpha 上限压到 0.85 让 0.25 强度的 convo bloom 透得出来
+    val hasContent = conversation.messageNodes.isNotEmpty()
+    val chatThemeForCanvas = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val maxCanvasAlpha = if (chatThemeForCanvas.showBloomInConvo) 0.85f else 1f
+    val canvasAlpha by animateFloatAsState(
+        targetValue = if (hasContent) maxCanvasAlpha else 0f,
+        animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+        label = "canvasFade",
+    )
+    val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(workspace.canvas),
+            .background(backgroundColor),
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(conversation.id, activeGeneration) {

@@ -32,7 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.rikkahub.ui.theme.CustomColors
 
-private val CardGroupCorner = 12.dp
+// V3 settings-screen.jsx:79 borderRadius: 18 —— 之前 12dp 偏紧、不像 editorial 卡
+private val CardGroupCorner = 18.dp
 private val CardGroupItemSpacing = 1.dp
 private val CardGroupInnerCorner = 2.dp
 

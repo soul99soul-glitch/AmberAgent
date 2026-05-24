@@ -14,7 +14,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -48,6 +47,8 @@ import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -64,15 +65,14 @@ fun SettingAgentExtensionsPage() {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_agent_extensions_page_title)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_agent_extensions_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -137,15 +137,14 @@ fun SettingAgentRuntimeTasksPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_agent_runtime_tasks_page_title)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_agent_runtime_tasks_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -332,15 +331,14 @@ fun SettingCronTasksPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_cron_tasks_page_title)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_cron_tasks_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),

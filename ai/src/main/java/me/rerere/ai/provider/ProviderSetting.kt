@@ -367,3 +367,33 @@ sealed class ProviderSetting {
         }
     }
 }
+
+/**
+ * Provider 是否拥有可用 auth (API key / OAuth token / service account).
+ * Picker (model 选择 UI) 和 data-layer fallback (getCurrentImageGenerationModel)
+ * 都用同一份判定, 避免 fallback 兜底到一个 picker 看不到的"无 key 模型".
+ *
+ * 之前住在 UI 层 ModelList.kt:1054 — Codex review 指出 data 层 fallback 漏掉
+ * 这条 check 会把 seed 的 gpt-image-2 暴露给没配 key 的用户, 401 fail. 提到 ai
+ * 模块同包, 两层共用.
+ */
+fun ProviderSetting.hasUsableAuth(): Boolean {
+    if (!enabled) return false
+    return when (this) {
+        is ProviderSetting.OpenAI -> when (authMode) {
+            // OAuth 模式用单独 token, 不依赖用户填的 apiKey
+            OpenAIAuthMode.CODEX_OAUTH -> true
+            else -> apiKey.isNotBlank()
+        }
+        is ProviderSetting.Google -> when (authMode) {
+            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> true
+            GoogleAuthMode.API_KEY -> when {
+                apiKey.isNotBlank() -> true
+                // Vertex AI + service account 用 privateKey blob 而非 apiKey
+                vertexAI && useServiceAccount && privateKey.isNotBlank() -> true
+                else -> false
+            }
+        }
+        is ProviderSetting.Claude -> apiKey.isNotBlank()
+    }
+}

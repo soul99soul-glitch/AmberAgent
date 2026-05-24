@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxScope
@@ -232,11 +233,12 @@ internal fun BoxScope.MessageJumper(
             targetOffsetX = { if (onLeft) -it * 2 else it * 2 },
         )
     ) {
-        // Notion-like 浮动导航：单个 12dp 圆角卡片 + hairline outline + 内部
-        // 用细 divider 分组 4 个 IconButton，配色走 onSurfaceVariant 灰阶，避免
-        // 之前那种 4 个独立圆形蓝色蒙层与整体 surface/outline 体系冲突。
-        val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-        val iconTint = MaterialTheme.colorScheme.onSurfaceVariant
+        // V3: 浮动导航卡。之前 border = outlineVariant@60% 在 Paper/Whisper 上看着是粗黑勾边,
+        // 跟整体轻 hairline 体系冲突. 改 chatTheme.hair (8% ink) 极淡描边 + 抬升 shadow 到 8dp
+        // 让它"浮"在 chat 上, 而不是靠 border 厚重感.
+        val chatTheme = LocalChatTheme.current
+        val dividerColor = chatTheme.hair
+        val iconTint = chatTheme.inkSoft
         Surface(
             // width(IntrinsicSize.Min) is load-bearing here. Material3 HorizontalDivider
             // defaults to fillMaxWidth, which would otherwise propagate "fill the parent"
@@ -246,15 +248,22 @@ internal fun BoxScope.MessageJumper(
             // what we actually want the divider to inherit.
             modifier = Modifier
                 .padding(8.dp)
-                .width(IntrinsicSize.Min),
+                .width(IntrinsicSize.Min)
+                .shadow(
+                    elevation = 8.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    clip = false,
+                    ambientColor = chatTheme.composerShadow,
+                    spotColor = chatTheme.composerShadow,
+                ),
             shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface,
+            color = chatTheme.surface,
             border = BorderStroke(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                color = chatTheme.surfaceEdge,
             ),
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             Column {
                 IconButton(

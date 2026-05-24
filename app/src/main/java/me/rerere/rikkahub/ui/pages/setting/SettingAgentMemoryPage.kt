@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
@@ -619,6 +621,8 @@ private fun AgentSoulCard(
         value
     }
 
+    // V3: 强制跟 chatTheme.surface (即使 dynamicColor 开了 Material You, 这里也跟主题色, 不出现浅蓝底)
+    val agentMemorySoulTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -626,7 +630,7 @@ private fun AgentSoulCard(
                 draft = value
                 showEditor = true
             },
-        colors = CustomColors.cardColorsOnSurfaceContainer,
+        colors = CardDefaults.cardColors(containerColor = agentMemorySoulTheme.surface),
     ) {
         Column(
             modifier = Modifier
@@ -656,7 +660,12 @@ private fun AgentSoulCard(
                     .padding(14.dp),
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
+                // V3 settings-memory.jsx: agents.md preview 用 monospace
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                ),
                 color = if (value.isBlank()) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {

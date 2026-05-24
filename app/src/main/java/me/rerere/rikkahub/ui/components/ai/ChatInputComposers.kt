@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,7 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
@@ -50,6 +54,7 @@ import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
@@ -94,6 +99,11 @@ internal fun TextInputRow(
     onSendMessage: () -> Unit,
     onUsageClick: () -> Unit,
     onCompactContext: () -> Unit,
+    modifier: Modifier = Modifier,
+    minimalChrome: Boolean = false,
+    // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到当前 assistant.
+    // 为 null 时 (sandbox / 历史预览等场景) footer 不渲染. ChatInput 调用处必传.
+    onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
@@ -120,10 +130,15 @@ internal fun TextInputRow(
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        if (state.isEditing()) {
+        // V3: 删除"编辑中"小框 — 之前用 workspace.blueContainer/blue 硬编码蓝色 + 直接挤在 TextField
+        // 上方看着像"顶在输入框里". 用户编辑路径已经清晰 (长按 user 消息 → 编辑), 这个框冗余.
+        // 如果以后想恢复, 改 SHOW_EDITING_BANNER = true 即可.
+        @Suppress("ConstantConditionIf", "KotlinConstantConditions")
+        val SHOW_EDITING_BANNER = false
+        if (SHOW_EDITING_BANNER && state.isEditing()) {
             Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = workspace.blueContainer,
@@ -205,40 +220,86 @@ internal fun TextInputRow(
                 }
             }
         }
-        val slashVisible = isFocused && slashQuery != null
-        androidx.compose.animation.AnimatedVisibility(
-            visible = slashVisible,
-            enter = androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(150)
-            ) + androidx.compose.animation.slideInVertically(
-                animationSpec = androidx.compose.animation.core.tween(150),
-                initialOffsetY = { it / 4 }
-            ),
-            exit = androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(100)
-            ) + androidx.compose.animation.slideOutVertically(
-                animationSpec = androidx.compose.animation.core.tween(100),
-                targetOffsetY = { it / 4 }
-            ),
-        ) {
-            SlashCommandPanel(
-                commands = slashCommands,
-                hasAnyCommand = allSlashCommands.isNotEmpty(),
-                onSelect = { command ->
-                    when (val action = command.action) {
-                        SlashCommandAction.ClearInput -> state.clearInput()
-                        SlashCommandAction.CompactContext -> {
-                            state.clearInput()
-                            onCompactContext()
-                        }
-                        is SlashCommandAction.InsertText -> state.setMessageText(action.text)
-                        SlashCommandAction.OpenUsage -> {
-                            state.clearInput()
-                            onUsageClick()
-                        }
+        // V3: 修两处:
+        //   1) 用 Popup 让 panel 浮在 TextField 上方, 不占布局空间 → 不再顶起 composer.
+        //   2) 去掉 isFocused 条件 — 点 "/" 按钮 append 了斜杠但 TextField 没获焦, 之前 panel 不弹.
+        //      只要 text 开头是 "/" 就显示 panel.
+        val slashVisible = slashQuery != null
+        if (slashVisible) {
+            androidx.compose.ui.window.Popup(
+                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                popupPositionProvider = object : androidx.compose.ui.window.PopupPositionProvider {
+                    override fun calculatePosition(
+                        anchorBounds: androidx.compose.ui.unit.IntRect,
+                        windowSize: androidx.compose.ui.unit.IntSize,
+                        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                        popupContentSize: androidx.compose.ui.unit.IntSize,
+                    ): androidx.compose.ui.unit.IntOffset {
+                        // panel 水平居中 = composer 一致左右 12dp margin
+                        // 垂直在 anchor 上方 8dp gap
+                        val gapPx = 8
+                        val x = ((windowSize.width - popupContentSize.width) / 2).coerceAtLeast(0)
+                        val y = (anchorBounds.top - popupContentSize.height - gapPx).coerceAtLeast(0)
+                        return androidx.compose.ui.unit.IntOffset(x, y)
                     }
                 },
-            )
+            ) {
+                // V3: 入场动画. Popup 不在 layout tree 中, AnimatedVisibility 无效, 用
+                // Animatable + graphicsLayer 驱动 alpha + scale. transformOrigin 偏右下,
+                // 接近 composer 上 "/" 按钮位置 (panel 在 anchor 上方居中, "/" 按钮在 anchor 右侧).
+                // 跟 ContextRing 同一套. 出场动画暂不做 (Popup visible=false 即销毁, 跟 ContextRing 一致).
+                val anim = remember { androidx.compose.animation.core.Animatable(0f) }
+                LaunchedEffect(Unit) {
+                    anim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = androidx.compose.animation.core.tween(180)
+                    )
+                }
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.graphicsLayer {
+                        alpha = anim.value
+                        val s = 0.94f + 0.06f * anim.value
+                        scaleX = s
+                        scaleY = s
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.85f, 1f)
+                    }
+                ) {
+                    SlashCommandPanel(
+                        commands = slashCommands,
+                        hasAnyCommand = allSlashCommands.isNotEmpty(),
+                        onSelect = { command ->
+                            when (val action = command.action) {
+                                SlashCommandAction.ClearInput -> state.clearInput()
+                                SlashCommandAction.CompactContext -> {
+                                    state.clearInput()
+                                    onCompactContext()
+                                }
+                                is SlashCommandAction.InsertText -> state.setMessageText(action.text)
+                                SlashCommandAction.OpenUsage -> {
+                                    state.clearInput()
+                                    onUsageClick()
+                                }
+                            }
+                        },
+                        // V3: thinking footer 数据来自当前 settings, 不为空且 model 支持 reasoning 时渲染
+                        thinkingFooter = onUpdateAssistant?.let { update ->
+                            {
+                                val currentModel = settings.getCurrentChatModel()
+                                val hasReasoning = currentModel?.abilities?.contains(
+                                    me.rerere.ai.provider.ModelAbility.REASONING
+                                ) == true
+                                if (hasReasoning) {
+                                    SlashCommandThinkingFooter(
+                                        currentLevel = assistant.reasoningLevel,
+                                        levels = me.rerere.rikkahub.ui.components.ai.reasoningLevelsForModel(currentModel),
+                                        onChange = { update(assistant.copy(reasoningLevel = it)) },
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
+            }
         }
         // @role mention: subagents and Model Council share the same lightweight picker.
         // Detection result is
@@ -303,10 +364,10 @@ internal fun TextInputRow(
                 .onFocusChanged {
                     isFocused = it.isFocused
                 },
-            shape = RoundedCornerShape(8.dp),
+            shape = if (minimalChrome) RoundedCornerShape(0.dp) else RoundedCornerShape(8.dp),
             placeholder = {
                 Text(
-                    text = stringResource(R.string.chat_input_placeholder),
+                    text = if (minimalChrome) "输入消息" else stringResource(R.string.chat_input_placeholder),
                     color = workspace.faint,
                 )
             },
@@ -322,14 +383,14 @@ internal fun TextInputRow(
             colors = TextFieldDefaults.colors().copy(
                 unfocusedIndicatorColor = Color.Transparent,
                 focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = workspace.paper,
-                unfocusedContainerColor = workspace.paper,
+                focusedContainerColor = if (minimalChrome) Color.Transparent else workspace.paper,
+                unfocusedContainerColor = if (minimalChrome) Color.Transparent else workspace.paper,
                 focusedTextColor = workspace.ink,
                 unfocusedTextColor = workspace.ink,
                 focusedPlaceholderColor = workspace.faint,
                 unfocusedPlaceholderColor = workspace.faint,
             ),
-            trailingIcon = if (isFocused) {
+            trailingIcon = if (isFocused && !minimalChrome) {
                 {
                     IconButton(
                         onClick = {
@@ -342,7 +403,9 @@ internal fun TextInputRow(
             } else {
                 null
             },
-            leadingIcon = if (quickMessages.isNotEmpty()) {
+            leadingIcon = if (minimalChrome) {
+                null
+            } else if (quickMessages.isNotEmpty()) {
                 {
                     QuickMessageButton(quickMessages = quickMessages, state = state)
                 }
@@ -365,15 +428,19 @@ private fun SlashCommandPanel(
     commands: List<SlashCommandItem>,
     hasAnyCommand: Boolean,
     onSelect: (SlashCommandItem) -> Unit,
+    thinkingFooter: (@Composable () -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3: panel 宽度跟 composer 一致 — screen 宽减去 24dp (composer 父级 horizontal padding 12dp 左右)
+    val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.width(screenWidth - 24.dp),
+        shape = RoundedCornerShape(14.dp),
         tonalElevation = 0.dp,
-        shadowElevation = 1.dp,
-        color = workspace.paper,
-        border = BorderStroke(1.dp, workspace.hairline),
+        shadowElevation = 8.dp,
+        color = chatTheme.surface,
+        border = BorderStroke(1.dp, chatTheme.surfaceEdge),
     ) {
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
             when {
@@ -401,6 +468,37 @@ private fun SlashCommandPanel(
                     }
                 }
             }
+            // V3: thinking-level footer — 跟着 panel 一起出现, 仅当 model 支持 reasoning 时显示
+            thinkingFooter?.invoke()
+        }
+    }
+}
+
+@Composable
+private fun SlashCommandThinkingFooter(
+    currentLevel: me.rerere.ai.core.ReasoningLevel,
+    levels: List<Pair<me.rerere.ai.core.ReasoningLevel, String>>,
+    onChange: (me.rerere.ai.core.ReasoningLevel) -> Unit,
+) {
+    val workspace = workspaceColors()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+    ) {
+        HorizontalDivider(color = workspace.hairline)
+        Text(
+            text = "思考等级",
+            color = workspace.faint,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 6.dp),
+        )
+        Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+            me.rerere.rikkahub.ui.components.ai.ThinkingLevelSegment(
+                levels = levels,
+                current = currentLevel,
+                onChange = onChange,
+            )
         }
     }
 }
@@ -421,15 +519,14 @@ private fun SlashCommandRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // V3: 跟主题色 (scheme.primary/primaryContainer), 边框降到 hair 极淡, 不再粗硬蓝勾边
+            val scheme = MaterialTheme.colorScheme
             Surface(
                 modifier = Modifier.size(30.dp),
                 shape = RoundedCornerShape(6.dp),
-                color = if (command.accent) workspace.blueContainer else workspace.row,
-                contentColor = if (command.accent) workspace.blue else workspace.muted,
-                border = BorderStroke(
-                    1.dp,
-                    if (command.accent) workspace.blue.copy(alpha = 0.14f) else workspace.hairline
-                ),
+                color = if (command.accent) scheme.primaryContainer else workspace.row,
+                contentColor = if (command.accent) scheme.primary else workspace.muted,
+                border = BorderStroke(1.dp, workspace.hairline),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -542,11 +639,13 @@ private fun QuickMessageButton(
 @Composable
 private fun SlashCommandLeadingMark() {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    // V3: 跟主题色 (scheme.primaryContainer/primary), 替代硬编码 workspace.blue
     Surface(
         modifier = Modifier.size(24.dp),
         shape = RoundedCornerShape(5.dp),
-        color = workspace.blueContainer,
-        contentColor = workspace.blue,
+        color = scheme.primaryContainer,
+        contentColor = scheme.primary,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -559,7 +658,9 @@ private fun SlashCommandLeadingMark() {
 }
 
 private fun String.slashCommandQuery(): String? {
-    if (!startsWith("/")) return null
+    // V3 修: 中文 IME 默认输入全角"／" (U+FF0F), ASCII "/" 检查会漏 → user 用中文输入法
+    // 直接打"/"唤不出 slash panel. 同时接受半角和全角.
+    if (!startsWith("/") && !startsWith("／")) return null
     val query = drop(1)
     return query.takeIf { it.none { char -> char.isWhitespace() } }
 }

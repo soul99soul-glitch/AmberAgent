@@ -34,9 +34,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.X
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Search01
+import me.rerere.rikkahub.ui.pages.chat.LocalChatTheme
 
 /**
  * Notion-style flat search field. Uses [BasicTextField] under the hood so we
@@ -65,39 +68,35 @@ fun WorkspaceSearchField(
     onSubmit: ((String) -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
+    // V3: 统一 drawer Amber 下方搜索栏样式 — 999 capsule + chatTheme.searchBarBg + hair border
+    // + HugeIcons.Search01 icon + chatTheme.inkSoft tint. (之前是 10dp 圆角 + workspace.row)
+    val chatTheme = LocalChatTheme.current
     val focusRequester = remember { FocusRequester() }
-    // No-ripple interactionSource so tapping the outer search box doesn't
-    // splash on the whole 40dp area — only the BasicTextField shows its
-    // own cursor blink on focus.
     val outerTapSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(workspace.row)
-            .border(BorderStroke(1.dp, workspace.hairline), RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(999.dp))
+            .background(chatTheme.searchBarBg)
+            .border(BorderStroke(1.dp, chatTheme.hair), RoundedCornerShape(999.dp))
             .clickable(
                 interactionSource = outerTapSource,
                 indication = null,
                 onClick = { focusRequester.requestFocus() },
             )
-            .padding(horizontal = 12.dp),
-        // contentAlignment vertically centers the Row inside the 40dp Box —
-        // without this the Row hugs the top edge and the magnifier icon /
-        // text input visibly float above the vertical midline.
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(
-                imageVector = Lucide.Search,
+                imageVector = HugeIcons.Search01,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = workspace.muted,
+                tint = chatTheme.inkSoft,
             )
             Box(
                 modifier = Modifier
@@ -112,25 +111,25 @@ fun WorkspaceSearchField(
                         .focusRequester(focusRequester),
                     singleLine = true,
                     textStyle = TextStyle(
-                        color = workspace.ink,
-                        fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                        color = chatTheme.ink,
+                        fontSize = 14.5.sp,
+                        letterSpacing = 0.2.sp,
                     ),
-                    cursorBrush = SolidColor(workspace.ink),
+                    cursorBrush = SolidColor(chatTheme.accent),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
                         onSearch = { onSubmit?.invoke(value) },
                     ),
                 )
                 if (value.isEmpty() && placeholder.isNotEmpty()) {
-                    ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
-                        CompositionLocalProvider(LocalContentColor provides workspace.faint) {
-                            Text(
-                                text = placeholder,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    Text(
+                        text = placeholder,
+                        fontSize = 14.5.sp,
+                        color = chatTheme.inkFaint,
+                        letterSpacing = 0.2.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
             if (value.isNotEmpty()) {
@@ -145,7 +144,7 @@ fun WorkspaceSearchField(
                         imageVector = Lucide.X,
                         contentDescription = "Clear",
                         modifier = Modifier.size(14.dp),
-                        tint = workspace.muted,
+                        tint = chatTheme.inkSoft,
                     )
                 }
             }

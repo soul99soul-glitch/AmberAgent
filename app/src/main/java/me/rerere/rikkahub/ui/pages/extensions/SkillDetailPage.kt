@@ -266,7 +266,7 @@ private fun SkillFilesPanel(
                     icon = Lucide.Plus,
                     contentDescription = stringResource(R.string.skill_detail_page_new_file),
                     tone = WorkspaceTone.Accent,
-                    containerColor = colors.blueContainer,
+                    // V3: 去掉 colors.blueContainer 硬编码, 让 tone=Accent 自己映射 scheme.primaryContainer (跟主题)
                 )
             }
             if (nodes.isEmpty()) {

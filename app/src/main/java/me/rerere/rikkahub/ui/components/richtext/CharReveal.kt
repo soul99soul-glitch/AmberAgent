@@ -55,11 +55,10 @@ enum class StreamRevealPreset(val baseRevealDurationMs: Long) {
     /** Snappy: ~120ms fade. Closest to "no animation but with a soft edge". */
     REALTIME(120L),
 
-    /** Default. ~80ms — ~5 frames @60Hz. "Crisp typing" sweet spot: short
-     *  enough to feel snappy, long enough that the fade is still
-     *  perceivable. Was 200L before the experiment; flip back if streaming
-     *  jank surfaces on slow devices. */
-    BALANCED(80L),
+    /** Default. ~240ms — Codex 同档. 配合 ease-out-expo + baselineShift y-offset
+     *  实现"字符轻飘上浮"质感. 200ms 仍偏短, 240ms 跨 ~2 个 chunk 间隔, 让多字
+     *  fade 窗口稳定重叠, 视觉是连续 cross-fade 而非脉冲. */
+    BALANCED(240L),
 
     /** Slow + cinematic. ~320ms — feels deliberate, good for long replies. */
     SILKY(320L),
@@ -88,10 +87,11 @@ private const val BACKLOG_DEGRADE = 80
  * is this fraction of the preset's base. Below SOFT_BACKPRESSURE_BACKLOG
  * the factor is 1.0; the ramp lerps between them.
  *
- * 0.30 means a 200ms preset compresses to 60ms at queueDepth=80 — fast
- * enough to catch up, slow enough that the fade is still visible.
+ * 之前 0.30 在 200ms 设置下降级到 60ms — 落进 flicker fusion 区(50-100ms),
+ * 视觉成"脉冲". 提到 0.55 让 240ms × 0.55 = 132ms, 跨过阈值, backlog 满时
+ * 仍有 ~8 帧平滑 fade, 不闪.
  */
-private const val BACKPRESSURE_DURATION_FLOOR = 0.30f
+private const val BACKPRESSURE_DURATION_FLOOR = 0.55f
 
 /**
  * EWMA-smoothed FPS below which we drop the fade animation entirely.
@@ -361,7 +361,12 @@ class CharRevealController internal constructor(
                 val age = nowNanos - entry.appearNanos
                 if (age <= 0L) return 0f
                 if (age >= effective) return 1f
-                return age.toFloat() / effective.toFloat()
+                // V3: ease-out-expo `1 - (1-t)^5` 替代 linear. Codex 同款曲线 —
+                // 前 30% 时窗走完 ~83% 进度, 视觉是"快速浮现 + 慢速 settle",
+                // 这才是"轻飘飘"感的核心. Linear 看起来机械.
+                val t = age.toFloat() / effective.toFloat()
+                val inv = 1f - t
+                return 1f - inv * inv * inv * inv * inv
             }
         }
         // Fall-through: shouldn't happen if onContentChanged was called

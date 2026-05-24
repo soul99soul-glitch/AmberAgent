@@ -22,7 +22,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -56,6 +55,8 @@ import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
+import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -123,11 +124,10 @@ fun SettingWebPage() {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.setting_page_web_server)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_page_web_server),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         floatingActionButton = {
@@ -181,7 +181,7 @@ fun SettingWebPage() {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -212,7 +212,7 @@ fun SettingWebPage() {
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 isError = portText.toIntOrNull()?.let { it !in 1024..65535 } ?: true,
-                                modifier = Modifier.width(100.dp),
+                                // V3 ValueChip 内容自适应,
                                 enabled = !serverState.isRunning,
                                 shape = CircleShape,
                                 colors = TextFieldDefaults.colors(
@@ -292,7 +292,7 @@ fun SettingWebPage() {
                                 },
                                 singleLine = true,
                                 isError = settings.webServerJwtEnabled && accessPasswordText.isBlank(),
-                                modifier = Modifier.width(180.dp),
+                                // V3 ValueChip 内容自适应,
                                 shape = CircleShape,
                                 colors = TextFieldDefaults.colors(
                                     focusedIndicatorColor = Color.Transparent,

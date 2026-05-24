@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.Icon
@@ -25,8 +28,13 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,7 +62,9 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.News01
+import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
@@ -130,33 +140,218 @@ fun ChatDrawerContent(
     // Menu popup 状态
     val workspace = workspaceColors()
 
+    // drawerShape: 之前 0dp 直角, 覆盖过来很生硬. 右侧 24dp 圆角让滑出时跟主屏边缘有过渡感.
     ModalDrawerSheet(
         modifier = Modifier.width(drawerWidth),
-        drawerShape = RoundedCornerShape(0.dp),
+        drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
         drawerContainerColor = workspace.paper,
         drawerContentColor = workspace.ink,
         drawerTonalElevation = 0.dp,
     ) {
+        // V3 convo-history.jsx 全量重构：
+        //   Amber wordmark → SearchBar → Primary nav (新聊天/今日看板/小应用)
+        //   → QuickRow (Workspace 文件/伴随智能/聊天热力图统计 icon-only)
+        //   → divider → 最近 label → ConversationList → Footer (avatar + name + settings gear)
+        val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
         Column(
             modifier = Modifier
                 .background(workspace.paper)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .windowInsetsPadding(WindowInsets.statusBars),
         ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                // (1) Amber wordmark
+                Text(
+                    text = "Amber",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.5.sp,
+                    color = chatTheme.ink,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                )
+
+                // (2) Search bar capsule
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(chatTheme.searchBarBg)
+                        .border(
+                            BorderStroke(1.dp, chatTheme.hair),
+                            RoundedCornerShape(999.dp),
+                        )
+                        .clickable { navController.navigate(Screen.MessageSearch) }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Search01,
+                        contentDescription = "Search",
+                        modifier = Modifier.size(16.dp),
+                        tint = chatTheme.inkSoft,
+                    )
+                    Text(
+                        text = "搜索聊天",
+                        fontSize = 14.5.sp,
+                        color = chatTheme.inkFaint,
+                        letterSpacing = 0.2.sp,
+                    )
+                }
+
+                // (3) Primary nav rows: 新聊天 / 今日看板 / 小应用
+                V3NavRow(
+                    icon = HugeIcons.MessageAdd01,
+                    label = "新聊天",
+                    accent = true,
+                    chatTheme = chatTheme,
+                    onClick = {
+                        scope.launch { drawerState.close() }
+                        navigateToChatPage(navController)
+                    },
+                )
+                // V3 设计稿 4 套主题中 "今日看板" 永远显示（不绑 todayBoardEnabled flag），
+                // 点开后用户没启用时由 TodayBoard 页面自己引导启用
+                V3NavRow(
+                    icon = HugeIcons.News01,
+                    label = "今日看板",
+                    accent = false,
+                    chatTheme = chatTheme,
+                    onClick = { navController.navigate(Screen.TodayBoard) },
+                )
+                V3NavRow(
+                    icon = HugeIcons.DashboardSquare01,
+                    label = "小应用",
+                    accent = false,
+                    chatTheme = chatTheme,
+                    onClick = { navController.navigate(Screen.MiniAppList) },
+                )
+
+                // (4) QuickRow: 3 icon-only buttons (Workspace 文件 / 伴随智能 / 聊天热力图统计)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    V3QuickBtn(
+                        icon = HugeIcons.Folder01,
+                        contentDescription = "Workspace 文件",
+                        chatTheme = chatTheme,
+                        onClick = onOpenWorkspace,
+                    )
+                    V3QuickBtn(
+                        icon = HugeIcons.Sparkles,
+                        contentDescription = "伴随智能",
+                        chatTheme = chatTheme,
+                        onClick = onOpenFavoritesLive,
+                    )
+                    V3QuickBtn(
+                        icon = HugeIcons.ChartColumn,
+                        contentDescription = "聊天热力图统计",
+                        chatTheme = chatTheme,
+                        onClick = { navController.navigate(Screen.Stats) },
+                    )
+                }
+
+                // (5) Divider
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 12.dp)
+                        .height(1.dp)
+                        .background(chatTheme.hair),
+                )
+
+                // (6) 最近 section label: 跟"新聊天"(V3NavRow accent=true) 同款 — accent 色 + Medium
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 6.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Time02,
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp),
+                        tint = chatTheme.accent,
+                    )
+                    Text(
+                        text = "最近",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                        color = chatTheme.accent,
+                    )
+                }
+
+                // (7) ConversationList — 历史会话（active 项已自动 accentSoft pill 高亮）
+                ConversationList(
+                    current = current,
+                    conversations = conversations,
+                    conversationJobs = conversationJobs.keys,
+                    listState = conversationListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    onClick = {
+                        scope.launch {
+                            if (it.id != current.id) {
+                                withTimeoutOrNull(220L) {
+                                    drawerState.close()
+                                }
+                                navigateToChatPage(navController, it.id)
+                            } else {
+                                drawerState.close()
+                            }
+                        }
+                    },
+                    onRegenerateTitle = {
+                        vm.generateTitle(it, true)
+                    },
+                    onDelete = {
+                        vm.deleteConversation(it)
+                        conversations.refresh()
+                        if (it.id == current.id) {
+                            navigateToChatPage(navController)
+                        }
+                    },
+                    onPin = {
+                        vm.updatePinnedStatus(it)
+                    }
+                )
+            }
+
+            // (8) Footer hair line + avatar + name + settings gear（V3 设计稿原版）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(chatTheme.hair),
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp, vertical = 8.dp),
+                    .padding(horizontal = 22.dp)
+                    .padding(top = 14.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 UIAvatar(
                     name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
                     value = settings.displaySetting.userAvatar,
-                    size = 48.dp,
-                    containerColor = workspace.blueContainer,
+                    size = 32.dp,
+                    containerColor = chatTheme.userBubble,
                     editContainerColor = workspace.paper,
-                    editContentColor = workspace.blue,
+                    editContentColor = chatTheme.accent,
+                    showEditBadge = false,  // V3 footer 头像无铅笔徽标，仍可点击换头像
                     onUpdate = { newAvatar ->
                         vm.updateSettings(
                             settings.copy(
@@ -167,120 +362,25 @@ fun ChatDrawerContent(
                         )
                     },
                 )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = workspace.ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
-                                nicknameEditState.open(settings.displaySetting.userNickname)
-                            }
-                        )
-
-                        Icon(
-                            imageVector = HugeIcons.PencilEdit01,
-                            contentDescription = "Edit",
-                            modifier = Modifier
-                                .onClick {
-                                    nicknameEditState.open(settings.displaySetting.userNickname)
-                                }
-                                .size(20.dp),
-                            tint = workspace.muted,
-                        )
-                    }
-                    Greeting(
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = workspace.muted,
-                    )
-                }
-            }
-
-            DrawerActions(
-                navController = navController,
-                todayBoardEnabled = settings.agentRuntime.todayBoard.enabled,
-            )
-            WorkspaceDivider(modifier = Modifier.padding(horizontal = 2.dp, vertical = 6.dp))
-
-            ConversationList(
-                current = current,
-                conversations = conversations,
-                conversationJobs = conversationJobs.keys,
-                listState = conversationListState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                onClick = {
-                    scope.launch {
-                        if (it.id != current.id) {
-                            withTimeoutOrNull(220L) {
-                                drawerState.close()
-                            }
-                            navigateToChatPage(navController, it.id)
-                        } else {
-                            drawerState.close()
-                        }
-                    }
-                },
-                onRegenerateTitle = {
-                    vm.generateTitle(it, true)
-                },
-                onDelete = {
-                    vm.deleteConversation(it)
-                    // Refresh the conversation list to immediately remove the deleted item
-                    // This fixes the issue where deleted conversations sometimes remain visible
-                    // until manually clicked (issue #747)
-                    conversations.refresh()
-                    if (it.id == current.id) {
-                        navigateToChatPage(navController)
-                    }
-                },
-                onPin = {
-                    vm.updatePinnedStatus(it)
-                }
-            )
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp, vertical = 6.dp)
-            ) {
-                DrawerAction(
-                    icon = { Icon(HugeIcons.Folder01, "Workspace") },
-                    label = { Text("文件") },
-                    onClick = onOpenWorkspace,
+                Text(
+                    text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = chatTheme.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            nicknameEditState.open(settings.displaySetting.userNickname)
+                        },
                 )
-
-                DrawerAction(
-                    icon = { Icon(HugeIcons.Sparkles, "Live") },
-                    label = { Text("Live") },
-                    onClick = onOpenFavoritesLive,
-                )
-
-                DrawerAction(
-                    icon = { Icon(HugeIcons.ChartColumn, "统计数据") },
-                    label = { Text("统计数据") },
-                    onClick = { navController.navigate(Screen.Stats) },
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                DrawerAction(
-                    icon = { Icon(HugeIcons.Settings03, null) },
-                    label = { Text(stringResource(R.string.settings)) },
-                    onClick = { navController.navigate(Screen.Setting) },
-                    tone = WorkspaceTone.Accent,
+                Icon(
+                    imageVector = HugeIcons.Settings03,
+                    contentDescription = stringResource(R.string.settings),
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clickable { navController.navigate(Screen.Setting) },
+                    tint = chatTheme.inkSoft,
                 )
             }
         }
@@ -421,6 +521,66 @@ private fun DrawerAction(
                 Box(modifier = Modifier.size(22.dp)) { icon() }
             }
         }
+    }
+}
+
+/** V3 convo-history.jsx NavRow —— accent=true 时 newchat 用 accent 字色, 否则 ink */
+@Composable
+private fun V3NavRow(
+    icon: ImageVector,
+    label: String,
+    accent: Boolean,
+    chatTheme: me.rerere.rikkahub.ui.pages.chat.ChatTheme,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            modifier = Modifier.size(19.dp),
+            tint = if (accent) chatTheme.accent else chatTheme.inkSoft,
+        )
+        Text(
+            text = label,
+            fontSize = 15.sp,
+            fontWeight = if (accent) FontWeight.Medium else FontWeight.Normal,
+            letterSpacing = 0.2.sp,
+            color = if (accent) chatTheme.accent else chatTheme.ink,
+        )
+    }
+}
+
+/** V3 convo-history.jsx QuickBtn —— 36×36 icon-only 圆角方块 */
+@Composable
+private fun V3QuickBtn(
+    icon: ImageVector,
+    contentDescription: String,
+    chatTheme: me.rerere.rikkahub.ui.pages.chat.ChatTheme,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(chatTheme.searchBarBg)
+            .border(BorderStroke(1.dp, chatTheme.hair), RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(18.dp),
+            tint = chatTheme.inkSoft,
+        )
     }
 }
 

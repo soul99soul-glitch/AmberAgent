@@ -277,9 +277,11 @@ private fun HeatmapGridCanvas(
     cellSize: androidx.compose.ui.unit.Dp,
     cellSpacing: androidx.compose.ui.unit.Dp,
 ) {
-    val futureColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-    val emptyColor = MaterialTheme.colorScheme.surfaceVariant
-    val baseColor = MaterialTheme.colorScheme.primary
+    // V3: heatmap 强制跟 chatTheme (即使 dynamicColor 开了 Material You, heatmap 也跟主题).
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val futureColor = chatTheme.toolPillBg.copy(alpha = 0.3f)
+    val emptyColor = chatTheme.toolPillBg
+    val baseColor = chatTheme.accent
     val density = LocalDensity.current
     val cellPx = with(density) { cellSize.toPx() }
     val spacingPx = with(density) { cellSpacing.toPx() }
@@ -320,10 +322,11 @@ private fun HeatmapGridCanvas(
 
 @Composable
 private fun HeatmapCell(alpha: Float, sizeDp: Int) {
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     val color = when {
-        alpha < 0f -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) // future
-        alpha == 0f -> MaterialTheme.colorScheme.surfaceVariant
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = alpha)
+        alpha < 0f -> chatTheme.toolPillBg.copy(alpha = 0.3f) // future
+        alpha == 0f -> chatTheme.toolPillBg
+        else -> chatTheme.accent.copy(alpha = alpha)
     }
     Box(
         modifier = Modifier

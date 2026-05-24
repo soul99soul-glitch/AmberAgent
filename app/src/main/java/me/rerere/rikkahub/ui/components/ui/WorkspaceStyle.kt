@@ -14,10 +14,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
@@ -25,9 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import me.rerere.rikkahub.ui.theme.LocalAmoledDarkMode
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
@@ -102,15 +108,20 @@ fun workspaceColors(): WorkspaceColors {
             redContainer = Color(0xFF3A1715),
         )
     } else {
+        // V3 修复：浅色分支镜像深色分支，从 MaterialTheme.colorScheme 读取核心 surface/text。
+        // Theme.kt 已经把 colorScheme 按 chatTheme override (background=chatTheme.bg,
+        // surface=chatTheme.paper, surfaceContainerLowest/Low/Mid/High/Highest 全套)，
+        // 所以二级页面（settings / providers / history）自动跟随 Whisper/Plain/Paper/Midnight。
+        // 之前硬编码白底导致用户切到 Paper 时 settings 页仍是白底+灰，体感不一致。
         WorkspaceColors(
-            canvas = Color(0xFFF7F7F5),
-            paper = Color.White,
-            row = Color(0xFFF7F7F5),
-            note = Color(0xFFFBFBFA),
-            ink = Color(0xFF1F1F1F),
-            muted = Color(0xFF6B6761),
-            faint = Color(0xFF9B9690),
-            hairline = Color.Black.copy(alpha = 0.085f),
+            canvas = scheme.surfaceContainerLowest,
+            paper = scheme.surface,
+            row = scheme.surfaceContainerLow,
+            note = scheme.surfaceContainer,
+            ink = scheme.onSurface,
+            muted = scheme.onSurfaceVariant,
+            faint = Color(0xFF9B9690),                       // 半灰，跨主题保持
+            hairline = scheme.outlineVariant,                // chatTheme.outlineSoft (12% ink)
             blue = Color(0xFF2383E2),
             blueContainer = Color(0xFFEAF4FF),
             green = Color(0xFF168A2D),
@@ -148,9 +159,11 @@ fun WorkspaceStatusPill(
     maxWidth: Dp = Dp.Unspecified,
 ) {
     val colors = workspaceColors()
+    // V3: Accent tone 跟主题 accent（Paper 砖红 / Plain 黑 / Midnight 靛蓝），不再硬蓝
+    val scheme = MaterialTheme.colorScheme
     val (container, content) = when (tone) {
         WorkspaceTone.Neutral -> colors.row to colors.muted
-        WorkspaceTone.Accent -> colors.blueContainer to colors.blue
+        WorkspaceTone.Accent -> scheme.primaryContainer to scheme.primary
         WorkspaceTone.Success -> colors.greenContainer to colors.green
         WorkspaceTone.Warning -> colors.amberContainer to colors.amber
         WorkspaceTone.Danger -> colors.redContainer to colors.red
@@ -181,9 +194,10 @@ fun WorkspaceLeadingIcon(
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
     val tint = when (tone) {
         WorkspaceTone.Neutral -> colors.ink
-        WorkspaceTone.Accent -> colors.blue
+        WorkspaceTone.Accent -> scheme.primary
         WorkspaceTone.Success -> colors.green
         WorkspaceTone.Warning -> colors.amber
         WorkspaceTone.Danger -> colors.red
@@ -193,7 +207,7 @@ fun WorkspaceLeadingIcon(
         shape = RoundedCornerShape(6.dp),
         color = when (tone) {
             WorkspaceTone.Neutral -> Color.Transparent
-            WorkspaceTone.Accent -> colors.blueContainer
+            WorkspaceTone.Accent -> scheme.primaryContainer
             WorkspaceTone.Success -> colors.greenContainer
             WorkspaceTone.Warning -> colors.amberContainer
             WorkspaceTone.Danger -> colors.redContainer
@@ -224,9 +238,10 @@ fun WorkspaceIconButton(
     contentDescription: String?,
 ) {
     val colors = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
     val contentColor = when (tone) {
         WorkspaceTone.Neutral -> colors.ink
-        WorkspaceTone.Accent -> colors.blue
+        WorkspaceTone.Accent -> scheme.primary
         WorkspaceTone.Success -> colors.green
         WorkspaceTone.Warning -> colors.amber
         WorkspaceTone.Danger -> colors.red
@@ -237,7 +252,7 @@ fun WorkspaceIconButton(
             .clip(RoundedCornerShape(6.dp))
             .clickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(6.dp),
-        color = containerColor ?: if (tone == WorkspaceTone.Accent) colors.blueContainer else colors.paper,
+        color = containerColor ?: if (tone == WorkspaceTone.Accent) scheme.primaryContainer else colors.paper,
         contentColor = contentColor,
         border = if (showBorder) workspaceBorder(alpha = if (enabled) 1f else 0.48f) else null,
     ) {
@@ -259,9 +274,10 @@ fun WorkspaceTextButton(
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
     val (container, contentColor) = when (tone) {
         WorkspaceTone.Neutral -> colors.row to colors.muted
-        WorkspaceTone.Accent -> colors.blueContainer to colors.blue
+        WorkspaceTone.Accent -> scheme.primaryContainer to scheme.primary
         WorkspaceTone.Success -> colors.greenContainer to colors.green
         WorkspaceTone.Warning -> colors.amberContainer to colors.amber
         WorkspaceTone.Danger -> colors.redContainer to colors.red
@@ -287,4 +303,52 @@ fun WorkspaceTextButton(
             )
         }
     }
+}
+
+/**
+ * V3 settings-shell.jsx SubHeader 设计稿：
+ *   - title 22sp W500 ink letterSpacing 0.3 lineHeight 1
+ *   - 14dp 上下 padding + 18dp 左右 padding (TopAppBar 默认就是 64dp 高，刚好近似)
+ *   - 32dp chevron-back box 内 22dp icon stroke 1.6
+ *   - 无 elevation (M3 TopAppBar 默认就是 0)
+ *
+ * 对外暴露与 [TopAppBar] 一致的 nav/actions/scrollBehavior 接口，
+ * 调用方仅传 title 字符串即可统一字号字重；样式 paddings/elevation 走 M3 默认 (已对齐 spec)。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WorkspaceTopBar(
+    title: String,
+    modifier: Modifier = Modifier,
+    navigationIcon: @Composable () -> Unit = {},
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+    scrollBehavior: TopAppBarScrollBehavior? = null,
+) {
+    val workspace = workspaceColors()
+    TopAppBar(
+        modifier = modifier,
+        title = {
+            Text(
+                text = title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.3.sp,
+                lineHeight = 22.sp,
+                color = workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        navigationIcon = navigationIcon,
+        actions = actions,
+        scrollBehavior = scrollBehavior,
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = workspace.paper,
+            scrolledContainerColor = workspace.paper,
+            titleContentColor = workspace.ink,
+            navigationIconContentColor = workspace.muted,
+            // V3: action icon 跟主题 accent (Paper 砖红 / Whisper 天蓝 等). 之前硬 workspace.blue.
+            actionIconContentColor = MaterialTheme.colorScheme.primary,
+        ),
+    )
 }

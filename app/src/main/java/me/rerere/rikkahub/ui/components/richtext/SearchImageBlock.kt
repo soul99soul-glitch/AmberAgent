@@ -245,8 +245,10 @@ private fun ThumbnailImage(
             // <50dp tall. With the LazyRow path replacing that case, it's now
             // only ever hit if the parent bubble is very narrow (<170dp wide)
             // — preferred over a sub-50dp sliver in that edge.
-            .aspectRatio(4f / 3f)
-            .heightIn(min = 72.dp)
+            // V3 设计稿: 网页预览缩略图 3:4 竖向 (不是 4:3 横向)
+            // 因为预览内容是网页 / app / 文档类竖向素材
+            .aspectRatio(3f / 4f)
+            .heightIn(min = 96.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable { showViewer = true },
         contentScale = ContentScale.Crop,

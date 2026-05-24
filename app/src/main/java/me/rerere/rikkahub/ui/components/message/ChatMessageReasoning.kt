@@ -31,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -203,26 +205,39 @@ private fun ReasoningContent(
             }
     ) {
         SelectionContainer {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-                border = BorderStroke(1.dp, workspace.hairline),
+            // V3 修: ReasoningContent 自带左竖线 — 让 reasoning step 有线、tool step 没线
+            // (wrapper 不画). 线 X=0 (ReasoningContent 起始, 跟 flushContent=true 的 wrapper
+            // step icon center 12dp 对齐), padding(start=14) 让文字距线 14dp.
+            val thinkRuleColor = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.thinkRule
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .drawBehind {
+                        val strokePx = 2.dp.toPx()
+                        drawLine(
+                            color = thinkRuleColor,
+                            start = Offset(strokePx / 2f, 0f),
+                            end = Offset(strokePx / 2f, size.height),
+                            strokeWidth = strokePx,
+                        )
+                    }
+                    .padding(start = 14.dp),
             ) {
-                // ChainOfThought.animateContentChanges already drives a spring on the
-                // step list; reasoning text rides on that motion. (Char-level fade was
-                // removed across the app 2026-05-15, so there's no fade to consider
-                // forwarding here anyway.)
                 MarkdownBlock(
                     content = MessageRenderCache.visualRegexText(
                         text = displayText,
                         assistant = assistant,
                         scope = AssistantAffectScope.ASSISTANT,
                     ),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current.thinkBodyInk,
+                        fontSize = 13.5.sp,
+                        lineHeight = 23.sp,
+                        letterSpacing = 0.2.sp,
+                    ),
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(vertical = 2.dp),
                 )
             }
         }
@@ -253,6 +268,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     }
     val budgetLabel = reasoningLevel.reasoningBudgetLabel()
 
+    // V3 主题感知 + 设计稿对齐: brain 图标 (替代默认灰圆豆 dot, 让"小图标"代表思考 step) +
+    //   flushContent=true 让 content 引用竖线 X 对齐 step icon center (12dp)
+    val chatThemeForReasoning = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, reasoningLoading) },
@@ -260,53 +278,59 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             Icon(
                 imageVector = HugeIcons.Brain02,
                 contentDescription = null,
+                tint = chatThemeForReasoning.thinkHeaderInk,
                 modifier = Modifier.size(14.dp),
-                tint = workspace.blue.copy(alpha = 0.72f),
             )
         },
         label = {
             if (thinkingTitle != null) {
                 ReasoningTitle(title = thinkingTitle)
             } else {
+                val baseText = if (showReasoningDuration) {
+                    stringResource(
+                        R.string.deep_thinking_seconds,
+                        state.duration.toDouble(DurationUnit.SECONDS).toFloat()
+                    )
+                } else {
+                    stringResource(R.string.deep_thinking)
+                }
+                // V3 设计稿: "思考了 5.4 秒 · auto" 一体显示，不分 extra
+                val combinedText = if (budgetLabel != null) "$baseText · $budgetLabel" else baseText
                 Text(
-                    text = if (showReasoningDuration) {
-                        stringResource(
-                            R.string.deep_thinking_seconds,
-                            state.duration.toDouble(DurationUnit.SECONDS).toFloat()
-                        )
-                    } else {
-                        stringResource(R.string.deep_thinking)
-                    },
+                    text = combinedText,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 12.sp,
+                        // V3 设计稿: 头部 13sp + 字距 0.2
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Normal,
+                        letterSpacing = 0.2.sp,
                     ),
-                    color = workspace.blue.copy(alpha = 0.72f),
+                    color = chatThemeForReasoning.thinkHeaderInk,  // 鲜亮 accent，不再 0.72 alpha
                     modifier = Modifier.shimmer(isLoading = reasoningLoading),
                 )
             }
         },
         extra = {
+            // V3 设计稿: 流式 title 时仅显示 duration 在右侧
             val durationLabel = if (showThinkingTitle && state.duration > 0.seconds) {
                 state.duration.toString(DurationUnit.SECONDS, 1)
             } else {
                 null
             }
-            val metaText = listOfNotNull(durationLabel, budgetLabel).joinToString(" · ")
-            if (metaText.isNotBlank()) {
+            if (durationLabel != null) {
                 Text(
-                    text = metaText,
+                    text = durationLabel,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Normal,
                     ),
-                    color = workspace.blue.copy(alpha = 0.56f),
+                    color = chatThemeForReasoning.thinkHeaderInk.copy(alpha = 0.56f),
                     modifier = Modifier.shimmer(isLoading = reasoningLoading),
                 )
             }
         },
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
         contentVisible = state.expandState != ReasoningCardState.Collapsed,
+        flushContent = true,  // V3: content 竖线 X 跟 step icon center 对齐
         content = {
             ReasoningContent(
                 reasoning = reasoning,
@@ -361,7 +385,7 @@ private fun reasoningDisplayLimit(
 
 @Composable
 private fun ReasoningTitle(title: String) {
-    val workspace = workspaceColors()
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     AnimatedContent(
         targetState = title,
         transitionSpec = {
@@ -376,7 +400,8 @@ private fun ReasoningTitle(title: String) {
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Normal,
             ),
-            color = workspace.blue.copy(alpha = 0.72f),
+            // V3 主题感知 (Paper 砖红 / Plain 黑 / Midnight 靛蓝)
+            color = chatTheme.thinkHeaderInk.copy(alpha = 0.72f),
             modifier = Modifier
                 .padding(horizontal = 4.dp)
                 .shimmer(true),

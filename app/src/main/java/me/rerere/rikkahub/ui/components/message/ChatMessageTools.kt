@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -345,11 +346,16 @@ internal fun AgentToolCallCapsule(
     subtitle: String? = null,
 ) {
     val workspace = workspaceColors()
-    val tone = toolStatusTone(status)
-    val shape = RoundedCornerShape(10.dp)
-    val kindDescription = toolKindLabel(kind, toolName)
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    // V3 ResultPill spec (convo-tool-result.jsx:80):
+    //   padding 3/10/3/3, fillMaxWidth, 999 圆角, toolPillBg + 1dp toolPillEdge
+    //   左侧 16dp accent 圆 + 10dp 白勾 (替代旧 15dp tool 图标)
+    //   inline "tool · query" 11.5sp letter 0.2  toolLabelInk W500 / inkSoft W400
+    //   高度 ~22dp (3+16+3)
+    val shape = androidx.compose.foundation.shape.CircleShape
     Surface(
         modifier = modifier
+            // V3: 改 wrapContentWidth, 胶囊自适应内容长度而非顶满整行
             .wrapContentWidth(align = Alignment.Start)
             .widthIn(max = 460.dp)
             .clip(shape)
@@ -362,54 +368,95 @@ internal fun AgentToolCallCapsule(
             )
             .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
         shape = shape,
-        color = workspace.paper,
+        color = theme.toolPillBg,
         contentColor = workspace.ink,
-        shadowElevation = 1.dp,
-        border = BorderStroke(1.dp, workspace.hairline),
+        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, theme.toolPillEdge),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.padding(start = 3.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            V3ToolLeadingBadge(
+                status = status,
+                loading = loading,
+            )
+
+            // Inline "label · name" 11.5sp letter 0.2. wrapContentWidth 模式下不再 weight(1f)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                WorkspaceLeadingIcon(
-                    icon = icon,
-                    size = 28.dp,
-                    iconSize = 15.dp,
-                    tone = tone,
+                Text(
+                    text = title,
+                    fontSize = 11.5.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    letterSpacing = 0.2.sp,
+                    color = theme.toolLabelInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
                 )
-
-                Column(modifier = Modifier.weight(1f, fill = false)) {
+                if (!subtitle.isNullOrBlank()) {
                     Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = workspace.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
-                    )
-                    Text(
-                        text = subtitle ?: "$kindDescription · ${toolName.compactToolPreview(28)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = workspace.muted,
+                        text = " $subtitle",
+                        fontSize = 11.5.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                        letterSpacing = 0.2.sp,
+                        color = theme.inkSoft,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-
-                if (approvalActions != null) {
-                    approvalActions()
-                } else {
-                    ToolStatusPill(status = status)
                 }
             }
-            // Note: dropped the LinearProgressIndicator below the row. Title-level shimmer
-            // (line 409) plus the running status pill on the right already convey "in flight";
-            // the indeterminate bar's segmented sweep (Material3 1.3+ default) read as stuttery
-            // against this tight capsule layout and added visual noise without info gain.
+
+            // V3: 删除右侧 ToolStatusPill ("失败" 文字框). 左侧 badge 已用红 X 表达 FAILED,
+            // 右侧再重复"失败"文字 pill 是冗余. 仅保留 approval actions (待授权时仍需操作按钮).
+            if (approvalActions != null) {
+                approvalActions()
+            }
+        }
+    }
+}
+
+/** V3 spec: 16dp accent 圆 + 10dp 白勾。非成功状态映射其他 tone。 */
+@Composable
+private fun V3ToolLeadingBadge(
+    status: AgentToolStatus,
+    loading: Boolean,
+) {
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val workspace = workspaceColors()
+    val (bg, ink) = when (status) {
+        AgentToolStatus.SUCCEEDED -> theme.toolDoneBg to theme.toolDoneBadgeInk
+        AgentToolStatus.RUNNING -> theme.toolDoneBg to theme.toolDoneBadgeInk
+        AgentToolStatus.WAITING_FOR_PERMISSION -> workspace.amber to Color.White
+        AgentToolStatus.FAILED -> workspace.red to Color.White
+        AgentToolStatus.CANCELLED -> workspace.muted to Color.White
+    }
+    Surface(
+        modifier = Modifier
+            .size(16.dp)
+            .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
+        shape = androidx.compose.foundation.shape.CircleShape,
+        color = bg,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (status == AgentToolStatus.SUCCEEDED || status == AgentToolStatus.RUNNING) {
+                Icon(
+                    imageVector = me.rerere.hugeicons.HugeIcons.Tick01,
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.size(10.dp),
+                )
+            } else if (status == AgentToolStatus.FAILED) {
+                Icon(
+                    imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.size(10.dp),
+                )
+            }
         }
     }
 }

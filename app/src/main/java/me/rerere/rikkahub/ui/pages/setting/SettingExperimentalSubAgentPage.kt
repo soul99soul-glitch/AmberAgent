@@ -352,7 +352,8 @@ private fun <T> SubAgentSelectRow(
             selectedOption = selected,
             onOptionSelected = onSelected,
             optionToString = optionToString,
-            modifier = Modifier.width(112.dp),
+            // V3: 去掉 width(112dp) 硬约束. 之前 Select 内容只占 ~60dp, 在 112dp 容器内左对齐
+            // 导致看着没"顶到右". 改 wrap content + weight(1f) 让 Select 自动靠 row 右端.
         )
     }
 }

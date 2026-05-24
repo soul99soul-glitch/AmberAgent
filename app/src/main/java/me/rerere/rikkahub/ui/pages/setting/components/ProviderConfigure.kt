@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -52,8 +51,8 @@ import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.providers.openai.OpenAICodexOAuthClient
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
+import me.rerere.rikkahub.ui.components.ui.FlatTextField
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.writeClipboardText
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -106,8 +105,10 @@ fun ProviderConfigure(
     onEdit: (provider: ProviderSetting) -> Unit,
 ) {
     val effectiveCommit = onCommit ?: onEdit
+    // V3 设计稿: fields 之间 16dp gap (provider-screens.jsx Field 容器)。
+    // Toggle/Segmented row 用同 12dp 折中（更紧凑也好看）
     Column(
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
     ) {
         // Type
@@ -453,14 +454,10 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         )
     }
 
-    OutlinedTextField(
+    FlatTextField(
         value = provider.name,
-        onValueChange = {
-            onEdit(provider.copy(name = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_name))
-        },
+        onValueChange = { onEdit(provider.copy(name = it.trim())) },
+        label = stringResource(id = R.string.setting_provider_page_name),
         modifier = Modifier.fillMaxWidth(),
     )
 
@@ -565,31 +562,36 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         OpenAIAuthMode.MIMO_CODING_PLAN,
     )
     if (provider.authMode == OpenAIAuthMode.API_KEY || isCodingPlan) {
-        OutlinedTextField(
+        FlatTextField(
             value = provider.apiKey,
-            onValueChange = {
-                onEdit(provider.copy(apiKey = it.trim()))
-            },
-            label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_key))
-            },
+            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+            label = stringResource(id = R.string.setting_provider_page_api_key),
             modifier = Modifier.fillMaxWidth(),
+            singleLine = false,
+            mono = true,
             maxLines = 3,
+            // V3 review P3 #11: 多 key 时 BasicTextField maxLines=3 内部不滚动, 用户看不到后面的 key.
+            // 用 supportingText 报告"共 N 个 key", 帮用户确认完整粘贴生效.
+            supportingText = provider.apiKey
+                .split(Regex("[\\s,]+"))
+                .filter { it.isNotBlank() }
+                .size
+                .takeIf { it > 1 }
+                ?.let { "已配置 $it 个 key (空格/逗号/换行分隔)" },
         )
 
         // baseUrl: editable for plain API_KEY, read-only when pinned by a Coding Plan mode.
         // Without the read-only state the user could clobber the brand-specific URL and the
         // request would silently 404 with no obvious cause.
-        OutlinedTextField(
+        FlatTextField(
             value = provider.baseUrl,
             onValueChange = {
                 if (!isCodingPlan) onEdit(provider.copy(baseUrl = it.trim()))
             },
-            label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-            },
+            label = stringResource(id = R.string.setting_provider_page_api_base_url),
             modifier = Modifier.fillMaxWidth(),
             enabled = !isCodingPlan,
+            mono = true,
             isError = !isCodingPlan && provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
         )
 
@@ -597,16 +599,13 @@ private fun ColumnScope.ProviderConfigureOpenAI(
         // Plans hit a fixed endpoint, no need to expose the protocol knobs.
         if (!isCodingPlan) {
             if (!provider.useResponseApi) {
-                OutlinedTextField(
+                FlatTextField(
                     value = provider.chatCompletionsPath,
-                    onValueChange = {
-                        onEdit(provider.copy(chatCompletionsPath = it.trim()))
-                    },
-                    label = {
-                        Text(stringResource(id = R.string.setting_provider_page_api_path))
-                    },
+                    onValueChange = { onEdit(provider.copy(chatCompletionsPath = it.trim())) },
+                    label = stringResource(id = R.string.setting_provider_page_api_path),
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !provider.builtIn
+                    mono = true,
+                    enabled = !provider.builtIn,
                 )
             }
 
@@ -636,14 +635,14 @@ private fun ColumnScope.ProviderConfigureOpenAI(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedTextField(
+        FlatTextField(
             value = OPENAI_CODEX_BACKEND_BASE_URL,
             onValueChange = {},
-            label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-            },
+            label = stringResource(id = R.string.setting_provider_page_api_base_url),
             modifier = Modifier.fillMaxWidth(),
             enabled = false,
+            readOnly = true,
+            mono = true,
         )
         Text(
             text = oauthTokens?.let { tokens ->
@@ -662,14 +661,14 @@ private fun ColumnScope.ProviderConfigureOpenAI(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
+            FlatTextField(
                 value = oauthDeviceCode.orEmpty(),
                 onValueChange = {},
-                label = {
-                    Text(stringResource(R.string.setting_provider_page_codex_oauth_device_code))
-                },
+                label = stringResource(R.string.setting_provider_page_codex_oauth_device_code),
                 modifier = Modifier.fillMaxWidth(),
                 enabled = false,
+                readOnly = true,
+                mono = true,
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -841,39 +840,29 @@ private fun ColumnScope.ProviderConfigureClaude(
         )
     }
 
-    OutlinedTextField(
+    FlatTextField(
         value = provider.name,
-        onValueChange = {
-            onEdit(provider.copy(name = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_name))
-        },
+        onValueChange = { onEdit(provider.copy(name = it.trim())) },
+        label = stringResource(id = R.string.setting_provider_page_name),
         modifier = Modifier.fillMaxWidth(),
-        maxLines = 3,
     )
 
-    OutlinedTextField(
+    FlatTextField(
         value = provider.apiKey,
-        onValueChange = {
-            onEdit(provider.copy(apiKey = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_api_key))
-        },
+        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+        label = stringResource(id = R.string.setting_provider_page_api_key),
         modifier = Modifier.fillMaxWidth(),
+        singleLine = false,
+        mono = true,
         maxLines = 3,
     )
 
-    OutlinedTextField(
+    FlatTextField(
         value = provider.baseUrl,
-        onValueChange = {
-            onEdit(provider.copy(baseUrl = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-        },
+        onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
+        label = stringResource(id = R.string.setting_provider_page_api_base_url),
         modifier = Modifier.fillMaxWidth(),
+        mono = true,
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl()
     )
 
@@ -953,15 +942,11 @@ private fun ColumnScope.ProviderConfigureGoogle(
         )
     }
 
-    OutlinedTextField(
+    FlatTextField(
         value = provider.name,
-        onValueChange = {
-            onEdit(provider.copy(name = it.trim()))
-        },
-        label = {
-            Text(stringResource(id = R.string.setting_provider_page_name))
-        },
-        modifier = Modifier.fillMaxWidth()
+        onValueChange = { onEdit(provider.copy(name = it.trim())) },
+        label = stringResource(id = R.string.setting_provider_page_name),
+        modifier = Modifier.fillMaxWidth(),
     )
 
     // Auth mode segmented row — mirrors the OpenAI side. API_KEY keeps the existing
@@ -1051,37 +1036,30 @@ private fun ColumnScope.ProviderConfigureGoogle(
         }
 
         if (!(provider.vertexAI && provider.useServiceAccount)) {
-            OutlinedTextField(
+            FlatTextField(
                 value = provider.apiKey,
-                onValueChange = {
-                    onEdit(provider.copy(apiKey = it.trim()))
-                },
-                label = {
-                    Text(stringResource(id = R.string.setting_provider_page_api_key))
-                },
+                onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+                label = stringResource(id = R.string.setting_provider_page_api_key),
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                mono = true,
                 maxLines = 3,
             )
         }
 
         if (!provider.vertexAI) {
-            OutlinedTextField(
+            FlatTextField(
                 value = provider.baseUrl,
-                onValueChange = {
-                    onEdit(provider.copy(baseUrl = it.trim()))
-                },
-                label = {
-                    Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-                },
+                onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
+                label = stringResource(id = R.string.setting_provider_page_api_base_url),
                 modifier = Modifier.fillMaxWidth(),
+                mono = true,
                 isError = provider.baseUrl.isNotBlank() && (
                     !provider.baseUrl.isValidBaseUrl() || !provider.baseUrl.endsWith("/v1beta")
                 ),
                 supportingText = if (!provider.baseUrl.endsWith("/v1beta")) {
-                    {
-                        Text("The base URL usually ends with `/v1beta`")
-                    }
-                } else null
+                    "The base URL usually ends with `/v1beta`"
+                } else null,
             )
         } else {
             Row(
@@ -1106,49 +1084,34 @@ private fun ColumnScope.ProviderConfigureGoogle(
                 ) {
                     Text(stringResource(R.string.setting_provider_page_import_service_account_json))
                 }
-                OutlinedTextField(
+                FlatTextField(
                     value = provider.serviceAccountEmail,
-                    onValueChange = {
-                        onEdit(provider.copy(serviceAccountEmail = it.trim()))
-                    },
-                    label = {
-                        Text(stringResource(id = R.string.setting_provider_page_service_account_email))
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = provider.privateKey,
-                    onValueChange = {
-                        onEdit(provider.copy(privateKey = it.trim()))
-                    },
-                    label = {
-                        Text(stringResource(id = R.string.setting_provider_page_private_key))
-                    },
+                    onValueChange = { onEdit(provider.copy(serviceAccountEmail = it.trim())) },
+                    label = stringResource(id = R.string.setting_provider_page_service_account_email),
                     modifier = Modifier.fillMaxWidth(),
+                    mono = true,
+                )
+                FlatTextField(
+                    value = provider.privateKey,
+                    onValueChange = { onEdit(provider.copy(privateKey = it.trim())) },
+                    label = stringResource(id = R.string.setting_provider_page_private_key),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = false,
+                    mono = true,
                     maxLines = 6,
                     minLines = 3,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
                 )
-                OutlinedTextField(
+                FlatTextField(
                     value = provider.location,
-                    onValueChange = {
-                        onEdit(provider.copy(location = it.trim()))
-                    },
-                    label = {
-                        // https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#available-regions
-                        Text(stringResource(id = R.string.setting_provider_page_location))
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                    onValueChange = { onEdit(provider.copy(location = it.trim())) },
+                    label = stringResource(id = R.string.setting_provider_page_location),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                FlatTextField(
                     value = provider.projectId,
-                    onValueChange = {
-                        onEdit(provider.copy(projectId = it.trim()))
-                    },
-                    label = {
-                        Text(stringResource(id = R.string.setting_provider_page_project_id))
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                    onValueChange = { onEdit(provider.copy(projectId = it.trim())) },
+                    label = stringResource(id = R.string.setting_provider_page_project_id),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -1162,14 +1125,14 @@ private fun ColumnScope.ProviderConfigureGoogle(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedTextField(
+        FlatTextField(
             value = checkNotNull(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl()),
             onValueChange = {},
-            label = {
-                Text(stringResource(id = R.string.setting_provider_page_api_base_url))
-            },
+            label = stringResource(id = R.string.setting_provider_page_api_base_url),
             modifier = Modifier.fillMaxWidth(),
             enabled = false,
+            readOnly = true,
+            mono = true,
         )
         Text(
             text = geminiTokens?.let { tokens ->

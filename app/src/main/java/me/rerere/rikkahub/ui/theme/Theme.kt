@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
@@ -199,22 +200,95 @@ fun RikkahubTheme(
         }
     }
 
+    // V3 chat theme（Phase 4.5）：深色模式强制 Midnight；浅色读 displaySetting.chatThemeChoice
+    // ("WHISPER" / "PLAIN" / "PAPER")。未知值 fallback 到 Whisper。
+    val chatTheme = if (darkTheme) {
+        me.rerere.rikkahub.ui.pages.chat.MidnightTheme
+    } else {
+        when (settings.displaySetting.chatThemeChoice) {
+            "PLAIN" -> me.rerere.rikkahub.ui.pages.chat.PlainTheme
+            "PAPER" -> me.rerere.rikkahub.ui.pages.chat.PaperTheme
+            else -> me.rerere.rikkahub.ui.pages.chat.WhisperTheme
+        }
+    }
+
+    // V3 Phase 4 二级页面适配：把 LocalChatTheme 映射到 MaterialTheme.colorScheme 的核心字段。
+    // 例外：
+    //   - dynamicColor 模式：用户明确选 Material You，跳过 chatTheme override
+    //   - AmoledDark：终审 #2 fix——AmoledDark 时仍应用 chatTheme accent/outline 体系，
+    //     但保留 bg/surface 为 #000 以省电。下方 cherry-pick override 处理。
+    val shouldApplyChatTheme = !(settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+    val themedColorScheme = remember(colorSchemeConverted, chatTheme, shouldApplyChatTheme) {
+        if (!shouldApplyChatTheme) {
+            colorSchemeConverted
+        } else {
+            // AmoledDark 时保留纯黑 bg/surface（省电），其他主题 token 仍跟 chatTheme
+            val useAmoledBlack = amoledDarkMode && darkTheme
+            colorSchemeConverted.copy(
+                background = if (useAmoledBlack) colorSchemeConverted.background else chatTheme.bg,
+                onBackground = chatTheme.ink,
+                surface = if (useAmoledBlack) colorSchemeConverted.surface else chatTheme.paper,
+                onSurface = chatTheme.ink,
+                surfaceVariant = if (useAmoledBlack) colorSchemeConverted.surfaceVariant else chatTheme.toolPillBg,
+                onSurfaceVariant = chatTheme.inkSoft,
+                // Subagent #6: 5 级 hierarchy 让 NavDrawer / Card / BottomSheet 有深度
+                surfaceContainerLowest = chatTheme.containerLowest,
+                surfaceContainerLow = chatTheme.containerLow,
+                surfaceContainer = chatTheme.containerMid,
+                surfaceContainerHigh = chatTheme.containerHigh,
+                surfaceContainerHighest = chatTheme.containerHighest,
+                // surfaceBright / surfaceDim 之前没 override, dynamicLight 默认给浅蓝 tinted,
+                // 导致 cardColorsOnSurfaceContainer (= surfaceBright) 出现浅蓝底. 跟 chatTheme.
+                surfaceBright = chatTheme.containerHighest,
+                surfaceDim = chatTheme.containerLowest,
+                surfaceTint = chatTheme.accent,
+                primary = chatTheme.accent,
+                // Subagent #3: Midnight 用深字反白 (chatTheme.onAccent)；其他主题仍是白字
+                onPrimary = chatTheme.onAccent,
+                primaryContainer = chatTheme.accentSoft,
+                onPrimaryContainer = chatTheme.accentDeep,
+                secondary = chatTheme.accent,
+                secondaryContainer = chatTheme.accentSoft,
+                onSecondaryContainer = chatTheme.accentDeep,
+                // Subagent #8 补齐 tertiary 用同主题 accent 体系
+                tertiary = chatTheme.accentDeep,
+                onTertiary = chatTheme.onAccent,
+                tertiaryContainer = chatTheme.accentTint,
+                onTertiaryContainer = chatTheme.accentDeep,
+                // Subagent #9 / 终审 #1：Snackbar 用 inverseSurface 应为"反相"色——
+                // 深色主题给亮底 + 深字; 浅色主题给深底 + 亮字。当前 chatTheme.ink/paper
+                // 在浅色 = 深字/白底 (正确)；在深色 = 浅字/深底 (反了)。所以深色下交换。
+                inverseSurface = if (darkTheme) chatTheme.paper else chatTheme.ink,
+                inverseOnSurface = if (darkTheme) chatTheme.ink else chatTheme.paper,
+                inversePrimary = chatTheme.accentTint,
+                // Subagent #4
+                outline = chatTheme.outlineStrong,
+                outlineVariant = chatTheme.outlineSoft,
+            )
+        }
+    }
+
     CompositionLocalProvider(
         LocalDarkMode provides darkTheme,
         LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
         LocalExtendColors provides extendColors,
-        LocalOverscrollFactory provides null
+        LocalOverscrollFactory provides null,
+        me.rerere.rikkahub.ui.pages.chat.LocalChatTheme provides chatTheme,
+        // Bug fix: M3 LocalContentColor 默认 Color.Black. 没有 Surface 显式 provide 时
+        // (如 ChatPage 直接放 MarkdownBlock 的无 bubble 渲染路径), 深色模式下文字仍渲染成黑色.
+        // 这里显式 provide onSurface (= chatTheme.ink) 作为全局默认前景色.
+        LocalContentColor provides themedColorScheme.onSurface,
     ) {
         if (BuildConfig.NOTION_LIKE) {
             MaterialTheme(
-                colorScheme = colorSchemeConverted,
+                colorScheme = themedColorScheme,
                 typography = NotionTypography,
                 shapes = NotionShapes,
                 content = content,
             )
         } else {
             MaterialExpressiveTheme(
-                colorScheme = colorSchemeConverted,
+                colorScheme = themedColorScheme,
                 typography = Typography,
                 content = content,
                 motionScheme = MotionScheme.expressive()
