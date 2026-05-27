@@ -1,0 +1,36 @@
+# legacy-package-allowlist.txt
+# 必须保留在 me.rerere.* 包名的文件/路径。
+# 破除任何一条都会导致用户数据丢失或运行时崩溃。
+# 后续迁移操作前必须先 grep 此清单。
+
+# ─── Room schema 路径绑定 @Database 类的 FQN ───
+app/src/main/java/me/rerere/rikkahub/data/db/AppDatabase.kt
+
+# ─── JNI 符号名硬编码 Java 包路径（Java_me_rerere_*_*）───
+# 见 native/markdown-parser/src/lib.rs
+app/src/main/java/me/rerere/rikkahub/ui/components/richtext/nativebridge/MarkdownParserNative.kt
+
+# 见 native/regex-transformer/src/lib.rs
+app/src/main/java/me/rerere/rikkahub/data/model/nativebridge/RegexTransformerNative.kt
+
+# 整个 highlight 模块的 Kotlin 包（HighlighterNative 在内）
+# 见 native/highlight-parser/src/lib.rs
+highlight/src/main/java/me/rerere/highlight/**
+
+# 整个 document 模块的 Kotlin 包（OfficeParserNative + PdfParser 在内）
+# 见 native/office-parsers/src/lib.rs
+document/src/main/java/me/rerere/document/**
+
+# ─── Roadmap 修订 #1 补充（3 个中风险遗漏）───
+
+# 快捷方式 Activity FQN（shortcuts.xml 硬编码）—— 迁移时需同步更新
+app/src/main/res/xml/shortcuts.xml
+
+# Broadcast action 常量（发送方/接收方必须同步迁移）
+# STOP_GENERATION 等常量分布在以下文件中：
+app/src/main/java/me/rerere/rikkahub/data/agent/AgentNotificationActionReceiver.kt
+app/src/main/java/me/rerere/rikkahub/data/agent/AgentLiveStatusNotifier.kt
+app/src/main/java/me/rerere/rikkahub/data/agent/terminal/TerminalRuntime.kt
+
+# JSON class discriminator（历史数据中的 FQN，永不可改）
+app/src/main/java/me/rerere/rikkahub/data/datastore/migration/PreferenceStoreV1Migration.kt
