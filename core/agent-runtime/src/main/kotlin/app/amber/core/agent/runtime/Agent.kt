@@ -2,6 +2,7 @@ package app.amber.core.agent.runtime
 
 import kotlin.reflect.KClass
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
 
 interface Agent<INPUT : AgentInput, ARTIFACT : AgentArtifact> {
     val descriptor: AgentDescriptor
@@ -31,9 +32,11 @@ enum class AgentCapability {
     BACKGROUND,
 }
 
+@Serializable
 @JvmInline
 value class AgentDescriptorId(val value: String)
 
+@Serializable
 @JvmInline
 value class AgentRunId(val value: String) {
     companion object {
@@ -41,12 +44,15 @@ value class AgentRunId(val value: String) {
     }
 }
 
+@Serializable
 @JvmInline
 value class ConversationId(val value: String)
 
+@Serializable
 @JvmInline
 value class MessageNodeId(val value: String)
 
+@Serializable
 @JvmInline
 value class AssistantId(val value: String)
 

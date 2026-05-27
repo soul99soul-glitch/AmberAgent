@@ -1,11 +1,13 @@
 package app.amber.core.agent.runtime
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 interface ModelRouter {
     fun session(policy: ModelSelectionPolicy): LlmSession
 }
 
+@Serializable
 data class ModelSelectionPolicy(
     val preferredModelId: String? = null,
     val fallbackModelId: String? = null,
