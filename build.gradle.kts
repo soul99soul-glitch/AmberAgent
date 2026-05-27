@@ -9,3 +9,9 @@ plugins {
     alias(libs.plugins.android.test) apply false
     alias(libs.plugins.baselineprofile) apply false
 }
+
+tasks.register<Exec>("checkLegacyPackage") {
+    group = "verification"
+    description = "Block new Kotlin files from landing in me.rerere.* (legacy package guard)"
+    commandLine("bash", "config/check-legacy-package.sh")
+}
