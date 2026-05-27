@@ -67,7 +67,28 @@ class GenerativeUiPlannerTest {
         )
 
         assertTrue(prompt.contains("Do NOT create a widget for routing, progress, plan, or status summaries."))
-        assertTrue(prompt.contains("Only emit a show-widget after the real tool/skill/subagent result exists"))
+        assertTrue(prompt.contains("final artifact must be a show-widget deck preview"))
+        assertTrue(prompt.contains("Do NOT turn the deck into a MiniApp"))
+        assertTrue(prompt.contains("use renderer \"guizang_html\" by default"))
+    }
+
+    @Test
+    fun guizangRequestsRouteToDeckEvenWithoutPptKeyword() {
+        val prompt = GenerativeUiPlanner.buildPrompt(
+            setting = GenerativeUiSetting(enabled = true),
+            messages = listOf(userMessage("用 guizang skill 做一个演示")),
+        )
+        val requirement = GenerativeUiPlanner.widgetRequirement(
+            setting = GenerativeUiSetting(enabled = true),
+            messages = listOf(userMessage("用 guizang skill 做一个演示")),
+        )
+
+        assertTrue(prompt.contains("final artifact must be a show-widget deck preview"))
+        assertTrue(prompt.contains("Do NOT turn the deck into a MiniApp"))
+        assertTrue(prompt.contains("use renderer \"guizang_html\" by default"))
+        assertTrue(requirement.required)
+        assertTrue(requirement.expectSlides)
+        assertTrue(requirement.expectGuizangHtml)
     }
 
     private fun userMessage(text: String) = UIMessage(

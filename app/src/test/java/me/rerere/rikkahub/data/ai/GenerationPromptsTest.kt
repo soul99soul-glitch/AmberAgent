@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
 import me.rerere.ai.provider.Model
+import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
 import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
 import me.rerere.rikkahub.data.model.AssistantMemory
 import org.junit.Assert.assertFalse
@@ -52,13 +53,17 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains("Do not call eval_javascript"))
         assertTrue(prompt.contains("Do NOT create widgets for tool routing"))
         assertTrue(prompt.contains("guizang-ppt-skill"))
-        assertTrue(prompt.contains("default path"))
-        assertTrue(prompt.contains("high-fidelity exception"))
+        assertTrue(prompt.contains("guizang-ppt-skill DEFAULT"))
+        assertFalse(prompt.contains("high-fidelity exception"))
         assertTrue(prompt.contains("guizang_html"))
+        assertTrue(prompt.contains("Do NOT generate or save an AmberAgent MiniApp for PPT requests."))
+        assertTrue(prompt.contains("""<div id="deck">"""))
+        assertTrue(prompt.contains(GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL))
+        assertTrue(prompt.contains(GuizangHtmlDeckValidator.LOCAL_MOTION_URL))
         assertTrue(prompt.contains("Slides Spec V2"))
         assertTrue(prompt.contains("cover, section, quote, split, metrics, timeline"))
         assertTrue(prompt.contains("fontPack"))
-        assertTrue(prompt.contains("Noto Serif SC"))
+        assertTrue(prompt.contains("magazine|swiss"))
     }
 
     @Test

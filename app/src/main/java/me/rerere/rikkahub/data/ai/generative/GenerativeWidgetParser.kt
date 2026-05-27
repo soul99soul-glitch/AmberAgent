@@ -73,6 +73,16 @@ object GenerativeWidgetParser {
     fun hasRenderableWidget(content: String): Boolean =
         parse(content, streaming = false).any { it is GenerativeWidgetSegment.Widget }
 
+    fun widgetQualityIssue(content: String, requirement: GenerativeUiWidgetRequirement): String? {
+        if (!requirement.required) return null
+        val widgets = parse(content, streaming = false)
+            .filterIsInstance<GenerativeWidgetSegment.Widget>()
+        if (widgets.isEmpty()) return "missing required show-widget"
+        val issues = widgets.mapNotNull { widgetQualityIssue(it, requirement) }
+        if (issues.size < widgets.size) return null
+        return issues.lastOrNull() ?: "missing required show-widget"
+    }
+
     fun parse(content: String, streaming: Boolean): List<GenerativeWidgetSegment> {
         val segments = mutableListOf<GenerativeWidgetSegment>()
         var cursor = 0
@@ -270,6 +280,39 @@ object GenerativeWidgetParser {
         if (!renderableTagRegex.containsMatchIn(compact)) return false
         if (complete && compact.count { it == '<' } < 2) return false
         return true
+    }
+
+    private fun widgetQualityIssue(
+        widget: GenerativeWidgetSegment.Widget,
+        requirement: GenerativeUiWidgetRequirement,
+    ): String? {
+        val renderer = widget.renderer.lowercase()
+        if (requirement.expectGuizangHtml) {
+            if (renderer != GuizangHtmlDeckValidator.RENDERER) {
+                return "expected renderer \"${GuizangHtmlDeckValidator.RENDERER}\" for guizang deck, got \"$renderer\""
+            }
+            val specJson = widget.specJson ?: return "guizang_html requires spec.html"
+            val validation = GuizangHtmlDeckValidator.validateSpecJson(specJson)
+            return if (validation.valid) null else validation.reason ?: "invalid guizang_html spec"
+        }
+        if (requirement.expectSlides) {
+            return when (renderer) {
+                "slides" -> {
+                    val specJson = widget.specJson ?: return "slides renderer requires spec"
+                    val validation = VChartSpecValidator.validateSlidesSpec(specJson)
+                    if (validation.valid) null else validation.reason ?: "invalid slides spec"
+                }
+
+                GuizangHtmlDeckValidator.RENDERER -> {
+                    val specJson = widget.specJson ?: return "guizang_html requires spec.html"
+                    val validation = GuizangHtmlDeckValidator.validateSpecJson(specJson)
+                    if (validation.valid) null else validation.reason ?: "invalid guizang_html spec"
+                }
+
+                else -> "expected renderer \"slides\" or \"${GuizangHtmlDeckValidator.RENDERER}\", got \"$renderer\""
+            }
+        }
+        return null
     }
 
     // Custom JSON boundary finder because kotlinx.serialization has no incremental API.

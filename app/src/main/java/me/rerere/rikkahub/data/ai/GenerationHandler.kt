@@ -47,7 +47,9 @@ import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransformsStreamingTail
 import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
+import me.rerere.rikkahub.data.ai.generative.GenerativeUiWidgetRequirement
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
+import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
@@ -110,9 +112,9 @@ private class GenerativeUiReasoningOnlyStreamException : RuntimeException(
     "Generative UI stream emitted only hidden reasoning without visible content"
 )
 
-private class GenerativeUiMissingWidgetStreamException : RuntimeException(
-    "Generative UI stream completed without a widget"
-)
+private class GenerativeUiInvalidWidgetStreamException(
+    val issue: String,
+) : RuntimeException("Generative UI stream completed without a valid widget: $issue")
 
 internal fun shouldPauseForToolApproval(
     toolDef: Tool?,
@@ -494,10 +496,10 @@ class GenerationHandler(
                 addAll(model.customBodies)
             }
         )
-        val shouldRequireGenerativeUiWidget =
-            GenerativeUiPlanner.needsVisibleStreamingFallback(settings.agentRuntime.generativeUi, messages)
+        val generativeUiWidgetRequirement =
+            GenerativeUiPlanner.widgetRequirement(settings.agentRuntime.generativeUi, messages)
         val shouldGuardGenerativeUiReasoningOnly =
-            shouldRequireGenerativeUiWidget
+            GenerativeUiPlanner.needsVisibleStreamingFallback(settings.agentRuntime.generativeUi, messages)
         if (stream) {
             runProviderCallWithRetry(
                 retrySetting = settings.agentRuntime.generationRetry,
@@ -521,7 +523,7 @@ class GenerationHandler(
                     providerMessages: List<UIMessage>,
                     streamParams: TextGenerationParams,
                     guardReasoningOnly: Boolean,
-                    requireWidget: Boolean,
+                    widgetRequirement: GenerativeUiWidgetRequirement,
                 ) {
                     val accumulator = MessageStreamAccumulator(baseMessages, model)
                     var lastFlushAt = 0L
@@ -571,8 +573,10 @@ class GenerationHandler(
                         tools.associateBy { it.name }
                     )
                     onUpdateMessages(GenerationUpdate.full(messages))
-                    if (requireWidget && !messages.hasVisibleWidgetFence()) {
-                        throw GenerativeUiMissingWidgetStreamException()
+                    if (widgetRequirement.required && !messages.hasPendingToolCalls()) {
+                        messages.visibleWidgetIssue(widgetRequirement)?.let { issue ->
+                            throw GenerativeUiInvalidWidgetStreamException(issue)
+                        }
                     }
                 }
 
@@ -581,21 +585,32 @@ class GenerationHandler(
                         providerMessages = internalMessages,
                         streamParams = params,
                         guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
-                        requireWidget = shouldRequireGenerativeUiWidget,
+                        widgetRequirement = generativeUiWidgetRequirement,
                     )
                 } catch (error: Throwable) {
                     if (
                         error is GenerativeUiReasoningOnlyStreamException ||
-                        error is GenerativeUiMissingWidgetStreamException
+                        error is GenerativeUiInvalidWidgetStreamException
                     ) {
+                        val widgetIssue = (error as? GenerativeUiInvalidWidgetStreamException)?.issue
                         messages = baseMessages
                         onUpdateMessages(GenerationUpdate.full(messages))
-                        processingStatus.value = "正在切换为可见输出模式生成可视化..."
+                        processingStatus.value = if (generativeUiWidgetRequirement.expectSlides) {
+                            "正在修复演示卡片..."
+                        } else {
+                            "正在切换为可见输出模式生成可视化..."
+                        }
                         streamWith(
-                            providerMessages = internalMessages.withGenerativeUiVisibleFallbackPrompt(),
-                            streamParams = params.copy(reasoningLevel = ReasoningLevel.OFF),
+                            providerMessages = internalMessages.withGenerativeUiVisibleFallbackPrompt(
+                                requirement = generativeUiWidgetRequirement,
+                                previousIssue = widgetIssue,
+                            ),
+                            streamParams = params.copy(
+                                tools = emptyList(),
+                                reasoningLevel = ReasoningLevel.OFF,
+                            ),
                             guardReasoningOnly = false,
-                            requireWidget = false,
+                            widgetRequirement = GenerativeUiWidgetRequirement.None,
                         )
                         // Only force-inject the local fallback widget when the retry
                         // ALSO produced no meaningful visible text. Previously we
@@ -605,13 +620,17 @@ class GenerationHandler(
                         // skeleton widget appended to its perfectly good text — visible
                         // as the "widget keeps appearing on every reply" loop the user
                         // reported.
-                        if (
-                            !messages.hasVisibleWidgetFence() &&
-                            !messages.hasMeaningfulVisibleAssistantText()
-                        ) {
+                        val retryIssue = messages.visibleWidgetIssue(generativeUiWidgetRequirement)
+                        val shouldAppendLocalFallback = if (generativeUiWidgetRequirement.required) {
+                            retryIssue != null && !messages.hasPendingToolCalls()
+                        } else {
+                            !messages.hasVisibleWidgetFence() && !messages.hasMeaningfulVisibleAssistantText()
+                        }
+                        if (shouldAppendLocalFallback) {
                             messages = messages.withLocalGenerativeUiFallbackWidget(
                                 baseMessages = baseMessages,
                                 model = model,
+                                requirement = generativeUiWidgetRequirement,
                             )
                             onUpdateMessages(GenerationUpdate.full(messages))
                         }
@@ -623,7 +642,7 @@ class GenerationHandler(
                         providerMessages = prepareInternalMessages(forceImageToText = true),
                         streamParams = params,
                         guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
-                        requireWidget = shouldRequireGenerativeUiWidget,
+                        widgetRequirement = generativeUiWidgetRequirement,
                     )
                 }
             }
@@ -646,11 +665,14 @@ class GenerationHandler(
                         stream = false
                     )
                 )
-                suspend fun generateWith(providerMessages: List<UIMessage>) =
+                suspend fun generateWith(
+                    providerMessages: List<UIMessage>,
+                    generateParams: TextGenerationParams = params,
+                ) =
                     providerImpl.generateText(
                         providerSetting = provider,
                         messages = providerMessages,
-                        params = params,
+                        params = generateParams,
                     )
 
                 val chunk = try {
@@ -670,6 +692,46 @@ class GenerationHandler(
                         } else {
                             message
                         }
+                    }
+                }
+                val widgetIssue = messages.visibleWidgetIssue(generativeUiWidgetRequirement)
+                if (widgetIssue != null && !messages.hasPendingToolCalls()) {
+                    processingStatus.value = if (generativeUiWidgetRequirement.expectSlides) {
+                        "正在修复演示卡片..."
+                    } else {
+                        "正在切换为可见输出模式生成可视化..."
+                    }
+                    val retryChunk = generateWith(
+                        providerMessages = internalMessages.withGenerativeUiVisibleFallbackPrompt(
+                            requirement = generativeUiWidgetRequirement,
+                            previousIssue = widgetIssue,
+                        ),
+                        generateParams = params.copy(
+                            tools = emptyList(),
+                            reasoningLevel = ReasoningLevel.OFF,
+                        ),
+                    )
+                    messages = baseMessages.handleMessageChunk(chunk = retryChunk, model = model)
+                    retryChunk.usage?.let { usage ->
+                        messages = messages.mapIndexed { index, message ->
+                            if (index == messages.lastIndex) {
+                                message.copy(
+                                    usage = message.usage.merge(usage)
+                                )
+                            } else {
+                                message
+                            }
+                        }
+                    }
+                    if (
+                        messages.visibleWidgetIssue(generativeUiWidgetRequirement) != null &&
+                        !messages.hasPendingToolCalls()
+                    ) {
+                        messages = messages.withLocalGenerativeUiFallbackWidget(
+                            baseMessages = baseMessages,
+                            model = model,
+                            requirement = generativeUiWidgetRequirement,
+                        )
                     }
                 }
                 onUpdateMessages(GenerationUpdate.full(messages))
@@ -794,6 +856,21 @@ class GenerationHandler(
             ?.filterIsInstance<UIMessagePart.Text>()
             ?.any { GenerativeWidgetParser.hasRenderableWidget(it.text) } == true
 
+    private fun List<UIMessage>.hasPendingToolCalls(): Boolean =
+        lastOrNull { it.role == MessageRole.ASSISTANT }
+            ?.getTools()
+            ?.any { !it.isExecuted } == true
+
+    private fun List<UIMessage>.visibleWidgetIssue(requirement: GenerativeUiWidgetRequirement): String? {
+        if (!requirement.required) return null
+        val content = lastOrNull { it.role == MessageRole.ASSISTANT }
+            ?.parts
+            ?.filterIsInstance<UIMessagePart.Text>()
+            ?.joinToString("\n") { it.text }
+            .orEmpty()
+        return GenerativeWidgetParser.widgetQualityIssue(content, requirement)
+    }
+
     /**
      * "Did the retry give a real answer?" — joined visible Text parts of the last
      * assistant message, with the widget fence stripped, must contain non-trivial
@@ -815,13 +892,52 @@ class GenerationHandler(
         return withoutWidget.length >= MEANINGFUL_TEXT_MIN_CHARS
     }
 
-    private fun List<UIMessage>.withGenerativeUiVisibleFallbackPrompt(): List<UIMessage> {
-        val instruction = UIMessage.system(
-            // NOTE: the inline SVG example below adds ~400 input tokens to every fallback retry.
-            // If weak models trigger this path frequently, consider trimming to a skeleton SVG.
-            prompt = """
+    private fun List<UIMessage>.withGenerativeUiVisibleFallbackPrompt(
+        requirement: GenerativeUiWidgetRequirement,
+        previousIssue: String?,
+    ): List<UIMessage> {
+        val instruction = UIMessage.system(prompt = buildGenerativeUiRetryPrompt(requirement, previousIssue))
+        val first = firstOrNull()
+        return if (first?.role == MessageRole.SYSTEM) {
+            listOf(first, instruction) + drop(1)
+        } else {
+            listOf(instruction) + this
+        }
+    }
+
+    private fun buildGenerativeUiRetryPrompt(
+        requirement: GenerativeUiWidgetRequirement,
+        previousIssue: String?,
+    ): String {
+        val issue = previousIssue?.takeIf { it.isNotBlank() } ?: "missing required show-widget"
+        if (requirement.expectGuizangHtml) {
+            return """
+                **Visible Guizang Deck Repair**
+                The previous output did not produce a valid guizang_html deck: $issue
+                Reply in visible content immediately with exactly one fenced `show-widget` JSON block. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
+                Required JSON shape:
+                - `renderer` must be `"${GuizangHtmlDeckValidator.RENDERER}"`.
+                - `widget_code` is only a static SVG cover preview.
+                - `spec.html` is the full live deck HTML as one JSON string.
+                - `spec.html` must contain `<div id="deck">` and one or more `<section class="slide ...">` pages.
+                - Scripts may only use `${GuizangHtmlDeckValidator.LOCAL_MOTION_URL}` and `${GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL}`. Do not use CDN script URLs.
+                - Preserve the requested PPT/deck content and style; keep the JSON valid.
+            """.trimIndent()
+        }
+        if (requirement.expectSlides) {
+            return """
+                **Visible Slide Deck Repair**
+                The previous output did not produce a valid deck card: $issue
+                Reply in visible content immediately with exactly one fenced `show-widget` JSON block. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
+                Use renderer `"slides"` unless the user explicitly asked for guizang/Guizang, in which case use `"${GuizangHtmlDeckValidator.RENDERER}"`.
+                For `"slides"`, `spec` must be Slides Spec V2: `{"schemaVersion":2,"style":"magazine|swiss","slides":[{"layout":"cover","title":"...","content":["..."]}]}`.
+                Keep the deck concise, mobile-readable, and valid JSON.
+            """.trimIndent()
+        }
+        return """
             **Visible Generative UI Retry**
-            The previous stream did not produce a visible widget. Reply in visible content immediately.
+            The previous stream did not produce a visible widget: $issue
+            Reply in visible content immediately.
             First output one valid fenced widget block with widget_code, then at most one short sentence.
             Use this exact form:
             ```show-widget
@@ -832,21 +948,20 @@ class GenerationHandler(
             Do not use renderer/spec in this retry because the timeline needs widget_code for streaming partial render.
             Do not put widget JSON, SVG, HTML, or renderer/spec inside hidden reasoning.
             Do not output Markdown-only prose for this retry.
-            """.trimIndent()
-        )
-        val first = firstOrNull()
-        return if (first?.role == MessageRole.SYSTEM) {
-            listOf(first, instruction) + drop(1)
-        } else {
-            listOf(instruction) + this
-        }
+        """.trimIndent()
     }
 
     private fun List<UIMessage>.withLocalGenerativeUiFallbackWidget(
         baseMessages: List<UIMessage>,
         model: Model,
+        requirement: GenerativeUiWidgetRequirement = GenerativeUiWidgetRequirement.None,
     ): List<UIMessage> {
-        val fallbackText = buildLocalGenerativeUiFallbackWidget(labels = fallbackWidgetLabels(baseMessages))
+        val labels = fallbackWidgetLabels(baseMessages)
+        val fallbackText = when {
+            requirement.expectGuizangHtml -> buildLocalGuizangDeckFallbackWidget(labels)
+            requirement.expectSlides -> buildLocalSlidesFallbackWidget(labels)
+            else -> buildLocalGenerativeUiFallbackWidget(labels)
+        }
         val lastAssistantIndex = indexOfLast { it.role == MessageRole.ASSISTANT }
         if (lastAssistantIndex < 0) {
             return this + UIMessage(
@@ -929,6 +1044,109 @@ class GenerationHandler(
         ```
         """.trimIndent()
     }
+
+    private fun buildLocalSlidesFallbackWidget(labels: List<String>): String {
+        val safeLabels = labels.ifEmpty { listOf("需求", "结构", "要点", "结论") }.take(4)
+        val slides = buildJsonArray {
+            add(
+                buildJsonObject {
+                    put("layout", "cover")
+                    put("title", safeLabels.first())
+                    put("subtitle", "AmberAgent deck fallback")
+                    put("content", buildJsonArray {
+                        safeLabels.drop(1).forEach { add(JsonPrimitive(it)) }
+                    })
+                }
+            )
+            safeLabels.drop(1).forEach { label ->
+                add(
+                    buildJsonObject {
+                        put("layout", "section")
+                        put("title", label)
+                        put("content", buildJsonArray { add(JsonPrimitive(label)) })
+                    }
+                )
+            }
+        }
+        val widget = buildJsonObject {
+            put("title", safeLabels.first().take(20).ifBlank { "演示预览" })
+            put("renderer", "slides")
+            put(
+                "spec",
+                buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("style", "swiss")
+                    put("accent", "#1F5EFF")
+                    put("slides", slides)
+                }
+            )
+        }
+        return """
+        ```show-widget
+        $widget
+        ```
+        """.trimIndent()
+    }
+
+    private fun buildLocalGuizangDeckFallbackWidget(labels: List<String>): String {
+        val safeLabels = labels.ifEmpty { listOf("演示预览", "结构", "要点", "结论") }.take(4)
+        val title = safeLabels.first().take(24).ifBlank { "演示预览" }
+        val html = buildString {
+            appendLine("<!DOCTYPE html>")
+            appendLine("<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+            appendLine("<style>")
+            appendLine("html,body{margin:0;width:100%;height:100%;background:#f8fafc;color:#111827;font-family:-apple-system,BlinkMacSystemFont,'Noto Sans SC',sans-serif;overflow:hidden}")
+            appendLine("#deck{width:100vw;height:100vh;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;touch-action:pan-x}")
+            appendLine(".slide{min-width:100vw;height:100vh;box-sizing:border-box;padding:9vh 8vw;scroll-snap-align:start;display:flex;flex-direction:column;justify-content:center;gap:22px}")
+            appendLine(".slide:nth-child(odd){background:#0f172a;color:#f8fafc}.kicker{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#38bdf8}.title{font-size:clamp(34px,9vw,84px);line-height:1.02;font-weight:800}.body{font-size:clamp(18px,4vw,34px);line-height:1.45;max-width:760px}.rule{width:88px;height:6px;background:#ef4444}")
+            appendLine("</style></head><body><div id=\"deck\">")
+            safeLabels.forEachIndexed { index, label ->
+                val safe = escapeHtml(label)
+                appendLine("<section class=\"slide ${if (index == 0) "dark" else "light"}\" data-slide=\"${index + 1}\">")
+                appendLine("<div class=\"kicker\">GUIZANG DECK</div><div class=\"rule\"></div>")
+                appendLine("<div class=\"title\">$safe</div>")
+                appendLine("<div class=\"body\">${if (index == 0) "移动端可左右滑动浏览。" else safe}</div>")
+                appendLine("</section>")
+            }
+            appendLine("</div><script>window.__pipeAdvance=function(){return false};window.__setLowPowerMode=function(){}</script></body></html>")
+        }
+        val cover = """
+            <svg width="100%" viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">
+              <rect width="680" height="220" rx="16" fill="#0f172a"/>
+              <rect x="32" y="30" width="616" height="160" rx="10" fill="none" stroke="#38bdf8" stroke-width="2"/>
+              <text x="54" y="72" font-size="13" letter-spacing="3" fill="#7dd3fc">GUIZANG DECK</text>
+              <text x="54" y="126" font-size="30" font-weight="800" fill="#f8fafc">${escapeHtml(title)}</text>
+              <text x="54" y="164" font-size="15" fill="#cbd5e1">fallback live deck preview</text>
+            </svg>
+        """.trimIndent()
+        val widget = buildJsonObject {
+            put("title", title)
+            put("renderer", GuizangHtmlDeckValidator.RENDERER)
+            put("widget_code", cover)
+            put(
+                "spec",
+                buildJsonObject {
+                    put("title", title)
+                    put("html", html)
+                    put("source", "amberagent-fallback")
+                    put("allowRemoteImages", true)
+                    put("allowRemoteFonts", true)
+                }
+            )
+        }
+        return """
+        ```show-widget
+        $widget
+        ```
+        """.trimIndent()
+    }
+
+    private fun escapeHtml(value: String): String =
+        value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
 
     private fun shouldFallbackToVisionRecognition(error: Throwable): Boolean {
         if (error is ImageEncodingException) return true

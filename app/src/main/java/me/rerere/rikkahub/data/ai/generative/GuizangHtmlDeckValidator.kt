@@ -7,7 +7,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * Validator and runtime URL normalizer for the high-fidelity guizang HTML deck path.
+ * Validator and runtime URL normalizer for the guizang HTML deck path.
  *
  * This deliberately does not share the normal widget sanitizer: guizang decks need their
  * original scripts, canvas, WebGL, and Motion One runtime to stay visually faithful. The
@@ -18,6 +18,8 @@ object GuizangHtmlDeckValidator {
     const val RENDERER = "guizang_html"
     const val MAX_HTML_BYTES = 1_500_000
     const val LOCAL_RUNTIME_BASE = "https://amberagent.local/guizang/"
+    const val LOCAL_MOTION_URL = "${LOCAL_RUNTIME_BASE}motion.min.js"
+    const val LOCAL_LUCIDE_URL = "${LOCAL_RUNTIME_BASE}lucide.min.js"
     const val MOTION_ASSET_PATH = "generative-libs/guizang/motion.min.js"
     const val LUCIDE_ASSET_PATH = "generative-libs/guizang/lucide.min.js"
 
@@ -43,8 +45,16 @@ object GuizangHtmlDeckValidator {
         LUCIDE(LUCIDE_ASSET_PATH, "application/javascript"),
     }
 
-    private val sectionSlideRegex = Regex(
-        """<section\b[^>]*\bclass\s*=\s*(['"])[^'"]*\bslide\b[^'"]*\1""",
+    private val slideElementRegex = Regex(
+        """<(?:section|article|div)\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bslide\b[^"]*"|'[^']*\bslide\b[^']*'|[^\s>]*\bslide\b[^\s>]*)|\bdata-slide(?:\s|=|>)))[^>]*>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val slideBlockRegex = Regex(
+        """(?is)<(?:section|article)\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bslide\b[^"]*"|'[^']*\bslide\b[^']*'|[^\s>]*\bslide\b[^\s>]*)|\bdata-slide(?:\s|=|>)))[^>]*>.*?</(?:section|article)>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val deckContainerWithoutIdRegex = Regex(
+        """<(?:(?:div)|(?:main))\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bdeck\b[^"]*"|'[^']*\bdeck\b[^']*'|[^\s>]*\bdeck\b[^\s>]*)|\bdata-(?:guizang-)?deck(?:\s|=|>)))(?![^>]*\bid\s*=)[^>]*>""",
         RegexOption.IGNORE_CASE,
     )
     private val blockedPatterns = listOf(
@@ -113,26 +123,30 @@ object GuizangHtmlDeckValidator {
         if (html.toByteArray(Charsets.UTF_8).size > MAX_HTML_BYTES) {
             return ValidationResult(false, "html too large: max ${MAX_HTML_BYTES / 1000}KB")
         }
-        if (!sectionSlideRegex.containsMatchIn(html)) {
-            return ValidationResult(false, "expected at least one <section class=\"slide ...\">")
+        val runtimeHtml = prepareRuntimeHtml(html)
+        if (!slideElementRegex.containsMatchIn(runtimeHtml)) {
+            return ValidationResult(false, "expected at least one slide element: <section class=\"slide ...\">")
         }
-        blockedPatterns.firstOrNull { it.regex.containsMatchIn(html) }?.let {
+        blockedPatterns.firstOrNull { it.regex.containsMatchIn(runtimeHtml) }?.let {
             return ValidationResult(false, it.reason)
         }
-        validateExternalScripts(html).let { result ->
+        validateExternalScripts(runtimeHtml).let { result ->
             if (!result.valid) return result
         }
         return ValidationResult(true)
     }
 
+    fun prepareRuntimeHtml(html: String): String =
+        normalizeDeckStructure(rewriteRuntimeUrls(html))
+
     fun rewriteRuntimeUrls(html: String): String =
-        rewriteRuntimeUrls(html, localMotionUrl(), localLucideUrl())
+        rewriteRuntimeUrls(html, LOCAL_MOTION_URL, LOCAL_LUCIDE_URL)
 
     fun rewriteRuntimeUrlsForArchive(html: String): String =
-        rewriteRuntimeUrls(html, "assets/motion.min.js", "assets/lucide.min.js")
+        normalizeDeckStructure(rewriteRuntimeUrls(html, "assets/motion.min.js", "assets/lucide.min.js"))
 
     fun runtimeAssetForUrl(url: String): RuntimeAsset? {
-        val normalized = url.trim()
+        val normalized = rewriteRuntimeUrls(url.trim())
         if (isKnownMotionUrl(normalized)) return RuntimeAsset.MOTION
         if (isKnownLucideUrl(normalized)) return RuntimeAsset.LUCIDE
         return null
@@ -160,14 +174,28 @@ object GuizangHtmlDeckValidator {
         html
             .replace(
                 Regex(
-                    """https://unpkg\.com/lucide@[^"'`\s<>]+/dist/umd/lucide(?:\.min)?\.js""",
+                    """https://unpkg\.com/lucide(?:@[^/"'`\s<>]+)?(?:/dist/umd/lucide(?:\.min)?\.js)?""",
                     RegexOption.IGNORE_CASE,
                 ),
                 lucideUrl,
             )
             .replace(
                 Regex(
-                    """https://cdn\.jsdelivr\.net/npm/motion@[^"'`\s<>]+/\+esm""",
+                    """https://cdn\.jsdelivr\.net/npm/lucide(?:@[^/"'`\s<>]+)?(?:/dist/umd/lucide(?:\.min)?\.js)?""",
+                    RegexOption.IGNORE_CASE,
+                ),
+                lucideUrl,
+            )
+            .replace(
+                Regex(
+                    """https://cdn\.jsdelivr\.net/npm/motion(?:@[^/"'`\s<>]+)?/\+esm""",
+                    RegexOption.IGNORE_CASE,
+                ),
+                motionUrl,
+            )
+            .replace(
+                Regex(
+                    """https://unpkg\.com/motion(?:@[^/"'`\s<>]+)?(?:/\+esm)?""",
                     RegexOption.IGNORE_CASE,
                 ),
                 motionUrl,
@@ -180,6 +208,26 @@ object GuizangHtmlDeckValidator {
                 Regex("""(?<=['"])(?:\./)?assets/lucide\.min\.js(?=['"])""", RegexOption.IGNORE_CASE),
                 lucideUrl,
             )
+
+    private fun normalizeDeckStructure(html: String): String {
+        if (Regex("""\bid\s*=\s*(['"])deck\1""", RegexOption.IGNORE_CASE).containsMatchIn(html)) return html
+        deckContainerWithoutIdRegex.find(html)?.let { match ->
+            val openTag = match.value
+            return html.replaceRange(match.range, openTag.dropLast(1) + """ id="deck">""")
+        }
+        val slideBlocks = slideBlockRegex.findAll(html).toList()
+        if (slideBlocks.isEmpty()) return html
+        val first = slideBlocks.first().range.first
+        val last = slideBlocks.last().range.last
+        val slides = slideBlocks.joinToString(separator = "\n") { it.value }
+        return buildString {
+            append(html.substring(0, first))
+            append("<div id=\"deck\">\n")
+            append(slides)
+            append("\n</div>")
+            append(html.substring(last + 1))
+        }
+    }
 
     private fun validateExternalScripts(html: String): ValidationResult {
         scriptSrcRegex.findAll(html).forEach { match ->
@@ -214,25 +262,19 @@ object GuizangHtmlDeckValidator {
 
     private fun isKnownMotionUrl(url: String): Boolean {
         val lower = url.lowercase()
-        return lower == localMotionUrl() ||
+        return lower == LOCAL_MOTION_URL ||
             lower.endsWith("/assets/motion.min.js") ||
             lower == "./assets/motion.min.js" ||
-            lower == "assets/motion.min.js" ||
-            Regex("""^https://cdn\.jsdelivr\.net/npm/motion@[^/]+/\+esm$""").matches(lower)
+            lower == "assets/motion.min.js"
     }
 
     private fun isKnownLucideUrl(url: String): Boolean {
         val lower = url.lowercase()
-        return lower == localLucideUrl() ||
+        return lower == LOCAL_LUCIDE_URL ||
             lower.endsWith("/assets/lucide.min.js") ||
             lower == "./assets/lucide.min.js" ||
-            lower == "assets/lucide.min.js" ||
-            Regex("""^https://unpkg\.com/lucide@[^/]+/dist/umd/lucide(?:\.min)?\.js$""").matches(lower)
+            lower == "assets/lucide.min.js"
     }
-
-    private fun localMotionUrl(): String = "${LOCAL_RUNTIME_BASE}motion.min.js"
-
-    private fun localLucideUrl(): String = "${LOCAL_RUNTIME_BASE}lucide.min.js"
 
     private fun JsonObject.stringOrNull(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull

@@ -50,6 +50,16 @@ enum class VisualRoute {
     PROSE,
 }
 
+data class GenerativeUiWidgetRequirement(
+    val required: Boolean,
+    val expectSlides: Boolean = false,
+    val expectGuizangHtml: Boolean = false,
+) {
+    companion object {
+        val None = GenerativeUiWidgetRequirement(required = false)
+    }
+}
+
 object GenerativeUiPlanner {
     fun buildPrompt(
         setting: GenerativeUiSetting,
@@ -96,11 +106,12 @@ object GenerativeUiPlanner {
                     if (toolMediated) {
                         appendLine("The user asked for a presentation/deck but also requested tools, skills, subagents, files, or external context.")
                         appendLine("Use the requested tool/skill/subagent first. Do NOT create a widget for routing, progress, plan, or status summaries.")
-                        appendLine("Only emit a show-widget after the real tool/skill/subagent result exists and the widget is the final requested artifact.")
+                        appendLine("After the real tool/skill/subagent result exists, the final artifact must be a show-widget deck preview in the chat. Do NOT turn the deck into a MiniApp, a standalone webpage, or a generic HTML app.")
                     } else {
                         appendLine("The user asked for a multi-slide presentation / deck. Emit a show-widget RENDERER (slides spec) — NOT an inline SVG.")
                     }
-                    appendLine("Exception: if they explicitly asked for guizang live HTML/WebGL/Motion/1:1/高保真, use renderer \"guizang_html\" with a static cover widget_code and full deck HTML in spec.html.")
+                    appendLine("If the request mentions guizang, guizang-ppt-skill, Swiss International style from that skill, Motion/WebGL/live deck, or guizang-like PPT, use renderer \"guizang_html\" by default. This is the normal guizang PPT path, not an optional exception.")
+                    appendLine("For guizang_html, spec.html must use `<div id=\"deck\">` with `<section class=\"slide ...\">` pages and AmberAgent local Motion/Lucide runtime URLs, not CDN scripts.")
                     appendLine("Pick a sensible deck length (4-8 slides) unless the user specified a count. Use the slide spec format the renderer expects.")
                     appendLine("Keep slide content concise; each slide is one idea.")
                 }
@@ -162,6 +173,31 @@ object GenerativeUiPlanner {
         return !needsExternalContext
     }
 
+    fun widgetRequirement(setting: GenerativeUiSetting, messages: List<UIMessage>): GenerativeUiWidgetRequirement {
+        if (!setting.enabled) return GenerativeUiWidgetRequirement.None
+        val text = latestUserText(messages)
+        if (text.isBlank()) return GenerativeUiWidgetRequirement.None
+        val route = classifyRoute(text)
+        val toolMediated = isToolMediatedRequest(text)
+        return when (route) {
+            VisualRoute.SLIDES -> GenerativeUiWidgetRequirement(
+                required = true,
+                expectSlides = true,
+                expectGuizangHtml = isGuizangDeckRequest(text),
+            )
+
+            VisualRoute.DIAGRAM_WIDGET -> {
+                if (toolMediated) {
+                    GenerativeUiWidgetRequirement.None
+                } else {
+                    GenerativeUiWidgetRequirement(required = true)
+                }
+            }
+
+            else -> GenerativeUiWidgetRequirement.None
+        }
+    }
+
     private fun latestUserText(messages: List<UIMessage>): String = messages
         .lastOrNull { it.role == MessageRole.USER }
         ?.parts
@@ -196,13 +232,17 @@ object GenerativeUiPlanner {
             STYLE_MODIFIER_REGEX.containsMatchIn(lower)
         val diagramStrong = DIAGRAM_STRONG_KEYWORDS.any { it in lower } ||
             DIAGRAM_STRONG_REGEX.containsMatchIn(lower)
+        val guizangDeckStrong = GUIZANG_DECK_KEYWORDS.any { it in lower }
         val slidesStrong = SLIDES_STRONG_KEYWORDS.any { it in lower } ||
-            SLIDES_STRONG_REGEX.containsMatchIn(lower)
+            SLIDES_STRONG_REGEX.containsMatchIn(lower) ||
+            guizangDeckStrong
 
         // Slides win over diagram/image when explicitly named — "5 张幻灯片"
         // means a deck, not an SVG diagram, even if a diagram word slipped
-        // in. Image-gen still wins over slides if a paint-style word is
-        // present ("油画风格的演示稿" reads as a single art piece).
+        // in. Guizang is always a deck runtime request; for other slide
+        // requests, image-gen still wins if a paint-style word is present
+        // ("油画风格的演示稿" reads as a single art piece).
+        if (guizangDeckStrong) return VisualRoute.SLIDES
         if (slidesStrong && !imageGenStrong) return VisualRoute.SLIDES
 
         return when {
@@ -269,6 +309,11 @@ object GenerativeUiPlanner {
             "https://",
         )
         return explicitDelegation.any { it in lower }
+    }
+
+    private fun isGuizangDeckRequest(text: String): Boolean {
+        val lower = text.lowercase()
+        return GUIZANG_DECK_KEYWORDS.any { it in lower }
     }
 
     // ----------------------------------------------------------------------
@@ -356,6 +401,11 @@ object GenerativeUiPlanner {
     /** Slide / deck / presentation terms — explicit multi-slide signal. */
     private val SLIDES_STRONG_KEYWORDS = listOf(
         "幻灯片", "ppt", "slide deck", "presentation deck", "演示文稿", "演示稿",
+    )
+    private val GUIZANG_DECK_KEYWORDS = listOf(
+        "guizang",
+        "guizang-ppt",
+        "归藏",
     )
     private val SLIDES_STRONG_REGEX = Regex(
         """\b(slide\s*deck|presentation\s+deck|powerpoint)\b""",

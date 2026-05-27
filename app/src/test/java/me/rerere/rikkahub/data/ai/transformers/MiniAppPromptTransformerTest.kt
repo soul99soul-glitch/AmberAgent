@@ -18,6 +18,16 @@ class MiniAppPromptTransformerTest {
     }
 
     @Test
+    fun presentationRequestsDoNotAccidentallyTriggerMiniAppHarness() {
+        assertFalse(MiniAppPromptTransformer.isExplicitMiniAppRequest("不要做小应用，给我做 guizang PPT 预览"))
+        assertFalse(MiniAppPromptTransformer.isExplicitMiniAppRequest("别跑去做小应用，用 guizang-ppt-skill 做演示稿"))
+        assertFalse(MiniAppPromptTransformer.isExplicitMiniAppRequest("用 guizang skill 做一个演示，别给我小程序"))
+
+        assertTrue(MiniAppPromptTransformer.isExplicitMiniAppRequest("把这个 PPT 做成小应用"))
+        assertTrue(MiniAppPromptTransformer.isExplicitMiniAppRequest("生成一个幻灯片小应用版"))
+    }
+
+    @Test
     fun extractsRevisionAppIdFromModifyPrompt() {
         val id = "123e4567-e89b-12d3-a456-426614174000"
         assertEquals(

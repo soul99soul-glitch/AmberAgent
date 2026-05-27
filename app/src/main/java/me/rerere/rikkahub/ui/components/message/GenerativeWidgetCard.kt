@@ -1378,7 +1378,7 @@ private fun GuizangHtmlDeckWebView(
                             view?.evaluateJavascript(buildGuizangDeckBootstrapJs(), null)
                         }
                     }
-                    val runtimeHtml = GuizangHtmlDeckValidator.rewriteRuntimeUrls(deck.html)
+                    val runtimeHtml = GuizangHtmlDeckValidator.prepareRuntimeHtml(deck.html)
                     post {
                         loadDataWithBaseURL(
                             "https://amberagent.local/guizang-deck/",
@@ -1478,11 +1478,33 @@ private fun buildGuizangDeckBootstrapJs(): String = """
   if (window.__amberGuizangReady) return true;
   window.__amberGuizangReady = true;
 
-  function deckEl(){ return document.getElementById('deck'); }
+  function slideSelector(){ return '.slide, section[data-slide], article[data-slide], div[data-slide]'; }
+  function ensureSlideClass(el){
+    if (el && el.classList && !el.classList.contains('slide')) el.classList.add('slide');
+    return el;
+  }
+  function deckEl(){
+    var deck = document.getElementById('deck') ||
+      document.querySelector('[data-guizang-deck], [data-deck], .deck, .slides, main');
+    if (deck && deck.querySelectorAll(slideSelector()).length) {
+      if (!deck.id) deck.id = 'deck';
+      Array.prototype.forEach.call(deck.querySelectorAll(slideSelector()), ensureSlideClass);
+      return deck;
+    }
+    var slides = Array.prototype.slice.call(document.querySelectorAll(slideSelector()));
+    if (slides.length) {
+      var wrapper = document.createElement('div');
+      wrapper.id = 'deck';
+      slides[0].parentNode.insertBefore(wrapper, slides[0]);
+      slides.forEach(function(slide){ wrapper.appendChild(ensureSlideClass(slide)); });
+      return wrapper;
+    }
+    return null;
+  }
   function navEl(){ return document.getElementById('nav'); }
   function slideList(){
     var deck = deckEl();
-    return deck ? Array.prototype.slice.call(deck.querySelectorAll('.slide')) : [];
+    return deck ? Array.prototype.slice.call(deck.querySelectorAll(slideSelector())).map(ensureSlideClass) : [];
   }
   function count(){ return slideList().length; }
   function getIndex(){

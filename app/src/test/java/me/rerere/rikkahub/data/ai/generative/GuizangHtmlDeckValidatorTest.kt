@@ -28,6 +28,7 @@ class GuizangHtmlDeckValidatorTest {
         """.trimIndent()
 
         assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        assertTrue(GuizangHtmlDeckValidator.prepareRuntimeHtml(html).contains(GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL))
     }
 
     @Test
@@ -88,6 +89,7 @@ class GuizangHtmlDeckValidatorTest {
         val html = """
             <section class="slide">A</section>
             <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/lucide@0.468.0/dist/umd/lucide.min.js"></script>
             <script type="module">
               await import('./assets/motion.min.js');
               await import('https://cdn.jsdelivr.net/npm/motion@11.11.17/+esm');
@@ -95,19 +97,38 @@ class GuizangHtmlDeckValidatorTest {
         """.trimIndent()
 
         val rewritten = GuizangHtmlDeckValidator.rewriteRuntimeUrls(html)
-        assertTrue(rewritten.contains("https://amberagent.local/guizang/lucide.min.js"))
-        assertTrue(rewritten.contains("https://amberagent.local/guizang/motion.min.js"))
+        assertTrue(rewritten.contains(GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL))
+        assertTrue(rewritten.contains(GuizangHtmlDeckValidator.LOCAL_MOTION_URL))
         assertEquals(
             GuizangHtmlDeckValidator.RuntimeAsset.MOTION,
-            GuizangHtmlDeckValidator.runtimeAssetForUrl("https://amberagent.local/guizang/motion.min.js"),
+            GuizangHtmlDeckValidator.runtimeAssetForUrl(GuizangHtmlDeckValidator.LOCAL_MOTION_URL),
         )
         assertEquals(
             GuizangHtmlDeckValidator.RuntimeAsset.LUCIDE,
-            GuizangHtmlDeckValidator.runtimeAssetForUrl("https://amberagent.local/guizang/lucide.min.js"),
+            GuizangHtmlDeckValidator.runtimeAssetForUrl("https://unpkg.com/lucide@latest"),
         )
 
         val archiveHtml = GuizangHtmlDeckValidator.rewriteRuntimeUrlsForArchive(html)
         assertTrue(archiveHtml.contains("assets/motion.min.js"))
         assertTrue(archiveHtml.contains("assets/lucide.min.js"))
+    }
+
+    @Test
+    fun normalizesCommonDeckShapeMistakesBeforeRuntime() {
+        val orphanSlides = """
+            <!DOCTYPE html>
+            <html><body>
+              <section class=slide data-animate="hero">One</section>
+              <section class="slide dark">Two</section>
+            </body></html>
+        """.trimIndent()
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(orphanSlides).valid)
+        val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(orphanSlides)
+        assertTrue(normalized.contains("""<div id="deck">"""))
+        assertTrue(normalized.contains("""<section class=slide"""))
+
+        val deckClass = """<main class="deck"><section class="slide">One</section></main>"""
+        assertTrue(GuizangHtmlDeckValidator.prepareRuntimeHtml(deckClass).contains("id=\"deck\""))
     }
 }

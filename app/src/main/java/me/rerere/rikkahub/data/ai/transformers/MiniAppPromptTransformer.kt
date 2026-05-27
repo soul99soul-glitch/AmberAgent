@@ -49,10 +49,14 @@ object MiniAppPromptTransformer : InputMessageTransformer, KoinComponent {
 
     fun isExplicitMiniAppRequest(text: String): Boolean {
         val normalized = text.lowercase()
-        return "miniapp" in normalized ||
+        val mentionsMiniApp = "miniapp" in normalized ||
             "mini app" in normalized ||
             "小应用" in text ||
             "小程序" in text
+        if (!mentionsMiniApp) return false
+        if (miniAppNegationPattern.containsMatchIn(text)) return false
+        if (isPresentationRequest(text) && !positiveMiniAppIntentPattern.containsMatchIn(text)) return false
+        return true
     }
 
     fun revisionAppId(text: String): String? =
@@ -63,6 +67,35 @@ object MiniAppPromptTransformer : InputMessageTransformer, KoinComponent {
 
     private val revisionAppIdPattern = Regex("""(?im)^\s*appId\s*:\s*([0-9a-fA-F-]{32,36})\s*$""")
     private val revisionVersionPattern = Regex("""(?im)^\s*currentVersion\s*:\s*(\d+)\s*$""")
+    private val miniAppNegationPattern = Regex(
+        """(?:不要|别|别再|不要再|不是|无需|不用|别给我|不要给我).{0,16}(?:小应用|小程序|mini\s*app|miniapp)|(?:小应用|小程序|mini\s*app|miniapp).{0,12}(?:不要|别|不需要|不用|别做|别生成)""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val positiveMiniAppIntentPattern = Regex(
+        """(?:做成|做为|作为|做一个|做个|生成|创建|开发|实现|改成|转换成|变成).{0,12}(?:小应用|小程序|mini\s*app|miniapp)|(?:小应用|小程序|mini\s*app|miniapp).{0,6}(?:版|形式|形态)""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun isPresentationRequest(text: String): Boolean {
+        val normalized = text.lowercase()
+        return presentationKeywords.any { it in normalized }
+    }
+
+    private val presentationKeywords = listOf(
+        "ppt",
+        "幻灯片",
+        "演示文稿",
+        "演示稿",
+        "slide",
+        "slides",
+        "slide deck",
+        "presentation",
+        "deck",
+        "guizang",
+        "guizang-ppt",
+        "归藏",
+        "简报",
+    )
 
     private fun missingRevisionInstruction(appId: String): String = """
         这是一个 AmberAgent MiniApp 修改请求，但目标小应用不存在或已被删除。

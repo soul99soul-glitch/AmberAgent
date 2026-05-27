@@ -5,6 +5,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.provider.Model
 import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
+import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -60,7 +61,7 @@ internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting, model: Model?
             if (setting.enableInteractiveCharts) {
                 appendLine("- For interactive charts with hover tooltips and animations, use renderer \"vchart\" with a VChart spec: {\"title\":\"...\",\"renderer\":\"vchart\",\"spec\":{\"type\":\"bar\",\"data\":[{\"values\":[{\"x\":\"A\",\"y\":10}]}],\"xField\":\"x\",\"yField\":\"y\"}}.")
                 appendLine("- VChart spec follows VChart 2.x API: type, data, xField, yField, seriesField, color, legends, tooltip, title, etc.")
-                appendLine("- For slide presentations / decks / PPT / 幻灯片 / 演示文稿, you MUST use renderer \"slides\" with Slides Spec V2:")
+                appendLine("- For generic slide presentations / decks / PPT / 幻灯片 / 演示文稿, use renderer \"slides\" with Slides Spec V2:")
                 appendLine("    {\"title\":\"Deck Title\",\"renderer\":\"slides\",\"widget_code\":\"<svg .../>\",\"spec\":{\"schemaVersion\":2,\"style\":\"magazine|swiss\",\"accent\":\"#1F5EFF\",\"fontPack\":\"source-han-serif-sc-regular\",\"slides\":[{\"layout\":\"cover\",\"kicker\":\"...\",\"title\":\"Page 1\",\"subtitle\":\"...\",\"content\":[\"bullet 1\",\"bullet 2\"],\"notes\":\"...\"}]}}")
                 appendLine("- Slides Spec V2 layout choices are fixed: cover, section, quote, split, metrics, timeline, cards, image-grid, comparison, closing. Every slide should set one layout.")
                 appendLine("- Recommended sequence: cover → section → metrics/cards/split/timeline/comparison → quote → closing. Split complex material across more slides instead of shrinking text.")
@@ -68,15 +69,17 @@ internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting, model: Model?
                 appendLine("- spec REAL DATA: every slide object MUST be filled with the real page content (title text, real bullets, real notes). Do NOT emit empty/skeleton objects with only a title — the deck will appear blank to the user.")
                 appendLine("- widget_code ROLE for slides: it is JUST a tiny cover thumbnail SVG shown inline before the user expands. Keep it under ~600 chars: deck title + 1 short subtitle + page count badge. Do NOT paint detailed page bodies, do NOT list every page, do NOT include navigation hints, hotkeys, or viewer instructions (no \"← → 翻页\", no \"F 全屏\", no \"S 演讲者模式\", no \"点击展开\" — the app handles those natively).")
                 appendLine("- MANDATORY: never render a multi-page deck as an SVG/HTML grid in widget_code. That produces a static image with no pagination. The slides renderer gives horizontal swipe, per-page vertical scroll, full-screen, and per-page image export — all inline in the chat timeline.")
-                appendLine("- guizang-ppt-skill default path: treat its desktop HTML templates as visual/storytelling references and convert the story into the native slides spec above. style \"magazine\" approximates Source Han Serif / Noto Serif SC editorial decks; style \"swiss\" approximates Source Han Sans / Noto Sans SC grid decks.")
-                appendLine("- guizang-ppt-skill high-fidelity exception: if the user explicitly asks for guizang/live HTML/WebGL/Motion/1:1/高保真, use renderer \"guizang_html\" instead of slides: {\"title\":\"Deck Title\",\"renderer\":\"guizang_html\",\"widget_code\":\"<svg ...static cover only.../>\",\"spec\":{\"html\":\"<!DOCTYPE html>...full guizang deck with <section class=\\\"slide ...\\\">...</html>\",\"source\":\"guizang-ppt-skill\",\"allowRemoteImages\":true,\"allowRemoteFonts\":true}}.")
-                appendLine("- guizang_html rules: widget_code is only a tiny static cover; put the full live deck in spec.html. Keep Motion One/Lucide script URLs as the guizang template uses them so AmberAgent can replace them with bundled local assets. Do NOT add Android bridge calls, popups, downloads, file/content/intent/android_asset URLs, or keyboard-only instructions.")
+                appendLine("- guizang-ppt-skill DEFAULT: when the user asks for guizang, guizang-ppt-skill, Swiss International style, magazine deck from that skill, or a guizang-like PPT, emit renderer \"guizang_html\" by default. Do not choose ordinary HTML widget, mini app, standalone webpage, or native slides for guizang skill output.")
+                appendLine("- guizang_html output shape: {\"title\":\"Deck Title\",\"renderer\":\"guizang_html\",\"widget_code\":\"<svg ...static cover only.../>\",\"spec\":{\"html\":\"<!DOCTYPE html>...<div id=\\\"deck\\\"><section class=\\\"slide ...\\\">...</section></div>...</html>\",\"source\":\"guizang-ppt-skill\",\"allowRemoteImages\":true,\"allowRemoteFonts\":true}}.")
+                appendLine("- guizang_html REQUIRED STRUCTURE: spec.html must contain one live deck wrapper `<div id=\"deck\">...</div>` and every page must be `<section class=\"slide ...\" data-animate=\"...\">...</section>`. Do not output a flat web app, a single SVG, a `slides` JSON spec, or pages outside #deck.")
+                appendLine("- guizang_html LOCAL RUNTIME ONLY: for Lucide use `<script src=\"${GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL}\"></script>`; for Motion One use `await import('${GuizangHtmlDeckValidator.LOCAL_MOTION_URL}')`. Do NOT use unpkg/jsdelivr/skypack/CDN script URLs in the generated HTML.")
+                appendLine("- guizang_html preview contract: widget_code is only a tiny static cover; the live PPT/deck must be in spec.html so AmberAgent shows a fullscreen touch presentation preview. Do NOT generate or save an AmberAgent MiniApp for PPT requests.")
                 appendLine("- Mobile slide density: each slide should fit a phone screen after expansion — one main claim, optional subtitle, 2-4 concise bullets/cards, no long paragraphs or dense tables.")
                 appendLine("- When the user asks to PREVIEW / OPEN / BROWSE / 打开 / 预览 / 给我看 / 发出来预览 a PPT you previously saved to /workspace, do NOT call share_file. Instead: file_read the saved deck, then in your visible reply emit a NEW show-widget fence with renderer \"slides\" and the spec JSON inline so the deck appears as an inline card in the chat.")
                 appendLine("- share_file is only for genuine sharing/exporting/forwarding (\"分享/发送/导出/传给别人\"); previews always stay inside the chat as widgets.")
                 appendLine("- VChart/slides specs must be under 50KB; array data capped at 1000 items; string values under 500 chars.")
             }
-            appendLine("- Do not use script tags or inline event handlers in ordinary widget_code; JavaScript will be stripped there. The only script-capable path is renderer \"guizang_html\", and only for explicit high-fidelity live deck requests.")
+            appendLine("- Do not use script tags or inline event handlers in ordinary widget_code; JavaScript will be stripped there. The only script-capable deck path is renderer \"guizang_html\" for guizang-style PPT requests.")
             appendLine("- Do not make decorative widgets that merely repeat the prose answer.")
             buildGenerativeUiModelGuidance(model).takeIf { it.isNotBlank() }?.let { guidance ->
                 append(guidance)

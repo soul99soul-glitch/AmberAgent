@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai.generative
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -238,6 +239,67 @@ class GenerativeWidgetParserTest {
         assertTrue(widget.specJson!!.contains("<section class=\\\"slide dark\\\">A</section>"))
         assertTrue(widget.specJson.contains("guizang-ppt-skill"))
         assertTrue(widget.widgetCode.contains("<svg"))
+    }
+
+    @Test
+    fun qualityGateRequiresGuizangRendererAndValidSpecForGuizangDecks() {
+        val requirement = GenerativeUiWidgetRequirement(
+            required = true,
+            expectSlides = true,
+            expectGuizangHtml = true,
+        )
+        val htmlRenderer = """
+            ```show-widget
+            {"title":"Wrong","renderer":"html","widget_code":"<section class=\"slide\">A</section>"}
+            ```
+        """.trimIndent()
+
+        assertTrue(
+            GenerativeWidgetParser.widgetQualityIssue(htmlRenderer, requirement)!!
+                .contains("expected renderer \"guizang_html\"")
+        )
+
+        val invalidDeck = """
+            ```show-widget
+            {"title":"Bad","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>A</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><main>No slides</main></body></html>"}}
+            ```
+        """.trimIndent()
+
+        assertTrue(
+            GenerativeWidgetParser.widgetQualityIssue(invalidDeck, requirement)!!
+                .contains("expected at least one slide")
+        )
+
+        val validDeck = """
+            ```show-widget
+            {"title":"Live Deck","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>G</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><div id=\"deck\"><section class=\"slide\">A</section></div></body></html>","source":"guizang-ppt-skill"}}
+            ```
+        """.trimIndent()
+
+        assertNull(GenerativeWidgetParser.widgetQualityIssue(validDeck, requirement))
+    }
+
+    @Test
+    fun qualityGateRequiresSlidesRendererForDecks() {
+        val requirement = GenerativeUiWidgetRequirement(required = true, expectSlides = true)
+        val htmlWidget = """
+            ```show-widget
+            {"title":"Wrong","renderer":"html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>A</text></svg>"}
+            ```
+        """.trimIndent()
+
+        assertTrue(
+            GenerativeWidgetParser.widgetQualityIssue(htmlWidget, requirement)!!
+                .contains("expected renderer \"slides\"")
+        )
+
+        val slidesWidget = """
+            ```show-widget
+            {"title":"Deck","renderer":"slides","spec":{"schemaVersion":2,"slides":[{"layout":"cover","title":"A","content":["B"]}]}}
+            ```
+        """.trimIndent()
+
+        assertNull(GenerativeWidgetParser.widgetQualityIssue(slidesWidget, requirement))
     }
 
     private fun jsonString(value: String): String =
