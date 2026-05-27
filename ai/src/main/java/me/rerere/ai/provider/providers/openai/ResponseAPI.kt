@@ -733,7 +733,7 @@ class ResponseAPI(
                                         UIMessagePart.Reasoning(
                                             reasoning = "",
                                             createdAt = Clock.System.now(),
-                                            finishedAt = null,
+                                            finishedAt = Clock.System.now(),
                                             metadata = buildJsonObject {
                                                 put("encrypted_content", encryptedContent)
                                                 put("reasoning_id", id)

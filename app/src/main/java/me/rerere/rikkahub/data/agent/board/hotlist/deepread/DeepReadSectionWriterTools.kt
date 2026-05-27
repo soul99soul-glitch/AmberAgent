@@ -67,9 +67,19 @@ class DeepReadSectionWriterTools(
 
     fun tools(): List<Tool> = tools(stages = null)
 
+    suspend fun markPhase(phase: DeepReadGenerationPhase): DeepReadOutput =
+        update { current ->
+            current.copy(generationPhase = phase)
+        }
+
     suspend fun markRunning(stages: Collection<DeepReadGenerationStage>): DeepReadOutput =
         update { current ->
-            stages.fold(current.copy(verificationState = DeepReadSectionState())) { output, stage ->
+            stages.fold(
+                current.copy(
+                    generationPhase = DeepReadGenerationPhase.WRITING,
+                    verificationState = DeepReadSectionState(),
+                )
+            ) { output, stage ->
                 if (output.statusOf(stage) == DeepReadSectionStatus.READY) {
                     output
                 } else {
@@ -90,6 +100,7 @@ class DeepReadSectionWriterTools(
     suspend fun markVerificationFailed(message: String): DeepReadOutput =
         update { current ->
             current.copy(
+                generationPhase = DeepReadGenerationPhase.IDLE,
                 verificationState = DeepReadSectionState(
                     status = DeepReadSectionStatus.FAILED,
                     errorMessage = message.safeTake(220),
@@ -101,6 +112,7 @@ class DeepReadSectionWriterTools(
     suspend fun markVerificationRunning(): DeepReadOutput =
         update { current ->
             current.copy(
+                generationPhase = DeepReadGenerationPhase.VERIFYING,
                 verificationState = DeepReadSectionState(DeepReadSectionStatus.RUNNING),
                 generationComplete = false,
             )
@@ -110,9 +122,10 @@ class DeepReadSectionWriterTools(
         stage: DeepReadGenerationStage,
         assistantText: String,
         sources: List<DeepReadSource>,
+        allowReadyRewrite: Boolean = false,
     ): DeepReadOutput =
         update { current ->
-            if (current.statusOf(stage) == DeepReadSectionStatus.READY) return@update current
+            if (!allowReadyRewrite && current.statusOf(stage) == DeepReadSectionStatus.READY) return@update current
             val links = sources.toReadingLinks()
             val fallbackText = assistantText.fallbackBody(stage, sources, topicTitle)
             val next = when (stage) {
@@ -146,7 +159,9 @@ class DeepReadSectionWriterTools(
             }
             if (next.statusReadyFor(stage)) {
                 markRequiredWrite()
-                next.withSectionStatus(stage, DeepReadSectionStatus.READY)
+                next
+                    .withSectionStatus(stage, DeepReadSectionStatus.READY)
+                    .withSectionQuality(stage, DeepReadSectionQuality.BASIC)
             } else {
                 current
             }
@@ -187,7 +202,9 @@ class DeepReadSectionWriterTools(
                 )
                 if (!next.hasOverviewContent()) return@update current
                 markRequiredWrite()
-                next.withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
+                next
+                    .withSectionStatus(DeepReadGenerationStage.OVERVIEW, DeepReadSectionStatus.READY)
+                    .withSectionQuality(DeepReadGenerationStage.OVERVIEW, DeepReadSectionQuality.STANDARD)
             }
             if (output.statusOf(DeepReadGenerationStage.OVERVIEW) == DeepReadSectionStatus.READY) {
                 ok("overview", output)
@@ -220,7 +237,9 @@ class DeepReadSectionWriterTools(
                 )
                 if (!next.hasNarrativeContent()) return@update current
                 markRequiredWrite()
-                next.withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
+                next
+                    .withSectionStatus(DeepReadGenerationStage.NARRATIVE, DeepReadSectionStatus.READY)
+                    .withSectionQuality(DeepReadGenerationStage.NARRATIVE, DeepReadSectionQuality.STANDARD)
             }
             if (output.statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) {
                 ok("narrative", output)
@@ -259,7 +278,9 @@ class DeepReadSectionWriterTools(
                 )
                 if (!next.hasAnalysisContent()) return@update current
                 markRequiredWrite()
-                next.withSectionStatus(DeepReadGenerationStage.ANALYSIS, DeepReadSectionStatus.READY)
+                next
+                    .withSectionStatus(DeepReadGenerationStage.ANALYSIS, DeepReadSectionStatus.READY)
+                    .withSectionQuality(DeepReadGenerationStage.ANALYSIS, DeepReadSectionQuality.STANDARD)
             }
             if (output.statusOf(DeepReadGenerationStage.ANALYSIS) == DeepReadSectionStatus.READY) {
                 ok("analysis", output)
@@ -298,7 +319,9 @@ class DeepReadSectionWriterTools(
                 )
                 if (!next.hasExtendedReadingContent()) return@update current
                 markRequiredWrite()
-                next.withSectionStatus(DeepReadGenerationStage.EXTENDED_READING, DeepReadSectionStatus.READY)
+                next
+                    .withSectionStatus(DeepReadGenerationStage.EXTENDED_READING, DeepReadSectionStatus.READY)
+                    .withSectionQuality(DeepReadGenerationStage.EXTENDED_READING, DeepReadSectionQuality.STANDARD)
             }
             if (output.statusOf(DeepReadGenerationStage.EXTENDED_READING) == DeepReadSectionStatus.READY) {
                 ok("extended_reading", output)
@@ -447,6 +470,11 @@ class DeepReadSectionWriterTools(
         execute = {
             val output = update { current ->
                 current.copy(
+                    generationPhase = if (current.sectionsReady() && hasFreshVerification) {
+                        DeepReadGenerationPhase.COMPLETE
+                    } else {
+                        current.generationPhase
+                    },
                     generationComplete = current.sectionsReady() && hasFreshVerification,
                     verificationState = if (hasFreshVerification) {
                         DeepReadSectionState(DeepReadSectionStatus.READY)

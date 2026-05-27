@@ -75,9 +75,11 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagram
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationPhase
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadScheduler
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionQuality
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
@@ -165,13 +167,18 @@ fun DeepReadScreen(
     val darkTheme = LocalDarkMode.current
     DeepReadImmersiveWindowEffect(darkTheme = darkTheme)
 
-    val anySectionRunning = output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
-    val verificationRunning = output?.verificationState?.status == DeepReadSectionStatus.RUNNING
     val backgroundRunning by deepReadScheduler
         .observeRunning(topicId)
         .collectAsStateWithLifecycle(initialValue = false)
-    val generating = backgroundRunning || anySectionRunning || verificationRunning || retryingStages.isNotEmpty()
+    val lifecycleRunning = backgroundRunning || retryingStages.isNotEmpty()
+    val anySectionRunning = lifecycleRunning &&
+        output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
+    val verificationRunning = lifecycleRunning &&
+        output?.verificationState?.status == DeepReadSectionStatus.RUNNING
+    val phaseRunning = lifecycleRunning && output?.generationPhase?.isActiveDeepReadPhase() == true
+    val generating = lifecycleRunning || anySectionRunning || verificationRunning || phaseRunning
     val complete = output?.isComplete() == true
+    val hasBasicDraft = output?.hasBasicDraft() == true
 
     fun runAll(force: Boolean = false) {
         if (!confirmed) return
@@ -301,6 +308,11 @@ fun DeepReadScreen(
                         generating -> RunningStageNotice(
                             stages = data.sectionStates,
                             verificationState = data.verificationState,
+                            generationPhase = data.generationPhase,
+                            modifier = noticeModifier,
+                        )
+                        hasBasicDraft && !complete -> TemplateFallbackNotice(
+                            message = "基础稿，可继续增强",
                             modifier = noticeModifier,
                         )
                         historyExpired -> TemplateFallbackNotice(
@@ -350,6 +362,7 @@ fun DeepReadScreen(
                         RunningStageNotice(
                             stages = data.sectionStates,
                             verificationState = data.verificationState,
+                            generationPhase = data.generationPhase,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
@@ -412,6 +425,11 @@ fun DeepReadScreen(
                         generating -> RunningStageNotice(
                             stages = data.sectionStates,
                             verificationState = data.verificationState,
+                            generationPhase = data.generationPhase,
+                            modifier = noticeModifier,
+                        )
+                        hasBasicDraft && !complete -> TemplateFallbackNotice(
+                            message = "基础稿，可继续增强",
                             modifier = noticeModifier,
                         )
                         historyExpired -> TemplateFallbackNotice(
@@ -452,7 +470,11 @@ private fun DeepReadOutput.asVisibleGeneratingOutput(generating: Boolean): DeepR
             }
         )
     }
-    return copy(sectionStates = states)
+    return copy(
+        generationPhase = generationPhase.takeIf { it.isActiveDeepReadPhase() }
+            ?: DeepReadGenerationPhase.COLLECTING,
+        sectionStates = states,
+    )
 }
 
 private fun DeepReadOutput.firstFailureMessage(): String? =
@@ -469,13 +491,29 @@ private fun DeepReadOutput.firstFailedStage(): DeepReadGenerationStage? =
         sectionStates[stage]?.status == DeepReadSectionStatus.FAILED
     }
 
+private fun DeepReadOutput.hasBasicDraft(): Boolean =
+    sectionQualities.values.any { it == DeepReadSectionQuality.BASIC }
+
+private fun DeepReadGenerationPhase.isActiveDeepReadPhase(): Boolean =
+    this == DeepReadGenerationPhase.COLLECTING ||
+        this == DeepReadGenerationPhase.PLANNING ||
+        this == DeepReadGenerationPhase.WRITING ||
+        this == DeepReadGenerationPhase.VERIFYING
+
 @Composable
 private fun RunningStageNotice(
     stages: Map<DeepReadGenerationStage, me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState>,
     verificationState: me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState,
+    generationPhase: DeepReadGenerationPhase,
     modifier: Modifier = Modifier,
 ) {
-    if (verificationState.status == DeepReadSectionStatus.RUNNING) {
+    val phaseLabel = when (generationPhase) {
+        DeepReadGenerationPhase.COLLECTING -> "资料收集"
+        DeepReadGenerationPhase.PLANNING -> "结构规划"
+        DeepReadGenerationPhase.VERIFYING -> "补漏验真"
+        else -> null
+    }
+    if (verificationState.status == DeepReadSectionStatus.RUNNING || phaseLabel != null) {
         Surface(
             modifier = modifier,
             shape = RoundedCornerShape(50),
@@ -483,7 +521,7 @@ private fun RunningStageNotice(
             shadowElevation = 4.dp,
         ) {
             Text(
-                "正在验真",
+                "正在${phaseLabel ?: "补漏验真"}",
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -503,7 +541,7 @@ private fun RunningStageNotice(
         shadowElevation = 4.dp,
     ) {
         Text(
-            "正在生成：${activeStage.label}",
+            "分段写作：${activeStage.label}",
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
@@ -779,6 +817,14 @@ private fun DeepReadArticle(
                 )
             }
 
+            if (output.hasBasicDraft()) {
+                item {
+                    ArticleInset {
+                        BasicDraftNotice(palette = palette, fontFamily = fontFamily)
+                    }
+                }
+            }
+
             item {
                 ArticleInset {
                     NarrativeFrame(
@@ -831,6 +877,25 @@ private fun DeepReadArticle(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BasicDraftNotice(
+    palette: MagazinePalette,
+    fontFamily: FontFamily?,
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = palette.accent.copy(alpha = 0.08f),
+    ) {
+        Text(
+            "基础稿，可继续增强",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            style = MaterialTheme.typography.labelMedium.copy(
+                color = palette.muted,
+            ).withReadingFont(fontFamily),
+        )
     }
 }
 

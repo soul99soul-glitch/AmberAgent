@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.core.MessageRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -102,6 +103,18 @@ class MessageTest {
         val result = messages.limitContext(2)
         assertEquals(4, result.size)
         assertEquals(messages, result)
+    }
+
+    @Test
+    fun `handleMessageChunk finishes reasoning when text delta starts`() {
+        val messages = listOf(UIMessage.user("go"))
+            .handleMessageChunk(streamChunk(UIMessagePart.Reasoning("thinking", finishedAt = null)))
+            .handleMessageChunk(streamChunk(UIMessagePart.Text("answer")))
+
+        val assistant = messages.last()
+        val reasoning = assistant.parts.filterIsInstance<UIMessagePart.Reasoning>().single()
+        assertNotNull(reasoning.finishedAt)
+        assertEquals("answer", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
     }
 
     @Test
@@ -708,6 +721,22 @@ class MessageTest {
     }
 
     // ==================== Helper Functions ====================
+
+    private fun streamChunk(part: UIMessagePart): MessageChunk = MessageChunk(
+        id = "chunk",
+        model = "test",
+        choices = listOf(
+            UIMessageChoice(
+                index = 0,
+                delta = UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(part)
+                ),
+                message = null,
+                finishReason = null,
+            )
+        )
+    )
 
     private fun createTestMessages(count: Int): List<UIMessage> {
         return (0 until count).map { i ->

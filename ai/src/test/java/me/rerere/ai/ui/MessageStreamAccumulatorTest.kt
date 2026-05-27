@@ -2,6 +2,7 @@ package me.rerere.ai.ui
 
 import me.rerere.ai.core.MessageRole
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,6 +51,45 @@ class MessageStreamAccumulatorTest {
     }
 
     @Test
+    fun `reasoning finishes when streamed text starts`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        accumulator.append(chunk(UIMessagePart.Reasoning("thinking", finishedAt = null)))
+        accumulator.append(chunk(UIMessagePart.Text("answer")))
+
+        val assistant = accumulator.snapshot().last()
+        val reasoning = assistant.parts.filterIsInstance<UIMessagePart.Reasoning>().single()
+        assertNotNull(reasoning.finishedAt)
+        assertEquals("answer", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+    }
+
+    @Test
+    fun `empty reasoning marker in text chunk does not keep reasoning timer open`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        accumulator.append(chunk(UIMessagePart.Reasoning("thinking", finishedAt = null)))
+        accumulator.append(
+            chunk(
+                UIMessagePart.Reasoning(
+                    reasoning = "",
+                    finishedAt = null,
+                    metadata = reasoningContentPresentMetadata()
+                ),
+                UIMessagePart.Text("answer"),
+            )
+        )
+
+        val assistant = accumulator.snapshot().last()
+        val reasoning = assistant.parts.filterIsInstance<UIMessagePart.Reasoning>().single()
+        assertNotNull(reasoning.finishedAt)
+        assertEquals("answer", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+    }
+
+    @Test
     fun `final full message replaces streamed deltas instead of appending again`() {
         val accumulator = MessageStreamAccumulator(
             initialMessages = listOf(UIMessage.user("go"))
@@ -63,7 +103,7 @@ class MessageStreamAccumulatorTest {
         assertEquals("""{"summary":"完整 JSON"}""", assistant.parts.filterIsInstance<UIMessagePart.Text>().single().text)
     }
 
-    private fun chunk(part: UIMessagePart): MessageChunk = MessageChunk(
+    private fun chunk(vararg parts: UIMessagePart): MessageChunk = MessageChunk(
         id = "chunk",
         model = "test",
         choices = listOf(
@@ -71,7 +111,7 @@ class MessageStreamAccumulatorTest {
                 index = 0,
                 delta = UIMessage(
                     role = MessageRole.ASSISTANT,
-                    parts = listOf(part)
+                    parts = parts.toList()
                 ),
                 message = null,
                 finishReason = null,

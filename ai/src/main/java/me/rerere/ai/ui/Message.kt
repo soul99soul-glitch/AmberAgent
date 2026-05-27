@@ -136,9 +136,10 @@ data class UIMessage(
                 }
             }
             // Handle Reasoning End
-            if (parts.filterIsInstance<UIMessagePart.Reasoning>()
-                    .isNotEmpty() && delta.parts.filterIsInstance<UIMessagePart.Reasoning>()
-                    .isEmpty()
+            if (
+                parts.filterIsInstance<UIMessagePart.Reasoning>().isNotEmpty() &&
+                delta.parts.none { it.isReasoningContentDelta() } &&
+                delta.parts.any { it.isReasoningCloseDelta() }
             ) {
                 newParts = newParts.map { part ->
                     if (part is UIMessagePart.Reasoning && part.finishedAt == null) {
@@ -217,6 +218,17 @@ data class UIMessage(
             parts = listOf(UIMessagePart.Text(prompt))
         )
     }
+}
+
+private fun UIMessagePart.isReasoningContentDelta(): Boolean =
+    this is UIMessagePart.Reasoning && reasoning.isNotEmpty()
+
+private fun UIMessagePart.isReasoningCloseDelta(): Boolean = when (this) {
+    is UIMessagePart.Reasoning -> finishedAt != null
+    is UIMessagePart.Text -> text.isNotEmpty()
+    is UIMessagePart.Image -> url.isNotEmpty()
+    is UIMessagePart.Tool -> true
+    else -> false
 }
 
 /**

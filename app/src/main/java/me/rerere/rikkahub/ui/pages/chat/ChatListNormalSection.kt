@@ -678,10 +678,14 @@ internal fun ChatListNormal(
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
+    val timelineHasScrollableBacklog by remember(state) {
+        derivedStateOf { state.canScrollBackward }
+    }
     val showPinnedAgentWorkingIndicator =
         timelineLoading &&
             showBottomFollowAnimation &&
-            followMode == TimelineFollowMode.FollowingBottom
+            followMode == TimelineFollowMode.FollowingBottom &&
+            timelineHasScrollableBacklog
     val streamingVisibleEvents = remember(conversation.id) {
         MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     }

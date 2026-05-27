@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageCandidate
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionQuality
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionWriterTools
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSource
@@ -246,8 +247,47 @@ class DeepReadRepositoryTest {
         )
 
         assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.NARRATIVE))
+        assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.NARRATIVE])
         assertTrue(output.timeline.orEmpty().isNotEmpty())
         assertEquals("https://example.com/source", output.references.single().url)
+    }
+
+    @Test
+    fun fallbackSectionCanSupplementReadySectionDuringCoverageRepair() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val tools = writer.tools().associateBy { it.name }
+        tools.getValue("deep_read_write_analysis").execute(buildJsonObject {
+            put("core_dispute", "核心分歧已经有一段初稿，但缺少影响链条和反方证据的补充。")
+            put("perspectives", buildJsonArray {
+                add(buildJsonObject {
+                    put("holder", "观察者")
+                    put("viewpoint", "当前稿件需要继续增强，但已有基础分析内容。")
+                })
+            })
+            put("implications", "旧影响分析。")
+        })
+
+        val output = writer.writeFallbackSection(
+            stage = DeepReadGenerationStage.ANALYSIS,
+            assistantText = "补写影响链条：用户成本、开发者生态和后续监管都会受影响；不过反方证据仍然需要降格表达。",
+            sources = listOf(
+                DeepReadSource(
+                    title = "补漏来源",
+                    url = "https://example.com/supplement",
+                    source = "Example",
+                    content = "补漏来源说明影响链条和不确定点。",
+                    publishedAt = "2026-05-22",
+                    images = emptyList(),
+                )
+            ),
+            allowReadyRewrite = true,
+        )
+
+        assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.ANALYSIS))
+        assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.ANALYSIS])
+        assertTrue(output.analysis.implications.orEmpty().contains("用户成本"))
+        assertTrue(output.references.any { it.url == "https://example.com/supplement" })
     }
 
     @Test

@@ -9,6 +9,8 @@ data class DeepReadOutput(
     val topicType: String = "event",
     @SerialName("generation_complete")
     val generationComplete: Boolean = false,
+    @SerialName("generation_phase")
+    val generationPhase: DeepReadGenerationPhase = DeepReadGenerationPhase.IDLE,
     val summary: String = "",
     @SerialName("key_entities")
     val keyEntities: List<String> = emptyList(),
@@ -34,12 +36,20 @@ data class DeepReadOutput(
     val references: List<ReadingLink> = emptyList(),
     @SerialName("section_states")
     val sectionStates: Map<DeepReadGenerationStage, DeepReadSectionState> = emptyMap(),
+    @SerialName("section_qualities")
+    val sectionQualities: Map<DeepReadGenerationStage, DeepReadSectionQuality> = emptyMap(),
     @SerialName("verification_state")
     val verificationState: DeepReadSectionState = DeepReadSectionState(),
 )
 
 @Serializable
 enum class DeepReadSectionStatus { PENDING, RUNNING, READY, FAILED }
+
+@Serializable
+enum class DeepReadGenerationPhase { IDLE, COLLECTING, PLANNING, WRITING, VERIFYING, COMPLETE }
+
+@Serializable
+enum class DeepReadSectionQuality { BASIC, STANDARD, VERIFIED }
 
 @Serializable
 data class DeepReadSectionState(
@@ -54,6 +64,9 @@ fun DeepReadOutput.statusOf(stage: DeepReadGenerationStage): DeepReadSectionStat
 fun DeepReadOutput.errorOf(stage: DeepReadGenerationStage): String? =
     sectionStates[stage]?.errorMessage
 
+fun DeepReadOutput.qualityOf(stage: DeepReadGenerationStage): DeepReadSectionQuality? =
+    sectionQualities[stage]
+
 fun DeepReadOutput.withSectionStatus(
     stage: DeepReadGenerationStage,
     status: DeepReadSectionStatus,
@@ -63,6 +76,15 @@ fun DeepReadOutput.withSectionStatus(
     nextStates[stage] = DeepReadSectionState(status, errorMessage)
     val merged = copy(sectionStates = nextStates)
     return merged.copy(generationComplete = generationComplete && merged.isVerifiedComplete())
+}
+
+fun DeepReadOutput.withSectionQuality(
+    stage: DeepReadGenerationStage,
+    quality: DeepReadSectionQuality,
+): DeepReadOutput {
+    val nextQualities = sectionQualities.toMutableMap()
+    nextQualities[stage] = quality
+    return copy(sectionQualities = nextQualities)
 }
 
 fun DeepReadOutput.isComplete(): Boolean =

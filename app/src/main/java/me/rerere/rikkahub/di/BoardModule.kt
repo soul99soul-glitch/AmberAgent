@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.HotListTitleLocalizer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadNotifier
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepository
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadResearchHarness
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSourcePrefetcher
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateAgent
@@ -97,6 +98,8 @@ val boardModule = module {
         )
     }
 
+    single { DeepReadResearchHarness() }
+
     single {
         DeepReadAgentRunManager(
             settingsStore = get(),
@@ -105,6 +108,7 @@ val boardModule = module {
             toolSetFactory = get(),
             sourcePrefetcher = get(),
             playbookRepository = get(),
+            researchHarness = get(),
             appScope = get(),
         )
     }

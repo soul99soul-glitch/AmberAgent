@@ -70,7 +70,8 @@ class MessageStreamAccumulator(
 
         fun append(delta: UIMessage) {
             val hadReasoning = parts.any { it is MutablePart.Reasoning }
-            val deltaHasReasoning = delta.parts.any { it is UIMessagePart.Reasoning }
+            val deltaHasReasoningContent = delta.parts.any { it.isReasoningContentDelta() }
+            val deltaClosesReasoning = delta.parts.any { it.isReasoningCloseDelta() }
 
             delta.parts.forEach { deltaPart ->
                 when (deltaPart) {
@@ -82,7 +83,7 @@ class MessageStreamAccumulator(
                 }
             }
 
-            if (hadReasoning && !deltaHasReasoning) {
+            if (hadReasoning && !deltaHasReasoningContent && deltaClosesReasoning) {
                 parts.replaceAll { part ->
                     if (part is MutablePart.Reasoning && part.finishedAt == null) {
                         part.copy(finishedAt = Clock.System.now())
@@ -137,7 +138,11 @@ class MessageStreamAccumulator(
             val lastPart = parts.lastOrNull()
             if (lastPart is MutablePart.Reasoning) {
                 lastPart.reasoning.append(deltaPart.reasoning)
-                lastPart.finishedAt = null
+                if (deltaPart.reasoning.isNotEmpty()) {
+                    lastPart.finishedAt = deltaPart.finishedAt
+                } else if (deltaPart.finishedAt != null) {
+                    lastPart.finishedAt = deltaPart.finishedAt
+                }
                 lastPart.metadata = deltaPart.metadata ?: lastPart.metadata
             } else {
                 parts += MutablePart.Reasoning(
@@ -254,6 +259,17 @@ private fun UIMessagePart.toMutablePart(): MutablePart {
         is UIMessagePart.Tool -> MutablePart.Tool(this)
         else -> MutablePart.Static(this)
     }
+}
+
+private fun UIMessagePart.isReasoningContentDelta(): Boolean =
+    this is UIMessagePart.Reasoning && reasoning.isNotEmpty()
+
+private fun UIMessagePart.isReasoningCloseDelta(): Boolean = when (this) {
+    is UIMessagePart.Reasoning -> finishedAt != null
+    is UIMessagePart.Text -> text.isNotEmpty()
+    is UIMessagePart.Image -> url.isNotEmpty()
+    is UIMessagePart.Tool -> true
+    else -> false
 }
 
 private fun List<UIMessagePart>.coalesceStreamParts(): List<UIMessagePart> {

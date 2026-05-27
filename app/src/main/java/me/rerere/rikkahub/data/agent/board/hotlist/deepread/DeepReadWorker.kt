@@ -74,6 +74,7 @@ class DeepReadWorker(
     private fun failureOutput(cached: DeepReadOutput?, reason: String): DeepReadOutput {
         val failureMessage = reason.take(500)
         return (cached ?: DeepReadOutput()).copy(
+            generationPhase = DeepReadGenerationPhase.IDLE,
             generationComplete = false,
             sectionStates = DeepReadGenerationStage.entries.associateWith { stage ->
                 val current = cached?.sectionStates?.get(stage)
