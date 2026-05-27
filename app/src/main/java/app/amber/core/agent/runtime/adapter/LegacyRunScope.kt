@@ -29,8 +29,6 @@ import app.amber.core.agent.runtime.ToolId
 import app.amber.core.agent.runtime.ToolSession
 import app.amber.core.agent.runtime.TraceRecorder
 import app.amber.core.agent.runtime.TurnEvent
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.json.JsonElement

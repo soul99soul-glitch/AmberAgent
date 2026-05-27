@@ -50,8 +50,6 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
 import me.rerere.rikkahub.data.ai.generative.GenerativeUiWidgetRequirement
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
-import app.amber.core.agent.runtime.RunScope
-import app.amber.core.agent.runtime.adapter.LegacyRunScope
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.AgentLoopBudgetPrompt
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
@@ -175,7 +173,6 @@ class GenerationHandler(
         invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
         conversation: Conversation? = null,
         consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
-        scope: RunScope = LegacyRunScope(),
     ): Flow<GenerationChunk> = flow {
         coroutineScope {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")

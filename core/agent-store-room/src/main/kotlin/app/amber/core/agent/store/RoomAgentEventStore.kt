@@ -1,5 +1,6 @@
 package app.amber.core.agent.store
 
+import app.amber.core.agent.runtime.AgentDescriptorId
 import app.amber.core.agent.runtime.AgentEventRecord
 import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentRunId
@@ -8,14 +9,14 @@ import app.amber.core.agent.runtime.AgentRunSnapshot
 import app.amber.core.agent.runtime.AgentRunStatus
 import app.amber.core.agent.runtime.TraceSpanRecord
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 
 class RoomAgentEventStore(
     private val dao: AgentRuntimeDao,
 ) : AgentEventStore {
 
     override suspend fun appendRun(run: AgentRunRecord) {
-        dao.insertRun(run.toEntity())
+        dao.insertRun(run.toEntity().let { it.copy(status = it.status.lowercase()) })
     }
 
     override suspend fun appendEvent(event: AgentEventRecord) {
@@ -27,16 +28,7 @@ class RoomAgentEventStore(
     }
 
     override fun observeRun(runId: AgentRunId): Flow<AgentRunSnapshot> =
-        dao.observeRun(runId.value).map { entity ->
-            entity?.toSnapshot() ?: AgentRunSnapshot(
-                runId = runId,
-                parentRunId = null,
-                descriptorId = app.amber.core.agent.runtime.AgentDescriptorId("unknown"),
-                status = AgentRunStatus.INTERRUPTED,
-                startedAt = 0,
-                finishedAt = null,
-            )
-        }
+        dao.observeRun(runId.value).mapNotNull { it?.toSnapshot() }
 
     override suspend fun listUnfinishedRuns(): List<AgentRunRecord> =
         dao.listUnfinished().map { it.toRecord() }
@@ -55,7 +47,7 @@ private fun AgentRunRecord.toEntity() = AgentRunEntity(
     messageNodeId = messageNodeId,
     producesMessageId = producesMessageId,
     assistantId = assistantId,
-    status = status,
+    status = status.lowercase(),
     inputDigest = inputDigest,
     inputSnapshotRef = inputSnapshotRef,
     inputSchemaVersion = inputSchemaVersion,
@@ -85,7 +77,7 @@ private fun AgentRunEntity.toRecord() = AgentRunRecord(
 private fun AgentRunEntity.toSnapshot() = AgentRunSnapshot(
     runId = AgentRunId(runId),
     parentRunId = parentRunId?.let { AgentRunId(it) },
-    descriptorId = app.amber.core.agent.runtime.AgentDescriptorId(agentDescriptorId),
+    descriptorId = AgentDescriptorId(agentDescriptorId),
     status = try {
         AgentRunStatus.valueOf(status.uppercase())
     } catch (_: IllegalArgumentException) {

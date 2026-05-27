@@ -102,3 +102,21 @@ this. A Kotlin interface + future detekt rule can.
 JNI crossing has ~2μs overhead per call. For a 50-message conversation with system
 prompt + tools, single-call would pay this 50+ times. Batch API amortizes the marshal
 cost to one crossing regardless of segment count.
+
+## 13. Why `List<Any>` in MessagePipeline and ChatTurn (legacy bridge)
+
+`MessagePipeline.transformInput/Output` and `ChatTurn.messages` use `List<Any>` instead
+of a typed message class. This is an intentional compromise: the existing `UIMessage`
+type lives in the `:ai` module under `me.rerere.ai.ui`, and `:core:agent-runtime` must
+have zero dependencies on legacy modules. Introducing a new `KernelMessage` type and
+bidirectional mapping would be premature — Phase C will either define a bridge type or
+refine the contract when ChatTurnAgent is implemented. Until then, `List<Any>` signals
+"the kernel does not own this type yet."
+
+## 14. Why `PermissionIntentEntity` is in the v1 schema despite no write path
+
+The `permission_intent` table is included in `AgentRuntimeDatabase` v1 even though
+`RoomAgentEventStore` does not write to it yet. This is deliberate: the table supports
+Phase C's cross-process permission resume flow. Including it in v1 avoids a schema
+migration when the write path is added. The DAO method `insertPermissionIntent` exists
+for Phase C to call directly.
