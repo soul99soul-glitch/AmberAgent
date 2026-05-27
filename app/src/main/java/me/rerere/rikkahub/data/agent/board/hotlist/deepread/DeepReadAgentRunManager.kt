@@ -249,6 +249,7 @@ class DeepReadAgentRunManager(
                             articlePlan = articlePlan,
                             stageEvidence = stageEvidence,
                             targetStage = stage,
+                            stageTimeoutMs = collectRunTimeoutFor(stage),
                             playbookMarkdown = playbook.markdown,
                             coverageReport = coverageReport,
                         )
@@ -282,20 +283,27 @@ class DeepReadAgentRunManager(
                     val needsFallback = writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY ||
                         (coverageReport != null && writer.requiredWriteCount == initialRequiredWrites)
                     if (needsFallback) {
-                        val fallback = writer.writeFallbackSection(
+                        tryFallbackAfterStageFailure(
+                            writer = writer,
                             stage = stage,
-                            assistantText = messages.latestAssistantText(),
+                            messages = messages,
                             sources = stageSources,
+                            reason = "missing writer tool",
                             allowReadyRewrite = coverageReport != null,
                         )
-                        if (fallback.statusOf(stage) == DeepReadSectionStatus.READY) {
-                            Log.w(TAG, "deep read stage ${stage.label} auto-filled after missing writer tool")
-                        }
                     }
                 } catch (timeout: TimeoutCancellationException) {
                     Log.w(TAG, "deep read stage ${stage.label} timed out", timeout)
-                    if (writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
-                        writer.markFailed(stage, "${stage.label}超时未完成。")
+                    val recovered = tryFallbackAfterStageFailure(
+                        writer = writer,
+                        stage = stage,
+                        messages = messages,
+                        sources = stageSources,
+                        reason = "timeout",
+                        allowReadyRewrite = coverageReport != null,
+                    )
+                    if (!recovered && writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
+                        writer.markFailed(stage, timeoutFailureMessage(stage, collectRunTimeoutFor(stage)))
                     }
                 } catch (cancel: CancellationException) {
                     // External cancellation (e.g., user navigated away or parent
@@ -306,10 +314,18 @@ class DeepReadAgentRunManager(
                     // Local failure: mark this section FAILED and continue so
                     // already completed sections stay available to the reader.
                     Log.e(TAG, "deep read stage ${stage.label} failed", other)
-                    if (writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
+                    val recovered = tryFallbackAfterStageFailure(
+                        writer = writer,
+                        stage = stage,
+                        messages = messages,
+                        sources = stageSources,
+                        reason = if (other.isDeepReadTimeoutLike()) "provider timeout" else "failure",
+                        allowReadyRewrite = coverageReport != null,
+                    )
+                    if (!recovered && writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY) {
                         writer.markFailed(
                             stage,
-                            "${stage.label}生成失败：${other.message ?: other::class.simpleName.orEmpty()}",
+                            stageFailureMessage(stage, other, collectRunTimeoutFor(stage)),
                         )
                     }
                 }
@@ -515,6 +531,7 @@ class DeepReadAgentRunManager(
             runWith(stream = assistant.streamOutput)
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
+            if (error.isDeepReadTimeoutLike()) throw error
             Log.w(TAG, "deep read stream failed; retrying through non-stream GenerationHandler path", error)
             latest = messages
             runWith(stream = false)
@@ -584,6 +601,35 @@ class DeepReadAgentRunManager(
         return current
     }
 
+    private suspend fun tryFallbackAfterStageFailure(
+        writer: DeepReadSectionWriterTools,
+        stage: DeepReadGenerationStage,
+        messages: List<UIMessage>,
+        sources: List<DeepReadSource>,
+        reason: String,
+        allowReadyRewrite: Boolean,
+    ): Boolean {
+        if (writer.currentOutput().statusOf(stage) == DeepReadSectionStatus.READY) return true
+        val fallback = try {
+            writer.writeFallbackSection(
+                stage = stage,
+                assistantText = messages.latestAssistantText(),
+                sources = sources,
+                allowReadyRewrite = allowReadyRewrite,
+            )
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Throwable) {
+            Log.w(TAG, "deep read stage ${stage.label} fallback failed after $reason", error)
+            return false
+        }
+        val ready = fallback.statusOf(stage) == DeepReadSectionStatus.READY
+        if (ready) {
+            Log.w(TAG, "deep read stage ${stage.label} auto-filled after $reason")
+        }
+        return ready
+    }
+
     private fun buildPrompt(
         topicTitle: String,
         stages: List<DeepReadGenerationStage>,
@@ -594,6 +640,7 @@ class DeepReadAgentRunManager(
         articlePlan: DeepReadArticlePlan,
         stageEvidence: List<DeepReadEvidenceCard>,
         targetStage: DeepReadGenerationStage,
+        stageTimeoutMs: Long,
         playbookMarkdown: String,
         coverageReport: DeepReadCoverageReport? = null,
     ): String = buildString {
@@ -623,6 +670,8 @@ class DeepReadAgentRunManager(
         )
         appendLine()
         appendArticleContext(existingOutput)
+        appendLine()
+        appendDeadlineGuidance(targetStage, stageTimeoutMs)
         appendLine()
         appendLine("## 研究顺序")
         appendLine("1. 本地 harness 已经完成来源扩展、去重、分桶和结构规划。你只处理当前小目标。")
@@ -659,6 +708,22 @@ class DeepReadAgentRunManager(
         appendLine("- 图解：只提交 3-6 个短节点的 diagram spec；流程/因果只写主链路，避免网状交叉关系。禁止 raw SVG/HTML/JS/外链资源。图解不参与段落完成状态，不需要就隐藏。")
         appendLine()
         appendLine("正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。")
+    }
+
+    private fun StringBuilder.appendDeadlineGuidance(
+        stage: DeepReadGenerationStage,
+        stageTimeoutMs: Long,
+    ) {
+        val stageSeconds = stageTimeoutMs.toWholeSeconds()
+        val firstWriteSeconds = firstWriterSoftDeadlineMs(stageTimeoutMs).toWholeSeconds()
+        appendLine("## 时间预算（硬约束）")
+        appendLine("- 本段外层运行预算约 ${stageSeconds} 秒；底层单次模型/工具链路在设备上可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断。")
+        appendLine("- 你必须把第一优先级放在 ${firstWriteSeconds} 秒内调用 ${stage.writerToolName()}；不要先输出长文、完整 JSON 或 Markdown 草稿。")
+        appendLine("- 预抓证据包是主材料。除非关键事实缺失或互相矛盾，不要连续 search_web / scrape_web。")
+        appendLine("- 如果证据不够完整，先基于现有证据写保守版本；系统后续会做 coverage check 和验真，不要为了补全而耗尽时间。")
+        if (stage == DeepReadGenerationStage.EXTENDED_READING) {
+            appendLine("- 扩展阅读不是长文写作：从本段证据包挑选 4-8 条真实来源链接，必要时带 image_assets，然后立即调用 writer tool。")
+        }
     }
 
     private fun StringBuilder.appendArticlePlan(plan: DeepReadArticlePlan) {
@@ -755,7 +820,10 @@ class DeepReadAgentRunManager(
     }
 
     private fun buildWriterReminder(stages: List<DeepReadGenerationStage>, pass: Int): String = buildString {
+        val budgetMs = stages.map { collectRunTimeoutFor(it) }.maxOrNull() ?: PROVIDER_REQUEST_SOFT_TIMEOUT_MS
+        val firstWriteSeconds = firstWriterSoftDeadlineMs(budgetMs).toWholeSeconds()
         appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
+        appendLine("时间提醒：底层链路可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断；现在请在 ${firstWriteSeconds} 秒内直接调用 writer tool。")
         appendLine("UI 不会消费你的自由文本。请立刻继续研究缺口，然后调用以下 writer tool 中至少一个：")
         stages.forEach { stage -> appendLine("- ${stage.writerToolName()} for ${stage.label}") }
         appendLine("如果来源不足，只把当前段落写为 FAILED 的决定留给系统；不要用自由文本交差。")
@@ -772,6 +840,7 @@ class DeepReadAgentRunManager(
     ): String = buildString {
         appendLine("Final verification reminder #$pass:")
         appendLine("话题「$topicTitle」的四个段落已经写入。请在最终 finish 前执行验真 skill。")
+        appendLine("时间预算：验真外层约 ${VERIFICATION_COLLECT_RUN_TIMEOUT_MS.toWholeSeconds()} 秒；底层链路可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断。优先抽 2-3 个核心声明，尽快调用 deep_read_verify_claims，再调用 deep_read_finish。")
         if (previousPassMissingToolCall) {
             appendLine("上一轮没有调用 deep_read_verify_claims；本轮不要输出自由文本，")
             appendLine("必须调用 deep_read_verify_claims。")
@@ -977,6 +1046,39 @@ class DeepReadAgentRunManager(
         DeepReadGenerationStage.EXTENDED_READING -> 90_000L
     }
 
+    private fun firstWriterSoftDeadlineMs(stageTimeoutMs: Long): Long =
+        minOf(
+            PROVIDER_REQUEST_SOFT_TIMEOUT_MS - WRITER_DEADLINE_MARGIN_MS,
+            stageTimeoutMs - STAGE_DEADLINE_MARGIN_MS,
+        ).coerceAtLeast(MIN_FIRST_WRITER_DEADLINE_MS)
+
+    private fun Long.toWholeSeconds(): Long = (this / 1_000L).coerceAtLeast(1L)
+
+    private fun timeoutFailureMessage(stage: DeepReadGenerationStage, timeoutMs: Long): String =
+        "${stage.label}超时未完成（本段预算约 ${timeoutMs.toWholeSeconds()} 秒，底层链路可能约 ${PROVIDER_REQUEST_SOFT_TIMEOUT_MS.toWholeSeconds()} 秒中断）。"
+
+    private fun stageFailureMessage(
+        stage: DeepReadGenerationStage,
+        error: Throwable,
+        timeoutMs: Long,
+    ): String =
+        if (error.isDeepReadTimeoutLike()) {
+            timeoutFailureMessage(stage, timeoutMs)
+        } else {
+            "${stage.label}生成失败：${error.message ?: error::class.simpleName.orEmpty()}"
+        }
+
+    private fun Throwable.isDeepReadTimeoutLike(): Boolean {
+        if (this is TimeoutCancellationException) return true
+        val haystack = listOfNotNull(
+            message,
+            localizedMessage,
+            this::class.simpleName,
+            this::class.qualifiedName,
+        ).joinToString(" ")
+        return DEEP_READ_TIMEOUT_MARKERS.any { marker -> haystack.contains(marker, ignoreCase = true) }
+    }
+
     private fun previewTopicId(seedUrl: String): String =
         PREVIEW_TOPIC_PREFIX + MessageDigest.getInstance("SHA-256")
             .digest(seedUrl.toByteArray())
@@ -998,6 +1100,10 @@ class DeepReadAgentRunManager(
         // Hard timeouts so a stuck generation cannot hang the hidden run forever.
         // Analysis gets a larger budget because it reads the most context and is
         // the stage most likely to time out on slower model/provider paths.
+        private const val PROVIDER_REQUEST_SOFT_TIMEOUT_MS = 45_000L
+        private const val WRITER_DEADLINE_MARGIN_MS = 10_000L
+        private const val STAGE_DEADLINE_MARGIN_MS = 12_000L
+        private const val MIN_FIRST_WRITER_DEADLINE_MS = 20_000L
         private const val PLANNING_COLLECT_RUN_TIMEOUT_MS = 45_000L
         private const val VERIFICATION_COLLECT_RUN_TIMEOUT_MS = 60_000L
 
@@ -1009,6 +1115,13 @@ class DeepReadAgentRunManager(
         private const val PROMPT_SOURCE_EXCERPT_LIMIT = 2_000
         private const val PLAYBOOK_PROMPT_LIMIT = 12_000
         private val EVIDENCE_RECORDING_TOOL_NAMES = setOf("search_web", "scrape_web")
+        private val DEEP_READ_TIMEOUT_MARKERS = listOf(
+            "timed out",
+            "timeout",
+            "SocketTimeout",
+            "deadline exceeded",
+            "Read timed out",
+        )
     }
 }
 

@@ -253,6 +253,33 @@ class DeepReadRepositoryTest {
     }
 
     @Test
+    fun fallbackSectionWriteTurnsExtendedReadingTimeoutIntoSourceLinks() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
+        val sources = listOf(
+            DeepReadSource(
+                title = "官方公告",
+                url = "https://example.com/official",
+                source = "Example",
+                content = "公告正文已经足够作为扩展阅读来源。",
+                publishedAt = "2026-05-22",
+                images = emptyList(),
+            )
+        )
+
+        val output = writer.writeFallbackSection(
+            stage = DeepReadGenerationStage.EXTENDED_READING,
+            assistantText = "",
+            sources = sources,
+        )
+
+        assertEquals(DeepReadSectionStatus.READY, output.statusOf(DeepReadGenerationStage.EXTENDED_READING))
+        assertEquals(DeepReadSectionQuality.BASIC, output.sectionQualities[DeepReadGenerationStage.EXTENDED_READING])
+        assertEquals("https://example.com/official", output.extendedReading.single().url)
+        assertEquals("https://example.com/official", output.references.single().url)
+    }
+
+    @Test
     fun fallbackSectionCanSupplementReadySectionDuringCoverageRepair() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
