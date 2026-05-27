@@ -42,6 +42,25 @@ class SpeculativeToolRunnerTest {
     }
 
     @Test
+    fun changedObservedToolCancelsOldJobAndKeepsLatestState() = runBlocking {
+        val runner = SpeculativeToolRunner(this, dispatcher)
+        val first = toolCall("file_read", id = "call-1", input = """{"path":"a.md"}""")
+        val changed = toolCall("file_read", id = "call-1", input = """{"path":"b.md"}""")
+
+        runner.observe(listOf(first), mapOf("file_read" to delayedTool("file_read", "old", 50)))
+        runner.observe(listOf(changed), mapOf("file_read" to delayedTool("file_read", "new", 1)))
+        waitForCompletion(runner)
+        delay(80)
+
+        val reusable = runner.reusableResults(listOf(changed))
+        val snapshot = runner.snapshot().single()
+
+        assertEquals("new", (reusable["call-1"]!!.output.single() as UIMessagePart.Text).text)
+        assertEquals(changed.input, snapshot.input)
+        assertEquals(SpeculativeToolStatus.COMPLETED, snapshot.status)
+    }
+
+    @Test
     fun unsafeToolIsNotStartedSpeculatively() = runBlocking {
         val runner = SpeculativeToolRunner(this, dispatcher)
 
@@ -93,6 +112,15 @@ class SpeculativeToolRunnerTest {
         name = name,
         description = "test tool",
         execute = { listOf(UIMessagePart.Text(output)) },
+    )
+
+    private fun delayedTool(name: String, output: String, delayMs: Long) = Tool(
+        name = name,
+        description = "test tool",
+        execute = {
+            delay(delayMs)
+            listOf(UIMessagePart.Text(output))
+        },
     )
 
     private fun cancellingTool(name: String) = Tool(

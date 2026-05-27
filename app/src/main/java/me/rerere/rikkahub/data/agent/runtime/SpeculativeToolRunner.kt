@@ -51,6 +51,9 @@ class SpeculativeToolRunner(
                 if (existing != null && existing.toolName == tool.toolName && existing.input == tool.input) {
                     return@forEach
                 }
+                if (existing != null) {
+                    jobs.remove(tool.toolCallId)?.cancel()
+                }
                 states[tool.toolCallId] = SpeculativeToolState(
                     toolCallId = tool.toolCallId,
                     toolName = tool.toolName,
@@ -66,40 +69,28 @@ class SpeculativeToolRunner(
                             autoApproveHighRiskTools = false,
                             invocationContext = invocationContext,
                         )
-                        states[tool.toolCallId] = states[tool.toolCallId]?.copy(
-                            status = SpeculativeToolStatus.COMPLETED,
-                            result = result,
-                        ) ?: SpeculativeToolState(
-                            tool.toolCallId,
-                            tool.toolName,
-                            tool.input,
-                            SpeculativeToolStatus.COMPLETED,
-                            result,
-                        )
+                        updateStateIfCurrent(tool) { state ->
+                            state.copy(
+                                status = SpeculativeToolStatus.COMPLETED,
+                                result = result,
+                            )
+                        }
                         result
                     } catch (error: CancellationException) {
-                        states[tool.toolCallId] = states[tool.toolCallId]?.copy(
-                            status = SpeculativeToolStatus.CANCELLED,
-                            error = error.message ?: error.toString(),
-                        ) ?: SpeculativeToolState(
-                            tool.toolCallId,
-                            tool.toolName,
-                            tool.input,
-                            SpeculativeToolStatus.CANCELLED,
-                            error = error.message,
-                        )
+                        updateStateIfCurrent(tool) { state ->
+                            state.copy(
+                                status = SpeculativeToolStatus.CANCELLED,
+                                error = error.message ?: error.toString(),
+                            )
+                        }
                         throw error
                     } catch (error: Throwable) {
-                        states[tool.toolCallId] = states[tool.toolCallId]?.copy(
-                            status = SpeculativeToolStatus.FAILED,
-                            error = error.message ?: error.toString(),
-                        ) ?: SpeculativeToolState(
-                            tool.toolCallId,
-                            tool.toolName,
-                            tool.input,
-                            SpeculativeToolStatus.FAILED,
-                            error = error.message,
-                        )
+                        updateStateIfCurrent(tool) { state ->
+                            state.copy(
+                                status = SpeculativeToolStatus.FAILED,
+                                error = error.message ?: error.toString(),
+                            )
+                        }
                         null
                     }
                 }
@@ -119,7 +110,10 @@ class SpeculativeToolRunner(
         return finalTools.mapNotNull { final ->
             val state = states[final.toolCallId] ?: return@mapNotNull null
             if (state.toolName != final.toolName || state.input != final.input) return@mapNotNull null
-            val result = jobs[final.toolCallId]?.takeIf { it.isCompleted }?.await() ?: state.result
+            val result = jobs[final.toolCallId]
+                ?.takeIf { it.isCompleted && !it.isCancelled }
+                ?.await()
+                ?: state.result.takeIf { state.status == SpeculativeToolStatus.COMPLETED }
             result?.let { final.toolCallId to it }
         }.toMap()
     }
@@ -129,5 +123,18 @@ class SpeculativeToolRunner(
     private fun String.isLikelyCompleteJsonObject(): Boolean {
         val trimmed = trim()
         return trimmed.startsWith("{") && trimmed.endsWith("}")
+    }
+
+    private fun updateStateIfCurrent(
+        tool: UIMessagePart.Tool,
+        update: (SpeculativeToolState) -> SpeculativeToolState,
+    ) {
+        states.computeIfPresent(tool.toolCallId) { _, current ->
+            if (current.toolName == tool.toolName && current.input == tool.input) {
+                update(current)
+            } else {
+                current
+            }
+        }
     }
 }
