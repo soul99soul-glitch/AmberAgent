@@ -54,6 +54,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_28_29
 import me.rerere.rikkahub.data.db.migrations.Migration_29_30
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
+import me.rerere.rikkahub.data.agent.runtime.defaultToolInvocationHooks
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.sync.core.SyncArchiveManager
 import me.rerere.rikkahub.data.sync.google.GoogleDriveAppDataClient
@@ -328,7 +329,13 @@ val dataSourceModule = module {
 
     single { PermissionDecisionResolver() }
 
-    single { AgentToolDispatcher(json = get(), permissionDecisionResolver = get()) }
+    single {
+        AgentToolDispatcher(
+            json = get(),
+            permissionDecisionResolver = get(),
+            hooks = defaultToolInvocationHooks(),
+        )
+    }
 
     single {
         GenerationHandler(

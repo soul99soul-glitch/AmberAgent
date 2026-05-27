@@ -51,6 +51,7 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeUiWidgetRequirement
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
+import me.rerere.rikkahub.data.agent.runtime.AgentLoopBudgetPrompt
 import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
@@ -205,12 +206,18 @@ class GenerationHandler(
             } ?: emptyList()
             toolExposure.exposeToolNames(pendingTools.map { it.toolName })
             val hasResumableTools = pendingTools.isNotEmpty()
+            val loopBudgetPrompt = AgentLoopBudgetPrompt.build(stepIndex = stepIndex, maxSteps = maxSteps)
+            val shouldHideToolsForBudget = AgentLoopBudgetPrompt.shouldHideTools(
+                stepIndex = stepIndex,
+                maxSteps = maxSteps,
+                hasResumableTools = hasResumableTools,
+            )
             val directWidgetRequested =
                 GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(settings.agentRuntime.generativeUi, messages)
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
                 addAll(
-                    if (directWidgetRequested && !hasResumableTools) {
+                    if ((directWidgetRequested && !hasResumableTools) || shouldHideToolsForBudget) {
                         emptyList()
                     } else {
                         toolExposure.toolsForStep()
@@ -289,6 +296,7 @@ class GenerationHandler(
                     processingStatus = processingStatus,
                     conversation = conversation,
                     speculativeRunner = speculativeRunner,
+                    loopBudgetPrompt = loopBudgetPrompt,
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -440,6 +448,7 @@ class GenerationHandler(
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversation: Conversation? = null,
         speculativeRunner: SpeculativeToolRunner? = null,
+        loopBudgetPrompt: String = "",
     ) {
         val sessionDefaults = settings.resolveSessionDefaults(assistant, model)
         val memoryContextPrompt = memoryRecallStore.buildPrompt(settings, messages)
@@ -450,6 +459,7 @@ class GenerationHandler(
             messages = messages,
             tools = tools,
             memoryContextPrompt = memoryContextPrompt,
+            loopBudgetPrompt = loopBudgetPrompt,
         )
         val system = systemParts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text }
         val preparedContext = conversationContextEngine.prepareContext(
@@ -746,6 +756,7 @@ class GenerationHandler(
         messages: List<UIMessage>,
         tools: List<Tool>,
         memoryContextPrompt: String,
+        loopBudgetPrompt: String,
     ): List<UIMessagePart> {
         val staticPrompt = listOf(
             buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown),
@@ -754,6 +765,7 @@ class GenerationHandler(
 
         val dynamicPrompt = buildList {
             if (memoryContextPrompt.isNotBlank()) add(memoryContextPrompt)
+            if (loopBudgetPrompt.isNotBlank()) add(loopBudgetPrompt)
             buildGenerativeUiPrompt(settings.agentRuntime.generativeUi, model).takeIf { it.isNotBlank() }?.let(::add)
             val hasImageGenTool = tools.any { it.name == "generate_image" }
             GenerativeUiPlanner.buildPrompt(

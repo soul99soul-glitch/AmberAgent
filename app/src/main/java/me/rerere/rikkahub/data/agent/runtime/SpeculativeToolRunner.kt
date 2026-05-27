@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent.runtime
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -41,11 +42,15 @@ class SpeculativeToolRunner(
         tools.asSequence()
             .filter { it.toolCallId.isNotBlank() && !it.isExecuted }
             .filter { it.input.isLikelyCompleteJsonObject() }
-            .filter { tool -> toolDefinitions[tool.toolName]?.invocationPolicy(tool.input)?.speculativeEligible == true }
+            .filter { tool ->
+                toolDefinitions[tool.toolName]?.invocationPolicy(tool.input)?.speculativeEligible == true
+            }
             .take(maxConcurrentTools)
             .forEach { tool ->
                 val existing = states[tool.toolCallId]
-                if (existing != null && existing.toolName == tool.toolName && existing.input == tool.input) return@forEach
+                if (existing != null && existing.toolName == tool.toolName && existing.input == tool.input) {
+                    return@forEach
+                }
                 states[tool.toolCallId] = SpeculativeToolState(
                     toolCallId = tool.toolCallId,
                     toolName = tool.toolName,
@@ -53,30 +58,50 @@ class SpeculativeToolRunner(
                     status = SpeculativeToolStatus.PENDING,
                 )
                 jobs[tool.toolCallId] = scope.async {
-                    runCatching {
-                        dispatcher.execute(
+                    try {
+                        val result = dispatcher.execute(
                             tool = tool,
                             toolDef = toolDefinitions[tool.toolName],
                             autoApproveTools = false,
                             autoApproveHighRiskTools = false,
                             invocationContext = invocationContext,
                         )
-                    }.fold(
-                        onSuccess = { result ->
-                            states[tool.toolCallId] = states[tool.toolCallId]?.copy(
-                                status = SpeculativeToolStatus.COMPLETED,
-                                result = result,
-                            ) ?: SpeculativeToolState(tool.toolCallId, tool.toolName, tool.input, SpeculativeToolStatus.COMPLETED, result)
-                            result
-                        },
-                        onFailure = { error ->
-                            states[tool.toolCallId] = states[tool.toolCallId]?.copy(
-                                status = SpeculativeToolStatus.FAILED,
-                                error = error.message ?: error.toString(),
-                            ) ?: SpeculativeToolState(tool.toolCallId, tool.toolName, tool.input, SpeculativeToolStatus.FAILED, error = error.message)
-                            null
-                        }
-                    )
+                        states[tool.toolCallId] = states[tool.toolCallId]?.copy(
+                            status = SpeculativeToolStatus.COMPLETED,
+                            result = result,
+                        ) ?: SpeculativeToolState(
+                            tool.toolCallId,
+                            tool.toolName,
+                            tool.input,
+                            SpeculativeToolStatus.COMPLETED,
+                            result,
+                        )
+                        result
+                    } catch (error: CancellationException) {
+                        states[tool.toolCallId] = states[tool.toolCallId]?.copy(
+                            status = SpeculativeToolStatus.CANCELLED,
+                            error = error.message ?: error.toString(),
+                        ) ?: SpeculativeToolState(
+                            tool.toolCallId,
+                            tool.toolName,
+                            tool.input,
+                            SpeculativeToolStatus.CANCELLED,
+                            error = error.message,
+                        )
+                        throw error
+                    } catch (error: Throwable) {
+                        states[tool.toolCallId] = states[tool.toolCallId]?.copy(
+                            status = SpeculativeToolStatus.FAILED,
+                            error = error.message ?: error.toString(),
+                        ) ?: SpeculativeToolState(
+                            tool.toolCallId,
+                            tool.toolName,
+                            tool.input,
+                            SpeculativeToolStatus.FAILED,
+                            error = error.message,
+                        )
+                        null
+                    }
                 }
             }
     }

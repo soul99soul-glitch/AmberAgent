@@ -16,6 +16,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.MainAgentToolProfile
 import java.util.Locale
 
 const val TOOL_SEARCH_TOOL_NAME = "tool_search"
@@ -24,7 +25,10 @@ const val TOOL_SEARCH_DEFAULT_LIMIT = 5
 
 private val toolSearchJson = Json { ignoreUnknownKeys = true }
 
-fun createToolSearchTool(registry: ToolRegistry) = Tool(
+fun createToolSearchTool(
+    registry: ToolRegistry,
+    profile: MainAgentToolProfile? = null,
+) = Tool(
     name = TOOL_SEARCH_TOOL_NAME,
     description = "Search AmberAgent's full tool catalog by intent/category and expose the best matching tool schemas for the next step.",
     parameters = {
@@ -44,7 +48,7 @@ fun createToolSearchTool(registry: ToolRegistry) = Tool(
     needsApproval = false,
     allowsAutoApproval = true,
     systemPrompt = { _, _ ->
-        val index = ToolSearchIndex(registry)
+        val index = ToolSearchIndex(registry, profile)
         val categories = index.categoryCounts().entries
             .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
             .joinToString(", ") { "${it.key}:${it.value}" }
@@ -65,13 +69,14 @@ fun createToolSearchTool(registry: ToolRegistry) = Tool(
         val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val category = input.jsonObject["category"]?.jsonPrimitive?.contentOrNull?.ifBlank { null }
         val limit = input.jsonObject["limit"]?.jsonPrimitive?.intOrNull ?: TOOL_SEARCH_DEFAULT_LIMIT
-        val index = ToolSearchIndex(registry)
+        val index = ToolSearchIndex(registry, profile)
         listOf(UIMessagePart.Text(index.searchPayload(query, category, limit).toString()))
     },
 )
 
 class ToolSearchIndex(
     private val registry: ToolRegistry,
+    private val profile: MainAgentToolProfile? = null,
 ) {
     private val toolsByName = registry.tools().associateBy { it.name }
 
@@ -107,6 +112,10 @@ class ToolSearchIndex(
             put("trace", buildJsonObject {
                 put("mode", if (registry.metadata.size > TOOL_SEARCH_AUTO_THRESHOLD) "lazy" else "bypass")
                 put("query", query)
+                profile?.let {
+                    put("profile", it.name.lowercase(Locale.ROOT))
+                    put("profile_filtered", it != MainAgentToolProfile.FULL)
+                }
                 put("hit_tools", buildJsonArray { expandedTools.forEach(::add) })
                 put("expanded_tools", buildJsonArray { expandedTools.forEach(::add) })
                 put("estimated_full_schema_chars", fullSchemaChars)

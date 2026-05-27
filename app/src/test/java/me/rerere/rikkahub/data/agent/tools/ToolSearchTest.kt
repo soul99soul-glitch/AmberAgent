@@ -11,6 +11,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.MainAgentToolProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -100,6 +101,56 @@ class ToolSearchTest {
 
         assertTrue(oldExpanded.isEmpty())
         assertEquals(listOf("new_tool"), newExpanded.map { it.jsonPrimitive.contentOrNull })
+    }
+
+    @Test
+    fun searchTraceIncludesCurrentProfile() {
+        val registry = ToolRegistry.from(listOf(tool("search_web", "Search web sources.")))
+
+        val payload = ToolSearchIndex(registry, MainAgentToolProfile.WEB_READ)
+            .searchPayload("search", null, 1)
+        val trace = payload["trace"]!!.jsonObject
+
+        assertEquals("web_read", trace["profile"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("true", trace["profile_filtered"]!!.jsonPrimitive.contentOrNull)
+    }
+
+    @Test
+    fun searchCannotReturnToolsFilteredOutByProfileRegistry() {
+        val filtered = ToolProfileFilter.filter(
+            listOf(
+                tool("search_web", "Search web sources."),
+                tool("terminal_execute", "Execute shell commands."),
+            ),
+            MainAgentToolProfile.WEB_READ,
+        )
+        val registry = ToolRegistry.from(filtered.tools)
+
+        val payload = ToolSearchIndex(registry, MainAgentToolProfile.WEB_READ)
+            .searchPayload("terminal", null, 5)
+
+        assertTrue(payload["expanded_tools"]!!.jsonArray.isEmpty())
+    }
+
+    @Test
+    fun searchCannotReturnLateOrchestrationToolsAfterFinalProfileFilter() {
+        val filtered = ToolProfileFilter.filter(
+            listOf(
+                tool("search_web", "Search web sources."),
+                tool("subagent_start", "Start a delegated subagent."),
+                tool("model_council_start", "Start a model council run."),
+            ),
+            MainAgentToolProfile.WEB_READ,
+        )
+        val registry = ToolRegistry.from(filtered.tools)
+
+        val subagentPayload = ToolSearchIndex(registry, MainAgentToolProfile.WEB_READ)
+            .searchPayload("subagent", null, 5)
+        val councilPayload = ToolSearchIndex(registry, MainAgentToolProfile.WEB_READ)
+            .searchPayload("model council", null, 5)
+
+        assertTrue(subagentPayload["expanded_tools"]!!.jsonArray.isEmpty())
+        assertTrue(councilPayload["expanded_tools"]!!.jsonArray.isEmpty())
     }
 
     @Test

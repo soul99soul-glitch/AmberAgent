@@ -28,6 +28,7 @@ private const val TAG = "AgentToolDispatcher"
 class AgentToolDispatcher(
     private val json: Json,
     private val permissionDecisionResolver: PermissionDecisionResolver,
+    private val hooks: List<ToolInvocationHook> = emptyList(),
 ) {
     fun shouldPauseForApproval(
         toolDef: Tool?,
@@ -173,20 +174,55 @@ class AgentToolDispatcher(
                         )
                     )
                 )
-            } else runCatching {
-                val resolved = toolDef ?: error("Tool ${tool.toolName} not found")
-                val args = json.parseToJsonElement(tool.input.ifBlank { "{}" }).withoutToolDisplayMetadata()
-                logInfo("execute: ${resolved.name} args=$args")
-                executeResolvedToolWithRetry(
-                    tool = tracedTool,
-                    toolDef = resolved,
-                    retrySetting = retrySetting,
-                    execute = { resolved.execute(args) },
-                )
-            }.getOrElse { error ->
-                if (error is CancellationException) throw error
-                logError("execute failed for ${tool.toolName}", error)
-                tracedTool.copy(
+            } else executeWithHooks(
+                tool = tracedTool,
+                toolDef = toolDef,
+                decision = decision,
+                invocationContext = invocationContext,
+                retrySetting = retrySetting,
+            )
+        }
+    }
+
+    private suspend fun executeWithHooks(
+        tool: UIMessagePart.Tool,
+        toolDef: Tool?,
+        decision: PermissionDecision,
+        invocationContext: ToolInvocationContext,
+        retrySetting: GenerationRetrySetting,
+    ): UIMessagePart.Tool {
+        var request = ToolInvocationRequest(
+            tool = tool,
+            toolDef = toolDef,
+            parsedArgs = null,
+            permissionDecision = decision,
+            invocationContext = invocationContext,
+            startedAtMs = System.currentTimeMillis(),
+        )
+        return try {
+            val args = json.parseToJsonElement(tool.input.ifBlank { "{}" }).withoutToolDisplayMetadata()
+            request = request.copy(parsedArgs = args)
+            runBeforeHooks(request)?.let { result ->
+                return tool.copy(output = result.output).withHookMetadata(result.metadata)
+            }
+            val resolved = toolDef ?: error("Tool ${tool.toolName} not found")
+            logInfo("execute: ${resolved.name} args=$args")
+            val executed = executeResolvedToolWithRetry(
+                tool = tool,
+                toolDef = resolved,
+                retrySetting = retrySetting,
+                execute = { resolved.execute(args) },
+            )
+            val hooked = runAfterHooks(request, ToolInvocationResult(output = executed.output))
+            executed.copy(output = hooked.output).withHookMetadata(hooked.metadata)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            logError("execute failed for ${tool.toolName}", error)
+            val hooked = runErrorHooks(request, error)
+            if (hooked != null) {
+                tool.copy(output = hooked.output).withHookMetadata(hooked.metadata)
+            } else {
+                tool.copy(
                     output = listOf(
                         UIMessagePart.Text(
                             json.encodeToString(
@@ -200,6 +236,54 @@ class AgentToolDispatcher(
                 )
             }
         }
+    }
+
+    private suspend fun runBeforeHooks(request: ToolInvocationRequest): ToolInvocationResult? {
+        hooks.forEach { hook ->
+            val result = runHook("before", request.tool.toolName) {
+                hook.before(request)
+            }
+            if (result != null) return result
+        }
+        return null
+    }
+
+    private suspend fun runAfterHooks(
+        request: ToolInvocationRequest,
+        initial: ToolInvocationResult,
+    ): ToolInvocationResult {
+        var result = initial
+        hooks.forEach { hook ->
+            result = runHook("after", request.tool.toolName) {
+                hook.after(request, result)
+            } ?: result
+        }
+        return result
+    }
+
+    private suspend fun runErrorHooks(
+        request: ToolInvocationRequest,
+        error: Throwable,
+    ): ToolInvocationResult? {
+        hooks.forEach { hook ->
+            val result = runHook("onError", request.tool.toolName) {
+                hook.onError(request, error)
+            }
+            if (result != null) return result
+        }
+        return null
+    }
+
+    private suspend fun <T> runHook(
+        phase: String,
+        toolName: String,
+        block: suspend () -> T,
+    ): T? = try {
+        block()
+    } catch (error: Throwable) {
+        if (error is CancellationException) throw error
+        logError("tool hook $phase failed for $toolName", error)
+        null
     }
 
     private suspend fun executeResolvedToolWithRetry(
@@ -260,6 +344,13 @@ class AgentToolDispatcher(
     private fun UIMessagePart.Tool.withPermissionTrace(trace: JsonObject): UIMessagePart.Tool {
         val existing = metadata?.jsonObject?.toMutableMap() ?: mutableMapOf()
         existing["permission_trace"] = trace
+        return copy(metadata = JsonObject(existing))
+    }
+
+    private fun UIMessagePart.Tool.withHookMetadata(hookMetadata: JsonObject): UIMessagePart.Tool {
+        if (hookMetadata.isEmpty()) return this
+        val existing = metadata?.jsonObject?.toMutableMap() ?: mutableMapOf()
+        hookMetadata.forEach { (key, value) -> existing[key] = value }
         return copy(metadata = JsonObject(existing))
     }
 

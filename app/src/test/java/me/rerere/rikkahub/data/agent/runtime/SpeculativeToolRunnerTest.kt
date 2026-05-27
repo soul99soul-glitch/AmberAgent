@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent.runtime
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -60,9 +61,30 @@ class SpeculativeToolRunnerTest {
         assertTrue(runner.snapshot().isEmpty())
     }
 
+    @Test
+    fun cancelledSpeculativeToolIsMarkedCancelled() = runBlocking {
+        val runner = SpeculativeToolRunner(this, dispatcher)
+        val call = toolCall("file_read", id = "call-cancel", input = """{"path":"notes.md"}""")
+
+        runner.observe(listOf(call), mapOf("file_read" to cancellingTool("file_read")))
+        waitForStatus(runner, SpeculativeToolStatus.CANCELLED)
+
+        assertEquals(SpeculativeToolStatus.CANCELLED, runner.snapshot().single().status)
+    }
+
     private suspend fun waitForCompletion(runner: SpeculativeToolRunner) {
         repeat(20) {
             if (runner.snapshot().any { it.status == SpeculativeToolStatus.COMPLETED }) return
+            delay(10)
+        }
+    }
+
+    private suspend fun waitForStatus(
+        runner: SpeculativeToolRunner,
+        status: SpeculativeToolStatus,
+    ) {
+        repeat(20) {
+            if (runner.snapshot().any { it.status == status }) return
             delay(10)
         }
     }
@@ -71,6 +93,12 @@ class SpeculativeToolRunnerTest {
         name = name,
         description = "test tool",
         execute = { listOf(UIMessagePart.Text(output)) },
+    )
+
+    private fun cancellingTool(name: String) = Tool(
+        name = name,
+        description = "test tool",
+        execute = { throw CancellationException("cancelled") },
     )
 
     private fun toolCall(

@@ -98,6 +98,7 @@ import me.rerere.rikkahub.data.agent.tools.ConversationContextTools
 import me.rerere.rikkahub.data.agent.tools.ConversationHistoryTools
 import me.rerere.rikkahub.data.agent.tools.ModelCouncilTools
 import me.rerere.rikkahub.data.agent.tools.SubAgentTools
+import me.rerere.rikkahub.data.agent.tools.ToolProfileFilter
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.createToolSearchTool
 import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
@@ -2366,19 +2367,22 @@ class ChatService(
             }
             addAll(AgentTaskTools(agentTaskScheduler).tools())
         }
-        val baseRegistry = ToolRegistry.from(rawTools)
+        val assistant = settings.getCurrentAssistant()
+        val profileFilter = ToolProfileFilter.filter(rawTools, assistant.toolProfile)
+        val profiledRawTools = profileFilter.tools
+        val baseRegistry = ToolRegistry.from(profiledRawTools)
         val baseTools = baseRegistry.tools() +
             localTools.registryIntrospectionTools(baseRegistry)
         val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
-            rawTools + SubAgentTools(
+            profiledRawTools + SubAgentTools(
                 subAgentManager = subAgentManager,
                 parentConversationId = conversationId,
                 parentToolsProvider = { baseTools },
             ).tools()
         } else {
-            rawTools
+            profiledRawTools
         }
-        val finalRawTools = if (settings.agentRuntime.modelCouncil.enabled) {
+        val augmentedRawTools = if (settings.agentRuntime.modelCouncil.enabled) {
             subAgentRawTools + ModelCouncilTools(
                 manager = modelCouncilManager,
                 workspaceManager = workspaceManager,
@@ -2386,9 +2390,10 @@ class ChatService(
         } else {
             subAgentRawTools
         }
+        val finalRawTools = ToolProfileFilter.filter(augmentedRawTools, assistant.toolProfile).tools
         val registry = ToolRegistry.from(finalRawTools)
         val tools = registry.tools() +
-            createToolSearchTool(registry) +
+            createToolSearchTool(registry, profile = assistant.toolProfile) +
             localTools.registryIntrospectionTools(registry)
         return tools.scopedToConversation(conversationId)
     }

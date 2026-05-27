@@ -32,11 +32,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.MainAgentToolProfile
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.TagsInput
@@ -86,6 +88,15 @@ fun AssistantBasicPage(id: String) {
             vm = vm
         )
     }
+}
+
+private fun MainAgentToolProfile.label(): String = when (this) {
+    MainAgentToolProfile.FULL -> "完整"
+    MainAgentToolProfile.MINIMAL -> "最小"
+    MainAgentToolProfile.WEB_READ -> "网页只读"
+    MainAgentToolProfile.WORKSPACE_READ -> "文件只读"
+    MainAgentToolProfile.CODING -> "编程"
+    MainAgentToolProfile.MOBILE_CONTROL -> "手机控制"
 }
 
 @Composable
@@ -216,6 +227,26 @@ internal fun AssistantBasicContent(
                                 )
                             )
                         },
+                    )
+                }
+            )
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text("工具范围")
+                },
+                description = {
+                    Text("限制此助手可使用的工具类别；不会自动启用未开启的本地工具。")
+                },
+                tail = {
+                    Select(
+                        options = MainAgentToolProfile.entries.toList(),
+                        selectedOption = assistant.toolProfile,
+                        onOptionSelected = { profile ->
+                            onUpdate(assistant.copy(toolProfile = profile))
+                        },
+                        optionToString = { it.label() },
                     )
                 }
             )
