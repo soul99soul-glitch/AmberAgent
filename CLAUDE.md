@@ -4,14 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AmberAgent is a native Android LLM chat client that supports switching between different AI providers for conversations.
+AmberAgent is an Android AI agent platform evolving from a chat client toward a modular Agent Kernel + Surfaces architecture.
 Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
+Original LLM/markdown/highlight rendering infrastructure forked from rikkahub (Apache 2.0), independently evolving since 2026-05.
 
 ## Architecture Overview
 
 ### Module Structure
 
 - **app**: Main application module with UI, ViewModels, and core logic
+- **core/agent-runtime**: Pure Kotlin Agent Kernel contracts (Agent, RunScope, AgentEvent, Surface)
+- **core/agent-store-room**: Room persistence for AgentRuntimeDatabase (agent_run, agent_event, trace_span)
+- **core/agent-utils**: Shared JSON extension utilities
+- **feature/deepread/api**: DeepRead agent types (DeepReadInput, DeepReadArtifact, events)
+- **feature/chat/api**: ChatTurn agent types (ChatTurnInput, ChatTurnArtifact, events)
 - **ai**: AI SDK abstraction layer for different providers (OpenAI, Google, Anthropic)
 - **common**: Common utilities and extensions
 - **document**: Document parsing module for handling PDF, DOCX, and PPTX files
