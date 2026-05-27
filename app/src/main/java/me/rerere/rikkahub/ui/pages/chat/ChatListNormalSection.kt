@@ -678,6 +678,10 @@ internal fun ChatListNormal(
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
+    val showPinnedAgentWorkingIndicator =
+        timelineLoading &&
+            showBottomFollowAnimation &&
+            followMode == TimelineFollowMode.FollowingBottom
     val streamingVisibleEvents = remember(conversation.id) {
         MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     }
@@ -1093,10 +1097,18 @@ internal fun ChatListNormal(
                             key = LoadingIndicatorKey,
                             contentType = "loading",
                         ) {
-                            TimelineTailWorkingIndicator(
-                                processingStatus = processingStatus,
-                                visible = showBottomFollowAnimation,
-                            )
+                            if (showPinnedAgentWorkingIndicator) {
+                                Spacer(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(AgentWorkingIndicatorReserveHeight)
+                                )
+                            } else {
+                                TimelineTailWorkingIndicator(
+                                    processingStatus = processingStatus,
+                                    visible = showBottomFollowAnimation,
+                                )
+                            }
                         }
                     }
 
@@ -1149,6 +1161,18 @@ internal fun ChatListNormal(
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
             )
+
+            AnimatedVisibility(
+                visible = showPinnedAgentWorkingIndicator && !captureProgress,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = AgentWorkingIndicatorOverlayBottomOffset)
+                    .zIndex(6f),
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                AgentWorkingIndicator(processingStatus = processingStatus)
+            }
 
             // 完成选择
             AnimatedVisibility(
