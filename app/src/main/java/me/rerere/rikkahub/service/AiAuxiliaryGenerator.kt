@@ -66,7 +66,7 @@ class AiAuxiliaryGenerator(
                 title = title,
                 updateAt = Instant.now(),
             )
-            conversationAccess.updateConversation(conversationId, updatedConversation)
+            conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
             conversationRepo.updateConversationMetadata(
                 conversationId = conversationId,
                 title = title,
@@ -87,11 +87,12 @@ class AiAuxiliaryGenerator(
             val model = settings.resolveTaskChatModel(settings.suggestionModelId) ?: return
             val provider = model.findProvider(settings.providers) ?: return
 
-            val currentConv = conversationAccess.getConversationFlow(conversationId).value
-            conversationAccess.updateConversation(
-                conversationId,
-                currentConv.copy(chatSuggestions = emptyList()),
-            )
+            conversationAccess.getConversationFlowOrNull(conversationId)?.let { flow ->
+                conversationAccess.updateConversation(
+                    conversationId,
+                    flow.value.copy(chatSuggestions = emptyList()),
+                )
+            }
 
             val providerHandler = providerManager.getProviderByType(provider)
             val result = providerHandler.generateText(
@@ -116,12 +117,12 @@ class AiAuxiliaryGenerator(
                 result.choices[0].message?.toText()?.split("\n")?.map { it.trim() }
                     ?.filter { it.isNotBlank() } ?: emptyList()
 
-            val latest = conversationAccess.getConversationFlow(conversationId).value
+            val latest = conversationAccess.getConversationFlowOrNull(conversationId)?.value ?: conversation
             val updatedConversation = latest.copy(
                 chatSuggestions = suggestions.take(10),
                 updateAt = Instant.now(),
             )
-            conversationAccess.updateConversation(conversationId, updatedConversation)
+            conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
             conversationRepo.updateConversationMetadata(
                 conversationId = conversationId,
                 chatSuggestions = updatedConversation.chatSuggestions,

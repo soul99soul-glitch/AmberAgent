@@ -436,6 +436,10 @@ class ChatService(
         return getOrCreateSession(conversationId).state
     }
 
+    override fun getConversationFlowOrNull(conversationId: Uuid): StateFlow<Conversation>? {
+        return sessions[conversationId]?.state
+    }
+
     fun getTimelineLoadStateFlow(conversationId: Uuid): StateFlow<ConversationTimelineLoadState> {
         return getOrCreateSession(conversationId).timelineLoadState
     }
@@ -1771,10 +1775,10 @@ class ChatService(
 
     // ---- 对话状态更新 ----
 
-    private fun updateConversation(
+    override fun updateConversation(
         conversationId: Uuid,
         conversation: Conversation,
-        checkDeletedFiles: Boolean = true,
+        checkDeletedFiles: Boolean,
     ) {
         if (conversation.id != conversationId) return
         val session = getOrCreateSession(conversationId)
@@ -1798,10 +1802,6 @@ class ChatService(
                 )
             )
         }
-    }
-
-    override fun updateConversation(conversationId: Uuid, conversation: Conversation) {
-        updateConversation(conversationId, conversation, checkDeletedFiles = true)
     }
 
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {

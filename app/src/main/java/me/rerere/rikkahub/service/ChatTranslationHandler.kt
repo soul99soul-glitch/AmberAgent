@@ -97,7 +97,8 @@ class ChatTranslationHandler(
 
 interface ConversationAccess {
     fun getConversationFlow(conversationId: Uuid): StateFlow<Conversation>
-    fun updateConversation(conversationId: Uuid, conversation: Conversation)
+    fun getConversationFlowOrNull(conversationId: Uuid): StateFlow<Conversation>?
+    fun updateConversation(conversationId: Uuid, conversation: Conversation, checkDeletedFiles: Boolean = true)
     suspend fun saveConversation(conversationId: Uuid, conversation: Conversation)
     fun addError(error: Throwable, conversationId: Uuid? = null, title: String? = null)
 }
