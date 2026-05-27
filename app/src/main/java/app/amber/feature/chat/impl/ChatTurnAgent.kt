@@ -1,0 +1,117 @@
+package app.amber.feature.chat.impl
+
+import app.amber.core.agent.runtime.Agent
+import app.amber.core.agent.runtime.AgentDescriptor
+import app.amber.core.agent.runtime.AgentHandler
+import app.amber.feature.chat.api.ChatEventPayload
+import app.amber.feature.chat.api.ChatTurnArtifact
+import app.amber.feature.chat.api.ChatTurnDescriptor
+import app.amber.feature.chat.api.ChatTurnInput
+import kotlinx.coroutines.flow.last
+import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.ai.GenerationChunk
+import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.Conversation
+
+class ChatTurnAgent(
+    private val generationHandler: GenerationHandler,
+    private val sessionResolver: ChatSessionResolver,
+) : Agent<ChatTurnInput, ChatTurnArtifact> {
+
+    override val descriptor: AgentDescriptor = ChatTurnDescriptor.value
+
+    override val handler = AgentHandler<ChatTurnInput, ChatTurnArtifact> { input, scope ->
+        val session = sessionResolver.resolve(input)
+
+        scope.events.commit(
+            ChatEventPayload.UserMessageAccepted(
+                messageNodeId = input.messageNodeId,
+                messageId = input.userMessageText.hashCode().toString(),
+            )
+        )
+
+        var lastMessages: List<UIMessage> = emptyList()
+        var toolCallCount = 0
+
+        try {
+            generationHandler.generateText(
+                settings = session.settings,
+                model = session.model,
+                messages = session.messages,
+                inputTransformers = session.inputTransformers,
+                outputTransformers = session.outputTransformers,
+                assistant = session.assistant,
+                memories = session.memories,
+                tools = session.tools,
+                maxSteps = input.maxToolIterations,
+                autoApproveTools = session.autoApproveTools,
+                autoApproveHighRiskTools = session.autoApproveHighRiskTools,
+                autoApprovedToolNames = session.autoApprovedToolNames,
+                invocationContext = session.invocationContext,
+                conversation = session.conversation,
+            ).collect { chunk ->
+                when (chunk) {
+                    is GenerationChunk.Messages -> {
+                        lastMessages = chunk.messages
+                        val lastMsg = lastMessages.lastOrNull()
+                        if (lastMsg != null) {
+                            scope.events.emit(
+                                ChatEventPayload.AssistantTextDelta(
+                                    messageId = lastMsg.id.toString(),
+                                    delta = "",
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            scope.events.commitError(e, recoverable = false)
+            throw e
+        }
+
+        val assistantMsg = lastMessages.lastOrNull()
+        val msgId = assistantMsg?.id?.toString() ?: "unknown"
+
+        scope.events.commit(
+            ChatEventPayload.AssistantMessageFinalized(
+                messageNodeId = input.messageNodeId,
+                messageId = msgId,
+                inputTokens = assistantMsg?.usage?.promptTokens ?: 0,
+                outputTokens = assistantMsg?.usage?.completionTokens ?: 0,
+                regenerateOf = input.regenerateOf,
+            )
+        )
+
+        ChatTurnArtifact(
+            assistantMessageId = msgId,
+            producedInNode = input.messageNodeId,
+            inputTokens = assistantMsg?.usage?.promptTokens ?: 0,
+            outputTokens = assistantMsg?.usage?.completionTokens ?: 0,
+            toolCallsCount = toolCallCount,
+        )
+    }
+}
+
+interface ChatSessionResolver {
+    fun resolve(input: ChatTurnInput): ChatSession
+}
+
+data class ChatSession(
+    val settings: Settings,
+    val model: me.rerere.ai.provider.Model,
+    val messages: List<UIMessage>,
+    val inputTransformers: List<me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer>,
+    val outputTransformers: List<me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer>,
+    val assistant: Assistant,
+    val memories: List<me.rerere.rikkahub.data.model.AssistantMemory>?,
+    val tools: List<me.rerere.ai.core.Tool>,
+    val autoApproveTools: Boolean,
+    val autoApproveHighRiskTools: Boolean,
+    val autoApprovedToolNames: Set<String>,
+    val invocationContext: me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext,
+    val conversation: Conversation?,
+)
