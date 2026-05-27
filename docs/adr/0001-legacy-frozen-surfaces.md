@@ -65,7 +65,8 @@ from being silently renamed and losing the ability to remotely disable native co
 | Archive extension | `.amberbackup` | `SYNC_ARCHIVE_EXTENSION = "amberbackup"` in `SyncModels.kt` |
 | S3 prefix | `rikkahub_backups/` | `S3Sync.kt` — existing user backups stored under this key prefix |
 | S3 file pattern | `backup_*.zip` | Legacy S3 path (pre-sync-v2); filter in `S3Sync.kt:73` |
-| Secret mask sentinel | `__MASKED_BY_AMBERAGENT_BACKUP__` | `BackupSettingsRedactor.kt` — changing this breaks restore of masked backups |
+| Secret mask sentinel (backup) | `__MASKED_BY_AMBERAGENT_BACKUP__` | `BackupSettingsRedactor.kt` — changing this breaks restore of masked backups |
+| Secret mask sentinel (sync) | `__MASKED_BY_AMBERAGENT_SYNC__` | `SyncRedactor.kt:15` — changing this breaks restore of cloud-synced archives |
 | File URI prefix | `amber-file://` | `SyncArchiveManager.kt:698` — embedded in archive entries |
 
 ---
