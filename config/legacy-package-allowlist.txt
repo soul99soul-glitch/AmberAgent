@@ -2,6 +2,9 @@
 # 必须保留在 me.rerere.* 包名的文件/路径。
 # 破除任何一条都会导致用户数据丢失或运行时崩溃。
 # 后续迁移操作前必须先 grep 此清单。
+#
+# 本文件同时被 check-legacy-package.sh（自动防回流）和人工迁移审查使用。
+# 部分条目不在 guard 的自动检测范围内（如 res/xml），仅供人工迁移 checklist。
 
 # ─── Room schema 路径绑定 @Database 类的 FQN ───
 app/src/main/java/me/rerere/rikkahub/data/db/AppDatabase.kt
@@ -24,6 +27,7 @@ document/src/main/java/me/rerere/document/**
 # ─── Roadmap 修订 #1 补充（3 个中风险遗漏）───
 
 # 快捷方式 Activity FQN（shortcuts.xml 硬编码）—— 迁移时需同步更新
+# (不在 guard 自动检测范围内，仅供人工 checklist)
 app/src/main/res/xml/shortcuts.xml
 
 # Broadcast action 常量（发送方/接收方必须同步迁移）

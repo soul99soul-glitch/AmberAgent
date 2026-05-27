@@ -34,17 +34,15 @@ fi
 
 # Filter to only Kotlin files in legacy package paths
 LEGACY_PATTERN="^(app|ai|common|highlight|search|tts|document|web)/src/.*/java/me/rerere/"
-VIOLATIONS=""
+VIOLATIONS=()
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   if echo "$file" | grep -qE "$LEGACY_PATTERN"; then
-    # Check against allowlist (strip comments and blank lines)
     ALLOWED=false
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
       [[ "$entry" == \#* ]] && continue
-      # Support glob patterns with **
       if [[ "$entry" == *"**"* ]]; then
         PREFIX="${entry%%\*\*}"
         if [[ "$file" == "$PREFIX"* ]]; then
@@ -58,17 +56,17 @@ while IFS= read -r file; do
     done < "$ALLOWLIST"
 
     if [ "$ALLOWED" = false ]; then
-      VIOLATIONS="${VIOLATIONS}${file}\n"
+      VIOLATIONS+=("$file")
     fi
   fi
 done <<< "$NEW_FILES"
 
-if [ -n "$VIOLATIONS" ]; then
+if [ ${#VIOLATIONS[@]} -gt 0 ]; then
   echo "::error::Legacy package guard: new files in me.rerere.* must move to app.amber.*"
   echo ""
   echo "Violations:"
-  printf "$VIOLATIONS" | while IFS= read -r v; do
-    [ -n "$v" ] && echo "  - $v"
+  for v in "${VIOLATIONS[@]}"; do
+    echo "  - $v"
   done
   echo ""
   echo "If a file MUST stay in me.rerere.*, add it to config/legacy-package-allowlist.txt"

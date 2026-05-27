@@ -10,17 +10,4 @@ jobs:
           fetch-depth: 0
 
       - name: New files must not land in me.rerere.*
-        run: |
-          git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD \
-            | grep -E "^(app|ai|common|highlight|search|tts|document|web)/src/.*/java/me/rerere/" \
-            | grep -vFf config/legacy-package-allowlist.txt > /tmp/violations.txt || true
-          if [ -s /tmp/violations.txt ]; then
-            echo "::error::Legacy package guard: new files in me.rerere.* must move to app.amber.*"
-            echo ""
-            echo "Violations:"
-            cat /tmp/violations.txt
-            echo ""
-            echo "If a file MUST stay in me.rerere.*, add it to config/legacy-package-allowlist.txt"
-            exit 1
-          fi
-          echo "Legacy package guard: OK"
+        run: bash config/check-legacy-package.sh "origin/${{ github.base_ref }}"

@@ -116,7 +116,6 @@ private class GenerativeUiInvalidWidgetStreamException(
     val issue: String,
 ) : RuntimeException("Generative UI stream completed without a valid widget: $issue")
 
-
 @Serializable
 sealed interface GenerationChunk {
     data class Messages(

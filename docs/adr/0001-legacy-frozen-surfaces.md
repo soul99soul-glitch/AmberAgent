@@ -50,7 +50,7 @@ resets all user preferences to defaults.
 | `native_path_markdown_html` | Boolean | Same |
 | `native_path_markdown_ast` | Boolean | Same |
 | `native_path_sampling_rate` | Float | Same |
-| `native_path_kill_switch` | String (remote) | RC kill switch — `NativePathBootstrap.REMOTE_KILL_SWITCH_KEY` |
+| `native_path_kill_switch` | Boolean (remote config) | RC kill switch — `NativePathBootstrap.REMOTE_KILL_SWITCH_KEY` |
 
 **Rule**: Native path preference keys are permanent. If a native path is removed,
 the key stays in the schema with its default value. This prevents the kill switch
