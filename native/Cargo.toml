@@ -6,6 +6,7 @@ members = [
     "markdown-parser",
     "highlight-parser",
     "regex-transformer",
+    "tokenizer",
     # `generative-widget-parser` was ABANDONED at Round 1 review (P0 structural
     # mismatch with JVM). Both the Rust crate and the Kotlin adapter have been
     # removed from the spike branch — the abandonment record + revival
@@ -96,6 +97,9 @@ tree-sitter-html = "0.23"
 tree-sitter-css = "0.25"
 # crates.io `tree-sitter-sql` stops at 0.0.2; the maintained fork is `tree-sitter-sequel`.
 tree-sitter-sequel = "0.3"
+
+# Component #8 — tokenizer
+tiktoken-rs = "0.6"
 
 [profile.release]
 opt-level = 3

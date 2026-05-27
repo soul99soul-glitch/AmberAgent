@@ -1,0 +1,19 @@
+[package]
+name = "tokenizer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni.workspace = true
+jni-common.workspace = true
+thiserror.workspace = true
+log.workspace = true
+android_logger.workspace = true
+
+tiktoken-rs = "0.6"
