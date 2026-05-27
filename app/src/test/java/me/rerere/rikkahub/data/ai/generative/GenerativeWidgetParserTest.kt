@@ -221,6 +221,32 @@ class GenerativeWidgetParserTest {
     }
 
     @Test
+    fun parsesGuizangHtmlRendererAndPreservesSpecHtml() {
+        val html = """
+            <!DOCTYPE html>
+            <html><body><div id="deck"><section class="slide dark">A</section></div></body></html>
+        """.trimIndent()
+        val content = """
+            ```show-widget
+            {"title":"Live Deck","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text x=\"2\" y=\"12\">G</text></svg>","spec":{"html":${jsonString(html)},"source":"guizang-ppt-skill","allowRemoteImages":true,"allowRemoteFonts":false}}
+            ```
+        """.trimIndent()
+
+        val widget = GenerativeWidgetParser.parse(content, streaming = false).single() as GenerativeWidgetSegment.Widget
+
+        assertEquals("guizang_html", widget.renderer)
+        assertTrue(widget.specJson!!.contains("<section class=\\\"slide dark\\\">A</section>"))
+        assertTrue(widget.specJson.contains("guizang-ppt-skill"))
+        assertTrue(widget.widgetCode.contains("<svg"))
+    }
+
+    private fun jsonString(value: String): String =
+        "\"" + value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n") + "\""
+
+    @Test
     fun validatesWrappedSlidesSpec() {
         val result = VChartSpecValidator.validateSlidesSpec("""{"slides":[{"title":"A","content":["B"]}]}""")
 

@@ -16,6 +16,13 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object GenerativeWidgetRenderer {
     fun render(renderer: String?, spec: JsonElement?): String? {
+        if (renderer?.lowercase() == GuizangHtmlDeckValidator.RENDERER) {
+            val specObject = spec as? JsonObject ?: return renderErrorSvg("guizang_html: no spec")
+            val title = specObject.string("title")
+                ?: specObject.string("source")
+                ?: "Guizang Live Deck"
+            return renderGuizangPreview(title)
+        }
         if (renderer?.lowercase() == "slides") {
             val specArray = when (spec) {
                 is JsonArray -> spec
@@ -49,6 +56,28 @@ object GenerativeWidgetRenderer {
             <svg width="400" height="80" xmlns="http://www.w3.org/2000/svg">
                 <rect width="100%" height="100%" fill="#fef2f2" rx="8"/>
                 <text x="200" y="44" text-anchor="middle" font-size="13" fill="#dc2626">$escaped</text>
+            </svg>
+        """.trimIndent()
+    }
+
+    private fun renderGuizangPreview(title: String): String {
+        val safeTitle = escape(title).take(56)
+        return """
+            <svg width="100%" viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#111827"/>
+                  <stop offset="0.52" stop-color="#1F5EFF"/>
+                  <stop offset="1" stop-color="#f8fafc"/>
+                </linearGradient>
+              </defs>
+              <rect width="680" height="220" rx="16" fill="url(#g)"/>
+              <rect x="26" y="24" width="628" height="172" rx="12" fill="rgba(255,255,255,.13)" stroke="rgba(255,255,255,.35)"/>
+              <text x="52" y="68" font-size="13" letter-spacing="3" fill="rgba(255,255,255,.76)">GUIZANG LIVE HTML</text>
+              <text x="52" y="116" font-size="28" font-weight="700" fill="#ffffff">$safeTitle</text>
+              <text x="52" y="154" font-size="14" fill="rgba(255,255,255,.78)">WebGL · Motion One · fullscreen deck</text>
+              <circle cx="594" cy="64" r="20" fill="rgba(255,255,255,.18)"/>
+              <circle cx="594" cy="64" r="8" fill="#fff"/>
             </svg>
         """.trimIndent()
     }

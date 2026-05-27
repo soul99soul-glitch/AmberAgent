@@ -93,7 +93,14 @@ object GenerativeUiPlanner {
                 }
 
                 VisualRoute.SLIDES -> {
-                    appendLine("The user asked for a multi-slide presentation / deck. Emit a show-widget RENDERER (slides spec) — NOT an inline SVG.")
+                    if (toolMediated) {
+                        appendLine("The user asked for a presentation/deck but also requested tools, skills, subagents, files, or external context.")
+                        appendLine("Use the requested tool/skill/subagent first. Do NOT create a widget for routing, progress, plan, or status summaries.")
+                        appendLine("Only emit a show-widget after the real tool/skill/subagent result exists and the widget is the final requested artifact.")
+                    } else {
+                        appendLine("The user asked for a multi-slide presentation / deck. Emit a show-widget RENDERER (slides spec) — NOT an inline SVG.")
+                    }
+                    appendLine("Exception: if they explicitly asked for guizang live HTML/WebGL/Motion/1:1/高保真, use renderer \"guizang_html\" with a static cover widget_code and full deck HTML in spec.html.")
                     appendLine("Pick a sensible deck length (4-8 slides) unless the user specified a count. Use the slide spec format the renderer expects.")
                     appendLine("Keep slide content concise; each slide is one idea.")
                 }
@@ -275,7 +282,7 @@ object GenerativeUiPlanner {
         "流程图", "架构图", "组织图", "时序图", "思维导图", "结构图",
         "类图", "状态图", "ER 图", "er图", "用例图", "活动图", "部署图",
         "树状图", "网络拓扑图", "拓扑图", "依赖图", "调用图", "数据流图",
-        "甘特图", "燃尽图", "象限图",
+        "甘特图", "燃尽图", "象限图", "三省六部制",
         // Folk-equivalents the reviewer flagged as missing
         "家族树", "家谱图", "时间线", "时间轴", "鱼骨图", "韦恩图",
         // English — structural visualization terms
@@ -374,4 +381,3 @@ object GenerativeUiPlanner {
         RegexOption.IGNORE_CASE,
     )
 }
-

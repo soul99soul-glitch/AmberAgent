@@ -143,7 +143,7 @@ object GenerativeWidgetParser {
         val parsed = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
         val rendererRaw = parsed?.stringOrNull("renderer")
         val renderer = rendererRaw?.lowercase()?.takeIf {
-            it in setOf("html", "chart", "diagram", "vchart", "slides")
+            it in setOf("html", "chart", "diagram", "vchart", "slides", GuizangHtmlDeckValidator.RENDERER)
         }
         // If renderer field is present but unrecognized (e.g. model emits "svg" / "structure" /
         // "flowchart"), fall back to rendering widget_code as plain html instead of rejecting the
@@ -163,10 +163,11 @@ object GenerativeWidgetParser {
             ?: extractJsonStringValue(jsonText, "title", allowUnclosed = false)
         val specJson = when (renderer) {
             "slides" -> specElement?.let { VChartSpecValidator.normalizeSlidesDeckSpecJson(it.toString()) }
+            GuizangHtmlDeckValidator.RENDERER -> specElement?.toString()
             else -> specElement?.toString()
         }
         val code = when (renderer) {
-            "vchart", "slides" -> renderedCode ?: rawWidgetCode
+            "vchart", "slides", GuizangHtmlDeckValidator.RENDERER -> renderedCode ?: rawWidgetCode
             "html" -> rawWidgetCode
             null -> rawWidgetCode  // old widgets without renderer field
             else -> renderedCode ?: rawWidgetCode
@@ -197,7 +198,7 @@ object GenerativeWidgetParser {
         // For renderer-based widgets (slides, vchart) that have no widget_code during streaming,
         // generate a placeholder card so the user sees progress instead of a generic loading spinner.
         val renderer = extractJsonStringValue(jsonText, "renderer", allowUnclosed = true)
-            ?.lowercase()?.takeIf { it in setOf("vchart", "slides") }
+            ?.lowercase()?.takeIf { it in setOf("vchart", "slides", GuizangHtmlDeckValidator.RENDERER) }
         if (renderer != null) {
             val title = normalizeWidgetTitle(extractJsonStringValue(jsonText, "title", allowUnclosed = true))
             // For slides, try to extract completed slide objects from the partial JSON array
@@ -232,7 +233,10 @@ object GenerativeWidgetParser {
                     )
                 }
             }
-            val label = if (renderer == "slides") "幻灯片" else "图表"
+            val label = when (renderer) {
+                "slides", GuizangHtmlDeckValidator.RENDERER -> "演示"
+                else -> "图表"
+            }
             val titleText = title ?: "正在生成"
             val placeholder = """<svg width="100%" viewBox="0 0 680 100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f9ff" rx="10" stroke="#bae6fd"/><text x="340" y="42" text-anchor="middle" font-size="15" fill="#0369a1">生成$label...</text><text x="340" y="68" text-anchor="middle" font-size="13" fill="#7dd3fc">$titleText</text></svg>"""
             return GenerativeWidgetSegment.Widget(

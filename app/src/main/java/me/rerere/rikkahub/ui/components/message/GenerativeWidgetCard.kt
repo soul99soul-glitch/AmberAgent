@@ -8,10 +8,12 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.Build
+import android.os.Message
 import android.view.WindowManager
+import android.webkit.WebChromeClient
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -71,6 +73,9 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToasterState
 import com.dokar.sonner.ToastType
@@ -81,8 +86,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowExpand01
+import me.rerere.hugeicons.stroke.ArrowLeft01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.FileZip
+import me.rerere.hugeicons.stroke.Pause
+import me.rerere.hugeicons.stroke.Play
+import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizeStatus
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
@@ -167,7 +178,7 @@ fun GenerativeWidgetCard(
             html = sanitized.html,
             setting = settings,
             onDismissRequest = { showExpanded = false },
-            initialFullscreen = widget.renderer == "slides",
+            initialFullscreen = widget.renderer == "slides" || widget.renderer == GuizangHtmlDeckValidator.RENDERER,
         )
     }
 
@@ -269,7 +280,7 @@ fun GenerativeWidgetCard(
                     onAction = onAction,
                 )
             }
-            if (widget.complete && widget.renderer in setOf("vchart", "slides") &&
+            if (widget.complete && widget.renderer in setOf("vchart", "slides", GuizangHtmlDeckValidator.RENDERER) &&
                 widget.specJson != null && canOpenExpanded
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -280,22 +291,36 @@ fun GenerativeWidgetCard(
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     ) {
                         Text(
-                            text = if (widget.renderer == "slides") "▶ 打开演示" else "▶ 交互式图表",
+                            text = when (widget.renderer) {
+                                "slides" -> "▶ 打开演示"
+                                GuizangHtmlDeckValidator.RENDERER -> "▶ 打开 Live 演示"
+                                else -> "▶ 交互式图表"
+                            },
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
-                    if (widget.renderer == "slides") {
+                    if (widget.renderer == "slides" || widget.renderer == GuizangHtmlDeckValidator.RENDERER) {
                         Surface(
                             onClick = {
                                 scope.launch {
-                                    shareSlidesDeckArchive(
-                                        context = context,
-                                        title = widget.title,
-                                        specJson = widget.specJson,
-                                        coverHtml = sanitized.html,
-                                        toaster = toaster,
-                                    )
+                                    if (widget.renderer == GuizangHtmlDeckValidator.RENDERER) {
+                                        shareGuizangDeckArchive(
+                                            context = context,
+                                            title = widget.title,
+                                            specJson = widget.specJson,
+                                            coverHtml = sanitized.html,
+                                            toaster = toaster,
+                                        )
+                                    } else {
+                                        shareSlidesDeckArchive(
+                                            context = context,
+                                            title = widget.title,
+                                            specJson = widget.specJson,
+                                            coverHtml = sanitized.html,
+                                            toaster = toaster,
+                                        )
+                                    }
                                 }
                             },
                             shape = RoundedCornerShape(6.dp),
@@ -338,8 +363,10 @@ fun ExpandedGenerativeWidgetDialog(
     // SVG/HTML widgets always stay in mid-card. The two layouts had inconsistent backgrounds and
     // button orders anyway — collapsing to one mode per renderer keeps things predictable.
     val isFullscreen = initialFullscreen
-    val isRichRenderer = widget.renderer in setOf("vchart", "slides")
+    val isGuizangRenderer = widget.renderer == GuizangHtmlDeckValidator.RENDERER
+    val isRichRenderer = widget.renderer in setOf("vchart", "slides", GuizangHtmlDeckValidator.RENDERER)
     val isSlidesRenderer = widget.renderer == "slides"
+    val isPresentationRenderer = isSlidesRenderer || isGuizangRenderer
 
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -380,7 +407,7 @@ fun ExpandedGenerativeWidgetDialog(
                     modifier = Modifier.padding(if (isFullscreen) 0.dp else 12.dp),
                     verticalArrangement = Arrangement.spacedBy(if (isFullscreen) 0.dp else 10.dp),
                 ) {
-                    val headerCompact = isFullscreen && isSlidesRenderer
+                    val headerCompact = isFullscreen && isPresentationRenderer
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -399,6 +426,33 @@ fun ExpandedGenerativeWidgetDialog(
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
+                        if (widget.specJson != null && isPresentationRenderer) {
+                            IconButton(
+                                onClick = {
+                                    scope.launch {
+                                        if (isGuizangRenderer) {
+                                            shareGuizangDeckArchive(
+                                                context = context,
+                                                title = widget.title,
+                                                specJson = widget.specJson,
+                                                coverHtml = html,
+                                                toaster = toaster,
+                                            )
+                                        } else {
+                                            shareSlidesDeckArchive(
+                                                context = context,
+                                                title = widget.title,
+                                                specJson = widget.specJson,
+                                                coverHtml = html,
+                                                toaster = toaster,
+                                            )
+                                        }
+                                    }
+                                },
+                            ) {
+                                Icon(HugeIcons.FileZip, contentDescription = "分享 ZIP")
+                            }
+                        }
                         IconButton(
                             onClick = {
                                 val activity = context.getActivity()
@@ -407,10 +461,11 @@ fun ExpandedGenerativeWidgetDialog(
                                     toaster.show("暂时无法保存这张卡片", type = ToastType.Error)
                                     return@IconButton
                                 }
-                                val isSlides = widget.renderer == "slides" &&
+                                val isPresentation = (widget.renderer == "slides" ||
+                                    widget.renderer == GuizangHtmlDeckValidator.RENDERER) &&
                                     widget.specJson != null &&
                                     setting.enableInteractiveCharts
-                                if (isSlides) {
+                                if (isPresentation) {
                                     scope.launch {
                                         captureSlidesToJpg(
                                             webView = target,
@@ -418,6 +473,7 @@ fun ExpandedGenerativeWidgetDialog(
                                             context = context,
                                             deckTitle = widget.title,
                                             toaster = toaster,
+                                            settleDelayMs = if (isGuizangRenderer) 900L else 160L,
                                         )
                                     }
                                 } else {
@@ -454,14 +510,22 @@ fun ExpandedGenerativeWidgetDialog(
                             .weight(1f),
                     ) {
                         if (isRichRenderer && widget.specJson != null && setting.enableInteractiveCharts) {
-                            RichSandboxWebView(
-                                renderer = widget.renderer,
-                                specJson = widget.specJson,
-                                setting = setting,
-                                modifier = if (widget.renderer == "slides") Modifier.fillMaxSize() else Modifier.align(Alignment.TopCenter),
-                                maxHeightDp = maxHeight.value.toInt().coerceAtLeast(240),
-                                onWebViewReady = { webView = it },
-                            )
+                            if (isGuizangRenderer) {
+                                GuizangHtmlDeckWebView(
+                                    specJson = widget.specJson,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onWebViewReady = { webView = it },
+                                )
+                            } else {
+                                RichSandboxWebView(
+                                    renderer = widget.renderer,
+                                    specJson = widget.specJson,
+                                    setting = setting,
+                                    modifier = if (widget.renderer == "slides") Modifier.fillMaxSize() else Modifier.align(Alignment.TopCenter),
+                                    maxHeightDp = maxHeight.value.toInt().coerceAtLeast(240),
+                                    onWebViewReady = { webView = it },
+                                )
+                            }
                         } else {
                             SafeGenerativeWidgetWebView(
                                 html = html,
@@ -813,6 +877,97 @@ private class WidgetBridge(
     }
 }
 
+private suspend fun shareGuizangDeckArchive(
+    context: Context,
+    title: String?,
+    specJson: String,
+    coverHtml: String,
+    toaster: ToasterState,
+) {
+    toaster.show("正在打包 Live HTML…")
+    val archive = runCatching {
+        withContext(Dispatchers.IO) {
+            createGuizangDeckArchive(context, title, specJson, coverHtml)
+        }
+    }.getOrElse { error ->
+        toaster.show(error.message ?: "打包失败", type = ToastType.Error)
+        return
+    }
+    runCatching {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", archive)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/zip"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, archive.name)
+            putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "Guizang Live HTML")
+            clipData = ClipData.newUri(context.contentResolver, archive.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "分享 Live HTML ZIP")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }.onSuccess {
+        toaster.show("已打开分享菜单", type = ToastType.Success)
+    }.onFailure { error ->
+        toaster.show(error.message ?: "无法打开分享菜单", type = ToastType.Error)
+    }
+}
+
+private fun createGuizangDeckArchive(
+    context: Context,
+    title: String?,
+    specJson: String,
+    coverHtml: String,
+): File {
+    val now = System.currentTimeMillis()
+    val safeTitle = safeArchiveName(title)
+    val dir = File(context.cacheDir, "guizang-html-shares").apply { mkdirs() }
+    dir.listFiles()
+        ?.filter { it.isFile && now - it.lastModified() > 2 * 24 * 60 * 60 * 1000L }
+        ?.forEach { it.delete() }
+    val archive = File(dir, "AmberAgent_${safeTitle}_guizang_$now.zip")
+    val deck = GuizangHtmlDeckValidator.normalizeSpecJson(specJson)
+        ?: error("Guizang HTML 数据格式不正确，无法分享")
+    val validation = GuizangHtmlDeckValidator.validateDeck(deck)
+    if (!validation.valid) {
+        error("Guizang HTML 不安全或过大，无法分享: ${validation.reason.orEmpty()}")
+    }
+    val exportHtml = GuizangHtmlDeckValidator.rewriteRuntimeUrlsForArchive(deck.html)
+    ZipOutputStream(FileOutputStream(archive)).use { zip ->
+        zip.writeTextEntry(
+            name = "manifest.json",
+            text = JSONObject()
+                .put("type", "amberagent-guizang-html")
+                .put("title", title?.takeIf { it.isNotBlank() } ?: "Guizang Live HTML")
+                .put("source", deck.source ?: "guizang_html")
+                .put("allow_remote_images", deck.allowRemoteImages)
+                .put("allow_remote_fonts", deck.allowRemoteFonts)
+                .put("created_at_ms", now)
+                .toString(2),
+        )
+        zip.writeTextEntry("index.html", exportHtml)
+        zip.writeAssetEntry(context, "assets/motion.min.js", GuizangHtmlDeckValidator.MOTION_ASSET_PATH)
+        zip.writeAssetEntry(context, "assets/lucide.min.js", GuizangHtmlDeckValidator.LUCIDE_ASSET_PATH)
+        zip.writeTextEntry(
+            "README.md",
+            """
+            # ${title?.takeIf { it.isNotBlank() } ?: "Guizang Live HTML"}
+
+            - `index.html`: Guizang live HTML deck, with Motion One and Lucide URLs rewritten to local files.
+            - `assets/motion.min.js`: bundled Motion One runtime.
+            - `assets/lucide.min.js`: bundled Lucide runtime.
+            - `cover.svg`: optional chat preview cover.
+            - Remote images/fonts may still load if the deck references them and the viewer has network access.
+            """.trimIndent(),
+        )
+        val cover = coverHtml.trim()
+        if (cover.startsWith("<svg", ignoreCase = true) && cover.length <= 32_000) {
+            zip.writeTextEntry("cover.svg", cover)
+        }
+    }
+    return archive
+}
+
 private suspend fun shareSlidesDeckArchive(
     context: Context,
     title: String?,
@@ -918,6 +1073,12 @@ private fun ZipOutputStream.writeTextEntry(name: String, text: String) {
     closeEntry()
 }
 
+private fun ZipOutputStream.writeAssetEntry(context: Context, name: String, assetPath: String) {
+    putNextEntry(ZipEntry(name))
+    context.assets.open(assetPath).use { input -> input.copyTo(this) }
+    closeEntry()
+}
+
 private fun buildStandaloneSlidesHtml(context: Context, title: String?, specJson: String): String {
     val safeTitle = htmlEscape(title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
     val slidesLiteral = JSONObject.quote(specJson.toScriptSafeJsonString())
@@ -963,8 +1124,9 @@ private suspend fun captureSlidesToJpg(
     context: android.content.Context,
     deckTitle: String?,
     toaster: com.dokar.sonner.ToasterState,
+    settleDelayMs: Long = 160L,
 ) {
-    toaster.show("正在保存幻灯片…")
+    toaster.show("正在保存演示…")
     val count = evaluateJsAwait(webView, "window.__getSlideCount && window.__getSlideCount()")
         ?.toIntOrNull() ?: 0
     if (count <= 0) {
@@ -990,7 +1152,7 @@ private suspend fun captureSlidesToJpg(
                     null,
                 )
             }
-            delay(160)
+            delay(settleDelayMs)
             val bitmap = withContext(Dispatchers.Main) { webView.captureWidgetBitmap() } ?: continue
             val ok = withContext(Dispatchers.IO) {
                 context.exportJpegImage(
@@ -1063,6 +1225,356 @@ private fun isSafeExternalWidgetUrl(url: String): Boolean {
     val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
     return uri.scheme?.lowercase() in setOf("http", "https")
 }
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun GuizangHtmlDeckWebView(
+    specJson: String,
+    modifier: Modifier = Modifier,
+    onWebViewReady: (WebView?) -> Unit = {},
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val deck = remember(specJson) { GuizangHtmlDeckValidator.normalizeSpecJson(specJson) }
+    val validated = remember(deck) {
+        deck?.let { GuizangHtmlDeckValidator.validateDeck(it) }
+            ?: GuizangHtmlDeckValidator.ValidationResult(false, "expected spec.html")
+    }
+    var activeWebView by remember { mutableStateOf<WebView?>(null) }
+    var currentSlide by remember { mutableStateOf(0) }
+    var slideCount by remember { mutableStateOf(0) }
+    var lowPower by remember { mutableStateOf(false) }
+    val lowPowerState by rememberUpdatedState(lowPower)
+
+    if (!validated.valid || deck == null) {
+        Text(
+            text = "Guizang HTML 校验失败: ${validated.reason.orEmpty()}",
+            modifier = modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+
+    fun setLowPowerMode(on: Boolean) {
+        lowPower = on
+        activeWebView?.evaluateJavascript(
+            "window.__setLowPowerMode && window.__setLowPowerMode($on);",
+            null,
+        )
+    }
+
+    fun runDeckAction(js: String) {
+        activeWebView?.evaluateJavascript(js, null)
+    }
+
+    LaunchedEffect(activeWebView) {
+        while (true) {
+            val target = activeWebView ?: break
+            val nextCount = evaluateJsAwait(target, "window.__getSlideCount && window.__getSlideCount()")
+                ?.toIntOrNull()
+                ?: 0
+            val nextCurrent = evaluateJsAwait(target, "window.__getCurrentSlide && window.__getCurrentSlide()")
+                ?.toIntOrNull()
+                ?: 0
+            slideCount = nextCount
+            currentSlide = nextCurrent.coerceIn(0, (nextCount - 1).coerceAtLeast(0))
+            delay(650)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, activeWebView) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    activeWebView?.evaluateJavascript(
+                        "window.__setLowPowerMode && window.__setLowPowerMode(true);",
+                        null,
+                    )
+                    activeWebView?.onPause()
+                }
+
+                Lifecycle.Event.ON_RESUME -> {
+                    activeWebView?.onResume()
+                    activeWebView?.evaluateJavascript(
+                        "window.__setLowPowerMode && window.__setLowPowerMode($lowPowerState);",
+                        null,
+                    )
+                }
+
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    overScrollMode = android.view.View.OVER_SCROLL_NEVER
+                    isHorizontalScrollBarEnabled = false
+                    isVerticalScrollBarEnabled = false
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = false
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.allowFileAccessFromFileURLs = false
+                    settings.allowUniversalAccessFromFileURLs = false
+                    settings.setSupportZoom(false)
+                    settings.builtInZoomControls = false
+                    settings.displayZoomControls = false
+                    settings.useWideViewPort = false
+                    settings.loadWithOverviewMode = false
+                    settings.javaScriptCanOpenWindowsAutomatically = false
+                    settings.mediaPlaybackRequiresUserGesture = true
+                    settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                    settings.blockNetworkLoads = false
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    settings.setSupportMultipleWindows(false)
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: Message?,
+                        ): Boolean = false
+                    }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean = true
+
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): WebResourceResponse? {
+                            val url = request?.url?.toString() ?: return null
+                            GuizangHtmlDeckValidator.runtimeAssetForUrl(url)?.let { asset ->
+                                return guizangAssetResponse(asset)
+                            }
+                            interceptBuiltinFontRequest(request)?.let { return it }
+
+                            val uri = request.url
+                            val scheme = uri.scheme?.lowercase()
+                            if (scheme == "file" || scheme == "content" || scheme == "intent") {
+                                return blockedGuizangResponse()
+                            }
+                            if (scheme == "http" || scheme == "https") {
+                                if (uri.host == "amberagent.local") return blockedGuizangResponse()
+                                if (deck.allowRemoteImages && GuizangHtmlDeckValidator.isAllowedRemoteImage(url)) return null
+                                if (deck.allowRemoteFonts && GuizangHtmlDeckValidator.isAllowedRemoteFontOrStylesheet(url)) return null
+                                return blockedGuizangResponse()
+                            }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            view?.evaluateJavascript(buildGuizangDeckBootstrapJs(), null)
+                        }
+                    }
+                    val runtimeHtml = GuizangHtmlDeckValidator.rewriteRuntimeUrls(deck.html)
+                    post {
+                        loadDataWithBaseURL(
+                            "https://amberagent.local/guizang-deck/",
+                            runtimeHtml,
+                            "text/html",
+                            "utf-8",
+                            null,
+                        )
+                    }
+                    activeWebView = this
+                    onWebViewReady(this)
+                }
+            },
+            update = { webView ->
+                activeWebView = webView
+                onWebViewReady(webView)
+            },
+        )
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(14.dp),
+            shape = RoundedCornerShape(999.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+            tonalElevation = 2.dp,
+            shadowElevation = 4.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                IconButton(
+                    onClick = {
+                        runDeckAction("window.__amberDeckPrev && window.__amberDeckPrev();")
+                    },
+                ) {
+                    Icon(HugeIcons.ArrowLeft01, contentDescription = "上一页")
+                }
+                Text(
+                    text = if (slideCount > 0) "${currentSlide + 1}/$slideCount" else "0/0",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                IconButton(onClick = { setLowPowerMode(!lowPower) }) {
+                    Icon(
+                        if (lowPower) HugeIcons.Play else HugeIcons.Pause,
+                        contentDescription = if (lowPower) "恢复动画" else "低功耗",
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        runDeckAction("window.__amberDeckNext && window.__amberDeckNext();")
+                    },
+                ) {
+                    Icon(HugeIcons.ArrowRight01, contentDescription = "下一页")
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            activeWebView?.apply {
+                evaluateJavascript("window.__setLowPowerMode && window.__setLowPowerMode(true);", null)
+                onPause()
+                stopLoading()
+                loadUrl("about:blank")
+                destroy()
+            }
+            activeWebView = null
+            onWebViewReady(null)
+        }
+    }
+}
+
+private fun WebView.guizangAssetResponse(
+    asset: GuizangHtmlDeckValidator.RuntimeAsset,
+): WebResourceResponse? =
+    runCatching {
+        WebResourceResponse(asset.mimeType, "utf-8", context.assets.open(asset.assetPath)).apply {
+            responseHeaders = mapOf(
+                "Access-Control-Allow-Origin" to "*",
+                "Cache-Control" to "no-store",
+            )
+        }
+    }.getOrNull()
+
+private fun blockedGuizangResponse(): WebResourceResponse =
+    WebResourceResponse("text/plain", "utf-8", ByteArray(0).inputStream()).apply {
+        responseHeaders = mapOf("Cache-Control" to "no-store")
+    }
+
+private fun buildGuizangDeckBootstrapJs(): String = """
+(function(){
+  if (window.__amberGuizangReady) return true;
+  window.__amberGuizangReady = true;
+
+  function deckEl(){ return document.getElementById('deck'); }
+  function navEl(){ return document.getElementById('nav'); }
+  function slideList(){
+    var deck = deckEl();
+    return deck ? Array.prototype.slice.call(deck.querySelectorAll('.slide')) : [];
+  }
+  function count(){ return slideList().length; }
+  function getIndex(){
+    try {
+      if (typeof idx !== 'undefined' && Number.isFinite(idx)) return idx;
+    } catch(e) {}
+    return window.__currentSlideIndex || window.__amberGuizangCurrent || 0;
+  }
+  function applyTheme(slide){
+    if (!slide) return;
+    var th = slide.dataset && slide.dataset.theme;
+    var isLight = th ? th === 'light' : slide.classList.contains('light');
+    var isDark = th ? th === 'dark' : (slide.classList.contains('dark') || slide.classList.contains('accent'));
+    document.body.classList.toggle('light-bg', !!isLight);
+    document.body.classList.toggle('dark-bg', !!isDark);
+  }
+  function setIndex(n, animate){
+    var slides = slideList();
+    var total = slides.length;
+    if (!total) return false;
+    n = Math.max(0, Math.min(total - 1, Number(n) || 0));
+    try { if (typeof lock !== 'undefined') lock = false; } catch(e) {}
+    try { if (typeof idx !== 'undefined') idx = n; } catch(e) {}
+    window.__currentSlideIndex = n;
+    window.__amberGuizangCurrent = n;
+    var deck = deckEl();
+    if (deck) {
+      var previousTransition = deck.style.transition;
+      if (!animate) deck.style.transition = 'none';
+      deck.style.width = (total * 100) + 'vw';
+      deck.style.transform = 'translateX(' + (-n * 100) + 'vw)';
+      if (!animate) requestAnimationFrame(function(){ deck.style.transition = previousTransition; });
+    }
+    var nav = navEl();
+    if (nav) {
+      Array.prototype.forEach.call(nav.querySelectorAll('.dot'), function(dot, i){
+        dot.classList.toggle('active', i === n);
+      });
+    }
+    applyTheme(slides[n]);
+    if (window.__playSlide) setTimeout(function(){ window.__playSlide(n); }, animate ? 450 : 30);
+    return true;
+  }
+
+  window.__getSlideCount = count;
+  window.__getCurrentSlide = function(){
+    var total = count();
+    if (!total) return 0;
+    return Math.max(0, Math.min(total - 1, getIndex()));
+  };
+  window.__jumpToSlideInstant = function(n){ return setIndex(n, false); };
+  window.__amberDeckPrev = function(){
+    var next = window.__getCurrentSlide() - 1;
+    if (typeof go === 'function') {
+      try { if (typeof lock !== 'undefined') lock = false; } catch(e) {}
+      go(next);
+      window.__amberGuizangCurrent = window.__getCurrentSlide();
+      return true;
+    }
+    return setIndex(next, true);
+  };
+  window.__amberDeckNext = function(){
+    if (window.__pipeAdvance && window.__pipeAdvance()) return 'step';
+    var next = window.__getCurrentSlide() + 1;
+    if (typeof go === 'function') {
+      try { if (typeof lock !== 'undefined') lock = false; } catch(e) {}
+      go(next);
+      window.__amberGuizangCurrent = window.__getCurrentSlide();
+      return true;
+    }
+    return setIndex(next, true);
+  };
+  window.__beginCapture = function(){
+    document.body.classList.add('amber-capture');
+    var style = document.getElementById('amber-capture-style');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'amber-capture-style';
+      style.textContent = '#hint,#nav,#overview{display:none!important} body{overflow:hidden!important}';
+      document.head.appendChild(style);
+    }
+  };
+  window.__endCapture = function(){
+    document.body.classList.remove('amber-capture');
+    var style = document.getElementById('amber-capture-style');
+    if (style) style.remove();
+  };
+  setIndex(getIndex(), false);
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+  return true;
+})();
+""".trimIndent()
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
