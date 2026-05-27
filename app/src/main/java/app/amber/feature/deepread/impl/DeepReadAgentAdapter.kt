@@ -3,13 +3,12 @@ package app.amber.feature.deepread.impl
 import app.amber.core.agent.runtime.Agent
 import app.amber.core.agent.runtime.AgentDescriptor
 import app.amber.core.agent.runtime.AgentHandler
-import app.amber.core.agent.runtime.RunScope
 import app.amber.feature.deepread.api.DeepReadArtifact
 import app.amber.feature.deepread.api.DeepReadDescriptor
 import app.amber.feature.deepread.api.DeepReadEventPayload
 import app.amber.feature.deepread.api.DeepReadInput
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationPhase
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 
 class DeepReadAgentAdapter(
     private val runManager: DeepReadAgentRunManager,
@@ -22,14 +21,17 @@ class DeepReadAgentAdapter(
             DeepReadEventPayload.GenerationPhaseChanged(phase = "collecting")
         )
 
-        val result = runManager.run(
-            topicId = input.topicId,
-            topicTitle = input.title,
-            seedUrl = input.url,
-            force = input.force,
-        )
-
-        val output = result.getOrThrow()
+        val output = try {
+            runManager.run(
+                topicId = input.topicId,
+                topicTitle = input.title,
+                seedUrl = input.url,
+                force = input.force,
+            ).getOrThrow()
+        } catch (e: Exception) {
+            scope.events.commitError(e, recoverable = false)
+            throw e
+        }
 
         scope.events.commit(
             DeepReadEventPayload.GenerationPhaseChanged(
@@ -38,7 +40,7 @@ class DeepReadAgentAdapter(
         )
 
         output.sectionStates.forEach { (stage, state) ->
-            if (state.status.name == "READY") {
+            if (state.status == DeepReadSectionStatus.READY) {
                 scope.events.commit(
                     DeepReadEventPayload.SectionCompleted(
                         stage = stage.name,
@@ -53,7 +55,7 @@ class DeepReadAgentAdapter(
         DeepReadArtifact(
             summary = output.summary,
             topicType = output.topicType,
-            sectionCount = output.sectionStates.count { it.value.status.name == "READY" },
+            sectionCount = output.sectionStates.count { it.value.status == DeepReadSectionStatus.READY },
             generationComplete = output.generationComplete,
         )
     }
