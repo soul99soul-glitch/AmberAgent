@@ -24,3 +24,50 @@
 - Unresolved: none
 - Commits: 06903658..12e25273 (3 commits)
 - Notes: ChatService 2623→2474 (−149 lines). ConversationAccess interface extracted for clean delegation. checkDeletedFiles param preserved in interface. getConversationFlowOrNull added for null-safe session access. compressConversation left in ChatService (depends on ensureFullConversationLoaded).
+
+## Phase B — 2026-05-28
+
+- Tasks completed: TB.2 (:feature:deepread:api), TB.3.5 (DeepReadAgentAdapter), TB.5 (ADR-0003)
+- Tasks deferred: TB.1 (Rust reader-extractor, requires cargo-ndk), TB.3 (full pipeline), TB.4 (Surface ViewModel)
+- Gate review: P1=0, P2=0, P3=2 (fixed), P4=2, P5=2
+- Unresolved: none
+- Commits: 9ae5cedb..289977de (5 commits)
+- Notes: :feature:deepread:api module (pure Kotlin). DeepReadAgentAdapter wraps existing RunManager into Agent interface. ADR-0003 documents UniFFI strategy.
+
+## Phase C (TC.1) — 2026-05-28
+
+- Tasks completed: TC.1 (:feature:chat:api with ChatTurnInput/Artifact/EventPayload)
+- Tasks deferred: TC.2 (ChatTurnAgent implementation), TC.3 (ChatService degradation), TC.4-TC.6
+- Commits: 5c390cc5 (1 commit)
+- Notes: @Serializable added to value classes in :core:agent-runtime for serialization support.
+
+## Phase D (QW1) — 2026-05-28
+
+- Tasks completed: QW1 (:core:agent-utils with shared ToolJson extensions)
+- Tasks deferred: Sprint 2-4 (module extraction sprints)
+- Commits: 2b39dec4 (1 commit)
+- Notes: Public versions of string/requiredString/boolean/int/long ready for webmount decoupling.
+
+## Deferred Work Summary
+
+The following items require infrastructure not available in this session:
+
+### Rust Toolchain Dependent (TA.3a + downstream)
+- TA.3a: UniFFI Android Pioneer (cargo-ndk 4 ABI, CI cross-compile)
+- TA.3b: tokenizer crate
+- Phase A.5: markdown + regex Rust crate production wiring (HARD GATE)
+- TB.1: reader-extractor Rust crate
+
+### Deep Implementation (multi-week, require extensive business logic understanding)
+- TC.2: ChatTurnAgent (rewrite of GenerationHandler 230-line tool loop)
+- TC.3: ChatService degradation to service shell
+- TC.4-TC.6: ChatPage UI, projector, property tests
+- TB.3: Full DeepRead pipeline
+- TB.4: DeepReadSurface ViewModel
+- Phase D Sprint 2-4: Physical module extraction of 18 agent sub-systems
+
+### Legacy Cleanup (Phase E, depends on D completion)
+- TE.1: Minimize legacy allowlist
+- TE.2: Rename highlight/document module packages
+- TE.3: Documentation rewrite
+- TE.4: Internal docs update
