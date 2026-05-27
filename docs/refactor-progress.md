@@ -16,3 +16,11 @@
 - Unresolved: none
 - Commits: d79164d0..06edc6a2 (6 commits)
 - Notes: :core:agent-runtime (pure Kotlin, zero Android deps, 12 interface files). :core:agent-store-room (Room entities for agent_run/agent_event/trace_span/permission_intent, separate DB). LegacyRunScope adapter created. GenerationHandler scope param deferred to Phase C per review. ADR-0002 with 14 design decisions.
+
+## TC.0 (Phase C pre-split) — 2026-05-28
+
+- Tasks completed: TC.0.1 (TranslationHandler), TC.0.2 (AiAuxiliaryGenerator)
+- Gate review: P1=0, P2=1 (fixed), P3=1 (fixed), P4=1, P5=1
+- Unresolved: none
+- Commits: 06903658..12e25273 (3 commits)
+- Notes: ChatService 2623→2474 (−149 lines). ConversationAccess interface extracted for clean delegation. checkDeletedFiles param preserved in interface. getConversationFlowOrNull added for null-safe session access. compressConversation left in ChatService (depends on ensureFullConversationLoaded).
