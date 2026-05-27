@@ -678,14 +678,26 @@ internal fun ChatListNormal(
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
-    val timelineHasScrollableBacklog by remember(state) {
-        derivedStateOf { state.canScrollBackward }
+    val pinRequiresViewportFillSlackPx = with(density) { 24.dp.roundToPx() }
+    val timelineVisibleContentFillsViewport by remember(state, pinRequiresViewportFillSlackPx) {
+        derivedStateOf {
+            val visibleItems = state.layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) {
+                false
+            } else {
+                val visibleContentTop = visibleItems.minOf { it.offset }
+                val visibleContentBottom = visibleItems.maxOf { it.offset + it.size }
+                val visibleContentSpan = visibleContentBottom - visibleContentTop
+                val viewportSpan = state.layoutInfo.viewportEndOffset - state.layoutInfo.viewportStartOffset
+                visibleContentSpan >= viewportSpan - pinRequiresViewportFillSlackPx
+            }
+        }
     }
     val showPinnedAgentWorkingIndicator =
         timelineLoading &&
             showBottomFollowAnimation &&
             followMode == TimelineFollowMode.FollowingBottom &&
-            timelineHasScrollableBacklog
+            timelineVisibleContentFillsViewport
     val streamingVisibleEvents = remember(conversation.id) {
         MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     }
@@ -1108,10 +1120,11 @@ internal fun ChatListNormal(
                                         .height(AgentWorkingIndicatorReserveHeight)
                                 )
                             } else {
-                                TimelineTailWorkingIndicator(
-                                    processingStatus = processingStatus,
-                                    visible = showBottomFollowAnimation,
-                                )
+                                if (showBottomFollowAnimation) {
+                                    Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
+                                        AgentWorkingIndicator(processingStatus = processingStatus)
+                                    }
+                                }
                             }
                         }
                     }
