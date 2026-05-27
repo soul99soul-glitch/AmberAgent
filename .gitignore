@@ -16,3 +16,4 @@ local.properties
 # Perfetto trace binaries (large, regeneratable). Keep .md analysis reports.
 *.pftrace
 *.perfetto-trace
+core/**/build/
