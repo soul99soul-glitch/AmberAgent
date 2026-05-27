@@ -624,8 +624,8 @@
   <string name="setting_display_page_chat_font_family_monospace">Monospace</string>
   <string name="setting_display_page_chat_font_family_serif">Serif</string>
   <string name="setting_display_page_chat_font_family_title">Chat Font</string>
-  <string name="setting_display_page_chat_list_model_icon_desc">Whether to display model icons in chat list messages</string>
-  <string name="setting_display_page_chat_list_model_icon_title">Chat List Model Icon</string>
+  <string name="setting_display_page_chat_list_model_icon_desc">Show the status dot next to assistant message headers</string>
+  <string name="setting_display_page_chat_list_model_icon_title">Assistant Status Dot</string>
   <string name="setting_display_page_code_block_auto_collapse_desc">Automatically collapse code blocks by default</string>
   <string name="setting_display_page_code_block_auto_collapse_title">Code Block Auto Collapse</string>
   <string name="setting_display_page_code_block_auto_wrap_desc">Automatically wrap long lines in code blocks</string>
@@ -640,6 +640,8 @@
   <string name="setting_display_page_launch_start_mode_home">Home</string>
   <string name="setting_display_page_enable_auto_scroll_desc">Follow generation only when the chat is already near the bottom</string>
   <string name="setting_display_page_enable_auto_scroll_title">Follow Generation</string>
+  <string name="setting_display_page_bottom_follow_animation_desc">Show the small breathing dot at the end of the generating message</string>
+  <string name="setting_display_page_bottom_follow_animation_title">Bottom Follow Animation</string>
   <string name="setting_display_page_enable_blur_effect_desc">Enable blur effect on chat input bar</string>
   <string name="setting_display_page_enable_blur_effect_title">Enable Blur Effect</string>
   <string name="setting_display_page_enable_latex_rendering_desc">Render mathematical expressions and formulas using LaTeX syntax</string>
@@ -855,6 +857,7 @@
   <string name="setting_page_search_agent_search">Agent Web Search</string>
   <string name="setting_page_search_agent_search_desc">Allow chats to use search_web and scrape_web with enabled services.</string>
   <string name="setting_page_search_enabled_services_count">%1$d/%2$d services enabled for multi-source Agent search.</string>
+  <string name="setting_page_search_enabled_services_summary">%1$d of %2$d enabled · multi-source recall</string>
   <string name="setting_page_search_builtin_sources">Built-in free sources</string>
   <string name="setting_page_search_builtin_sources_desc">Used as public fallback, reader, and vertical cross-check sources when API services are weak or unavailable.</string>
   <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
@@ -869,10 +872,19 @@
   <string name="setting_page_search_builtin_hackernews_desc">Technical and open-source discussion source for developer topics.</string>
   <string name="setting_page_search_google_webview_fallback">Google WebView fallback</string>
   <string name="setting_page_search_google_webview_fallback_desc">Opens a visible search page only when normal search is weak or deep search asks for it.</string>
+  <string name="setting_page_search_configured_services">Configured</string>
+  <string name="setting_page_search_drag_priority">drag to adjust priority</string>
   <string name="setting_page_search_recommend_title">Recommended combinations</string>
   <string name="setting_page_search_recommend_desc">Zero cost: Jina + DuckDuckGo + Bing. Google results: add Serper or SerpAPI. High quality: add Tavily or Brave. Self-hosted: add SearXNG.</string>
+  <string name="setting_page_search_recommend_zero_cost">Zero cost</string>
+  <string name="setting_page_search_recommend_zero_cost_detail">Jina + DuckDuckGo + Bing</string>
+  <string name="setting_page_search_recommend_google">Google results</string>
+  <string name="setting_page_search_recommend_google_detail">Serper / SerpAPI</string>
+  <string name="setting_page_search_recommend_quality">High quality</string>
+  <string name="setting_page_search_recommend_quality_detail">Tavily or Brave</string>
   <string name="setting_page_search_use_for_agent">Use for Agent search</string>
   <string name="setting_page_search_result_size">Result Size</string>
+  <string name="setting_page_search_result_size_desc">Maximum results returned per search</string>
   <string name="setting_page_search_service">Search Service</string>
   <string name="setting_page_search_service_desc">Set up search service</string>
   <string name="setting_page_search_title">Search Service</string>

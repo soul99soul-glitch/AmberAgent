@@ -1,9 +1,13 @@
 package me.rerere.rikkahub.ui.pages.board
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -32,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -49,6 +54,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -71,6 +77,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagram
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
@@ -88,7 +95,11 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTem
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.font.SlidesFontRepository
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import org.koin.compose.koinInject
 
 @Composable
@@ -100,6 +111,7 @@ fun DeepReadScreen(
     fromHistory: Boolean = false,
 ) {
     val agent: DeepReadAgentRunManager = koinInject()
+    val deepReadScheduler: DeepReadScheduler = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val hotListRepository: HotListRepository = koinInject()
     val fontRepository: SlidesFontRepository = koinInject()
@@ -146,33 +158,26 @@ fun DeepReadScreen(
     val historyExpired = cacheEntry?.expired == true
     val historyLoading = fromHistory && !cacheState.loaded
     var runError by remember(topicId) { mutableStateOf<String?>(null) }
-    var fullRunInFlight by remember(topicId) { mutableStateOf(false) }
     var retryingStages by remember(topicId) { mutableStateOf<Set<DeepReadGenerationStage>>(emptySet()) }
     var initialForceConsumed by rememberSaveable(topicId, sourceUrl) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val darkTheme = LocalDarkMode.current
+    DeepReadImmersiveWindowEffect(darkTheme = darkTheme)
 
     val anySectionRunning = output?.sectionStates.orEmpty().values.any { it.status == DeepReadSectionStatus.RUNNING }
     val verificationRunning = output?.verificationState?.status == DeepReadSectionStatus.RUNNING
-    val generating = fullRunInFlight || anySectionRunning || verificationRunning || retryingStages.isNotEmpty()
+    val backgroundRunning by deepReadScheduler
+        .observeRunning(topicId)
+        .collectAsStateWithLifecycle(initialValue = false)
+    val generating = backgroundRunning || anySectionRunning || verificationRunning || retryingStages.isNotEmpty()
     val complete = output?.isComplete() == true
 
     fun runAll(force: Boolean = false) {
         if (!confirmed) return
-        if (fullRunInFlight) return
-        fullRunInFlight = true
+        if (backgroundRunning && !force) return
         runError = null
-        scope.launch {
-            try {
-                val result = agent.run(topicId = topicId, topicTitle = title, force = force, seedUrl = sourceUrl)
-                runError = result.exceptionOrNull()?.message
-            } finally {
-                // Always release the in-flight guard, otherwise a cancel
-                // (e.g. composable disposed mid-run) or any other thrown
-                // exception leaves the button permanently locked.
-                fullRunInFlight = false
-            }
-        }
+        deepReadScheduler.run(topicId = topicId, title = title, sourceUrl = sourceUrl, force = force)
     }
 
     fun runOne(stage: DeepReadGenerationStage) {
@@ -570,16 +575,28 @@ private fun DeepReadTemplateArticle(
     fallback: @Composable () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
+    val darkTheme = LocalDarkMode.current
     var failedImageUrls by remember(output) { mutableStateOf<Set<String>>(emptySet()) }
     val displayOutput = remember(output, failedImageUrls) {
         output.withoutTemplateImages(failedImageUrls)
     }
-    val rendered = remember(title, displayOutput, fontCss, customTemplateHtml) {
+    val rendered = remember(title, displayOutput, fontCss, customTemplateHtml, darkTheme) {
         runCatching {
             if (customTemplateHtml != null) {
-                DeepReadTemplateRenderer.renderCustom(title, displayOutput, customTemplateHtml, fontCss)
+                DeepReadTemplateRenderer.renderCustom(
+                    title = title,
+                    output = displayOutput,
+                    templateHtml = customTemplateHtml,
+                    fontCss = fontCss,
+                    darkTheme = darkTheme,
+                )
             } else {
-                DeepReadTemplateRenderer.renderEditorialSlant(title, displayOutput, fontCss)
+                DeepReadTemplateRenderer.renderEditorialSlant(
+                    title = title,
+                    output = displayOutput,
+                    fontCss = fontCss,
+                    darkTheme = darkTheme,
+                )
             }
         }.getOrNull()
     }
@@ -593,19 +610,72 @@ private fun DeepReadTemplateArticle(
             html = rendered.html,
             modifier = Modifier
                 .fillMaxSize()
-                .background(palette.background)
-                .statusBarsPadding()
-                .navigationBarsPadding(),
+                .background(palette.background),
             baseUrl = DEEP_READ_TEMPLATE_BASE_URL,
             allowedImageUrls = rendered.allowedImageUrls,
             allowedLinkUrls = rendered.allowedLinkUrls,
             fontRepository = fontRepository,
             textScale = fontScale,
+            backgroundColor = palette.background,
             onOpenLink = { url -> runCatching { uriHandler.openUri(url) } },
             onMainFrameError = { failed = true },
             onImageError = { url -> failedImageUrls = failedImageUrls + url },
         )
     }
+}
+
+@Composable
+private fun DeepReadImmersiveWindowEffect(darkTheme: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(view, darkTheme) {
+        val window = view.context.findActivity()?.window
+        if (window == null) {
+            onDispose { }
+        } else {
+            val previousStatusBarColor = window.statusBarColor
+            val previousNavigationBarColor = window.navigationBarColor
+            val previousSoftInputMode = window.attributes.softInputMode
+            val previousCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes.layoutInDisplayCutoutMode
+            } else {
+                null
+            }
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            controller.apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                show(WindowInsetsCompat.Type.statusBars())
+                hide(WindowInsetsCompat.Type.navigationBars())
+            }
+            onDispose {
+                WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                window.statusBarColor = previousStatusBarColor
+                window.navigationBarColor = previousNavigationBarColor
+                window.attributes = window.attributes.apply {
+                    softInputMode = previousSoftInputMode
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && previousCutoutMode != null) {
+                        layoutInDisplayCutoutMode = previousCutoutMode
+                    }
+                }
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 private fun DeepReadOutput.withoutTemplateImages(urls: Set<String>): DeepReadOutput {
@@ -1932,15 +2002,15 @@ private fun TextStyle.withReadingFont(fontFamily: FontFamily?): TextStyle =
 
 @Composable
 private fun magazinePalette(): MagazinePalette {
-    val dark = isSystemInDarkTheme()
+    val dark = LocalDarkMode.current
     return if (dark) {
         MagazinePalette(
-            background = Color(0xFF0F0F0F),
-            surface = Color(0xFF181818),
-            ink = Color(0xFFE5E7EB),
-            muted = Color(0xFF9CA3AF),
-            line = Color(0xFF374151),
-            accent = Color(0xFFEF4444),
+            background = Color(0xFF0B0A09),
+            surface = Color(0xFF181410),
+            ink = Color(0xFFF1ECE3),
+            muted = Color(0xFFA89D90),
+            line = Color(0xFF3A332B),
+            accent = Color(0xFFD18752),
         )
     } else {
         MagazinePalette(

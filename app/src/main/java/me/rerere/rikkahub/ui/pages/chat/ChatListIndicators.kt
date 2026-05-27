@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -183,16 +184,36 @@ internal fun AgentWorkingIndicator(
 }
 
 @Composable
-internal fun PostSendWaitingIndicator(
+internal fun TimelineTailWorkingIndicator(
+    processingStatus: String?,
+    visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(AgentWorkingIndicatorReserveHeight),
+        contentAlignment = Alignment.BottomCenter,
     ) {
-        AgentWaitingDot(modifier = Modifier.size(32.dp))
+        if (visible) {
+            AgentWorkingIndicator(
+                processingStatus = processingStatus,
+                modifier = Modifier.padding(bottom = 18.dp),
+            )
+        }
     }
+}
+
+@Composable
+internal fun PostSendWaitingIndicator(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    TimelineTailWorkingIndicator(
+        processingStatus = null,
+        visible = visible,
+        modifier = modifier,
+    )
 }
 
 /**

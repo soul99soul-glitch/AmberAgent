@@ -1,8 +1,10 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import android.os.Build
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,9 +12,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
@@ -60,11 +65,13 @@ import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceString
 import me.rerere.rikkahub.ui.pages.setting.components.PresetThemeButtonGroup
+import me.rerere.rikkahub.ui.pages.chat.ChatThemeChoice
 import me.rerere.rikkahub.ui.components.ui.IntLabel
 import me.rerere.rikkahub.ui.components.ui.NotionSlider
 import me.rerere.rikkahub.ui.components.ui.PercentLabel
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -120,6 +127,73 @@ private fun <T> WorkspaceSegmentedChoice(
 }
 
 @Composable
+private fun ChatThemeChoiceCard(
+    choice: ChatThemeChoice,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val theme = choice.instance
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .width(128.dp)
+            .height(86.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = theme.bg,
+        contentColor = theme.ink,
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) theme.accent else theme.hair,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(theme.accent),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(theme.userBubble)
+                        .border(1.dp, theme.hair, androidx.compose.foundation.shape.CircleShape),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(theme.modelLogoBg)
+                        .border(1.dp, theme.hair, androidx.compose.foundation.shape.CircleShape),
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = choice.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = theme.ink,
+                    maxLines = 1,
+                )
+                Text(
+                    text = if (theme.isDark) "深色" else "浅色",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.inkSoft,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
@@ -168,15 +242,13 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
                     )
                     if (BuildConfig.NOTION_LIKE) {
-                        // V3: 用聊天主题切换器替代旧的 "Notion style" 静态条目
-                        val themeOptions = listOf(
-                            "WHISPER" to "微光",
-                            "PLAIN" to "素白",
-                            "PAPER" to "暖纸",
-                        )
-                        val currentTheme = themeOptions.firstOrNull {
-                            it.first == displaySetting.chatThemeChoice
-                        } ?: themeOptions[0]
+                        val darkMode = LocalDarkMode.current
+                        val themeOptions = remember(darkMode) {
+                            ChatThemeChoice.choicesFor(darkMode)
+                        }
+                        val currentTheme = remember(displaySetting.chatThemeChoice, darkMode) {
+                            ChatThemeChoice.resolve(displaySetting.chatThemeChoice, darkMode)
+                        }
                         ListItem(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -194,25 +266,34 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("微光 / 素白 / 暖纸 三套浅色主题; 深色模式自动 Midnight")
-                                    WorkspaceSegmentedChoice(
-                                        options = themeOptions,
-                                        selected = currentTheme,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        onSelected = { (key, _) ->
-                                            updateDisplaySetting(
-                                                displaySetting.copy(chatThemeChoice = key)
-                                            )
-                                        },
-                                        label = { (_, name) ->
-                                            Text(
-                                                text = name,
-                                                maxLines = 1,
-                                                textAlign = TextAlign.Center,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            )
-                                        },
+                                    Text(
+                                        if (darkMode) {
+                                            "深色主题; 横向滑动查看更多"
+                                        } else {
+                                            "浅色主题; 横向滑动查看更多"
+                                        }
                                     )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(90.dp)
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        themeOptions.forEach { choice ->
+                                            ChatThemeChoiceCard(
+                                                choice = choice,
+                                                selected = choice == currentTheme,
+                                                onClick = {
+                                                    updateDisplaySetting(
+                                                        displaySetting.copy(chatThemeChoice = choice.name)
+                                                    )
+                                                },
+                                            )
+                                        }
+                                    }
                                 }
                             },
                             colors = CustomColors.listItemColors,
@@ -351,18 +432,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
                         item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.showUserAvatar,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(showUserAvatar = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_assistant_bubble_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_assistant_bubble_desc)) },
                             trailingContent = {
@@ -406,18 +475,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     checked = displaySetting.showDateBelowName,
                                     onCheckedChange = {
                                         updateDisplaySetting(displaySetting.copy(showDateBelowName = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_show_token_usage_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_show_token_usage_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.showTokenUsage,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(showTokenUsage = it))
                                     }
                                 )
                             },
@@ -625,6 +682,18 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 )
                             },
                         )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_bottom_follow_animation_title)) },
+                            supportingContent = { Text(stringResource(R.string.setting_display_page_bottom_follow_animation_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = displaySetting.showBottomFollowAnimation,
+                                    onCheckedChange = {
+                                        updateDisplaySetting(displaySetting.copy(showBottomFollowAnimation = it))
+                                    }
+                                )
+                            },
+                        )
                         if (!BuildConfig.NOTION_LIKE) {
                             item(
                                 headlineContent = { Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_title)) },
@@ -775,4 +844,3 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
         }
     }
 }
-

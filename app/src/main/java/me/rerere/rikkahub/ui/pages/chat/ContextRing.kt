@@ -33,7 +33,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -44,9 +43,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+
+private const val CONTEXT_USAGE_POPUP_EXIT_MS = 140
 
 /**
  * 22dp Context Ring —— 顶栏右侧轻量进度环 + 点开 usage panel popup。
@@ -64,8 +66,9 @@ fun ContextRing(
     modifier: Modifier = Modifier,
     // V3: 接真实 token usage. null 时 popup meta strip 显示 "—" 占位.
     // 来源 = lastAssistantMessage.usage; 计算: 本次=totalTokens,
-    // 缓存命中=cachedTokens/promptTokens, 速度=totalTokens/elapsedSec.
+    // 缓存命中=cachedTokens/promptTokens, 速度=completionTokens/elapsedSec.
     lastTurnTotalTokens: Int? = null,
+    lastTurnCompletionTokens: Int? = null,
     lastTurnCachedTokens: Int? = null,
     lastTurnPromptTokens: Int? = null,
     lastTurnElapsedMs: Long? = null,
@@ -84,6 +87,15 @@ fun ContextRing(
     val strokeDp = 2.6.dp
 
     var expanded by remember { mutableStateOf(false) }
+    var popupMounted by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            popupMounted = true
+        } else if (popupMounted) {
+            delay(CONTEXT_USAGE_POPUP_EXIT_MS.toLong())
+            popupMounted = false
+        }
+    }
 
     Box(
         modifier = modifier
@@ -129,12 +141,14 @@ fun ContextRing(
             }
         }
 
-        if (expanded) {
+        if (popupMounted) {
             ContextUsagePopup(
                 used = used,
                 total = total,
                 progressColor = color,
+                visible = expanded,
                 lastTurnTotalTokens = lastTurnTotalTokens,
+                lastTurnCompletionTokens = lastTurnCompletionTokens,
                 lastTurnCachedTokens = lastTurnCachedTokens,
                 lastTurnPromptTokens = lastTurnPromptTokens,
                 lastTurnElapsedMs = lastTurnElapsedMs,
@@ -157,7 +171,9 @@ private fun ContextUsagePopup(
     used: Int,
     total: Int,
     progressColor: Color,
+    visible: Boolean,
     lastTurnTotalTokens: Int? = null,
+    lastTurnCompletionTokens: Int? = null,
     lastTurnCachedTokens: Int? = null,
     lastTurnPromptTokens: Int? = null,
     lastTurnElapsedMs: Long? = null,
@@ -200,25 +216,30 @@ private fun ContextUsagePopup(
             }
         },
     ) {
-        // V3: popup 出场动画 — fade + 轻微 scale 从顶右 (ring 位置) 扩开. 避免硬切.
-        val animProgress = remember { androidx.compose.animation.core.Animatable(0f) }
-        LaunchedEffect(Unit) {
-            animProgress.animateTo(
-                1f,
+        // Keep the Popup mounted through exit so dismiss feels like the slash panel,
+        // not an instant cut.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = visible,
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(120),
+            ) + androidx.compose.animation.scaleIn(
                 animationSpec = androidx.compose.animation.core.tween(
                     durationMillis = 180,
                     easing = androidx.compose.animation.core.FastOutSlowInEasing,
                 ),
-            )
-        }
-        Box(
-            modifier = Modifier.graphicsLayer {
-                alpha = animProgress.value
-                val s = 0.94f + 0.06f * animProgress.value
-                scaleX = s
-                scaleY = s
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.92f, 0f)
-            },
+                initialScale = 0.96f,
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.92f, 0f),
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(CONTEXT_USAGE_POPUP_EXIT_MS),
+            ) + androidx.compose.animation.scaleOut(
+                animationSpec = androidx.compose.animation.core.tween(
+                    durationMillis = CONTEXT_USAGE_POPUP_EXIT_MS,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                ),
+                targetScale = 0.96f,
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.92f, 0f),
+            ),
         ) {
             // ── 主体卡片 (箭头已删, 不再 padding top)
             Surface(
@@ -277,7 +298,7 @@ private fun ContextUsagePopup(
                     UsageRow(
                         label = "Context",
                         value = if (total > 0) used.toFloat() / total.toFloat() else 0f,
-                        caption = "${used}K / ${total}K",
+                        caption = "${formatContextWindowK(used)} / ${formatContextWindowK(total)}",
                         fillColor = progressColor,
                         theme = theme,
                     )
@@ -301,14 +322,17 @@ private fun ContextUsagePopup(
                         val turnVal = lastTurnTotalTokens?.let { formatTokens(it) + " tok" } ?: "—"
                         MetaStat(label = "本次", value = turnVal, theme = theme)
                         // 缓存命中率: cached / prompt * 100%, 跳过 prompt==0 (避免除零 / N/A 时显示 —)
-                        val cacheVal = if ((lastTurnPromptTokens ?: 0) > 0 && lastTurnCachedTokens != null) {
-                            val pct = (lastTurnCachedTokens * 100.0 / lastTurnPromptTokens!!).coerceIn(0.0, 100.0)
+                        val promptTokens = lastTurnPromptTokens ?: 0
+                        val cachedTokens = lastTurnCachedTokens ?: 0
+                        val cacheVal = if (promptTokens > 0 && cachedTokens > 0) {
+                            val pct = (cachedTokens * 100.0 / promptTokens).coerceIn(0.0, 100.0)
                             "${pct.toInt()}%"
                         } else "—"
                         MetaStat(label = "缓存命中", value = cacheVal, theme = theme)
                         // 速度: completion_tokens / elapsed_seconds → tok/s. elapsed=null 时 —
-                        val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && lastTurnTotalTokens != null) {
-                            val tps = lastTurnTotalTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
+                        val completionTokens = lastTurnCompletionTokens ?: 0
+                        val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && completionTokens > 0) {
+                            val tps = completionTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
                             "${tps.toInt()} tok/s"
                         } else "—"
                         MetaStat(label = "速度", value = speedVal, theme = theme)
@@ -376,6 +400,16 @@ private fun formatTokens(n: Int): String {
         // 2,420 / 12,345 风格
         "%,d".format(n)
     } else n.toString()
+}
+
+private fun formatContextWindowK(valueK: Int): String {
+    if (valueK < 1000) return "${valueK}K"
+    return if (valueK % 1000 == 0) {
+        "${valueK / 1000}M"
+    } else {
+        val valueM = valueK / 1000.0
+        "%.1fM".format(valueM).trimEnd('0').trimEnd('.')
+    }
 }
 
 @Composable

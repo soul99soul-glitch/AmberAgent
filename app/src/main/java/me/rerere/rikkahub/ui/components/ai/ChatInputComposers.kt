@@ -35,10 +35,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
@@ -92,6 +93,7 @@ private const val MAX_SLASH_COMMANDS = 9
 private const val MAX_SLASH_COMMAND_TITLE_CHARS = 32
 private const val DYNAMIC_SLASH_COMMAND_MIN_QUERY_CHARS = 2
 private const val MAX_MENTIONS = 9
+private const val SLASH_COMMAND_PANEL_EXIT_MS = 130
 
 @Composable
 internal fun TextInputRow(
@@ -101,6 +103,7 @@ internal fun TextInputRow(
     onCompactContext: () -> Unit,
     modifier: Modifier = Modifier,
     minimalChrome: Boolean = false,
+    hidePlaceholder: Boolean = false,
     // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到当前 assistant.
     // 为 null 时 (sandbox / 历史预览等场景) footer 不渲染. ChatInput 调用处必传.
     onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
@@ -225,7 +228,24 @@ internal fun TextInputRow(
         //   2) 去掉 isFocused 条件 — 点 "/" 按钮 append 了斜杠但 TextField 没获焦, 之前 panel 不弹.
         //      只要 text 开头是 "/" 就显示 panel.
         val slashVisible = slashQuery != null
-        if (slashVisible) {
+        var slashPanelMounted by remember { mutableStateOf(false) }
+        var retainedSlashCommands by remember { mutableStateOf<List<SlashCommandItem>>(emptyList()) }
+        var retainedHasAnySlashCommand by remember { mutableStateOf(false) }
+        LaunchedEffect(slashVisible) {
+            if (slashVisible) {
+                slashPanelMounted = true
+            } else if (slashPanelMounted) {
+                delay(SLASH_COMMAND_PANEL_EXIT_MS.toLong())
+                slashPanelMounted = false
+            }
+        }
+        LaunchedEffect(slashVisible, slashCommands, allSlashCommands) {
+            if (slashVisible) {
+                retainedSlashCommands = slashCommands
+                retainedHasAnySlashCommand = allSlashCommands.isNotEmpty()
+            }
+        }
+        if (slashPanelMounted) {
             androidx.compose.ui.window.Popup(
                 properties = androidx.compose.ui.window.PopupProperties(focusable = false),
                 popupPositionProvider = object : androidx.compose.ui.window.PopupPositionProvider {
@@ -244,29 +264,44 @@ internal fun TextInputRow(
                     }
                 },
             ) {
-                // V3: 入场动画. Popup 不在 layout tree 中, AnimatedVisibility 无效, 用
-                // Animatable + graphicsLayer 驱动 alpha + scale. transformOrigin 偏右下,
-                // 接近 composer 上 "/" 按钮位置 (panel 在 anchor 上方居中, "/" 按钮在 anchor 右侧).
-                // 跟 ContextRing 同一套. 出场动画暂不做 (Popup visible=false 即销毁, 跟 ContextRing 一致).
-                val anim = remember { androidx.compose.animation.core.Animatable(0f) }
-                LaunchedEffect(Unit) {
-                    anim.animateTo(
-                        targetValue = 1f,
-                        animationSpec = androidx.compose.animation.core.tween(180)
-                    )
-                }
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier.graphicsLayer {
-                        alpha = anim.value
-                        val s = 0.94f + 0.06f * anim.value
-                        scaleX = s
-                        scaleY = s
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.85f, 1f)
-                    }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = slashVisible,
+                    enter = androidx.compose.animation.fadeIn(
+                        animationSpec = androidx.compose.animation.core.tween(120)
+                    ) + androidx.compose.animation.slideInVertically(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 180,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        initialOffsetY = { it / 12 },
+                    ) + androidx.compose.animation.scaleIn(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 180,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        initialScale = 0.98f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.85f, 1f),
+                    ),
+                    exit = androidx.compose.animation.fadeOut(
+                        animationSpec = androidx.compose.animation.core.tween(SLASH_COMMAND_PANEL_EXIT_MS)
+                    ) + androidx.compose.animation.slideOutVertically(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = SLASH_COMMAND_PANEL_EXIT_MS,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        targetOffsetY = { it / 16 },
+                    ) + androidx.compose.animation.scaleOut(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = SLASH_COMMAND_PANEL_EXIT_MS,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        targetScale = 0.985f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.85f, 1f),
+                    ),
                 ) {
                     SlashCommandPanel(
-                        commands = slashCommands,
-                        hasAnyCommand = allSlashCommands.isNotEmpty(),
+                        commands = retainedSlashCommands,
+                        hasAnyCommand = retainedHasAnySlashCommand,
                         onSelect = { command ->
                             when (val action = command.action) {
                                 SlashCommandAction.ClearInput -> state.clearInput()
@@ -366,10 +401,12 @@ internal fun TextInputRow(
                 },
             shape = if (minimalChrome) RoundedCornerShape(0.dp) else RoundedCornerShape(8.dp),
             placeholder = {
-                Text(
-                    text = if (minimalChrome) "输入消息" else stringResource(R.string.chat_input_placeholder),
-                    color = workspace.faint,
-                )
+                if (!hidePlaceholder) {
+                    Text(
+                        text = if (minimalChrome) "输入消息" else stringResource(R.string.chat_input_placeholder),
+                        color = workspace.faint,
+                    )
+                }
             },
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
             keyboardOptions = KeyboardOptions(
@@ -434,11 +471,20 @@ private fun SlashCommandPanel(
     val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     // V3: panel 宽度跟 composer 一致 — screen 宽减去 24dp (composer 父级 horizontal padding 12dp 左右)
     val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val panelShape = RoundedCornerShape(14.dp)
     Surface(
-        modifier = Modifier.width(screenWidth - 24.dp),
-        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .width(screenWidth - 24.dp)
+            .shadow(
+                elevation = 8.dp,
+                shape = panelShape,
+                clip = false,
+                ambientColor = chatTheme.composerShadow,
+                spotColor = chatTheme.composerShadow,
+            ),
+        shape = panelShape,
         tonalElevation = 0.dp,
-        shadowElevation = 8.dp,
+        shadowElevation = 0.dp,
         color = chatTheme.surface,
         border = BorderStroke(1.dp, chatTheme.surfaceEdge),
     ) {

@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -88,6 +89,7 @@ internal fun MessagePartsBlock(
     onUserMessageLongClick: (() -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
+    onStreamingVisibleFrame: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
@@ -298,6 +300,11 @@ internal fun MessagePartsBlock(
                                                     streaming = isStreamingText,
                                                     onClickCitation = handleClickCitation,
                                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                    onStreamingVisibleFrame = if (isStreamingText) {
+                                                        onStreamingVisibleFrame
+                                                    } else {
+                                                        null
+                                                    },
                                                 )
                                             }
                                         }
@@ -309,6 +316,11 @@ internal fun MessagePartsBlock(
                                             onClickCitation = handleClickCitation,
                                             streaming = isStreamingText,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                            onStreamingVisibleFrame = if (isStreamingText) {
+                                                onStreamingVisibleFrame
+                                            } else {
+                                                null
+                                            },
                                         )
                                     }
                                 }
@@ -396,12 +408,13 @@ internal fun MessagePartsBlock(
                         val isImageLoading =
                             part.url.isBlank() || part.url.matches(Regex("^data:image/[^;]*;base64,\\s*$"))
                         if (isImageLoading) {
+                            val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
                             Box(
                                 modifier = Modifier
                                     .heightIn(min = 120.dp, max = 216.dp)
                                     .widthIn(min = 120.dp, max = 360.dp)
                                     .clip(MaterialTheme.shapes.medium)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .background(chatTheme.widgetCanvas.takeIf { it.isSpecified } ?: chatTheme.surface)
                                     .shimmer(isLoading = true)
                             )
                         } else {

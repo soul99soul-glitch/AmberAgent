@@ -16,7 +16,9 @@ import me.rerere.rikkahub.data.agent.board.hotlist.HotListSafeFetcher
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListTitleLocalizer
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadNotifier
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepository
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadScheduler
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSourcePrefetcher
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateAgent
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
@@ -106,6 +108,10 @@ val boardModule = module {
             appScope = get(),
         )
     }
+
+    single { DeepReadScheduler(context = get()) }
+
+    single { DeepReadNotifier(context = get()) }
 
     single {
         HotListScheduler(

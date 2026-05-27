@@ -86,6 +86,7 @@ import kotlinx.serialization.json.intOrNull
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
@@ -108,6 +109,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.CompactLifecycleState
+import me.rerere.rikkahub.data.context.ContextFootprintEstimator
 import me.rerere.rikkahub.data.context.ConversationCompact
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.service.ChatError
@@ -575,6 +577,7 @@ private fun ChatPageContent(
                 TopBar(
                     settings = setting,
                     conversation = conversation,
+                    contextCompacts = contextCompacts,
                     bigScreen = bigScreen,
                     drawerState = drawerState,
                     currentChatModel = currentChatModel,
@@ -1403,6 +1406,7 @@ private fun String.compactSandboxText(maxLength: Int): String {
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
+    contextCompacts: List<ConversationCompact>,
     drawerState: DrawerState,
     bigScreen: Boolean,
     currentChatModel: Model?,
@@ -1480,12 +1484,25 @@ private fun TopBar(
                     val lastAssistant = conversation.currentMessages
                         .lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
                     val lastUsage = lastAssistant?.usage
-                    val usedK = ((lastUsage?.promptTokens ?: 0) / 1000).coerceAtLeast(0)
-                    // total: 模型 context window 估值，未取到时按 200K 默认（大多数现代模型）
-                    val totalK = currentChatModel?.let {
-                        // TODO: Model 数据加 contextWindow 字段后用真实值；当前 200K 保守估计
-                        200
-                    } ?: 200
+                    val messagesFingerprint = remember(conversation.currentMessages) {
+                        ContextFootprintEstimator.inputFingerprint(conversation.currentMessages)
+                    }
+                    val compactsFingerprint = remember(contextCompacts) {
+                        contextCompacts.fold(0L) { acc, compact ->
+                            (acc * 31) xor compact.id.hashCode().toLong() xor compact.tokenEstimate.toLong()
+                        }
+                    }
+                    val estimatedInputTokens = remember(messagesFingerprint, compactsFingerprint) {
+                        ContextFootprintEstimator.estimateConversationInputTokens(conversation, contextCompacts)
+                    }
+                    val usedTokens = lastUsage?.promptTokens?.takeIf { it > 0 } ?: estimatedInputTokens
+                    val usedK = ((usedTokens + 999) / 1000).coerceAtLeast(0)
+                    // total: 优先使用持续维护的 registry，未知/自定义模型再退回 provider 配置。
+                    val contextWindowTokens = currentChatModel?.let { model ->
+                        ModelRegistry.MODEL_CONTEXT_WINDOW.getData(model.modelId)
+                            ?: model.contextWindowTokens
+                    }
+                    val totalK = (((contextWindowTokens ?: 200_000) + 999) / 1000).coerceAtLeast(1)
                     // V3: 接真实 token 数据给 popup. 速度算的是端到端 (含网络/排队), 不是
                     // 模型纯推理. createdAt 是 message 第一字符落地时刻, finishedAt 是最后字符,
                     // 所以差值 = 全部 streaming 时长.
@@ -1501,6 +1518,7 @@ private fun TopBar(
                         used = usedK,
                         total = totalK,
                         lastTurnTotalTokens = lastUsage?.totalTokens,
+                        lastTurnCompletionTokens = lastUsage?.completionTokens,
                         lastTurnCachedTokens = lastUsage?.cachedTokens,
                         lastTurnPromptTokens = lastUsage?.promptTokens,
                         lastTurnElapsedMs = elapsedMs,

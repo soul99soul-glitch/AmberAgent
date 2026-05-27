@@ -2,11 +2,16 @@ package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -42,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,11 +79,10 @@ import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.QuillWrite01
 import me.rerere.hugeicons.stroke.Refresh01
-import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Time02
-import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.VolumeHigh
+import me.rerere.hugeicons.stroke.Wrench01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -91,6 +97,9 @@ import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import org.koin.compose.koinInject
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 internal object ToolNames {
     const val MEMORY = "memory_tool"
@@ -139,7 +148,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         else -> HugeIcons.QuillWrite01
     }
 
-    ToolNames.SEARCH_WEB -> HugeIcons.Search01
+    ToolNames.SEARCH_WEB -> HugeIcons.GlobalSearch
     ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
     "webview_search_open" -> HugeIcons.GlobalSearch
     "webview_open" -> HugeIcons.GlobalSearch
@@ -157,7 +166,8 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "file_write",
         "file_edit",
         "file_search",
-        "file_move"
+        "file_move",
+        "share_file"
     ) -> HugeIcons.File02
 
     in setOf(
@@ -193,7 +203,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
             toolName.startsWith("bilibili_") ||
             toolName.startsWith("zhihu_") ||
             toolName.startsWith("feishu_docs_") -> HugeIcons.GlobalSearch
-        else -> HugeIcons.Tools
+        else -> HugeIcons.Wrench01
     }
 }
 
@@ -204,7 +214,8 @@ private fun getToolKind(toolName: String) = when {
         "file_write",
         "file_edit",
         "file_search",
-        "file_move"
+        "file_move",
+        "share_file"
     ) -> AgentToolKind.FILE
 
     toolName in setOf(
@@ -256,6 +267,18 @@ private fun String.compactToolPreview(maxLength: Int = 34): String {
     val compact = trim().replace(Regex("\\s+"), " ")
     return if (compact.length > maxLength) compact.take(maxLength - 1) + "…" else compact
 }
+
+private fun JsonElement.toolDisplayTitleHint(): String? =
+    getStringContent("display_title")
+        ?.compactToolPreview(28)
+        ?.takeIf { it.isNotBlank() }
+
+private fun JsonElement.pathDisplayName(key: String = "path"): String =
+    getStringContent(key)
+        ?.substringAfterLast('/')
+        ?.ifBlank { null }
+        ?.compactToolPreview(18)
+        .orEmpty()
 
 private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): Boolean {
     val jsonObject = content?.jsonObjectOrNull
@@ -373,76 +396,108 @@ internal fun AgentToolCallCapsule(
         shadowElevation = 0.dp,
         border = BorderStroke(1.dp, theme.toolPillEdge),
     ) {
-        Row(
-            modifier = Modifier.padding(start = 3.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            V3ToolLeadingBadge(
-                status = status,
-                loading = loading,
-            )
-
-            // Inline "label · name" 11.5sp letter 0.2. wrapContentWidth 模式下不再 weight(1f)
+        val reserveStatusSlot = approvalActions == null
+        Box {
             Row(
+                modifier = Modifier.padding(start = 3.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = title,
-                    fontSize = 11.5.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                    letterSpacing = 0.2.sp,
-                    color = theme.toolLabelInk,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
-                )
-                if (!subtitle.isNullOrBlank()) {
+                Row(
+                    modifier = if (reserveStatusSlot) {
+                        Modifier.padding(end = 24.dp)
+                    } else {
+                        Modifier.padding(end = 7.dp)
+                    },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    V3ToolTypeIcon(
+                        icon = icon,
+                        kind = kind,
+                    )
+
+                    val displayText = if (subtitle.isNullOrBlank()) title else "$title $subtitle"
                     Text(
-                        text = " $subtitle",
+                        text = displayText,
                         fontSize = 11.5.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                         letterSpacing = 0.2.sp,
-                        color = theme.inkSoft,
+                        color = theme.toolLabelInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .widthIn(max = if (approvalActions == null) 380.dp else 180.dp)
+                            .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
                     )
+
+                    if (approvalActions != null) {
+                        approvalActions()
+                    }
                 }
             }
-
-            // V3: 删除右侧 ToolStatusPill ("失败" 文字框). 左侧 badge 已用红 X 表达 FAILED,
-            // 右侧再重复"失败"文字 pill 是冗余. 仅保留 approval actions (待授权时仍需操作按钮).
-            if (approvalActions != null) {
-                approvalActions()
+            if (reserveStatusSlot) {
+                V3ToolStatusBadge(
+                    status = status,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 3.dp),
+                )
             }
         }
     }
 }
 
-/** V3 spec: 16dp accent 圆 + 10dp 白勾。非成功状态映射其他 tone。 */
 @Composable
-private fun V3ToolLeadingBadge(
-    status: AgentToolStatus,
-    loading: Boolean,
+private fun V3ToolTypeIcon(
+    icon: ImageVector,
+    kind: AgentToolKind,
 ) {
     val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
-    val workspace = workspaceColors()
+    val tint = when (kind) {
+        AgentToolKind.FILE -> theme.toolIconInk
+        AgentToolKind.TERMINAL -> theme.toolIconInk
+        AgentToolKind.MCP -> theme.toolIconInk
+        AgentToolKind.SCREEN -> theme.toolIconInk
+        AgentToolKind.WEB -> theme.toolIconInk
+        AgentToolKind.MEMORY -> theme.toolIconInk
+        AgentToolKind.GENERIC -> theme.toolIconInk
+    }
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.requiredSize(16.dp),
+    )
+}
+
+@Composable
+private fun V3ToolStatusBadge(
+    status: AgentToolStatus,
+    modifier: Modifier = Modifier,
+) {
+    val theme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val statusIconInk = if (theme.isDark) theme.bg else Color.White
     val (bg, ink) = when (status) {
         AgentToolStatus.SUCCEEDED -> theme.toolDoneBg to theme.toolDoneBadgeInk
-        AgentToolStatus.RUNNING -> theme.toolDoneBg to theme.toolDoneBadgeInk
-        AgentToolStatus.WAITING_FOR_PERMISSION -> workspace.amber to Color.White
-        AgentToolStatus.FAILED -> workspace.red to Color.White
-        AgentToolStatus.CANCELLED -> workspace.muted to Color.White
+        AgentToolStatus.RUNNING -> Color.Transparent to theme.toolDoneBg
+        AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to statusIconInk
+        AgentToolStatus.FAILED -> theme.contextHigh to statusIconInk
+        AgentToolStatus.CANCELLED -> theme.inkSoft to statusIconInk
+    }
+    if (status == AgentToolStatus.RUNNING) {
+        RunningToolSpinner(
+            color = ink,
+            modifier = modifier.requiredSize(16.dp),
+        )
+        return
     }
     Surface(
-        modifier = Modifier
-            .size(16.dp)
-            .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
+        modifier = modifier.requiredSize(16.dp),
         shape = androidx.compose.foundation.shape.CircleShape,
         color = bg,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            if (status == AgentToolStatus.SUCCEEDED || status == AgentToolStatus.RUNNING) {
+            if (status == AgentToolStatus.SUCCEEDED) {
                 Icon(
                     imageVector = me.rerere.hugeicons.HugeIcons.Tick01,
                     contentDescription = null,
@@ -456,7 +511,49 @@ private fun V3ToolLeadingBadge(
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
+            } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION) {
+                Icon(
+                    imageVector = me.rerere.hugeicons.HugeIcons.Time02,
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.size(10.dp),
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun RunningToolSpinner(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "toolRunningSpinner")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+        ),
+        label = "toolRunningSpinnerRotation",
+    )
+    Canvas(
+        modifier = modifier.graphicsLayer { rotationZ = rotation }
+    ) {
+        val dotCount = 8
+        val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension * 0.36f
+        val dotRadius = size.minDimension * 0.07f
+        for (index in 0 until dotCount) {
+            val angle = (2.0 * PI * index / dotCount).toFloat()
+            drawCircle(
+                color = color.copy(alpha = 0.22f + 0.68f * (index + 1) / dotCount),
+                radius = dotRadius,
+                center = androidx.compose.ui.geometry.Offset(
+                    x = center.x + cos(angle) * radius,
+                    y = center.y + sin(angle) * radius,
+                ),
+            )
         }
     }
 }
@@ -466,7 +563,10 @@ private fun toolDisplayTitle(
     toolName: String,
     arguments: JsonElement,
     memoryAction: String?,
-): String = when (toolName) {
+): String {
+    arguments.toolDisplayTitleHint()?.let { return it }
+
+    return when (toolName) {
     ToolNames.MEMORY -> when (memoryAction) {
         MemoryActions.CREATE -> stringResource(R.string.chat_message_tool_create_memory)
         MemoryActions.EDIT -> stringResource(R.string.chat_message_tool_edit_memory)
@@ -509,10 +609,15 @@ private fun toolDisplayTitle(
 
     "file_list" -> "列出 workspace ${arguments.getStringContent("path")?.compactToolPreview(18).orEmpty()}"
     "file_read" -> "读取文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
-    "file_write" -> "写入文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
-    "file_edit" -> "编辑文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
+    "file_write" -> "写入 ${arguments.pathDisplayName().ifBlank { "文件" }}"
+    "file_edit" -> "编辑 ${arguments.pathDisplayName().ifBlank { "文件" }}"
     "file_search" -> "搜索文件 ${arguments.getStringContent("query")?.compactToolPreview(22).orEmpty()}"
     "file_move" -> "移动文件 ${arguments.getStringContent("from")?.compactToolPreview(16).orEmpty()}"
+    "share_file" -> "分享 ${arguments.pathDisplayName().ifBlank { "文件" }}"
+    "share_text" -> "分享文本"
+    "tool_search" -> "查找可用工具"
+    "tools_list" -> "查看工具目录"
+    "tool_policy_explain" -> "检查工具权限"
     "terminal_execute" -> "执行 Alpine 命令 ${arguments.getStringContent("command")?.compactToolPreview(22).orEmpty()}"
     "terminal_session_start" -> "启动终端会话"
     "terminal_session_exec" -> "终端会话执行 ${arguments.getStringContent("command")?.compactToolPreview(20).orEmpty()}"
@@ -532,6 +637,7 @@ private fun toolDisplayTitle(
         "MCP ${toolName.removePrefix("mcp__").compactToolPreview(26)}"
     } else {
         stringResource(R.string.chat_message_tool_call_generic, toolName)
+    }
     }
 }
 

@@ -32,6 +32,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadRen
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -46,6 +47,7 @@ fun DeepReadTemplateSettingsRow(
     onCreateTemplate: () -> Unit,
 ) {
     var previewTarget by remember { mutableStateOf<TemplatePreviewTarget?>(null) }
+    val darkTheme = LocalDarkMode.current
     val sampleTitle = "具身智能进入家庭前夜"
     val sampleOutput = remember { DeepReadTemplateRenderer.sampleOutput() }
     val selectedTemplateName = when (board.deepReadTemplateId) {
@@ -56,7 +58,12 @@ fun DeepReadTemplateSettingsRow(
     fun previewSelectedTemplate() {
         previewTarget = when (board.deepReadTemplateId) {
             DeepReadTemplateIds.COMPOSE_MAGAZINE,
-            DeepReadTemplateIds.EDITORIAL_SLANT -> DeepReadTemplateRenderer.renderEditorialSlant(sampleTitle, sampleOutput, fontCss)
+            DeepReadTemplateIds.EDITORIAL_SLANT -> DeepReadTemplateRenderer.renderEditorialSlant(
+                title = sampleTitle,
+                output = sampleOutput,
+                fontCss = fontCss,
+                darkTheme = darkTheme,
+            )
                 .toPreviewTarget(selectedTemplateName)
             else -> {
                 val template = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
@@ -64,7 +71,13 @@ fun DeepReadTemplateSettingsRow(
                     TemplatePreviewTarget(selectedTemplateName, "<html><body><p>当前模板不可用</p></body></html>")
                 } else {
                     runCatching {
-                        DeepReadTemplateRenderer.renderCustom(sampleTitle, sampleOutput, template.html, fontCss)
+                        DeepReadTemplateRenderer.renderCustom(
+                            title = sampleTitle,
+                            output = sampleOutput,
+                            templateHtml = template.html,
+                            fontCss = fontCss,
+                            darkTheme = darkTheme,
+                        )
                             .toPreviewTarget(template.name)
                     }.getOrElse {
                         TemplatePreviewTarget(template.name, "<html><body><p>模板预览失败：${it.message.orEmpty()}</p></body></html>")
@@ -183,6 +196,7 @@ private fun DeepReadTemplatePreviewDialog(
                     allowedImageUrls = target.allowedImageUrls,
                     fontRepository = fontRepository,
                     textScale = textScale,
+                    backgroundColor = MaterialTheme.colorScheme.surface,
                 )
             }
         },

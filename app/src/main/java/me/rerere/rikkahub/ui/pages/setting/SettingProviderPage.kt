@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -508,14 +509,20 @@ private fun ProviderItem(
 ) {
     val workspace = workspaceColors()
     val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
-    // V3: 整行 background 用主题色区分启用/禁用 —— enabled = accent 18% 半透 (Paper 深褐 /
-    //   Whisper 天蓝 / Plain 深灰 / Midnight 冷靛蓝), disabled = 默认 surface 不变色.
-    //   logo 36dp 区不再单独贴色块, 完全融入整行色调.
+    // V3: 整行 background 用主题色区分启用/禁用。深色主题里 accent 叠太多会吞掉副标题，
+    // 所以深色只保留很轻的 tint；状态主要靠文字和 logo spot 表达。
+    val enabledRowTint = if (chatTheme.isDark) 0.08f else 0.18f
     val rowBg = if (provider.enabled) {
-        chatTheme.accent.copy(alpha = 0.18f).compositeOver(chatTheme.surface)
+        chatTheme.accent.copy(alpha = enabledRowTint).compositeOver(chatTheme.surface)
     } else {
         chatTheme.surface
     }
+    val secondaryTextColor = when {
+        provider.enabled && chatTheme.isDark -> chatTheme.inkSoft
+        provider.enabled -> chatTheme.inkFaint
+        else -> chatTheme.inkFaint
+    }
+    val providerIconBackground = if (provider.enabled) chatTheme.modelLogoBg else Color.Transparent
     androidx.compose.material3.Surface(
         onClick = onEdit,
         modifier = modifier,
@@ -538,19 +545,13 @@ private fun ProviderItem(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // V3: logo 用 40dp 圆形 (CircleShape) bg, 比之前 36dp 圆角矩形更扩.
-                // enabled = accent 30% spot (跟主题, 在 row bg 之上叠加更浓主题色),
-                // disabled = transparent. AutoAIIcon 28dp 占比 ~70% 不显得拥挤.
+                // enabled = modelLogoBg spot (比 row bg 更轻), disabled = transparent.
+                // AutoAIIcon 28dp 占比 ~70% 不显得拥挤.
                 Box(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(
-                            if (provider.enabled) {
-                                chatTheme.accent.copy(alpha = 0.30f)
-                            } else {
-                                androidx.compose.ui.graphics.Color.Transparent
-                            }
-                        ),
+                        .background(providerIconBackground),
                     contentAlignment = Alignment.Center,
                 ) {
                     AutoAIIcon(
@@ -583,7 +584,7 @@ private fun ProviderItem(
                             provider.models.size,
                         ),
                         style = MaterialTheme.typography.labelSmall,
-                        color = chatTheme.inkFaint,
+                        color = secondaryTextColor,
                     )
                 }
                 // 仅 disabled 显示灰胶囊（"已禁用"），enabled 状态不显示
@@ -598,7 +599,7 @@ private fun ProviderItem(
                     imageVector = HugeIcons.ArrowRight01,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = chatTheme.inkFaint,
+                    tint = secondaryTextColor.copy(alpha = if (provider.enabled) 0.72f else 1f),
                 )
             }
             // V3 hairline divider — 仅非 last 行显示，模拟"单卡 + hairline 分隔"

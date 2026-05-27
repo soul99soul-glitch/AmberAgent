@@ -6,7 +6,6 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -75,6 +74,7 @@ import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote01
@@ -93,6 +93,7 @@ import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.pages.chat.LocalChatTheme
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -207,7 +208,7 @@ internal fun MediaFileInputRow(
                             displayNameByRelativePath = displayNameByRelativePath,
                             displayNameByFileName = displayNameByFileName
                         ),
-                        leading = { AttachmentLeadingIcon(icon = HugeIcons.Files02) },
+                        leading = { AttachmentLeadingIcon(icon = HugeIcons.File02) },
                         onRemove = { removePart(part, part.url) }
                     )
                 }
@@ -226,7 +227,7 @@ private fun ImageAttachmentPreview(
 ) {
     Box(
         modifier = Modifier
-            .size(34.dp)
+            .size(24.dp)
             .clickable(
                 enabled = status.blocksSend,
                 onClick = onStatusClick,
@@ -234,7 +235,7 @@ private fun ImageAttachmentPreview(
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(8.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             AsyncImage(
@@ -246,7 +247,7 @@ private fun ImageAttachmentPreview(
         }
         Surface(
             modifier = Modifier
-                .size(8.dp)
+                .size(7.dp)
                 .align(Alignment.TopEnd),
             shape = CircleShape,
             color = status.dotColor(),
@@ -270,43 +271,45 @@ private fun AttachmentChip(
     leading: @Composable () -> Unit,
     onRemove: () -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val chatTheme = LocalChatTheme.current
+    val chipBg = if (chatTheme.isDark) chatTheme.toolPillBg else chatTheme.accentTint
+    val chipInk = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(50),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        color = workspace.paper,
-        contentColor = workspace.ink,
-        border = BorderStroke(1.dp, workspace.hairline)
+        color = chipBg,
+        contentColor = chipInk,
     ) {
-        Row(
-            modifier = Modifier
-                .height(44.dp)
-                .padding(start = 8.dp, end = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            leading()
-            Text(
-                text = title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.widthIn(min = 40.dp, max = 180.dp),
-            )
-            Box(
+        ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+            Row(
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .size(26.dp)
-                    .clickable(onClick = onRemove),
-                contentAlignment = Alignment.Center
+                    .height(32.dp)
+                    .padding(start = 8.dp, end = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                Icon(
-                    imageVector = HugeIcons.Cancel01,
-                    contentDescription = null,
-                    tint = workspace.muted,
-                    modifier = Modifier.size(16.dp)
+                leading()
+                Text(
+                    text = title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(min = 36.dp, max = 210.dp),
                 )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .size(22.dp)
+                        .clickable(onClick = onRemove),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Cancel01,
+                        contentDescription = null,
+                        tint = chipInk.copy(alpha = 0.72f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
     }
@@ -316,25 +319,12 @@ private fun AttachmentChip(
 private fun AttachmentLeadingIcon(
     icon: ImageVector,
 ) {
-    val workspace = workspaceColors()
-    Surface(
-        modifier = Modifier.size(32.dp),
-        shape = RoundedCornerShape(6.dp),
-        color = workspace.row,
-        contentColor = workspace.muted,
-        border = BorderStroke(1.dp, workspace.hairline),
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = workspace.muted
-            )
-        }
-    }
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = LocalChatTheme.current.let { if (it.isDark) it.accent else it.accentDeep },
+        modifier = Modifier.size(20.dp),
+    )
 }
 
 private fun attachmentNameFromUrl(

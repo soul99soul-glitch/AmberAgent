@@ -18,7 +18,7 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
+import me.rerere.rikkahub.ui.components.ui.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -48,6 +48,7 @@ internal fun SearchServiceEditorSheet(
     confirmText: String,
     initialService: SearchServiceOptions,
     onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
     onConfirm: (SearchServiceOptions) -> Unit,
 ) {
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -118,6 +119,18 @@ internal fun SearchServiceEditorSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (onDelete != null) {
+                    TextButton(
+                        onClick = onDelete,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_page_search_delete_provider),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+
                 TextButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),

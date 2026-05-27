@@ -85,6 +85,7 @@ fun ChatMessage(
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
+    onStreamingVisibleFrame: (() -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalSettings.current.displaySetting
@@ -148,6 +149,7 @@ fun ChatMessage(
                 } else null,
                 onGenerativeWidgetAction = onGenerativeWidgetAction,
                 onMiniAppModify = onMiniAppModify,
+                onStreamingVisibleFrame = onStreamingVisibleFrame,
             )
 
             message.translation?.let { translation ->

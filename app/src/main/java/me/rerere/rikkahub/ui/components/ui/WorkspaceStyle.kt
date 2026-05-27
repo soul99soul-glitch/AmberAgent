@@ -343,8 +343,8 @@ fun WorkspaceTopBar(
         actions = actions,
         scrollBehavior = scrollBehavior,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = workspace.paper,
-            scrolledContainerColor = workspace.paper,
+            containerColor = workspace.canvas,
+            scrolledContainerColor = workspace.canvas,
             titleContentColor = workspace.ink,
             navigationIconContentColor = workspace.muted,
             // V3: action icon 跟主题 accent (Paper 砖红 / Whisper 天蓝 等). 之前硬 workspace.blue.

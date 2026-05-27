@@ -19,6 +19,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.model.Assistant
@@ -77,6 +78,47 @@ internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
     if (lastVisibleItem.index < totalItems - 1) return false
     val contentBottom = lastVisibleItem.offset + lastVisibleItem.size + layoutInfo.afterContentPadding
     return contentBottom <= layoutInfo.viewportEndOffset + bufferPx
+}
+
+internal fun Conversation.latestRenderToken(): String {
+    val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
+    val part = message.parts.lastOrNull()
+    return buildString {
+        append(messageNodes.size)
+        append(':')
+        append(message.id)
+        append(':')
+        append(message.parts.size)
+        append(':')
+        append(part?.compactRenderToken().orEmpty())
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun UIMessagePart.compactRenderToken(): String = when (this) {
+    is UIMessagePart.Text -> "text:${text.length}:${text.takeLast(16)}"
+    is UIMessagePart.Reasoning -> "reasoning:${reasoning.length}:${finishedAt != null}"
+    is UIMessagePart.Tool -> {
+        val outputToken = output.lastOrNull()?.compactRenderToken().orEmpty()
+        "tool:$toolCallId:$toolName:$isExecuted:${approvalState.compactRenderToken()}:${output.size}:$outputToken"
+    }
+
+    is UIMessagePart.Image -> "image:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Video -> "video:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Audio -> "audio:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.Document -> "document:$fileName:${url.length}:${metadata.hashCode()}"
+    is UIMessagePart.MiniApp -> "mini_app:$appId:$version:${htmlHash.orEmpty()}:${metadata.hashCode()}"
+    is UIMessagePart.Search -> "search"
+    is UIMessagePart.ToolCall -> "tool_call:$toolCallId:${arguments.length}:${approvalState.compactRenderToken()}"
+    is UIMessagePart.ToolResult -> "tool_result:$toolCallId:${content.hashCode()}"
+}
+
+private fun ToolApprovalState.compactRenderToken(): String = when (this) {
+    ToolApprovalState.Auto -> "auto"
+    ToolApprovalState.Pending -> "pending"
+    ToolApprovalState.Approved -> "approved"
+    is ToolApprovalState.Denied -> "denied:${reason.length}"
+    is ToolApprovalState.Answered -> "answered:${answer.length}:${answer.takeLast(16)}"
 }
 
 internal fun LazyListState.markdownPrewarmTexts(

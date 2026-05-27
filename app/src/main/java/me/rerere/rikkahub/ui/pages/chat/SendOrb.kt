@@ -61,14 +61,17 @@ fun SendOrb(
     // chat1.md L257 final: "按钮回到干净的纯色圆形"——非 stop 态用 theme.sendBg + theme.sendArrow；
     // 仅 stop 态(loading & empty) 切到 amber。Empty 状态不再褪色。
     val targetCore = when {
+        isStopState && theme.isDark -> Color(0xFF8F6535)
         isStopState -> Color(0xFFE5B567)            // amber stop
         else -> theme.sendBg
     }
     val targetHalo = when {
+        isStopState && theme.isDark -> Color(0x668F6535)
         isStopState -> Color(0xCCE5B567)
         else -> theme.sendHalo
     }
     val targetIconTint = when {
+        isStopState && theme.isDark -> Color(0xFF351D10)
         isStopState -> Color(0xFFD37A00)
         else -> theme.sendArrow
     }

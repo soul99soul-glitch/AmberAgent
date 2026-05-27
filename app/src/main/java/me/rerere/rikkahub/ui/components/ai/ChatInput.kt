@@ -4,10 +4,19 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandHorizontally
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -58,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -101,6 +111,9 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Camera01
+import me.rerere.hugeicons.stroke.Files02
+import me.rerere.hugeicons.stroke.Image02
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
@@ -119,6 +132,9 @@ import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
+import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
+import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
+import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
@@ -194,6 +210,16 @@ fun ChatInput(
     val focusManager = LocalFocusManager.current
     val imeVisible = WindowInsets.isImeVisible
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
+    var keepPlaceholderHiddenDuringAttachmentExit by remember { mutableStateOf(false) }
+
+    LaunchedEffect(expand) {
+        if (expand == ExpandState.Files) {
+            keepPlaceholderHiddenDuringAttachmentExit = true
+        } else {
+            delay(190)
+            keepPlaceholderHiddenDuringAttachmentExit = false
+        }
+    }
 
     fun hideKeyboardAfterSend() {
         coroutineScope.launch {
@@ -584,6 +610,14 @@ fun ChatInput(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
+                    val attachmentsExpanded = expand == ExpandState.Files
+                    val hideComposerPlaceholder = attachmentsExpanded || keepPlaceholderHiddenDuringAttachmentExit
+                    val addRotation by animateFloatAsState(
+                        targetValue = if (attachmentsExpanded) 45f else 0f,
+                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                        label = "composerAttachmentToggleRotation",
+                    )
+
                     Box(
                         modifier = Modifier
                             .size(32.dp)
@@ -596,35 +630,69 @@ fun ChatInput(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                imageVector = if (expand == ExpandState.Files) HugeIcons.Cancel01 else HugeIcons.Add01,
+                                imageVector = HugeIcons.Add01,
                                 contentDescription = stringResource(R.string.more_options),
-                                tint = workspace.ink,
-                                modifier = Modifier.size(24.dp),
+                                tint = if (attachmentsExpanded) chatTheme.accent else chatTheme.ink,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .graphicsLayer {
+                                        rotationZ = addRotation
+                                    },
                             )
                         }
+                    }
+
+                    AnimatedVisibility(
+                        visible = attachmentsExpanded,
+                        enter = expandHorizontally(
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                            expandFrom = Alignment.Start,
+                        ) + fadeIn(animationSpec = tween(160)) + scaleIn(
+                            initialScale = 0.92f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        ),
+                        exit = shrinkHorizontally(
+                            animationSpec = tween(180, easing = FastOutSlowInEasing),
+                            shrinkTowards = Alignment.Start,
+                        ) + fadeOut(animationSpec = tween(120)) + scaleOut(
+                            targetScale = 0.94f,
+                            animationSpec = tween(160, easing = FastOutSlowInEasing),
+                        ),
+                    ) {
+                        InlineAttachmentActions(
+                            onTakePic = onLaunchCamera,
+                            onPickImage = { imagePickerLauncher.launch("image/*") },
+                            onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            modifier = Modifier.padding(start = 2.dp, end = 4.dp),
+                        )
                     }
 
                     Box(
                         modifier = Modifier
                             .width(1.dp)
                             .height(20.dp)
-                            .background(workspace.hairline),
+                            .background(chatTheme.hair),
                     )
 
-                    TextInputRow(
-                        state = state,
-                        onSendMessage = { sendMessage() },
-                        onUsageClick = { showUsageSheet = true },
-                        onCompactContext = onCompactContext,
-                        // 用 absoluteOffset 把 TextField 整体视觉左移 8dp, 抵消 M3 TextField
-                        // 不可直接修改的 16dp leading content padding. 不影响 layout 尺寸,
-                        // 故不会跟 / 按钮 / send orb 重叠.
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .absoluteOffset(x = (-8).dp),
-                        minimalChrome = true,
-                        onUpdateAssistant = onUpdateAssistant,
-                    )
+                    ) {
+                        TextInputRow(
+                            state = state,
+                            onSendMessage = { sendMessage() },
+                            onUsageClick = { showUsageSheet = true },
+                            onCompactContext = onCompactContext,
+                            // 用 absoluteOffset 把 TextField 整体视觉左移 8dp, 抵消 M3 TextField
+                            // 不可直接修改的 16dp leading content padding. 不影响 layout 尺寸,
+                            // 故不会跟 / 按钮 / send orb 重叠.
+                            modifier = Modifier.fillMaxWidth(),
+                            minimalChrome = true,
+                            hidePlaceholder = hideComposerPlaceholder,
+                            onUpdateAssistant = onUpdateAssistant,
+                        )
+                    }
 
                     // V3: 用 Text("/") 字符替代 Canvas line, 跟 SlashCommandLeadingMark
                     // (TextField leadingIcon 内的 "/" 字符) 用同一字体, 两个斜杠角度一致.
@@ -689,34 +757,71 @@ fun ChatInput(
                 ) {
                     dismissExpand()
                 }
-                if (expand == ExpandState.Files) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .then(
-                                if (useComposerBlur) Modifier.hazeEffect(
-                                    state = hazeState,
-                                    style = HazeMaterials.ultraThin()
-                                )
-                                else Modifier
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        tonalElevation = 0.dp,
-                        border = BorderStroke(1.dp, workspace.hairline),
-                        color = if (useComposerBlur) Color.Transparent else hazeTintColor,
-                    ) {
-                        FilesPicker(
-                            onTakePic = onLaunchCamera,
-                            onPickImage = { imagePickerLauncher.launch("image/*") },
-                            onPickVideo = { videoPickerLauncher.launch("video/*") },
-                            onPickAudio = { audioPickerLauncher.launch("audio/*") },
-                            onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
-                        )
-                    }
-                }
             }
         }
+    }
+}
+
+@Composable
+private fun InlineAttachmentActions(
+    onTakePic: () -> Unit,
+    onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cameraPermission = rememberPermissionState(PermissionCamera)
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        PermissionManager(permissionState = cameraPermission) {
+            InlineAttachmentIcon(
+                icon = HugeIcons.Camera01,
+                contentDescription = stringResource(R.string.take_picture),
+                onClick = {
+                    if (cameraPermission.allRequiredPermissionsGranted) {
+                        onTakePic()
+                    } else {
+                        cameraPermission.requestPermissions()
+                    }
+                },
+            )
+        }
+        InlineAttachmentIcon(
+            icon = HugeIcons.Image02,
+            contentDescription = stringResource(R.string.photo),
+            onClick = onPickImage,
+        )
+        InlineAttachmentIcon(
+            icon = HugeIcons.Files02,
+            contentDescription = stringResource(R.string.upload_file),
+            onClick = onPickFile,
+        )
+    }
+}
+
+@Composable
+private fun InlineAttachmentIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = chatTheme.inkSoft,
+            modifier = Modifier.size(23.dp),
+        )
     }
 }
 

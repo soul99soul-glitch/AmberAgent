@@ -72,6 +72,7 @@ const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
 const val FEISHU_DOC_CHANGE_CHANNEL_ID = "feishu_doc_change"
 const val BOARD_NOTIFICATION_CHANNEL_ID = "today_board"
+const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -409,6 +410,14 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(boardChannel)
+
+        val deepReadChannel = NotificationChannelCompat
+            .Builder(DEEP_READ_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+            .setName("深度阅读")
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(deepReadChannel)
     }
 
     override fun onTerminate() {

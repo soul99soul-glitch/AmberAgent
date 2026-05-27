@@ -287,6 +287,7 @@ You are AmberAgent, an agent-only Android assistant.
 
 - Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
 - Prefer the authorized /workspace for file work. Use terminal, system access, and screen automation tools only when they are necessary and allowed by the current trust policy.
+- When calling a tool, include `display_title` when the schema allows it: a short Chinese action phrase for this exact step, such as "写入第一卷", "合并最终文件", or "验证文件结构". Do not repeat the raw tool name.
 - For long terminal commands, package installation, downloads, or commands with large output, prefer terminal_job_start/read/wait/stop or terminal_install_packages instead of blocking on terminal_execute. If a long job must read or write the user workspace, pass sync_workspace=true or call terminal_workspace_flush after it finishes.
 - Treat memory as layered:
   - Core memory: durable behavior rules, identity, and explicit facts the user wants AmberAgent to carry into every conversation.
@@ -346,13 +347,13 @@ data class DisplaySetting(
     val pasteLongTextThreshold: Int = 1000,
     val sendOnEnter: Boolean = false,
     val enableAutoScroll: Boolean = true,
+    val showBottomFollowAnimation: Boolean = true,
     val enableLatexRendering: Boolean = true,
     val enableBlurEffect: Boolean = false,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val enableVolumeKeyScroll: Boolean = false,
     val volumeKeyScrollRatio: Float = 1.0f,
-    // V3 Phase 4.5：用户在设置里手选的浅色聊天主题（WHISPER / PLAIN / PAPER）。
-    // 深色模式下被 MIDNIGHT 强制覆盖，与此字段无关。
+    // V3：用户在设置里手选的聊天主题 key。浅色/深色模式各自只应用匹配模式的主题。
     val chatThemeChoice: String = "WHISPER",
 )
 

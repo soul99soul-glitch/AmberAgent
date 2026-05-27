@@ -53,10 +53,13 @@ object DeepReadTemplateRenderer {
         output: DeepReadOutput,
         templateHtml: String,
         fontCss: String = DEFAULT_FONT_CSS,
+        darkTheme: Boolean = false,
     ): DeepReadRenderedTemplate {
         DeepReadTemplateRepository.validateCustomTemplate(templateHtml)
         val safeImages = output.safeImageUrls()
         val hero = output.safeHeroUrl(safeImages).orEmpty()
+        val runtimeCss = TEMPLATE_RUNTIME_CSS
+        val darkCss = if (darkTheme) DARK_TEMPLATE_CSS else ""
         val placeholders = mapOf(
             "title" to title.escapeHtml(),
             "summary" to output.summary.escapeHtml(),
@@ -70,11 +73,11 @@ object DeepReadTemplateRenderer {
             "diagram_html" to output.diagramHtml(),
             "analysis_html" to output.analysisHtml(),
             "extended_reading_html" to output.extendedReadingHtml(),
-            "font_css" to fontCss + "\n" + TEMPLATE_RUNTIME_CSS,
+            "font_css" to fontCss + "\n" + runtimeCss,
         )
         val html = placeholders.entries.fold(templateHtml) { current, (key, value) ->
             current.replace("{{$key}}", value)
-        }.withRuntimeCss(fontCss + "\n" + TEMPLATE_RUNTIME_CSS)
+        }.withRuntimeCss(fontCss + "\n" + runtimeCss, trailingCss = darkCss)
         return DeepReadRenderedTemplate(
             html = html,
             allowedImageUrls = safeImages,
@@ -86,6 +89,7 @@ object DeepReadTemplateRenderer {
         title: String,
         output: DeepReadOutput,
         fontCss: String = DEFAULT_FONT_CSS,
+        darkTheme: Boolean = false,
     ): DeepReadRenderedTemplate {
         val safeImages = output.safeImageUrls()
         val hero = output.safeHeroUrl(safeImages)
@@ -93,7 +97,7 @@ object DeepReadTemplateRenderer {
             appendLine("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>")
             appendLine(fontCss)
             appendLine(BASE_CSS)
-            appendLine(TEMPLATE_RUNTIME_CSS)
+            appendLine(templateRuntimeCss(darkTheme))
             appendLine("</style></head><body>")
             appendLine("<article>")
             if (hero != null) {
@@ -431,12 +435,14 @@ object DeepReadTemplateRenderer {
             .replace("\"", "&quot;")
             .replace("'", "&#39;")
 
-    private fun String.withRuntimeCss(css: String): String {
+    private fun String.withRuntimeCss(css: String, trailingCss: String = ""): String {
         val hasCss = css.trim() in this
+        val hasTrailingCss = trailingCss.isBlank() || trailingCss.trim() in this
         val hasImageFallback = "img:not([src])" in this
-        if (hasCss && hasImageFallback) return this
+        if (hasCss && hasTrailingCss && hasImageFallback) return this
         val styleCss = buildString {
             if (!hasCss) appendLine(css)
+            if (!hasTrailingCss) appendLine(trailingCss)
             if (!hasImageFallback) appendLine(EMPTY_IMAGE_FALLBACK_CSS)
         }
         val styleTag = "<style>$styleCss</style>"
@@ -539,6 +545,32 @@ object DeepReadTemplateRenderer {
         .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:#6b7280;margin:4px 0;}
         .diagram-relations b{font-weight:500;color:#ef4444;margin:0 5px;}
         .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:#6b7280;margin:10px 0 0;}
+    """
+
+    private fun templateRuntimeCss(darkTheme: Boolean): String =
+        if (darkTheme) TEMPLATE_RUNTIME_CSS + "\n" + DARK_TEMPLATE_CSS else TEMPLATE_RUNTIME_CSS
+
+    private const val DARK_TEMPLATE_CSS = """
+        :root{color-scheme:dark;}
+        html,body{background:#0b0a09;color:#f1ece3;}
+        article{background:#0b0a09;}
+        .hero{background:#14110e;}
+        .hero-cut{background:#0b0a09;}
+        .hero-type,.diagram-group{color:#d18752;}
+        .hero-source,figcaption,.kicker,.section,.date,.holder,small,.diagram-step p,.diagram-card p,.diagram-relations li,.diagram-caption,.reading-link small{color:#a89d90;}
+        .timeline,.timeline-item,.core-point,.reading,.reading-link{border-top-color:#3a332b;}
+        .timeline-marker{border-color:#d18752;}
+        .num,.timeline-date,.diagram-step-index,.diagram-relations b,.reading span{color:#d18752;}
+        blockquote{border-left-color:#d18752;}
+        .inline,.timeline-item figure,.core-point figure,.diagram-frame{background:#181410;}
+        .diagram-frame{border-top-color:#3a332b;border-bottom-color:#3a332b;}
+        .diagram-step,.diagram-relations{border-top-color:rgba(168,157,144,.24);}
+        .diagram-card{background:#120f0c;border-color:#3a332b;}
+        .section-state{background:#181410;color:#a89d90;}
+        .section-state.running .state-dot{background:#d18752;box-shadow:0 0 0 8px rgba(209,135,82,.15);}
+        .section-state.failed{background:#281515;color:#f2b8b5;}
+        .state-dot{background:#62574c;}
+        .skeleton-line{background:#322b24;}
     """
 
     private const val EMPTY_IMAGE_FALLBACK_CSS = """

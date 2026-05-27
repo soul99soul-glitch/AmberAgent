@@ -80,6 +80,7 @@ import me.rerere.rikkahub.utils.toDp
 import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
+private const val STREAMING_CODE_BLOCK_LINES = 6
 
 @Composable
 fun HighlightCodeBlock(
@@ -146,6 +147,8 @@ fun HighlightCodeBlock(
                 completeCodeBlock = completeCodeBlock,
             )
         }
+        val codeTextStyle = LocalTextStyle.current.merge(style)
+        val activeStreamingBlock = LocalCharRevealController.current != null
         Column(
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {
@@ -157,10 +160,13 @@ fun HighlightCodeBlock(
                     )
                 }
                 else -> {
-                    val textStyle = LocalTextStyle.current.merge(style)
+                    val textStyle = codeTextStyle
                     val codeLines = remember(code) { code.lines() }
-                    val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
-                    val displayCode = if (isExpanded) code else collapsedCode
+                    val collapsedLineLimit = if (activeStreamingBlock) STREAMING_CODE_BLOCK_LINES else COLLAPSE_LINES
+                    val collapsedCode = remember(codeLines, collapsedLineLimit) {
+                        codeLines.take(collapsedLineLimit).joinToString("\n")
+                    }
+                    val displayCode = if (activeStreamingBlock || !isExpanded) collapsedCode else code
                     val displayLines = remember(displayCode) { displayCode.lines() }
 
                     // 如果显示行号且自动换行，需要逐行渲染以保持对齐
@@ -191,7 +197,7 @@ fun HighlightCodeBlock(
 
                     Spacer(Modifier.height(4.dp))
                     // 代码折叠按钮
-                    if (settings.displaySetting.codeBlockAutoCollapse && codeLines.size > COLLAPSE_LINES) {
+                    if (settings.displaySetting.codeBlockAutoCollapse && codeLines.size > collapsedLineLimit) {
                         Box(
                             modifier = Modifier
                                 .onClick {

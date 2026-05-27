@@ -185,7 +185,7 @@ fun GenerativeWidgetCard(
             .clickable(enabled = canOpenExpanded) { showExpanded = true },
         shape = RoundedCornerShape(10.dp),
         color = widgetSurfaceColor,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        contentColor = chatTheme.ink,
         border = widgetBorder,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
@@ -199,7 +199,7 @@ fun GenerativeWidgetCard(
                     text = it,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = chatTheme.inkSoft,
                 )
             }
             slidesFontHint?.let { hint ->
@@ -212,8 +212,8 @@ fun GenerativeWidgetCard(
                         )
                     },
                     shape = RoundedCornerShape(999.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = chatTheme.accentSoft,
+                    contentColor = chatTheme.accent,
                 ) {
                     Text(
                         text = "使用系统字体 · 下载字体",
@@ -576,12 +576,13 @@ private fun GenerativeWidgetActions(
 
 @Composable
 fun GenerativeWidgetLoading(modifier: Modifier = Modifier) {
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        color = chatTheme.widgetCanvas.takeIf { it.isSpecified } ?: chatTheme.surface,
+        contentColor = chatTheme.inkSoft,
+        border = BorderStroke(1.dp, chatTheme.surfaceEdge),
     ) {
         Text(
             text = "正在生成可视化...",
@@ -609,6 +610,7 @@ private fun SafeGenerativeWidgetWebView(
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     var renderedHtml by remember {
         mutableStateOf(if (streaming) html.toStableStreamingWidgetHtml().orEmpty() else html)
     }
@@ -657,16 +659,20 @@ private fun SafeGenerativeWidgetWebView(
         colorScheme.surface,
         colorScheme.outlineVariant,
         colorScheme.primary,
+        chatTheme.ink,
+        chatTheme.surface,
+        chatTheme.surfaceEdge,
+        chatTheme.accent,
         interactive,
         fillContainer,
     ) {
         buildReceiverHtml(
             bridgeToken = bridgeToken,
             background = "transparent",
-            foreground = colorScheme.onSurface.toCssHex(),
-            surface = colorScheme.surface.toCssHex(),
-            outline = colorScheme.outlineVariant.toCssHex(),
-            primary = colorScheme.primary.toCssHex(),
+            foreground = chatTheme.ink.toCssHex(),
+            surface = chatTheme.surface.toCssHex(),
+            outline = chatTheme.surfaceEdge.toCssHex(),
+            primary = chatTheme.accent.toCssHex(),
             interactive = interactive,
             fillContainer = fillContainer,
         )

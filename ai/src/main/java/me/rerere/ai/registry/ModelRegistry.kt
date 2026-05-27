@@ -508,6 +508,21 @@ object ModelRegistry {
     private val XIAOMI_MIMO_V2_PRO = defineModel {
         tokens("mimo", "v", "2", "pro")
         toolReasoningAbility()
+        contextWindow(1_000_000)
+    }
+
+    private val XIAOMI_MIMO_V2_OMNI = defineModel {
+        tokens("mimo", "v", "2", "omni")
+        visionInput()
+        toolReasoningAbility()
+        contextWindow(256_000)
+    }
+
+    private val XIAOMI_MIMO_V2_FLASH = defineModel {
+        tokens("mimo", "v", "2", "flash")
+        visionInput()
+        toolReasoningAbility()
+        contextWindow(256_000)
     }
 
     private val XIAOMI_MIMO_V2_5 = defineModel {
@@ -654,6 +669,8 @@ object ModelRegistry {
         MINIMAX_M2_7,
         XIAOMI_MIMO_V2,
         XIAOMI_MIMO_V2_PRO,
+        XIAOMI_MIMO_V2_OMNI,
+        XIAOMI_MIMO_V2_FLASH,
         XIAOMI_MIMO_V2_5,
         XIAOMI_MIMO_V2_5_PRO,
         QWEN_MT

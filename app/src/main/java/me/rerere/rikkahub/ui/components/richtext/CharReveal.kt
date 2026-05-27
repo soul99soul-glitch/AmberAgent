@@ -2,10 +2,12 @@ package me.rerere.rikkahub.ui.components.richtext
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -55,10 +57,9 @@ enum class StreamRevealPreset(val baseRevealDurationMs: Long) {
     /** Snappy: ~120ms fade. Closest to "no animation but with a soft edge". */
     REALTIME(120L),
 
-    /** Default. ~240ms — Codex 同档. 配合 ease-out-expo + baselineShift y-offset
-     *  实现"字符轻飘上浮"质感. 200ms 仍偏短, 240ms 跨 ~2 个 chunk 间隔, 让多字
-     *  fade 窗口稳定重叠, 视觉是连续 cross-fade 而非脉冲. */
-    BALANCED(240L),
+    /** Default. Codex-like light float: soft enough to see the glyphs emerge,
+     * short enough that the stream tail still feels attached to the model. */
+    BALANCED(160L),
 
     /** Slow + cinematic. ~320ms — feels deliberate, good for long replies. */
     SILKY(320L),
@@ -87,11 +88,23 @@ private const val BACKLOG_DEGRADE = 80
  * is this fraction of the preset's base. Below SOFT_BACKPRESSURE_BACKLOG
  * the factor is 1.0; the ramp lerps between them.
  *
- * 之前 0.30 在 200ms 设置下降级到 60ms — 落进 flicker fusion 区(50-100ms),
- * 视觉成"脉冲". 提到 0.55 让 240ms × 0.55 = 132ms, 跨过阈值, backlog 满时
- * 仍有 ~8 帧平滑 fade, 不闪.
+ * Keep the catch-up behavior: when the queue backs up, shorten the fade
+ * enough that text does not lag behind the real stream.
  */
-private const val BACKPRESSURE_DURATION_FLOOR = 0.55f
+private const val BACKPRESSURE_DURATION_FLOOR = 0.45f
+
+private const val MIN_ENTRY_STAGGER_NANOS = 4_000_000L
+private const val MAX_ENTRY_STAGGER_NANOS = 10_000_000L
+private const val MAX_BATCH_STAGGER_NANOS = 64_000_000L
+
+private const val STREAM_DISPLAY_BASE_CHARS_PER_SEC = 54f
+private const val STREAM_DISPLAY_BACKLOG_GAIN = 2.2f
+private const val STREAM_DISPLAY_MAX_CHARS_PER_SEC = 720f
+private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC = 1_800f
+private const val STREAM_DISPLAY_SPEED_ALPHA = 0.18f
+private const val STREAM_DISPLAY_MIN_EMIT_INTERVAL_NANOS = 16_000_000L
+private const val STREAM_DISPLAY_MAX_CHARS_PER_EMIT = 24
+private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT = 48
 
 /**
  * EWMA-smoothed FPS below which we drop the fade animation entirely.
@@ -313,11 +326,8 @@ class CharRevealController internal constructor(
 
         if (sliceFrom < newLength) {
             // B5.1: lock the effective duration NOW for everything we're
-            // about to add. queue depth used = depth before this batch
-            // (we add below); a long batch shares one duration, which
-            // is the simpler approximation than per-entry "expected
-            // final depth" — and it's still correct in spirit (all
-            // chars in this chunk arrived at the same moment).
+            // about to add. Entries inside the same chunk get a tiny capped
+            // stagger so large flushes do not pulse in as one block.
             val effectiveAtStamp = effectiveRevealDurationNanos()
             sliceTailIntoEntries(
                 content = newContent,
@@ -361,12 +371,9 @@ class CharRevealController internal constructor(
                 val age = nowNanos - entry.appearNanos
                 if (age <= 0L) return 0f
                 if (age >= effective) return 1f
-                // V3: ease-out-expo `1 - (1-t)^5` 替代 linear. Codex 同款曲线 —
-                // 前 30% 时窗走完 ~83% 进度, 视觉是"快速浮现 + 慢速 settle",
-                // 这才是"轻飘飘"感的核心. Linear 看起来机械.
                 val t = age.toFloat() / effective.toFloat()
                 val inv = 1f - t
-                return 1f - inv * inv * inv * inv * inv
+                return 1f - inv * inv * inv
             }
         }
         // Fall-through: shouldn't happen if onContentChanged was called
@@ -409,9 +416,8 @@ class CharRevealController internal constructor(
          * Walks `content[startInclusive..endExclusive)` and slices it
          * into reveal entries by these rules:
          *  - whitespace codepoints become their own single-codepoint
-         *    entry (a space "fading in" looks weird but it has to be
-         *    in the queue or alphaAt would treat it as fully-revealed
-         *    after the next promotion).
+         *    entry. They share the current visible-entry delay but do not
+         *    advance the stagger because a space has no visible glyph.
          *  - CJK / Hangul / kana codepoints become 1 entry each (no
          *    word breaks in those scripts).
          *  - runs of other codepoints (Latin, digits, punctuation
@@ -429,26 +435,56 @@ class CharRevealController internal constructor(
             // wordRunStart tracks the start of an in-progress Latin/digit
             // word. -1 means we're not currently inside one.
             var wordRunStart = -1
+            var visibleEntryCount = 0
             var i = startInclusive
+
+            fun appearNanos(advanceVisibleEntry: Boolean): Long {
+                val delay = staggerDelayNanos(
+                    revealDurationNanos = revealDurationNanos,
+                    visibleEntryIndex = visibleEntryCount,
+                )
+                if (advanceVisibleEntry) visibleEntryCount++
+                return stamp + delay
+            }
+
             while (i < endExclusive) {
                 val cp = content.codePointAt(i)
                 val cpLen = Character.charCount(cp)
-                val isWordBreaker = isWhitespaceCodepoint(cp) || isCjkCodepoint(cp)
+                val isWhitespace = isWhitespaceCodepoint(cp)
+                val isWordBreaker = isWhitespace || isCjkCodepoint(cp)
                 if (isWordBreaker) {
                     // Flush any in-progress word run first.
                     if (wordRunStart >= 0) {
-                        into.addLast(RevealEntry(wordRunStart, i, stamp, revealDurationNanos))
+                        into.addLast(RevealEntry(wordRunStart, i, appearNanos(true), revealDurationNanos))
                         wordRunStart = -1
                     }
-                    into.addLast(RevealEntry(i, i + cpLen, stamp, revealDurationNanos))
+                    into.addLast(
+                        RevealEntry(
+                            i,
+                            i + cpLen,
+                            appearNanos(advanceVisibleEntry = !isWhitespace),
+                            revealDurationNanos,
+                        ),
+                    )
                 } else {
                     if (wordRunStart < 0) wordRunStart = i
                 }
                 i += cpLen
             }
             if (wordRunStart >= 0) {
-                into.addLast(RevealEntry(wordRunStart, endExclusive, stamp, revealDurationNanos))
+                into.addLast(RevealEntry(wordRunStart, endExclusive, appearNanos(true), revealDurationNanos))
             }
+        }
+
+        private fun staggerDelayNanos(
+            revealDurationNanos: Long,
+            visibleEntryIndex: Int,
+        ): Long {
+            if (revealDurationNanos <= 0L || visibleEntryIndex <= 0) return 0L
+            val perEntry = (revealDurationNanos / 16L)
+                .coerceIn(MIN_ENTRY_STAGGER_NANOS, MAX_ENTRY_STAGGER_NANOS)
+            val maxBatch = minOf(MAX_BATCH_STAGGER_NANOS, revealDurationNanos / 2L)
+            return (visibleEntryIndex * perEntry).coerceAtMost(maxBatch)
         }
 
         private fun isWhitespaceCodepoint(cp: Int): Boolean =
@@ -511,9 +547,146 @@ fun rememberCharRevealController(
     return controller
 }
 
+@Composable
+fun rememberStreamingDisplayText(
+    content: String,
+    streaming: Boolean,
+    onVisibleFrame: (() -> Unit)? = null,
+): String {
+    var visible by remember { mutableStateOf(content) }
+    val updatedContent by rememberUpdatedState(content)
+    val updatedStreaming by rememberUpdatedState(streaming)
+    val updatedOnVisibleFrame by rememberUpdatedState(onVisibleFrame)
+    val drainingAfterStream = !streaming && visible != content && content.startsWith(visible)
+
+    if (!streaming && visible != content && !content.startsWith(visible)) {
+        SideEffect {
+            visible = content
+        }
+    }
+
+    LaunchedEffect(streaming, drainingAfterStream) {
+        if (!streaming && !drainingAfterStream) return@LaunchedEffect
+        var lastFrameNanos = 0L
+        var lastEmitNanos = 0L
+        var speed = STREAM_DISPLAY_BASE_CHARS_PER_SEC
+        var budget = 0f
+        var lastTarget = updatedContent
+        while (true) {
+            val frameNanos = withFrameNanos { it }
+            val target = updatedContent
+            val shouldDrain = updatedStreaming || (visible != target && target.startsWith(visible))
+            if (!shouldDrain) {
+                if (visible != target) {
+                    visible = target
+                    updatedOnVisibleFrame?.invoke()
+                }
+                return@LaunchedEffect
+            }
+            if (target !== lastTarget) {
+                lastTarget = target
+                if (visible.length > target.length || !target.startsWith(visible)) {
+                    visible = target
+                    speed = STREAM_DISPLAY_BASE_CHARS_PER_SEC
+                    budget = 0f
+                    lastEmitNanos = frameNanos
+                    updatedOnVisibleFrame?.invoke()
+                    lastFrameNanos = frameNanos
+                    continue
+                }
+            }
+            val backlog = target.length - visible.length
+            if (backlog <= 0) {
+                lastFrameNanos = frameNanos
+                continue
+            }
+            val deltaSeconds = if (lastFrameNanos == 0L) {
+                1f / 60f
+            } else {
+                ((frameNanos - lastFrameNanos).coerceIn(1_000_000L, 100_000_000L)) / 1_000_000_000f
+            }
+            lastFrameNanos = frameNanos
+            val maxCharsPerSecond = if (updatedStreaming) {
+                STREAM_DISPLAY_MAX_CHARS_PER_SEC
+            } else {
+                STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC
+            }
+            val targetSpeed = (STREAM_DISPLAY_BASE_CHARS_PER_SEC + backlog * STREAM_DISPLAY_BACKLOG_GAIN)
+                .coerceAtMost(maxCharsPerSecond)
+            speed += (targetSpeed - speed) * STREAM_DISPLAY_SPEED_ALPHA
+            budget += speed * deltaSeconds
+            val maxCharsPerEmit = if (updatedStreaming) {
+                STREAM_DISPLAY_MAX_CHARS_PER_EMIT
+            } else {
+                STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT
+            }
+            val releaseCount = budget.toInt().coerceAtMost(maxCharsPerEmit)
+            if (releaseCount <= 0) continue
+            if (
+                lastEmitNanos != 0L &&
+                frameNanos - lastEmitNanos < STREAM_DISPLAY_MIN_EMIT_INTERVAL_NANOS
+            ) {
+                continue
+            }
+            val nextEnd = target.safeStreamingDisplayEnd(visible.length + releaseCount)
+            val safeEnd = if (nextEnd <= visible.length) {
+                target.nextCodePointEnd(visible.length)
+            } else {
+                nextEnd
+            }
+            visible = target.substring(0, safeEnd.coerceAtMost(target.length))
+            budget -= releaseCount
+            lastEmitNanos = frameNanos
+            updatedOnVisibleFrame?.invoke()
+        }
+    }
+
+    return if (streaming || drainingAfterStream) visible else content
+}
+
 // Local clone of androidx.compose.ui.util.fastForEach to avoid the
 // import cost from this small file. Same semantics, no allocation.
 private inline fun <T> ArrayDeque<T>.fastForEach(action: (T) -> Unit) {
     val it = iterator()
     while (it.hasNext()) action(it.next())
 }
+
+private fun String.safeStreamingDisplayEnd(candidate: Int): Int {
+    var end = candidate.coerceIn(0, length)
+    if (end == 0 || end >= length) return end
+    if (Character.isLowSurrogate(this[end])) {
+        end++
+    }
+    while (end < length) {
+        val previousCodePoint = codePointBefore(end)
+        if (previousCodePoint == ZERO_WIDTH_JOINER) {
+            end = nextCodePointEnd(end)
+            continue
+        }
+        val nextCodePoint = codePointAt(end)
+        if (nextCodePoint == ZERO_WIDTH_JOINER) {
+            end = nextCodePointEnd(nextCodePointEnd(end))
+            continue
+        }
+        if (!nextCodePoint.isAttachedMark()) break
+        end += Character.charCount(nextCodePoint)
+    }
+    return end.coerceAtMost(length)
+}
+
+private fun String.nextCodePointEnd(offset: Int): Int {
+    if (offset >= length) return length
+    return (offset + Character.charCount(codePointAt(offset))).coerceAtMost(length)
+}
+
+private fun Int.isAttachedMark(): Boolean {
+    if (this in 0xFE00..0xFE0F) return true
+    return when (Character.getType(this)) {
+        Character.NON_SPACING_MARK.toInt(),
+        Character.COMBINING_SPACING_MARK.toInt(),
+        Character.ENCLOSING_MARK.toInt() -> true
+        else -> false
+    }
+}
+
+private const val ZERO_WIDTH_JOINER = 0x200D

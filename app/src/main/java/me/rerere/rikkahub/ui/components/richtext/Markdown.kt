@@ -637,28 +637,35 @@ fun MarkdownBlock(
      * arrived text can fade in while finalized blocks stay on the fast path.
      */
     streaming: Boolean = false,
+    onStreamingVisibleFrame: (() -> Unit)? = null,
     onClickCitation: (String) -> Unit = {}
 ) {
+    val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
+    val renderContent = rememberStreamingDisplayText(
+        content = content,
+        streaming = bufferStreaming,
+        onVisibleFrame = onStreamingVisibleFrame,
+    )
     val streamingParseCache = remember {
         StreamingMarkdownParseCache()
     }
     var (data, setData) = remember {
         mutableStateOf(
             if (streaming) {
-                streamingParseCache.parse(content)
+                streamingParseCache.parse(renderContent)
             } else {
                 streamingParseCache.reset()
-                MarkdownParseCache.getOrParse(content)
+                MarkdownParseCache.getOrParse(renderContent)
             }
         )
     }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
-    val updatedContent by rememberUpdatedState(content)
+    val updatedContent by rememberUpdatedState(renderContent)
     val updatedStreaming by rememberUpdatedState(streaming)
     LaunchedEffect(Unit) {
-        var lastParsedContent = content
+        var lastParsedContent = renderContent
         var lastParsedStreaming = streaming
         snapshotFlow { updatedContent to updatedStreaming }
             .distinctUntilChanged()
@@ -697,7 +704,7 @@ fun MarkdownBlock(
       ) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
-                content = content,
+                content = renderContent,
                 modifier = modifier.amberTraceMeasure("Amber MarkdownBlock html measure"),
                 style = style,
                 onClickCitation = onClickCitation,
@@ -771,6 +778,16 @@ fun MarkdownBlock(
         }
       }
     }
+}
+
+private fun String.shouldBypassStreamingDisplayBuffer(): Boolean {
+    val lower = lowercase()
+    return lower.contains("```html") ||
+        lower.contains("<html") ||
+        lower.contains("<body") ||
+        lower.contains("<script") ||
+        lower.contains("<style") ||
+        lower.contains("<svg")
 }
 
 // for debug
@@ -1831,13 +1848,13 @@ internal fun shouldMarkLeafAsFadeEligible(
  */
 /**
  * V3: 给 fade 中的字符加 baselineShift 模拟"从下方浮上来"(Codex 同款).
- * alpha=0 → shift = -0.15 (字在 baseline 下方 ~15% font size ≈ 2-3px)
+ * alpha=0 → shift = -0.08 (字在 baseline 下方约 1-2px)
  * alpha=1 → shift = 0 (归位)
  * BaselineShift 是 SpanStyle 字段, 不影响 line height (Compose 已 clamp).
  */
 private fun fadingSpanStyle(baseColor: Color, alpha: Float): SpanStyle = SpanStyle(
     color = baseColor.copy(alpha = alpha),
-    baselineShift = BaselineShift(-(1f - alpha) * 0.15f),
+    baselineShift = BaselineShift(-(1f - alpha) * 0.08f),
 )
 
 internal fun applyRevealOverlay(

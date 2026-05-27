@@ -9,6 +9,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -174,7 +175,7 @@ class AgentToolDispatcher(
                 )
             } else runCatching {
                 val resolved = toolDef ?: error("Tool ${tool.toolName} not found")
-                val args = json.parseToJsonElement(tool.input.ifBlank { "{}" })
+                val args = json.parseToJsonElement(tool.input.ifBlank { "{}" }).withoutToolDisplayMetadata()
                 logInfo("execute: ${resolved.name} args=$args")
                 executeResolvedToolWithRetry(
                     tool = tracedTool,
@@ -262,6 +263,12 @@ class AgentToolDispatcher(
         return copy(metadata = JsonObject(existing))
     }
 
+    private fun JsonElement.withoutToolDisplayMetadata(): JsonElement {
+        val obj = runCatching { jsonObject }.getOrNull() ?: return this
+        if (obj.keys.none { it in TOOL_DISPLAY_METADATA_KEYS }) return this
+        return JsonObject(obj.filterKeys { key -> key !in TOOL_DISPLAY_METADATA_KEYS })
+    }
+
     private fun logInfo(message: String) {
         runCatching { Log.i(TAG, message) }
     }
@@ -270,3 +277,5 @@ class AgentToolDispatcher(
         runCatching { Log.e(TAG, message, error) }
     }
 }
+
+private val TOOL_DISPLAY_METADATA_KEYS = setOf("display_title")

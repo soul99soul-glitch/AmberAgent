@@ -200,17 +200,11 @@ fun RikkahubTheme(
         }
     }
 
-    // V3 chat theme（Phase 4.5）：深色模式强制 Midnight；浅色读 displaySetting.chatThemeChoice
-    // ("WHISPER" / "PLAIN" / "PAPER")。未知值 fallback 到 Whisper。
-    val chatTheme = if (darkTheme) {
-        me.rerere.rikkahub.ui.pages.chat.MidnightTheme
-    } else {
-        when (settings.displaySetting.chatThemeChoice) {
-            "PLAIN" -> me.rerere.rikkahub.ui.pages.chat.PlainTheme
-            "PAPER" -> me.rerere.rikkahub.ui.pages.chat.PaperTheme
-            else -> me.rerere.rikkahub.ui.pages.chat.WhisperTheme
-        }
-    }
+    // V3 chat theme：用户可选浅色/深色主题；当前系统模式与已存选择不匹配时，
+    // 回落到该模式默认主题，避免浅色模式误套深色 token。
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.ChatThemeChoice
+        .resolve(settings.displaySetting.chatThemeChoice, darkTheme)
+        .instance
 
     // V3 Phase 4 二级页面适配：把 LocalChatTheme 映射到 MaterialTheme.colorScheme 的核心字段。
     // 例外：
@@ -250,11 +244,12 @@ fun RikkahubTheme(
                 secondary = chatTheme.accent,
                 secondaryContainer = chatTheme.accentSoft,
                 onSecondaryContainer = chatTheme.accentDeep,
-                // Subagent #8 补齐 tertiary 用同主题 accent 体系
+                // Subagent #8 补齐 tertiary 用同主题 accent 体系。深色主题的 accentTint 是浅色提示色，
+                // 直接当 container 会在标签/搜索高亮/预览浮层里冒出亮块；深色下用透明 accentSoft。
                 tertiary = chatTheme.accentDeep,
                 onTertiary = chatTheme.onAccent,
-                tertiaryContainer = chatTheme.accentTint,
-                onTertiaryContainer = chatTheme.accentDeep,
+                tertiaryContainer = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
+                onTertiaryContainer = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
                 // Subagent #9 / 终审 #1：Snackbar 用 inverseSurface 应为"反相"色——
                 // 深色主题给亮底 + 深字; 浅色主题给深底 + 亮字。当前 chatTheme.ink/paper
                 // 在浅色 = 深字/白底 (正确)；在深色 = 浅字/深底 (反了)。所以深色下交换。

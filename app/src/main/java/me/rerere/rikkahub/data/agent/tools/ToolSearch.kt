@@ -36,6 +36,7 @@ fun createToolSearchTool(registry: ToolRegistry) = Tool(
                     put("type", "integer")
                     put("description", "Maximum tools to expose. Defaults to 5; capped at 20.")
                 })
+                put("display_title", stringProp("Optional short user-facing action title in Chinese, e.g. 查找写作工具."))
             },
             required = listOf("query")
         )

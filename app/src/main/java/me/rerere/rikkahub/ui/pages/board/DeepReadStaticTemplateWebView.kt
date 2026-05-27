@@ -8,6 +8,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.font.SlidesFontRepository
@@ -29,22 +31,26 @@ internal fun DeepReadStaticTemplateWebView(
     allowedLinkUrls: Set<String> = emptySet(),
     fontRepository: SlidesFontRepository? = null,
     textScale: Float = 1.0f,
+    backgroundColor: Color = Color.Transparent,
     onOpenLink: ((String) -> Unit)? = null,
     onMainFrameError: () -> Unit = {},
     onImageError: (String) -> Unit = {},
 ) {
     val textZoom = (textScale.coerceIn(0.75f, 1.5f) * 100f).roundToInt()
+    val backgroundArgb = backgroundColor.toArgb()
     val signature = listOf(
         baseUrl,
         html.hashCode().toString(),
         allowedImageUrls.hashCode().toString(),
         allowedLinkUrls.hashCode().toString(),
         textZoom.toString(),
+        backgroundArgb.toString(),
     ).joinToString(":")
     AndroidView(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
+                setBackgroundColor(backgroundArgb)
                 configureDeepReadStaticSettings(textZoom)
                 webViewClient = deepReadStaticTemplateWebViewClient(
                     baseUrl = baseUrl,
@@ -59,6 +65,7 @@ internal fun DeepReadStaticTemplateWebView(
             }
         },
         update = { view ->
+            view.setBackgroundColor(backgroundArgb)
             view.configureDeepReadStaticSettings(textZoom)
             view.webViewClient = deepReadStaticTemplateWebViewClient(
                 baseUrl = baseUrl,

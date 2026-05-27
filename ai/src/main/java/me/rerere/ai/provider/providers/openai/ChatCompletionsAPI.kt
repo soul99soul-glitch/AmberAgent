@@ -86,11 +86,12 @@ class ChatCompletionsAPI(
                 providerSetting = providerSetting
             )
 
+        val token = bearerResolver(providerSetting, false)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${bearerResolver(providerSetting, false)}")
+            .addOpenAICompatibleAuthHeader(providerSetting, token)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
@@ -143,11 +144,12 @@ class ChatCompletionsAPI(
             stream = true,
         )
 
+        val token = bearerResolver(providerSetting, false)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${bearerResolver(providerSetting, false)}")
+            .addOpenAICompatibleAuthHeader(providerSetting, token)
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
@@ -268,7 +270,9 @@ class ChatCompletionsAPI(
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_tokens", params.maxTokens)
+            if (params.maxTokens != null) {
+                put(if (isMiMo) "max_completion_tokens" else "max_tokens", params.maxTokens)
+            }
 
             put("stream", stream)
             if (stream) {
@@ -474,6 +478,20 @@ class ChatCompletionsAPI(
             providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
             host.endsWith("xiaomimimo.com") ||
             lowerModelId.contains("mimo")
+    }
+
+    private fun Request.Builder.addOpenAICompatibleAuthHeader(
+        providerSetting: ProviderSetting.OpenAI,
+        token: String,
+    ): Request.Builder {
+        val host = providerSetting.baseUrl.toHttpUrl().host
+        return if (providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
+            host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com")
+        ) {
+            addHeader("api-key", token)
+        } else {
+            addHeader("Authorization", "Bearer $token")
+        }
     }
 
     private fun JsonArrayBuilder.addAssistantMessages(message: UIMessage, includeReasoning: Boolean) {
@@ -736,11 +754,19 @@ class ChatCompletionsAPI(
 
     private fun parseTokenUsage(jsonObject: JsonObject?): TokenUsage? {
         if (jsonObject == null) return null
+        val promptCacheHitTokens = jsonObject["prompt_cache_hit_tokens"]?.jsonPrimitive?.intOrNull
+        val promptCacheMissTokens = jsonObject["prompt_cache_miss_tokens"]?.jsonPrimitive?.intOrNull
+        val promptTokens = jsonObject["prompt_tokens"]?.jsonPrimitive?.intOrNull
+            ?: listOfNotNull(promptCacheHitTokens, promptCacheMissTokens)
+                .takeIf { it.isNotEmpty() }
+                ?.sum()
+            ?: 0
         return TokenUsage(
-            promptTokens = jsonObject["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+            promptTokens = promptTokens,
             completionTokens = jsonObject["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
             totalTokens = jsonObject["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
             cachedTokens = jsonObject["prompt_tokens_details"]?.jsonObjectOrNull?.get("cached_tokens")?.jsonPrimitive?.intOrNull
+                ?: promptCacheHitTokens
                 ?: 0
         )
     }

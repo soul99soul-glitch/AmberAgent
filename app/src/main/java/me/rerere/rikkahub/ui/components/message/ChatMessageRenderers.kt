@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.ui.UIMessagePart
@@ -114,6 +115,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
     streaming: Boolean,
     onClickCitation: (String) -> Unit,
     onGenerativeWidgetAction: (String) -> Unit,
+    onStreamingVisibleFrame: (() -> Unit)? = null,
 ) {
     if (content.looksLikeMiniAppJsonPayload()) {
         MiniAppJsonPreview(
@@ -132,6 +134,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
             // Forward streaming so the tail block of the assistant response fades in
             // smoothly on each 200ms flush instead of popping. See MarkdownBlock kdoc.
             streaming = streaming,
+            onStreamingVisibleFrame = onStreamingVisibleFrame,
             onClickCitation = onClickCitation,
         )
         return
@@ -159,6 +162,11 @@ internal fun AssistantMarkdownBlockOrWidgets(
                     is GenerativeWidgetSegment.Text -> MarkdownBlock(
                         content = segment.content,
                         streaming = segmentStreaming,
+                        onStreamingVisibleFrame = if (segmentStreaming) {
+                            onStreamingVisibleFrame
+                        } else {
+                            null
+                        },
                         onClickCitation = onClickCitation,
                     )
 
@@ -180,6 +188,7 @@ private fun MiniAppJsonPreview(
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
     val previewText = remember(content) {
         content.trim().removeSurroundingMiniAppFence()
     }
@@ -195,9 +204,9 @@ private fun MiniAppJsonPreview(
             .fillMaxWidth()
             .height(220.dp),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = chatTheme.widgetCanvas.takeIf { it.isSpecified } ?: chatTheme.surface,
+        contentColor = chatTheme.inkSoft,
+        border = BorderStroke(1.dp, chatTheme.surfaceEdge),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -206,7 +215,7 @@ private fun MiniAppJsonPreview(
             Text(
                 text = if (streaming) "正在生成小应用" else "MiniApp JSON",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = chatTheme.accent,
             )
             Text(
                 text = previewText,
@@ -215,7 +224,7 @@ private fun MiniAppJsonPreview(
                     .weight(1f)
                     .verticalScroll(scrollState),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = chatTheme.inkSoft,
             )
         }
     }

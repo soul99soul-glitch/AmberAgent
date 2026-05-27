@@ -52,6 +52,7 @@ import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.net.URI
@@ -74,6 +75,7 @@ fun DeepReadTemplateWorkbenchPage(
     val scope = rememberCoroutineScope()
     val sampleTitle = "具身智能进入家庭前夜"
     val sampleOutput = remember { DeepReadTemplateRenderer.sampleOutput() }
+    val darkTheme = LocalDarkMode.current
     val fontCss = rememberDeepReadTemplateFontCss(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
@@ -98,11 +100,22 @@ fun DeepReadTemplateWorkbenchPage(
     var previewOutput by remember { mutableStateOf<DeepReadOutput>(sampleOutput) }
     var validDraft by remember { mutableStateOf<DeepReadTemplatePackage?>(null) }
 
-    val rendered = remember(validDraft, previewTitle, previewOutput, fontCss) {
+    val rendered = remember(validDraft, previewTitle, previewOutput, fontCss, darkTheme) {
         runCatching {
             validDraft?.let { draft ->
-                DeepReadTemplateRenderer.renderCustom(previewTitle, previewOutput, draft.html, fontCss)
-            } ?: DeepReadTemplateRenderer.renderEditorialSlant(previewTitle, previewOutput, fontCss)
+                DeepReadTemplateRenderer.renderCustom(
+                    title = previewTitle,
+                    output = previewOutput,
+                    templateHtml = draft.html,
+                    fontCss = fontCss,
+                    darkTheme = darkTheme,
+                )
+            } ?: DeepReadTemplateRenderer.renderEditorialSlant(
+                title = previewTitle,
+                output = previewOutput,
+                fontCss = fontCss,
+                darkTheme = darkTheme,
+            )
         }.getOrNull()
     }
 
@@ -232,6 +245,7 @@ fun DeepReadTemplateWorkbenchPage(
                         allowedImageUrls = if (demoPreviewUrl != null) template.allowedImageUrls else emptySet(),
                         fontRepository = fontRepository,
                         textScale = board.deepReadFontScale,
+                        backgroundColor = MaterialTheme.colorScheme.surface,
                     )
                 } ?: Text(
                     "模板预览不可用",

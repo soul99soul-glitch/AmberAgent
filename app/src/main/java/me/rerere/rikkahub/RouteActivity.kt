@@ -131,6 +131,7 @@ import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadScreen
 import me.rerere.rikkahub.ui.pages.board.DeepReadHistoryPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadTemplateWorkbenchPage
+import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadNotifier
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
@@ -277,7 +278,28 @@ class RouteActivity : ComponentActivity() {
         if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
             navStack?.add(Screen.TodayBoard)
         }
+        deepReadScreenFromIntent(intent)?.let { screen ->
+            navStack?.add(screen)
+        }
         newIntentHandler?.invoke(intent)
+    }
+
+    private fun deepReadScreenFromIntent(intent: Intent): Screen.DeepRead? {
+        if (!intent.getBooleanExtra(DeepReadNotifier.EXTRA_OPEN_DEEP_READ, false)) return null
+        val topicId = intent.getStringExtra(DeepReadNotifier.EXTRA_TOPIC_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val title = intent.getStringExtra(DeepReadNotifier.EXTRA_TITLE)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val sourceUrl = intent.getStringExtra(DeepReadNotifier.EXTRA_SOURCE_URL)
+            ?.takeIf { it.isNotBlank() }
+        return Screen.DeepRead(
+            topicId = topicId,
+            title = title,
+            sourceUrl = sourceUrl,
+            fromHistory = intent.getBooleanExtra(DeepReadNotifier.EXTRA_FROM_HISTORY, true),
+        )
     }
 
     @Composable
@@ -294,6 +316,9 @@ class RouteActivity : ComponentActivity() {
             }
             if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
                 return@remember Screen.TodayBoard
+            }
+            deepReadScreenFromIntent(intent)?.let { screen ->
+                return@remember screen
             }
             val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
                 readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)

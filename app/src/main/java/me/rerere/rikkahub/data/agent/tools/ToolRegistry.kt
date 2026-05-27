@@ -3,10 +3,12 @@ package me.rerere.rikkahub.data.agent.tools
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
@@ -55,6 +57,7 @@ class ToolRegistry private constructor(
         entry.tool.copy(
             needsApproval = entry.metadata.needsApproval,
             allowsAutoApproval = entry.metadata.autoApprovable,
+            parameters = { entry.tool.parameters().withDisplayTitleHint() },
             execute = { input ->
                 entry.tool.execute(input).enforceOutputBudget(entry.metadata.outputBudgetChars)
             }
@@ -106,6 +109,27 @@ class ToolRegistry private constructor(
         val tool: Tool,
         val metadata: ToolMetadata,
     )
+}
+
+private fun InputSchema?.withDisplayTitleHint(): InputSchema? = when (this) {
+    is InputSchema.Obj -> copy(
+        properties = JsonObject(
+            properties.toMutableMap().apply {
+                put(
+                    "display_title",
+                    buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "description",
+                            "Optional short user-facing action title in Chinese, 4-14 chars, describing this specific step (e.g. 写入第一卷, 合并最终文件)."
+                        )
+                    }
+                )
+            }
+        )
+    )
+
+    null -> null
 }
 
 enum class ToolRisk {

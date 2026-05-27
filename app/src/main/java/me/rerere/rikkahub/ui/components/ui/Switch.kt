@@ -40,7 +40,7 @@ fun Switch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    size: SwitchSize = SwitchSize.Medium,
+    size: SwitchSize = SwitchSize.Small,
     enabled: Boolean = true,
     trackColor: Color = MaterialTheme.colorScheme.primary,
     trackColorUnchecked: Color = MaterialTheme.colorScheme.surfaceContainer,

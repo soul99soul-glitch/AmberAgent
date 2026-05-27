@@ -62,6 +62,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -189,7 +190,6 @@ internal fun ChatListNormal(
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
     val timelineBottomPadding = TimelineBottomSafetyPadding +
-        innerPadding.calculateBottomPadding() +
         if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
 
     LaunchedEffect(conversation.id, activeGeneration) {
@@ -260,11 +260,59 @@ internal fun ChatListNormal(
         logScroll("pauseAutoFollowTemporarily", "mode=$mode")
     }
 
-    fun requestTimelineBottom(reason: String) {
-        val totalItems = state.layoutInfo.totalItemsCount
-        if (totalItems > 0) {
-            state.requestScrollToItem(totalItems - 1)
-            logScroll("requestTimelineBottom", "$reason totalItems=$totalItems")
+    suspend fun scrollToTimelineBottom(
+        reason: String,
+        smoothLargeMove: Boolean = false,
+    ) {
+        val token = beginProgrammaticScroll()
+        logScroll("scrollToTimelineBottom.enter", "reason=$reason token=$token")
+        try {
+            val maxSmoothStepPx = with(density) { 18.dp.toPx() }
+            val maxFrames = if (smoothLargeMove) 8 else 1
+            var frameIndex = 0
+            while (frameIndex < maxFrames) {
+                val totalItems = state.layoutInfo.totalItemsCount
+                if (totalItems <= 0) break
+                val distancePx = state.distanceToTimelineBottomPx()
+                when {
+                    distancePx == null -> {
+                        if (!smoothLargeMove) {
+                            state.scrollToItem(totalItems - 1)
+                            logScroll("scrollToTimelineBottom.snap", "reason=$reason token=$token")
+                            break
+                        }
+                        if (!state.canScrollForward) break
+                        state.scrollBy(maxSmoothStepPx)
+                        logScroll(
+                            "scrollToTimelineBottom.scrollByHiddenAnchor",
+                            "reason=$reason token=$token stepPx=$maxSmoothStepPx frame=$frameIndex",
+                        )
+                        frameIndex++
+                        withFrameNanos { }
+                    }
+
+                    distancePx > 0 -> {
+                        val stepPx = if (smoothLargeMove) {
+                            minOf(distancePx.toFloat(), maxSmoothStepPx)
+                        } else {
+                            distancePx.toFloat()
+                        }
+                        state.scrollBy(stepPx)
+                        logScroll(
+                            "scrollToTimelineBottom.scrollBy",
+                            "reason=$reason token=$token distancePx=$distancePx stepPx=$stepPx frame=$frameIndex",
+                        )
+                        if (!smoothLargeMove || distancePx.toFloat() <= maxSmoothStepPx) break
+                        frameIndex++
+                        withFrameNanos { }
+                    }
+
+                    else -> break
+                }
+            }
+        } finally {
+            logScroll("scrollToTimelineBottom.exit", "reason=$reason token=$token")
+            endProgrammaticScroll(token)
         }
     }
 
@@ -431,7 +479,10 @@ internal fun ChatListNormal(
                 !userScrollInTimeline &&
                 !state.isScrollInProgress
             ) {
-                requestTimelineBottom("generationEnded")
+                withFrameNanos { }
+                scrollToTimelineBottom("generationEnded", smoothLargeMove = true)
+                withFrameNanos { }
+                scrollToTimelineBottom("generationEnded-settle", smoothLargeMove = true)
             }
             logScroll("LE_init.branch", "→ enterIdleFollowMode (generationOff)")
             enterIdleFollowMode()
@@ -625,45 +676,51 @@ internal fun ChatListNormal(
         label = "canvasFade",
     )
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
+    val latestRenderToken = conversation.latestRenderToken()
+    val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
+    val streamingVisibleEvents = remember(conversation.id) {
+        MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor),
     ) {
         if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(conversation.id, activeGeneration) {
-                if (!activeGeneration) return@LaunchedEffect
-                snapshotFlow {
-                    val layoutInfo = state.layoutInfo
-                    val visibleItemsInfo = layoutInfo.visibleItemsInfo
-                    val lastVisibleItem = visibleItemsInfo.lastOrNull()
-                    FollowLayoutSignal(
-                        totalItems = layoutInfo.totalItemsCount,
-                        visibleItems = visibleItemsInfo.size,
-                        bottomAnchorVisible = visibleItemsInfo.isBottomAnchorVisible(),
-                        lastVisibleIndex = lastVisibleItem?.index ?: -1,
-                        lastVisibleOffset = lastVisibleItem?.offset ?: 0,
-                        lastVisibleSize = lastVisibleItem?.size ?: 0,
-                        viewportEndOffset = layoutInfo.viewportEndOffset,
-                        followingBottom = activeGenerationState &&
-                            followMode == TimelineFollowMode.FollowingBottom,
-                        userScrollInTimeline = userScrollInTimeline,
-                        scrollInProgress = state.isScrollInProgress,
-                    )
-                }
-                    .distinctUntilChanged()
-                    .collect { signal ->
-                        val willFollow = signal.followingBottom &&
-                            !signal.userScrollInTimeline &&
-                            !signal.scrollInProgress &&
-                            !signal.bottomAnchorVisible
-                        if (willFollow) {
-                            requestTimelineBottom(
-                                "layoutFollow visibleItems=${signal.visibleItems} " +
-                                    "bottomVisible=${signal.bottomAnchorVisible}",
-                            )
-                        }
+            LaunchedEffect(streamingVisibleEvents, conversation.id) {
+                streamingVisibleEvents.collect {
+                    val willFollow = activeGenerationState &&
+                        followMode == TimelineFollowMode.FollowingBottom &&
+                        !userScrollInTimeline
+                    if (!willFollow) return@collect
+                    withFrameNanos { }
+                    val stillFollowing = activeGenerationState &&
+                        followMode == TimelineFollowMode.FollowingBottom &&
+                        !userScrollInTimeline
+                    if (stillFollowing) {
+                        scrollToTimelineBottom("stream-visible", smoothLargeMove = true)
                     }
+                }
+            }
+            LaunchedEffect(
+                latestRenderToken,
+                conversation.id,
+                processingStatus,
+                pendingUserMessages.size,
+                loading,
+            ) {
+                if (!activeGeneration) return@LaunchedEffect
+                val willFollow = activeGenerationState &&
+                    followMode == TimelineFollowMode.FollowingBottom &&
+                    !userScrollInTimeline
+                logScroll(
+                    "LE_chunk",
+                    "loading=$loading pendingUserMsgs=${pendingUserMessages.size} " +
+                        "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willFollow) "SCROLL" else "SKIP"}"
+                )
+                if (willFollow) {
+                    scrollToTimelineBottom("chunk", smoothLargeMove = true)
+                }
             }
         }
 
@@ -717,7 +774,10 @@ internal fun ChatListNormal(
                         }
                     }
                 }
-                .padding(top = innerPadding.calculateTopPadding()),
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding(),
+                ),
         ) {
             chatTimelinePlan.entries.forEachIndexed { planIndex, entry ->
                 when (entry) {
@@ -741,6 +801,7 @@ internal fun ChatListNormal(
                             contentType = "post-send-waiting-assistant",
                         ) {
                             PostSendWaitingIndicator(
+                                visible = showBottomFollowAnimation,
                                 modifier = Modifier.padding(bottom = TimelineItemSpacing),
                             )
                         }
@@ -832,6 +893,11 @@ internal fun ChatListNormal(
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                                         onMiniAppModify = onMiniAppModify,
+                                        onStreamingVisibleFrame = if (isLoadingMessage) {
+                                            { streamingVisibleEvents.tryEmit(Unit) }
+                                        } else {
+                                            null
+                                        },
                                         lastMessage = isLastMessage,
                                     )
                                 }
@@ -994,6 +1060,7 @@ internal fun ChatListNormal(
                             contentType = "post-send-waiting-assistant",
                         ) {
                             PostSendWaitingIndicator(
+                                visible = showBottomFollowAnimation,
                                 modifier = Modifier.padding(bottom = TimelineItemSpacing),
                             )
                         }
@@ -1026,9 +1093,9 @@ internal fun ChatListNormal(
                             key = LoadingIndicatorKey,
                             contentType = "loading",
                         ) {
-                            AgentWorkingIndicator(
+                            TimelineTailWorkingIndicator(
                                 processingStatus = processingStatus,
-                                modifier = Modifier.padding(8.dp),
+                                visible = showBottomFollowAnimation,
                             )
                         }
                     }
@@ -1203,4 +1270,13 @@ internal fun ChatListNormal(
         }
         }
     }
+}
+
+private fun LazyListState.distanceToTimelineBottomPx(): Int? {
+    val totalItems = layoutInfo.totalItemsCount
+    if (totalItems == 0) return 0
+    val bottomItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == totalItems - 1 }
+        ?: return null
+    val contentBottom = bottomItem.offset + bottomItem.size + layoutInfo.afterContentPadding
+    return (contentBottom - layoutInfo.viewportEndOffset).coerceAtLeast(0)
 }

@@ -624,8 +624,8 @@
   <string name="setting_display_page_chat_font_family_monospace">等宽字体</string>
   <string name="setting_display_page_chat_font_family_serif">衬线体</string>
   <string name="setting_display_page_chat_font_family_title">聊天字体</string>
-  <string name="setting_display_page_chat_list_model_icon_desc">是否在聊天列表消息中显示模型图标</string>
-  <string name="setting_display_page_chat_list_model_icon_title">聊天列表模型图标</string>
+  <string name="setting_display_page_chat_list_model_icon_desc">是否在助手消息标题左侧显示状态点</string>
+  <string name="setting_display_page_chat_list_model_icon_title">助手状态点</string>
   <string name="setting_display_page_code_block_auto_collapse_desc">默认自动折叠代码块</string>
   <string name="setting_display_page_code_block_auto_collapse_title">代码块自动折叠</string>
   <string name="setting_display_page_code_block_auto_wrap_desc">自动换行代码块中的长行</string>
@@ -640,6 +640,8 @@
   <string name="setting_display_page_launch_start_mode_home">主页</string>
   <string name="setting_display_page_enable_auto_scroll_desc">AI 生成内容时，仅在接近底部时跟随滚动</string>
   <string name="setting_display_page_enable_auto_scroll_title">生成时跟随</string>
+  <string name="setting_display_page_bottom_follow_animation_desc">在正在生成的消息末尾显示呼吸小圆点</string>
+  <string name="setting_display_page_bottom_follow_animation_title">底部跟随动画</string>
   <string name="setting_display_page_enable_blur_effect_desc">在聊天输入栏启用模糊效果</string>
   <string name="setting_display_page_enable_blur_effect_title">启用模糊效果</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 语法渲染数学表达式和公式</string>
@@ -1265,6 +1267,7 @@
   <string name="setting_page_search_agent_search">Agent 网络搜索</string>
   <string name="setting_page_search_agent_search_desc">允许聊天调用 search_web 和 scrape_web，使用已启用服务。</string>
   <string name="setting_page_search_enabled_services_count">已启用 %1$d/%2$d 个服务用于多源搜索。</string>
+  <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 个服务已启用 · 多源召回</string>
   <string name="setting_page_search_builtin_sources">内置免费源</string>
   <string name="setting_page_search_builtin_sources_desc">API 服务弱或不可用时，用公共源、阅读器和垂直源兜底验证。</string>
   <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
@@ -1279,10 +1282,19 @@
   <string name="setting_page_search_builtin_hackernews_desc">技术、开源和 AI 工具生态讨论源。</string>
   <string name="setting_page_search_google_webview_fallback">Google WebView 兜底</string>
   <string name="setting_page_search_google_webview_fallback_desc">普通搜索弱或深度搜索时，打开可见搜索页兜底。</string>
+  <string name="setting_page_search_configured_services">已配置</string>
+  <string name="setting_page_search_drag_priority">拖动调整优先级</string>
   <string name="setting_page_search_recommend_title">推荐组合</string>
   <string name="setting_page_search_recommend_desc">零成本：Jina + DuckDuckGo + Bing。Google 结果：加 Serper 或 SerpAPI。高质量多源：加 Tavily 或 Brave。自托管：加 SearXNG。</string>
+  <string name="setting_page_search_recommend_zero_cost">零成本</string>
+  <string name="setting_page_search_recommend_zero_cost_detail">Jina + DuckDuckGo + Bing</string>
+  <string name="setting_page_search_recommend_google">Google 结果</string>
+  <string name="setting_page_search_recommend_google_detail">Serper / SerpAPI</string>
+  <string name="setting_page_search_recommend_quality">高质量多源</string>
+  <string name="setting_page_search_recommend_quality_detail">Tavily 或 Brave</string>
   <string name="setting_page_search_use_for_agent">用于 Agent 搜索</string>
   <string name="setting_page_search_result_size">结果数量</string>
+  <string name="setting_page_search_result_size_desc">每次搜索最多返回的结果条数</string>
   <string name="setting_page_search_service">搜索服务</string>
   <string name="setting_page_search_service_desc">设置搜索服务</string>
   <string name="setting_page_search_title">搜索服务</string>

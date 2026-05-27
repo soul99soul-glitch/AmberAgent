@@ -5,17 +5,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * V3 设计稿 4 套主题 token —— themes.jsx 完整搬运 + 适应 Compose 类型。
+ * V3 设计稿主题 token —— themes.jsx 完整搬运 + 适应 Compose 类型。
  *
  * 用法：
  *   val theme = LocalChatTheme.current
  *   theme.accent / theme.sendBg / theme.bloomCore / ...
  *
- * 4 个实例：[WhisperTheme] (默认浅色) / [PlainTheme] (黑白) /
- *           [PaperTheme] (暖纸) / [MidnightTheme] (深色)
- *
- * 设备深色模式可与用户选择独立 —— Provider 层决定是否在 isDarkMode 时强制
- * 切到 [MidnightTheme]。
+ * 设备深色模式可与用户选择独立 —— Provider 层按当前系统模式解析浅色/深色主题。
  */
 @Immutable
 data class ChatTheme(
@@ -49,6 +45,8 @@ data class ChatTheme(
     val userBubbleEdge: Color,
     // agent header status dot
     val modelStatusDot: Color,
+    // provider/model logo circular background
+    val modelLogoBg: Color = Color.Unspecified,
     // tool pill
     val toolPillBg: Color,
     val toolPillEdge: Color,
@@ -134,6 +132,7 @@ val WhisperTheme = ChatTheme(
     userBubble = Color(0xFFF2F4F7),
     userBubbleEdge = Color(0x0F0F1419),
     modelStatusDot = Color(0xFF5DBE8A),
+    modelLogoBg = Color(0xFFF2F4F7),
     toolPillBg = Color(0xFFF4F4F4),
     toolPillEdge = Color(0x0D0F1419),
     toolLabelInk = Color(0xFF5B6573),
@@ -187,6 +186,7 @@ val PlainTheme = ChatTheme(
     userBubble = Color(0xFFF4F4F4),
     userBubbleEdge = Color(0x0D000000),
     modelStatusDot = Color(0xFF7A7A7A),
+    modelLogoBg = Color(0xFFF4F4F4),
     toolPillBg = Color(0xFFF4F4F4),
     toolPillEdge = Color(0x0D000000),
     toolLabelInk = Color(0xFF0E0E0E),
@@ -246,6 +246,7 @@ val PaperTheme = ChatTheme(
     userBubble = Color(0xFFF7EFDD),
     userBubbleEdge = Color(0x0D2A241B),
     modelStatusDot = Color(0xFFA88D5E),
+    modelLogoBg = Color(0xFFF7EBDD),
     toolPillBg = Color(0xFFF7EFDD),
     toolPillEdge = Color(0x102A241B),
     toolLabelInk = Color(0xFFB5683A),
@@ -287,6 +288,183 @@ val PaperTheme = ChatTheme(
     widgetCanvas = Color(0xFFE6D8B5),
 )
 
+// ── Sage · 鼠尾草（暖米偏绿纸感）───────────────────────────────────
+val SageTheme = ChatTheme(
+    name = "鼠尾草 · Sage",
+    bg = Color(0xFFF4F5EF),
+    paper = Color(0xFFF4F5EF),
+    ink = Color(0xFF2A352A),
+    inkSoft = Color(0xFF5E6E5A),
+    inkFaint = Color(0xFF9CAB95),
+    hair = Color(0x142A352A),
+    surface = Color(0xFFF4F5EF),
+    surfaceEdge = Color(0x142A352A),
+    accent = Color(0xFF6B8E5A),
+    accentDeep = Color(0xFF4F7340),
+    accentSoft = Color(0xFFE5ECDC),
+    accentTint = Color(0xFFD5E0C6),
+    sendBg = Color(0xFF6B8E5A),
+    sendArrow = Color.White,
+    sendHalo = Color(0xD97DA573),
+    bloomCore = Color(0xFF7DA573),
+    bloomSecondary = Color(0xFFC8DCC3),
+    bloomHighlight = Color(0xFFE5ECDC),
+    bloomMaxAlpha = 0.48f,
+    showBloomInConvo = true,
+    userBubble = Color(0xFFEEF1E7),
+    userBubbleEdge = Color(0x0D2A352A),
+    modelStatusDot = Color(0xFF6B8E5A),
+    modelLogoBg = Color(0xFFEEF1E7),
+    toolPillBg = Color(0xFFEEF1E7),
+    toolPillEdge = Color(0x102A352A),
+    toolLabelInk = Color(0xFF4F7340),
+    toolIconInk = Color(0xFF6B8E5A),
+    toolDoneBg = Color(0xFF6B8E5A),
+    toolDoneBadgeInk = Color.White,
+    thinkRule = Color(0x4D6B8E5A),
+    thinkHeaderInk = Color(0xFF6B8E5A),
+    thinkBodyInk = Color(0xFF5E6E5A),
+    sheetBackdrop = Color(0x332A352A),
+    dragHandle = Color(0x332A352A),
+    searchBarBg = Color(0x0A2A352A),
+    composerShadow = Color(0x402A352A),
+    outlineStrong = Color(0x336B8E5A),
+    outlineSoft = Color(0x1A2A352A),
+    containerLowest = Color(0xFFF4F5EF),
+    containerLow = Color(0xFFF7F8F3),
+    containerMid = Color(0xFFEEF1E7),
+    containerHigh = Color(0xFFE5ECDC),
+    containerHighest = Color(0xFFD5E0C6),
+    onAccent = Color.White,
+    topHaloCore = Color(0xFFC8DCC3),
+    topHaloAlpha = 0.18f,
+    bloomHeightFrac = 0.52f,
+    contextEmpty = Color(0xFFD2D9CD),
+    contextLow = Color(0xFF6B8E5A),
+    contextMid = Color(0xFFA18A45),
+    contextHigh = Color(0xFF9A4F3C),
+    contextTrack = Color(0x1A2A352A),
+    widgetCanvas = Color(0xFFDCE5D1),
+)
+
+// ── Tundra · 苔原（冷灰绿、低饱和霜雾感）────────────────────────────
+val TundraTheme = ChatTheme(
+    name = "苔原 · Tundra",
+    bg = Color(0xFFEEF1EC),
+    paper = Color(0xFFEEF1EC),
+    ink = Color(0xFF243029),
+    inkSoft = Color(0xFF5E6E63),
+    inkFaint = Color(0xFF9CABA1),
+    hair = Color(0x14243029),
+    surface = Color(0xFFEEF1EC),
+    surfaceEdge = Color(0x14243029),
+    accent = Color(0xFF6F8A7A),
+    accentDeep = Color(0xFF3F5C50),
+    accentSoft = Color(0xFFDCE3DC),
+    accentTint = Color(0xFFC5D5CB),
+    sendBg = Color(0xFF6F8A7A),
+    sendArrow = Color.White,
+    sendHalo = Color(0xB88CAA96),
+    bloomCore = Color(0xFF8CAA96),
+    bloomSecondary = Color(0xFFC8D8CD),
+    bloomHighlight = Color(0xFFDCE3DC),
+    bloomMaxAlpha = 0.42f,
+    showBloomInConvo = true,
+    userBubble = Color(0xFFE3E9E3),
+    userBubbleEdge = Color(0x0D243029),
+    modelStatusDot = Color(0xFF6F8A7A),
+    modelLogoBg = Color(0xFFE3E9E3),
+    toolPillBg = Color(0xFFE3E9E3),
+    toolPillEdge = Color(0x10243029),
+    toolLabelInk = Color(0xFF3F5C50),
+    toolIconInk = Color(0xFF6F8A7A),
+    toolDoneBg = Color(0xFF6F8A7A),
+    toolDoneBadgeInk = Color.White,
+    thinkRule = Color(0x4D6F8A7A),
+    thinkHeaderInk = Color(0xFF6F8A7A),
+    thinkBodyInk = Color(0xFF5E6E63),
+    sheetBackdrop = Color(0x33243029),
+    dragHandle = Color(0x33243029),
+    searchBarBg = Color(0x0A243029),
+    composerShadow = Color(0x40243029),
+    outlineStrong = Color(0x336F8A7A),
+    outlineSoft = Color(0x1A243029),
+    containerLowest = Color(0xFFEEF1EC),
+    containerLow = Color(0xFFF4F6F2),
+    containerMid = Color(0xFFE3E9E3),
+    containerHigh = Color(0xFFDCE3DC),
+    containerHighest = Color(0xFFC5D5CB),
+    onAccent = Color.White,
+    topHaloCore = Color(0xFFC8D8CD),
+    topHaloAlpha = 0.16f,
+    bloomHeightFrac = 0.50f,
+    contextEmpty = Color(0xFFD0D8D1),
+    contextLow = Color(0xFF6F8A7A),
+    contextMid = Color(0xFFA09056),
+    contextHigh = Color(0xFF9A5148),
+    contextTrack = Color(0x1A243029),
+    widgetCanvas = Color(0xFFD4DDD5),
+)
+
+// ── Pine Mist · 雾松（霜青灰、水汽感）───────────────────────────────
+val PineMistTheme = ChatTheme(
+    name = "雾松 · Pine Mist",
+    bg = Color(0xFFEEF2F1),
+    paper = Color(0xFFEEF2F1),
+    ink = Color(0xFF1F2A29),
+    inkSoft = Color(0xFF566866),
+    inkFaint = Color(0xFF94A5A3),
+    hair = Color(0x141F2A29),
+    surface = Color(0xFFEEF2F1),
+    surfaceEdge = Color(0x141F2A29),
+    accent = Color(0xFF5E7A78),
+    accentDeep = Color(0xFF3A5654),
+    accentSoft = Color(0xFFDCE5E4),
+    accentTint = Color(0xFFC2D3D1),
+    sendBg = Color(0xFF5E7A78),
+    sendArrow = Color.White,
+    sendHalo = Color(0xB85E7A78),
+    bloomCore = Color(0xFF5E7A78),
+    bloomSecondary = Color(0xFFC8D8D6),
+    bloomHighlight = Color(0xFFDCE5E4),
+    bloomMaxAlpha = 0.40f,
+    showBloomInConvo = true,
+    userBubble = Color(0xFFE3EAE9),
+    userBubbleEdge = Color(0x0D1F2A29),
+    modelStatusDot = Color(0xFF5E7A78),
+    modelLogoBg = Color(0xFFE3EAE9),
+    toolPillBg = Color(0xFFE3EAE9),
+    toolPillEdge = Color(0x101F2A29),
+    toolLabelInk = Color(0xFF3A5654),
+    toolIconInk = Color(0xFF5E7A78),
+    toolDoneBg = Color(0xFF5E7A78),
+    toolDoneBadgeInk = Color.White,
+    thinkRule = Color(0x4D5E7A78),
+    thinkHeaderInk = Color(0xFF5E7A78),
+    thinkBodyInk = Color(0xFF566866),
+    sheetBackdrop = Color(0x331F2A29),
+    dragHandle = Color(0x331F2A29),
+    searchBarBg = Color(0x0A1F2A29),
+    composerShadow = Color(0x401F2A29),
+    outlineStrong = Color(0x335E7A78),
+    outlineSoft = Color(0x1A1F2A29),
+    containerLowest = Color(0xFFEEF2F1),
+    containerLow = Color(0xFFF4F7F6),
+    containerMid = Color(0xFFE3EAE9),
+    containerHigh = Color(0xFFDCE5E4),
+    containerHighest = Color(0xFFC2D3D1),
+    onAccent = Color.White,
+    topHaloCore = Color(0xFFC8D8D6),
+    topHaloAlpha = 0.16f,
+    bloomHeightFrac = 0.50f,
+    contextEmpty = Color(0xFFCDDAD8),
+    contextLow = Color(0xFF5E7A78),
+    contextMid = Color(0xFF9A8B54),
+    contextHigh = Color(0xFF95514A),
+    contextTrack = Color(0x1A1F2A29),
+    widgetCanvas = Color(0xFFD2DEDC),
+)
+
 // ── Midnight · 夜墨（深色，冷靛蓝点缀）────────────────────────────
 val MidnightTheme = ChatTheme(
     name = "夜墨 · Midnight",
@@ -315,6 +493,7 @@ val MidnightTheme = ChatTheme(
     userBubble = Color(0x1FFFFFFF),
     userBubbleEdge = Color(0x14E8EAEF),
     modelStatusDot = Color(0xFF7BD49E),
+    modelLogoBg = Color(0x1FFFFFFF),
     toolPillBg = Color(0x1FFFFFFF),
     toolPillEdge = Color(0x14E8EAEF),
     toolLabelInk = Color(0xFF8FA9E0),
@@ -358,15 +537,157 @@ val MidnightTheme = ChatTheme(
     widgetCanvas = Color(0xFF1B1C22),
 )
 
+// ── Moss · 苔藓（深森林夜，暖深绿）─────────────────────────────────
+val MossTheme = ChatTheme(
+    name = "苔藓 · Moss",
+    bg = Color(0xFF1A2419),
+    paper = Color(0xFF1A2419),
+    ink = Color(0xFFE8ECE5),
+    inkSoft = Color(0xFF8B9885),
+    inkFaint = Color(0xFF4A5648),
+    hair = Color(0x1AE8ECE5),
+    surface = Color(0xFF243023),
+    surfaceEdge = Color(0x1AE8ECE5),
+    accent = Color(0xFF7FA876),
+    accentDeep = Color(0xFF365028),
+    accentSoft = Color(0x247FA876),
+    accentTint = Color(0xFFD0E0C7),
+    sendBg = Color(0xFF7FA876),
+    sendArrow = Color(0xFF1A2419),
+    sendHalo = Color(0x617FA876),
+    bloomCore = Color(0xFF7FA876),
+    bloomSecondary = Color(0xFF365028),
+    bloomHighlight = Color(0xFFD0E0C7),
+    bloomMaxAlpha = 0.38f,
+    showBloomInConvo = true,
+    userBubble = Color(0x0DFFFFFF),
+    userBubbleEdge = Color(0x14E8ECE5),
+    modelStatusDot = Color(0xFF7FA876),
+    modelLogoBg = Color(0x0DFFFFFF),
+    toolPillBg = Color(0x0DFFFFFF),
+    toolPillEdge = Color(0x14E8ECE5),
+    toolLabelInk = Color(0xFF7FA876),
+    toolIconInk = Color(0xFF7FA876),
+    toolDoneBg = Color(0xFF7FA876),
+    toolDoneBadgeInk = Color(0xFF1A2419),
+    thinkRule = Color(0x4D7FA876),
+    thinkHeaderInk = Color(0xFF7FA876),
+    thinkBodyInk = Color(0xFF8B9885),
+    sheetBackdrop = Color(0x8C000000),
+    dragHandle = Color(0x38FFFFFF),
+    searchBarBg = Color(0x0DFFFFFF),
+    composerShadow = Color(0x337FA876),
+    outlineStrong = Color(0x33E8ECE5),
+    outlineSoft = Color(0x1FE8ECE5),
+    containerLowest = Color(0xFF121A12),
+    containerLow = Color(0xFF1A2419),
+    containerMid = Color(0xFF202B1F),
+    containerHigh = Color(0xFF263324),
+    containerHighest = Color(0xFF2D3A2B),
+    onAccent = Color(0xFF1A2419),
+    isDark = true,
+    topHaloCore = Color(0xFF365028),
+    topHaloAlpha = 0.18f,
+    bloomHeightFrac = 0.55f,
+    contextEmpty = Color(0x338B9885),
+    contextLow = Color(0xFF7FA876),
+    contextMid = Color(0xFFC9A461),
+    contextHigh = Color(0xFFE06D5A),
+    contextTrack = Color(0x2EE8ECE5),
+    popoverBg = Color(0xFF243023),
+    widgetCanvas = Color(0xFF243023),
+)
+
+// ── Charcoal · 灰雀（中性深灰，低饱和暖白）──────────────────────────
+val CharcoalTheme = ChatTheme(
+    name = "灰雀 · Charcoal",
+    bg = Color(0xFF1C1C1C),
+    paper = Color(0xFF1C1C1C),
+    ink = Color(0xFFEDEAE5),
+    inkSoft = Color(0xFF8E8B86),
+    inkFaint = Color(0xFF4A4844),
+    hair = Color(0x1AEDEAE5),
+    surface = Color(0xFF262626),
+    surfaceEdge = Color(0x1AEDEAE5),
+    accent = Color(0xFFC4C0BA),
+    accentDeep = Color(0xFF403E3A),
+    accentSoft = Color(0x24C4C0BA),
+    accentTint = Color(0xFFE0DCD6),
+    sendBg = Color(0xFFC4C0BA),
+    sendArrow = Color(0xFF1C1C1C),
+    sendHalo = Color(0x33C4C0BA),
+    bloomCore = Color(0xFFC4C0BA),
+    bloomSecondary = Color(0xFF403E3A),
+    bloomHighlight = Color(0xFFE0DCD6),
+    bloomMaxAlpha = 0.20f,
+    showBloomInConvo = true,
+    userBubble = Color(0x0DFFFFFF),
+    userBubbleEdge = Color(0x14EDEAE5),
+    modelStatusDot = Color(0xFFC4C0BA),
+    modelLogoBg = Color(0x0DFFFFFF),
+    toolPillBg = Color(0x0DFFFFFF),
+    toolPillEdge = Color(0x14EDEAE5),
+    toolLabelInk = Color(0xFFC4C0BA),
+    toolIconInk = Color(0xFFC4C0BA),
+    toolDoneBg = Color(0xFFC4C0BA),
+    toolDoneBadgeInk = Color(0xFF1C1C1C),
+    thinkRule = Color(0x4DC4C0BA),
+    thinkHeaderInk = Color(0xFFC4C0BA),
+    thinkBodyInk = Color(0xFF8E8B86),
+    sheetBackdrop = Color(0x8C000000),
+    dragHandle = Color(0x38FFFFFF),
+    searchBarBg = Color(0x0DFFFFFF),
+    composerShadow = Color(0x26C4C0BA),
+    outlineStrong = Color(0x33EDEAE5),
+    outlineSoft = Color(0x1FEDEAE5),
+    containerLowest = Color(0xFF161616),
+    containerLow = Color(0xFF1C1C1C),
+    containerMid = Color(0xFF222222),
+    containerHigh = Color(0xFF282828),
+    containerHighest = Color(0xFF303030),
+    onAccent = Color(0xFF1C1C1C),
+    isDark = true,
+    topHaloCore = Color(0xFF403E3A),
+    topHaloAlpha = 0.12f,
+    bloomHeightFrac = 0.55f,
+    contextEmpty = Color(0x334A4844),
+    contextLow = Color(0xFFC4C0BA),
+    contextMid = Color(0xFFC9A461),
+    contextHigh = Color(0xFFE06D5A),
+    contextTrack = Color(0x2EEDEAE5),
+    popoverBg = Color(0xFF262626),
+    widgetCanvas = Color(0xFF262626),
+)
+
 /**
  * 主题枚举 —— 存到 DataStore 的 stringKey 值。
- * Midnight 可被 system dark mode override 触发；其他三个由用户在设置里选。
+ * 按系统浅/深色模式解析对应主题；模式不匹配时回落到该模式默认主题。
  */
 enum class ChatThemeChoice(val instance: ChatTheme, val displayName: String) {
     WHISPER(WhisperTheme, "微光"),
     PLAIN(PlainTheme, "素白"),
     PAPER(PaperTheme, "暖纸"),
+    SAGE(SageTheme, "鼠尾草"),
+    TUNDRA(TundraTheme, "苔原"),
+    PINE_MIST(PineMistTheme, "雾松"),
     MIDNIGHT(MidnightTheme, "夜墨"),
+    MOSS(MossTheme, "苔藓"),
+    CHARCOAL(CharcoalTheme, "灰雀"),
+    ;
+
+    companion object {
+        fun fromKey(key: String?): ChatThemeChoice =
+            entries.firstOrNull { it.name == key } ?: WHISPER
+
+        fun resolve(key: String?, darkTheme: Boolean): ChatThemeChoice {
+            val selected = fromKey(key)
+            if (selected.instance.isDark == darkTheme) return selected
+            return if (darkTheme) MIDNIGHT else WHISPER
+        }
+
+        fun choicesFor(darkTheme: Boolean): List<ChatThemeChoice> =
+            entries.filter { it.instance.isDark == darkTheme }
+    }
 }
 
 /** 全局 CompositionLocal —— UI 消费侧读 [LocalChatTheme.current]. */
