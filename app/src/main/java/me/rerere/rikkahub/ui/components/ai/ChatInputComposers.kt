@@ -94,6 +94,7 @@ private const val MAX_SLASH_COMMAND_TITLE_CHARS = 32
 private const val DYNAMIC_SLASH_COMMAND_MIN_QUERY_CHARS = 2
 private const val MAX_MENTIONS = 9
 private const val SLASH_COMMAND_PANEL_EXIT_MS = 130
+private const val MENTION_PANEL_EXIT_MS = 100
 
 @Composable
 internal fun TextInputRow(
@@ -248,21 +249,7 @@ internal fun TextInputRow(
         if (slashPanelMounted) {
             androidx.compose.ui.window.Popup(
                 properties = androidx.compose.ui.window.PopupProperties(focusable = false),
-                popupPositionProvider = object : androidx.compose.ui.window.PopupPositionProvider {
-                    override fun calculatePosition(
-                        anchorBounds: androidx.compose.ui.unit.IntRect,
-                        windowSize: androidx.compose.ui.unit.IntSize,
-                        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
-                        popupContentSize: androidx.compose.ui.unit.IntSize,
-                    ): androidx.compose.ui.unit.IntOffset {
-                        // panel 水平居中 = composer 一致左右 12dp margin
-                        // 垂直在 anchor 上方 8dp gap
-                        val gapPx = 8
-                        val x = ((windowSize.width - popupContentSize.width) / 2).coerceAtLeast(0)
-                        val y = (anchorBounds.top - popupContentSize.height - gapPx).coerceAtLeast(0)
-                        return androidx.compose.ui.unit.IntOffset(x, y)
-                    }
-                },
+                popupPositionProvider = inputPanelPopupPositionProvider(),
             ) {
                 androidx.compose.animation.AnimatedVisibility(
                     visible = slashVisible,
@@ -367,29 +354,73 @@ internal fun TextInputRow(
                 )
             }
         } ?: emptyList()
-        androidx.compose.animation.AnimatedVisibility(
-            visible = mentionVisible,
-            enter = androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(150)
-            ) + androidx.compose.animation.slideInVertically(
-                animationSpec = androidx.compose.animation.core.tween(150),
-                initialOffsetY = { it / 4 }
-            ),
-            exit = androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(100)
-            ) + androidx.compose.animation.slideOutVertically(
-                animationSpec = androidx.compose.animation.core.tween(100),
-                targetOffsetY = { it / 4 }
-            ),
-        ) {
-            MentionPanel(
-                roles = mentionMatches,
-                onSelect = { role ->
-                    if (mentionState != null) {
-                        state.replaceMention(mentionState, role.id)
-                    }
-                },
-            )
+        var mentionPanelMounted by remember { mutableStateOf(false) }
+        var retainedMentionMatches by remember { mutableStateOf<List<MentionRoleItem>>(emptyList()) }
+        var retainedMentionState by remember { mutableStateOf<MentionContext?>(null) }
+        LaunchedEffect(mentionVisible) {
+            if (mentionVisible) {
+                mentionPanelMounted = true
+            } else if (mentionPanelMounted) {
+                delay(MENTION_PANEL_EXIT_MS.toLong())
+                mentionPanelMounted = false
+            }
+        }
+        LaunchedEffect(mentionVisible, mentionMatches, mentionState) {
+            if (mentionVisible) {
+                retainedMentionMatches = mentionMatches
+                retainedMentionState = mentionState
+            }
+        }
+        if (mentionPanelMounted) {
+            androidx.compose.ui.window.Popup(
+                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                popupPositionProvider = inputPanelPopupPositionProvider(),
+            ) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = mentionVisible,
+                    enter = androidx.compose.animation.fadeIn(
+                        animationSpec = androidx.compose.animation.core.tween(120)
+                    ) + androidx.compose.animation.slideInVertically(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 180,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        initialOffsetY = { it / 12 },
+                    ) + androidx.compose.animation.scaleIn(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 180,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        initialScale = 0.98f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.85f, 1f),
+                    ),
+                    exit = androidx.compose.animation.fadeOut(
+                        animationSpec = androidx.compose.animation.core.tween(MENTION_PANEL_EXIT_MS)
+                    ) + androidx.compose.animation.slideOutVertically(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = MENTION_PANEL_EXIT_MS,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        targetOffsetY = { it / 16 },
+                    ) + androidx.compose.animation.scaleOut(
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = MENTION_PANEL_EXIT_MS,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        targetScale = 0.985f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.85f, 1f),
+                    ),
+                ) {
+                    MentionPanel(
+                        roles = retainedMentionMatches,
+                        onSelect = { role ->
+                            retainedMentionState?.let { activeMention ->
+                                state.replaceMention(activeMention, role.id)
+                            }
+                        },
+                    )
+                }
+            }
         }
         TextField(
             state = state.textContent,
@@ -457,6 +488,21 @@ internal fun TextInputRow(
                 isFullScreen = false
             }
         }
+    }
+}
+
+private fun inputPanelPopupPositionProvider(
+    gapPx: Int = 8,
+): androidx.compose.ui.window.PopupPositionProvider = object : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ): androidx.compose.ui.unit.IntOffset {
+        val x = ((windowSize.width - popupContentSize.width) / 2).coerceAtLeast(0)
+        val y = (anchorBounds.top - popupContentSize.height - gapPx).coerceAtLeast(0)
+        return androidx.compose.ui.unit.IntOffset(x, y)
     }
 }
 
@@ -878,13 +924,24 @@ private fun MentionPanel(
     onSelect: (MentionRoleItem) -> Unit,
 ) {
     val workspace = workspaceColors()
+    val chatTheme = me.rerere.rikkahub.ui.pages.chat.LocalChatTheme.current
+    val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val panelShape = RoundedCornerShape(14.dp)
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .width(screenWidth - 24.dp)
+            .shadow(
+                elevation = 8.dp,
+                shape = panelShape,
+                clip = false,
+                ambientColor = chatTheme.composerShadow,
+                spotColor = chatTheme.composerShadow,
+            ),
+        shape = panelShape,
         tonalElevation = 0.dp,
-        shadowElevation = 1.dp,
-        color = workspace.paper,
-        border = BorderStroke(1.dp, workspace.hairline),
+        shadowElevation = 0.dp,
+        color = chatTheme.surface,
+        border = BorderStroke(1.dp, chatTheme.surfaceEdge),
     ) {
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
             if (roles.isEmpty()) {
