@@ -249,6 +249,14 @@ class ChatService(
         conversationAccess = this,
     )
 
+    private val aiAuxiliaryGenerator = AiAuxiliaryGenerator(
+        context = context,
+        settingsStore = settingsStore,
+        providerManager = providerManager,
+        conversationRepo = conversationRepo,
+        conversationAccess = this,
+    )
+
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
     val errors: StateFlow<List<ChatError>> = _errors.asStateFlow()
@@ -1516,112 +1524,16 @@ class ChatService(
         )
     }
 
-    // ---- 生成标题 ----
+    // ---- 生成标题 / 建议（delegated to AiAuxiliaryGenerator）----
 
     suspend fun generateTitle(
         conversationId: Uuid,
         conversation: Conversation,
-        force: Boolean = false
-    ) {
-        val shouldGenerate = when {
-            force -> true
-            conversation.title.isBlank() -> true
-            else -> false
-        }
-        if (!shouldGenerate) return
+        force: Boolean = false,
+    ) = aiAuxiliaryGenerator.generateTitle(conversationId, conversation, force)
 
-        runCatching {
-            val settings = settingsStore.settingsFlow.first()
-            val model = settings.resolveTaskChatModel(settings.titleModelId) ?: return
-            val provider = model.findProvider(settings.providers) ?: return
-
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        prompt = settings.titlePrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(4).joinToString("\n\n") { it.summaryAsText() })
-                    ),
-                ),
-                params = TextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.OFF,
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies,
-                ),
-            )
-
-            val title = result.choices[0].message?.toText()?.trim().orEmpty()
-            val updatedConversation = getConversationFlow(conversationId).value.copy(
-                title = title,
-                updateAt = Instant.now(),
-            )
-            updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-            conversationRepo.updateConversationMetadata(
-                conversationId = conversationId,
-                title = title,
-                updateAt = updatedConversation.updateAt,
-            )
-        }.onFailure {
-            it.printStackTrace()
-            addError(it, conversationId, title = context.getString(R.string.error_title_generate_title))
-        }
-    }
-
-    // ---- 生成建议 ----
-
-    suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) {
-        runCatching {
-            val settings = settingsStore.settingsFlow.first()
-            val model = settings.resolveTaskChatModel(settings.suggestionModelId) ?: return
-            val provider = model.findProvider(settings.providers) ?: return
-
-            sessions[conversationId]?.let { session ->
-                updateConversation(
-                    conversationId,
-                    session.state.value.copy(chatSuggestions = emptyList())
-                )
-            }
-
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        settings.suggestionPrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(8).joinToString("\n\n") { it.summaryAsText() }),
-                    )
-                ),
-                params = TextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.OFF,
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies,
-                ),
-            )
-            val suggestions =
-                result.choices[0].message?.toText()?.split("\n")?.map { it.trim() }
-                    ?.filter { it.isNotBlank() } ?: emptyList()
-
-            val updatedConversation = (sessions[conversationId]?.state?.value ?: conversation).copy(
-                chatSuggestions = suggestions.take(10),
-                updateAt = Instant.now(),
-            )
-            updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-            conversationRepo.updateConversationMetadata(
-                conversationId = conversationId,
-                chatSuggestions = updatedConversation.chatSuggestions,
-                updateAt = updatedConversation.updateAt,
-            )
-        }.onFailure {
-            it.printStackTrace()
-        }
-    }
+    suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) =
+        aiAuxiliaryGenerator.generateSuggestion(conversationId, conversation)
 
     // ---- 压缩对话历史 ----
 
