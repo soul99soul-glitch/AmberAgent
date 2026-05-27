@@ -2,15 +2,17 @@ package me.rerere.rikkahub.data.ai
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationHandlerAutoApprovalTest {
+    private val resolver = PermissionDecisionResolver()
     @Test
     fun pausesForApprovalWhenAutoApproveIsDisabled() {
         assertTrue(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("terminal_execute"),
                 tool = toolCall("terminal_execute"),
                 autoApproveTools = false,
@@ -21,7 +23,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun bypassesApprovalForRegularToolsWhenAutoApproveIsEnabled() {
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("terminal_execute"),
                 tool = toolCall("terminal_execute"),
                 autoApproveTools = true,
@@ -32,7 +34,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun keepsHighRiskToolsManualWhenRegularAutoApproveIsEnabled() {
         assertTrue(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("sms_send", allowsAutoApproval = false),
                 tool = toolCall("sms_send"),
                 autoApproveTools = true,
@@ -43,7 +45,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun bypassesHighRiskToolsOnlyWhenHighRiskAutoApproveIsEnabled() {
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("sms_send", allowsAutoApproval = false),
                 tool = toolCall("sms_send"),
                 autoApproveTools = true,
@@ -55,7 +57,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun keepsAskUserAsManualApprovalEvenWhenAutoApproveIsEnabled() {
         assertTrue(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("ask_user"),
                 tool = toolCall("ask_user"),
                 autoApproveTools = true,
@@ -66,7 +68,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun neverPausesForToolsThatDoNotNeedApproval() {
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = Tool(
                     name = "file_read",
                     description = "",
@@ -82,14 +84,14 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun httpGetAndHeadDoNotPauseEvenWhenHttpToolRequiresApproval() {
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("http_request", allowsAutoApproval = false),
                 tool = toolCall("http_request", """{"method":"GET","url":"https://example.com"}"""),
                 autoApproveTools = false,
             )
         )
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("http_request", allowsAutoApproval = false),
                 tool = toolCall("http_request", """{"method":"HEAD","url":"https://example.com"}"""),
                 autoApproveTools = true,
@@ -101,7 +103,7 @@ class GenerationHandlerAutoApprovalTest {
     fun httpMutatingMethodsAlwaysPause() {
         listOf("POST", "PUT", "PATCH", "DELETE").forEach { method ->
             assertTrue(
-                shouldPauseForToolApproval(
+                resolver.shouldPauseForApproval(
                     toolDef = approvalTool("http_request", allowsAutoApproval = false),
                     tool = toolCall("http_request", """{"method":"$method","url":"https://example.com"}"""),
                     autoApproveTools = true,
@@ -113,7 +115,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun memoryToolReadOperationsDoNotPause() {
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
                 tool = toolCall("memory_tool", """{"operation":"search","query":"Q代"}"""),
                 autoApproveTools = false,
@@ -124,7 +126,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun memoryToolWriteOperationsPause() {
         assertTrue(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
                 tool = toolCall("memory_tool", """{"operation":"delete","id":"memory-1"}"""),
                 autoApproveTools = true,
@@ -135,7 +137,7 @@ class GenerationHandlerAutoApprovalTest {
     @Test
     fun cronCreateCanUseGlobalAutoApproval() {
         assertFalse(
-            shouldPauseForToolApproval(
+            resolver.shouldPauseForApproval(
                 toolDef = approvalTool("cron_task_create"),
                 tool = toolCall("cron_task_create", """{"prompt":"daily brief","cron_expression":"30 8 * * *"}"""),
                 autoApproveTools = true,

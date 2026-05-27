@@ -52,7 +52,6 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
 import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.AgentLoopBudgetPrompt
-import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
 import me.rerere.rikkahub.data.agent.tools.ToolExposureState
@@ -117,21 +116,6 @@ private class GenerativeUiInvalidWidgetStreamException(
     val issue: String,
 ) : RuntimeException("Generative UI stream completed without a valid widget: $issue")
 
-internal fun shouldPauseForToolApproval(
-    toolDef: Tool?,
-    tool: UIMessagePart.Tool,
-    autoApproveTools: Boolean,
-    autoApproveHighRiskTools: Boolean = false,
-    autoApprovedToolNames: Set<String> = emptySet(),
-): Boolean {
-    return PermissionDecisionResolver().shouldPauseForApproval(
-        toolDef = toolDef,
-        tool = tool,
-        autoApproveTools = autoApproveTools,
-        autoApproveHighRiskTools = autoApproveHighRiskTools,
-        autoApprovedToolNames = autoApprovedToolNames,
-    )
-}
 
 @Serializable
 sealed interface GenerationChunk {
