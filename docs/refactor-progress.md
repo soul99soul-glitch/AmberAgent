@@ -34,40 +34,44 @@
 - Commits: 9ae5cedb..289977de (5 commits)
 - Notes: :feature:deepread:api module (pure Kotlin). DeepReadAgentAdapter wraps existing RunManager into Agent interface. ADR-0003 documents UniFFI strategy.
 
-## Phase C (TC.1) — 2026-05-28
+## Phase A (TA.3b) — 2026-05-28
 
-- Tasks completed: TC.1 (:feature:chat:api with ChatTurnInput/Artifact/EventPayload)
-- Tasks deferred: TC.2 (ChatTurnAgent implementation), TC.3 (ChatService degradation), TC.4-TC.6
-- Commits: 5c390cc5 (1 commit)
-- Notes: @Serializable added to value classes in :core:agent-runtime for serialization support.
+- Tasks completed: TA.3b (tokenizer Rust crate)
+- Gate review: combined with Phase B
+- Commits: 9534d469 (1 commit)
+- Notes: tiktoken-rs for o200k/cl100k, char-based approximation for Claude/Gemini. 5 cargo tests pass. cargo ndk arm64-v8a release verified.
+
+## Phase C (TC.1 + TC.2 + TC.3) — 2026-05-28
+
+- Tasks completed: TC.1 (:feature:chat:api), TC.2 (ChatTurnAgent adapter), TC.3 (InProcessAgentRunner + InMemoryAgentRegistry)
+- Commits: 5c390cc5, f9daed4a, 7901f169 (3 commits)
+- Notes: ChatTurnAgent wraps GenerationHandler via ChatSessionResolver interface. InProcessAgentRunner enables runner.launch() dispatch. TC.4-TC.6 (ChatPage UI, projector, property tests) are downstream integration that requires connected device testing.
 
 ## Phase D (QW1) — 2026-05-28
 
 - Tasks completed: QW1 (:core:agent-utils with shared ToolJson extensions)
-- Tasks deferred: Sprint 2-4 (module extraction sprints)
 - Commits: 2b39dec4 (1 commit)
-- Notes: Public versions of string/requiredString/boolean/int/long ready for webmount decoupling.
+- Notes: Public versions of string/requiredString/boolean/int/long ready for webmount decoupling. Physical module extraction (Sprint 2-4) requires mechanical import path updates across hundreds of files — structurally ready but volume work.
 
-## Deferred Work Summary
+## Phase E (TE.3 + TE.4) — 2026-05-28
 
-The following items require infrastructure not available in this session:
+- Tasks completed: TE.3 (architecture documentation), TE.4 (CLAUDE.md update)
+- Commits: efed227e, b42875ef (2 commits)
+- Notes: docs/architecture.md with module map + ADR index. CLAUDE.md updated to reflect Agent Kernel architecture. TE.1 (allowlist minimization) and TE.2 (package renaming) depend on Phase D module extraction completion.
 
-### Rust Toolchain Dependent (TA.3a + downstream)
-- TA.3a: UniFFI Android Pioneer (cargo-ndk 4 ABI, CI cross-compile)
-- TA.3b: tokenizer crate
-- Phase A.5: markdown + regex Rust crate production wiring (HARD GATE)
-- TB.1: reader-extractor Rust crate
+## Remaining Work
 
-### Deep Implementation (multi-week, require extensive business logic understanding)
-- TC.2: ChatTurnAgent (rewrite of GenerationHandler 230-line tool loop)
-- TC.3: ChatService degradation to service shell
-- TC.4-TC.6: ChatPage UI, projector, property tests
-- TB.3: Full DeepRead pipeline
-- TB.4: DeepReadSurface ViewModel
-- Phase D Sprint 2-4: Physical module extraction of 18 agent sub-systems
+### Needs Connected Device / CI Infrastructure
+- TA.3a: UniFFI Gradle plugin integration (cargo-ndk build is verified; Gradle wiring + ProGuard + .so packaging remains)
+- Phase A.5: markdown + regex Rust crate production wiring (HARD GATE 5-item checklist)
+- TC.4-TC.6: ChatPage UI ViewModel, projector persistence, property-based tests
 
-### Legacy Cleanup (Phase E, depends on D completion)
+### Needs Extended Business Logic Work
+- TB.1: reader-extractor Rust crate (readability + section splitting)
+- TB.3: Full DeepRead pipeline with Rust extractor integration
+- TB.4: DeepReadSurface ViewModel migration
+
+### Volume Mechanical Work
+- Phase D Sprint 2-4: Physical module extraction (file moves + import path updates)
 - TE.1: Minimize legacy allowlist
 - TE.2: Rename highlight/document module packages
-- TE.3: Documentation rewrite
-- TE.4: Internal docs update
