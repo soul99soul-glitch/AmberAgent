@@ -46,7 +46,7 @@ internal object SyncCryptoNative {
     private const val LIB_NAME = "sync_crypto"
 
     private val loaded = AtomicBoolean(false)
-    @Volatile private var loadError: Throwable? = null
+    @Volatile private var loadAttempted = false
 
     val available: Boolean
         get() {
@@ -54,18 +54,16 @@ internal object SyncCryptoNative {
             return loaded.get()
         }
 
-    internal fun lastLoadError(): Throwable? = loadError
-
     private fun ensureLoaded() {
-        if (loaded.get() || loadError != null) return
+        if (loaded.get() || loadAttempted) return
         synchronized(this) {
-            if (loaded.get() || loadError != null) return
+            if (loaded.get() || loadAttempted) return
+            loadAttempted = true
             try {
                 System.loadLibrary(LIB_NAME)
                 loaded.set(true)
                 Log.i(TAG, "loaded native library: $LIB_NAME")
             } catch (t: Throwable) {
-                loadError = t
                 Log.w(TAG, "failed to load native library $LIB_NAME — will fall back to JVM", t)
             }
         }

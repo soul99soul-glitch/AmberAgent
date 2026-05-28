@@ -95,6 +95,38 @@ class SyncCryptoParityTest {
         assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", hex)
     }
 
+    /**
+     * P4 review fix — shared byte-golden vector for PBKDF2-HMAC-SHA256.
+     * Same passphrase/salt/iter/dkLen as the Rust crate's
+     * `pbkdf2_byte_golden_ascii` test. Both implementations must produce
+     * this exact hex string. If the Rust side updates, this fails.
+     */
+    @Test
+    fun pbkdf2_byte_golden_ascii() {
+        val out = pbkdf2Jvm("password", "salt".toByteArray(), 4096, 32)
+        val hex = out.joinToString("") { "%02x".format(it) }
+        assertEquals(
+            "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a",
+            hex,
+        )
+    }
+
+    /**
+     * P4 review fix — UTF-8 passphrase parity test. Java's PBEKeySpec
+     * encodes the char-array using PKCS#5 (UTF-8 since SE 8 for PBKDF2-HMAC);
+     * Rust uses `passphrase.as_bytes()` which is also UTF-8. The two must
+     * produce identical keys for a mixed CJK + ASCII passphrase.
+     */
+    @Test
+    fun pbkdf2_byte_golden_utf8() {
+        val out = pbkdf2Jvm("口令-passphrase", "salt".toByteArray(), 4096, 32)
+        val hex = out.joinToString("") { "%02x".format(it) }
+        assertEquals(
+            "4ef032d17c60721419081307ee1e75dd9d99853983f451b3fd33f93d495ad158",
+            hex,
+        )
+    }
+
     @Test
     fun sync_crypto_native_object_is_addressable() {
         // The SyncCryptoNative bridge object must compile and be reachable.
