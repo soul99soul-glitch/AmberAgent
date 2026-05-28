@@ -573,6 +573,7 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":core:app-infra"))
     implementation(project(":core:model"))
+    implementation(project(":core:event"))
     implementation(project(":core:agent-runtime"))
     implementation(project(":core:agent-store-room"))
     implementation(project(":feature:deepread:api"))
