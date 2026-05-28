@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.Conversation

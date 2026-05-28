@@ -79,7 +79,7 @@ import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Video01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.ai.vision.ImageAttachmentStatus
 import app.amber.core.ai.vision.ImageAttachmentStatusKind
 import app.amber.core.ai.vision.ImageAttachmentValidator

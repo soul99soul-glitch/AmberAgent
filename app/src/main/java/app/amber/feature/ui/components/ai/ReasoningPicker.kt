@@ -38,7 +38,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.hugeicons.stroke.Idea01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ui.ToggleSurface
 import app.amber.feature.ui.components.ui.icons.ReasoningHigh
 import app.amber.feature.ui.components.ui.icons.ReasoningLow

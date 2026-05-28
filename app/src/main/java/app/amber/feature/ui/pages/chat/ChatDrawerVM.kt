@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.toLocalString

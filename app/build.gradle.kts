@@ -26,7 +26,7 @@ fun String.asBuildConfigString(): String =
     replace("\\", "\\\\").replace("\"", "\\\"")
 
 val xiaomiXmsAppId = projectProperty("xiaomiXmsAppId", "XIAOMI_XMS_APP_ID")
-val baseApplicationId = "me.rerere.amberagent"
+val baseApplicationId = "app.amber.agent"
 
 // Build types that share the parallel-install UI contract — must each call
 // `applyNotionLikeUi(...)` in the `buildTypes {}` block below to set
@@ -72,7 +72,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.rikkahub"
+    namespace = "app.amber.agent"
     compileSdk = 37
 
     defaultConfig {

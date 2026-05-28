@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.rikkahub.web"
+    namespace = "app.amber.agent.web"
     compileSdk {
         version = release(36)
     }

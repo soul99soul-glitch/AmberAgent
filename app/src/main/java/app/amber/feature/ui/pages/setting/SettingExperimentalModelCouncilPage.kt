@@ -34,7 +34,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS

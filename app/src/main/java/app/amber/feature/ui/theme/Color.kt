@@ -9,7 +9,7 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 
 data class ExtendColors(
     val red1: Color,

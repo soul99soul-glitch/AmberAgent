@@ -47,7 +47,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.defaultCodexOAuthModelList
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.AutoAIIcon

@@ -55,7 +55,7 @@ import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.WavingHand01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.isNotConfigured
 import app.amber.core.files.FilesManager

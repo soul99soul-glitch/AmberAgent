@@ -5,7 +5,7 @@ import android.os.Trace
 import android.util.Log
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 
 private const val AmberPerfTag = "AmberChatPerf"
 private const val SlowMeasureThresholdMs = 8L

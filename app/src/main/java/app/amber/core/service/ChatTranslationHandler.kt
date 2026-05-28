@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.ai.GenerationHandler
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.Conversation

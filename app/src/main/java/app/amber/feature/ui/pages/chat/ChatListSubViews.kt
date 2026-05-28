@@ -51,7 +51,7 @@ import com.composables.icons.lucide.Lucide
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.context.ConversationCompact
 import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation

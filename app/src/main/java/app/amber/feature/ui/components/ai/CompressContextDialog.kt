@@ -27,7 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ui.PigLoadingIndicator
 
 @Composable

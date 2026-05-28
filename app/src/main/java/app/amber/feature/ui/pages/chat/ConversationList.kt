@@ -53,7 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.core.utils.toLocalString

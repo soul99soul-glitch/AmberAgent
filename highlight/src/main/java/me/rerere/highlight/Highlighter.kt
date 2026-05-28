@@ -1,4 +1,5 @@
 package me.rerere.highlight
+import app.amber.highlight.R
 
 import android.content.Context
 import com.whl.quickjs.android.QuickJSLoader

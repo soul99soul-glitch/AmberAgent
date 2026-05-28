@@ -19,7 +19,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.LocalToolOption
 import app.amber.core.model.Assistant
 import app.amber.feature.ui.components.nav.BackButton

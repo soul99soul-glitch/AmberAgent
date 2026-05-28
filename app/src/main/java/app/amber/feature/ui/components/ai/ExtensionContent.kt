@@ -22,7 +22,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Link01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.files.SkillMetadata
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection

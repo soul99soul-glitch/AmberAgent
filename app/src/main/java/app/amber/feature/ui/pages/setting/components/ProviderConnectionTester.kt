@@ -41,7 +41,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Connect
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.theme.extendColors
 import app.amber.core.utils.UiState

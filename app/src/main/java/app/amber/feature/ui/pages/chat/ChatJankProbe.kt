@@ -8,7 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 import app.amber.core.model.MessageNode
 import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage

@@ -10,7 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import me.rerere.rikkahub.BOARD_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.RouteActivity
 
 /**

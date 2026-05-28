@@ -67,8 +67,8 @@ import app.amber.core.model.AssistantMemory
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
-import me.rerere.rikkahub.R
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.R
+import app.amber.agent.BuildConfig
 import app.amber.core.utils.applyPlaceholders
 import java.util.Locale
 import kotlin.uuid.Uuid

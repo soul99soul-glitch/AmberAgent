@@ -83,7 +83,7 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.Wrench01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
 import app.amber.feature.ui.components.richtext.ZoomableAsyncImage

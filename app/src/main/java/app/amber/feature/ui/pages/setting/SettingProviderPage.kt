@@ -67,7 +67,7 @@ import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.AutoAIIcon

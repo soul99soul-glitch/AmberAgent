@@ -1,6 +1,6 @@
 package app.amber.core.di
 
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 import app.amber.feature.runtime.AgentLiveStatusNotifier
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.cron.AgentCronManager

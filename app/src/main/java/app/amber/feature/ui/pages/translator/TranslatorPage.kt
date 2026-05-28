@@ -54,7 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ModelType
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalToaster

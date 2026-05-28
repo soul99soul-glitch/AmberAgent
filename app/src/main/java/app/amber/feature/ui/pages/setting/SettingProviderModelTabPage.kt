@@ -68,7 +68,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.ai.registry.ModelRegistry
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ModelAbilityTag
 import app.amber.feature.ui.components.ai.ModelModalityTag
 import app.amber.feature.ui.components.ai.ModelTypeTag

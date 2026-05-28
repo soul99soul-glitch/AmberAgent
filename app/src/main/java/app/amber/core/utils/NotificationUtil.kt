@@ -22,8 +22,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.R
+import app.amber.agent.BuildConfig
+import app.amber.agent.R
 
 /**
  * 通知构建器的配置 DSL

@@ -13,7 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import me.rerere.rikkahub.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.RouteActivity
 import app.amber.core.utils.NotificationUtil
 import java.util.concurrent.ConcurrentHashMap

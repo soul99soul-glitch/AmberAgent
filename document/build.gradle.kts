@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.document"
+    namespace = "app.amber.document"
     compileSdk = 36
 
     defaultConfig {

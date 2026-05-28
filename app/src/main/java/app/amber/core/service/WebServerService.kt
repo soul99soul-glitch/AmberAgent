@@ -17,7 +17,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.WEB_SERVER_NOTIFICATION_CHANNEL_ID
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.web.WebServerManager

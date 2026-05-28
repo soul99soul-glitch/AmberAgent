@@ -27,7 +27,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID
 import org.koin.android.ext.android.inject

@@ -48,7 +48,7 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LanguageCircle
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import java.util.Locale
 

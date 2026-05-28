@@ -33,7 +33,7 @@ import androidx.compose.ui.util.fastForEach
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.Tag
 import kotlin.uuid.Uuid
 

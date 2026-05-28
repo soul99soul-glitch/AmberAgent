@@ -18,8 +18,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.svg.css
-import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.R
+import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import app.amber.feature.ui.hooks.rememberAvatarShape
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.core.utils.computeAIIconByName

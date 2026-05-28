@@ -81,7 +81,7 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.common.android.appTempFolder
 import me.rerere.highlight.Highlighter
 import me.rerere.highlight.LocalHighlighter
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.model.Conversation

@@ -8,7 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 
 @Composable
 fun PigLoadingIndicator(modifier: Modifier = Modifier) {

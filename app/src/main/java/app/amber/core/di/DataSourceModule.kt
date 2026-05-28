@@ -16,7 +16,7 @@ import me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.http.AcceptLanguageBuilder
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
 import app.amber.core.ai.GenerationHandler

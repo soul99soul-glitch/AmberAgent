@@ -21,7 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.core.settings.prefs.NativePathPrefs
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator

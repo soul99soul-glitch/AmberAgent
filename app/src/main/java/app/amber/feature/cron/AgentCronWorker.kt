@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.RouteActivity
 import app.amber.core.service.ChatService
 import app.amber.core.utils.sendNotification

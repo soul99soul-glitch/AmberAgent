@@ -1,4 +1,5 @@
 package me.rerere.rikkahub
+import app.amber.agent.R
 
 import android.annotation.SuppressLint
 import android.content.Intent

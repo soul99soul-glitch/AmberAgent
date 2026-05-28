@@ -10,7 +10,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.core.WebMountStatus

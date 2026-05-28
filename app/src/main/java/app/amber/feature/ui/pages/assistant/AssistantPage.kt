@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.DEFAULT_ASSISTANTS_IDS
 import app.amber.core.settings.Settings

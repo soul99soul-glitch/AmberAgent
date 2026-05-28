@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.common.http.isJsonExprValid
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.feature.ui.theme.JetbrainsMono
 

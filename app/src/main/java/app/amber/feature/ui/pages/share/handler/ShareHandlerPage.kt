@@ -11,7 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.context.LocalNavController

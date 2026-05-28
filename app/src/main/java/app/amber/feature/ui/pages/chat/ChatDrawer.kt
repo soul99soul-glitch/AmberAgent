@@ -70,7 +70,7 @@ import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.TransactionHistory
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation

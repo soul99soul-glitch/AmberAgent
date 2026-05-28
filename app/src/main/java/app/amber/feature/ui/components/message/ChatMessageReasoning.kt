@@ -50,7 +50,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Brain02
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.resolveSessionDefaults
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope

@@ -1,7 +1,7 @@
 package app.amber.core.sync.google
 
 import android.content.Context
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 
 class GoogleOAuthConfigGate(private val context: Context) {
     fun status(): GoogleOAuthConfigStatus {

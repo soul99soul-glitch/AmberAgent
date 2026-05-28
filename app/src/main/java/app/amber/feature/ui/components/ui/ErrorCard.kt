@@ -32,7 +32,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.service.ChatError
 import kotlin.uuid.Uuid
 

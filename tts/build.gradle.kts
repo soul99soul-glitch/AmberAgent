@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.tts"
+    namespace = "app.amber.tts"
     compileSdk = 36
 
     defaultConfig {

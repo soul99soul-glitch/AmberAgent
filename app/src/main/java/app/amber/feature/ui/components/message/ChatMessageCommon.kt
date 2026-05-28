@@ -32,8 +32,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.R
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.R
+import app.amber.agent.BuildConfig
 import app.amber.feature.ui.components.ui.Favicon
 import app.amber.feature.ui.theme.extendColors
 import app.amber.core.utils.openUrl

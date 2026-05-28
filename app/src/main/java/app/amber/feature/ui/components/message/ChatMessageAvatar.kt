@@ -22,7 +22,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.isEmptyUIMessage
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar
 import app.amber.feature.ui.components.ui.AutoAIIcon

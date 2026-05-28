@@ -53,7 +53,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Video01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope

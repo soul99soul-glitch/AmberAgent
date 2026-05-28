@@ -45,7 +45,7 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Zap
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.QuickMessage
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog

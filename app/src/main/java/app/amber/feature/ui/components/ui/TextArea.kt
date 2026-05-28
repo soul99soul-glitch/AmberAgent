@@ -46,7 +46,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FullScreen
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.modifier.onClick
 

@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ServerStack01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.icloud.ICLOUD_CHINA_LOGIN_URL
 import app.amber.feature.icloud.ICLOUD_GLOBAL_LOGIN_URL
 import app.amber.feature.icloud.ICloudDriveManager

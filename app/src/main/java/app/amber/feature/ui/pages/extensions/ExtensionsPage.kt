@@ -15,7 +15,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Favourite
 import me.rerere.hugeicons.stroke.Zap

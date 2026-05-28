@@ -62,7 +62,7 @@ import me.rerere.hugeicons.stroke.Idea
 import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.PlayCircle02
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.webmount.core.WebMountCapability
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.core.WebMountStationState

@@ -42,7 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
 import app.amber.feature.ui.components.nav.BackButton

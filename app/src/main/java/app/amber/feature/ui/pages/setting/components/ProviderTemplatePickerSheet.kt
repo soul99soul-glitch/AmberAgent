@@ -44,7 +44,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.fixedBaseUrl
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.Tag

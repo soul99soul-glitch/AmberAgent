@@ -6,7 +6,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import me.rerere.rikkahub.DEEP_READ_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.RouteActivity
 import app.amber.core.utils.sendNotification
 

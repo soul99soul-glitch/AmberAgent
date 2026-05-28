@@ -46,7 +46,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 
 private val LocalCardColor = staticCompositionLocalOf { Color.White }
 

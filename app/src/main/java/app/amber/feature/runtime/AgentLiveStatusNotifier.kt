@@ -13,7 +13,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.utils.NotificationActionConfig
 import app.amber.core.utils.XiaomiSuperIslandConfig
 import app.amber.core.utils.cancelNotification

@@ -75,8 +75,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.R
+import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import app.amber.core.context.ActiveCompactBoundary
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactLifecycleStatus

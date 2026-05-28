@@ -49,7 +49,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.openai.OpenAICodexUsageStatus
 import me.rerere.ai.provider.providers.openai.OpenAICodexUsageWindow
 import me.rerere.ai.registry.ModelRegistry
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactLifecycleStatus
 import app.amber.core.context.ContextFootprintEstimator

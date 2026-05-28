@@ -66,7 +66,7 @@ import me.rerere.hugeicons.stroke.MessageMultiple01
 import me.rerere.hugeicons.stroke.Notebook01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.View
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.ai.vision.VisionModelHealthChecker
 import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT

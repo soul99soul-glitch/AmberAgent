@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.ai"
+    namespace = "app.amber.ai"
     compileSdk = 36
 
     defaultConfig {

@@ -45,7 +45,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.office.FeishuWorkProject
 import app.amber.feature.office.radar.DocRadar

@@ -26,7 +26,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.LAST_CONVERSATION_ID_PREF
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentChatModel

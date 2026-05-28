@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.common"
+    namespace = "app.amber.common"
     compileSdk = 36
 
     defaultConfig {

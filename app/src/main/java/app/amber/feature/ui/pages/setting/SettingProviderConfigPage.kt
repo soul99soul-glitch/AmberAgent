@@ -30,7 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ProviderBalanceText
 import app.amber.feature.ui.components.ui.SiliconFlowPowerByIcon
 import app.amber.feature.ui.pages.setting.components.ProviderConfigure

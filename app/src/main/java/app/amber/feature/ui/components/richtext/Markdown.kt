@@ -83,7 +83,7 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.rikkahub.BuildConfig
+import app.amber.agent.BuildConfig
 import app.amber.feature.ui.components.table.DataTable
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetbrainsMono

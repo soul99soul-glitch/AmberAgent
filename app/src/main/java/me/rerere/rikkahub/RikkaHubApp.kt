@@ -1,4 +1,5 @@
 package me.rerere.rikkahub
+import app.amber.agent.R
 
 import android.app.Application
 import android.content.Intent

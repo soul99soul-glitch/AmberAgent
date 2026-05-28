@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.baselineprofile"
+    namespace = "app.amber.baselineprofile"
     compileSdk = 36
 
     compileOptions {

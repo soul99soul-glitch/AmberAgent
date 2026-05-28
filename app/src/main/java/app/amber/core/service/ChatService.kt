@@ -61,8 +61,8 @@ import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.R
+import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import me.rerere.rikkahub.RouteActivity
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationHandler

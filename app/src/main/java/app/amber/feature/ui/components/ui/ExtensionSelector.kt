@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.files.SkillManager
 import app.amber.core.files.SkillMetadata

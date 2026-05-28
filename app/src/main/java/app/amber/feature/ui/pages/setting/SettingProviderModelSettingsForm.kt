@@ -56,7 +56,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.pages.assistant.detail.CustomBodies
 import app.amber.feature.ui.pages.assistant.detail.CustomHeaders

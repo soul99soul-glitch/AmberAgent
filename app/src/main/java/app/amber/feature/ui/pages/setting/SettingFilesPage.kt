@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.nav.BackButton

@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit03
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Avatar
 import app.amber.feature.ui.hooks.rememberAvatarShape

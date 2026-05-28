@@ -59,7 +59,7 @@ import me.rerere.hugeicons.stroke.TextSelection
 import me.rerere.hugeicons.stroke.Translate
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.WebDesign01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.MessageNode
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
@@ -96,7 +96,7 @@ fun ColumnScope.ChatMessageActionButtons(
     // V3 instrumentation (DEBUG only): 用户报 SVG 类 message 下方 actions 重复出现两行.
     // 代码路径互斥 (Message vs VirtualMessage entry) — 双行只能来自上游 MessageNode 重复.
     // gate 在 BuildConfig.DEBUG 后 release 不再写 logcat (review P3 #9 修复).
-    if (me.rerere.rikkahub.BuildConfig.DEBUG) {
+    if (app.amber.agent.BuildConfig.DEBUG) {
         androidx.compose.runtime.SideEffect {
             android.util.Log.w(
                 "AmberActions",

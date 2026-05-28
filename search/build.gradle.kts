@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.search"
+    namespace = "app.amber.search"
     compileSdk = 36
 
     defaultConfig {

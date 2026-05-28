@@ -85,7 +85,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.ui.ImageAspectRatio
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.ai.ModelSelector

@@ -114,8 +114,8 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Image02
-import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.R
+import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 import app.amber.core.ai.vision.ImageAttachmentValidator

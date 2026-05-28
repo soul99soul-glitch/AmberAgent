@@ -39,7 +39,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.ServerStack01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.terminal.AlpineRuntimeInstaller
 import app.amber.feature.terminal.InstallStatus
 import app.amber.feature.terminal.TerminalRuntime

@@ -49,7 +49,7 @@ import me.rerere.ai.provider.providers.defaultCodexOAuthModelList
 import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.providers.openai.OpenAICodexOAuthClient
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.feature.ui.components.ui.FlatTextField
 import app.amber.feature.ui.context.LocalToaster

@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
 import me.rerere.ai.core.MessageRole
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.model.Conversation
 
 // 消息节点数量警告阈值

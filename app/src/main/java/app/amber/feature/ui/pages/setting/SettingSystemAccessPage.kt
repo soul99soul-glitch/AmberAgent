@@ -44,7 +44,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionCapability
 import app.amber.feature.system.AgentPermissionRisk

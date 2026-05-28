@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.Screen
 import app.amber.feature.ui.components.ai.ExtensionEmptyState

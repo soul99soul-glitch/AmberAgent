@@ -42,7 +42,7 @@ import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.core.utils.ImageUtils
 import app.amber.core.utils.jsonPrimitiveOrNull
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import org.koin.compose.koinInject
 
 @Composable

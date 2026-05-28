@@ -1,4 +1,5 @@
 package me.rerere.search
+import app.amber.search.R
 
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton

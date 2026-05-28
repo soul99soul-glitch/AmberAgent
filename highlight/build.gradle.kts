@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "me.rerere.highlight"
+    namespace = "app.amber.highlight"
     compileSdk = 36
 
     defaultConfig {

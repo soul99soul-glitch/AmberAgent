@@ -1,4 +1,5 @@
 package me.rerere.search
+import app.amber.search.R
 
 import android.util.Log
 import androidx.compose.material3.Text

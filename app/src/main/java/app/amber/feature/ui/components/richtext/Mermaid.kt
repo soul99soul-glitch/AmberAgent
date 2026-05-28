@@ -37,7 +37,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.View
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.webview.WebView
 import app.amber.feature.ui.components.webview.rememberWebViewState
 import app.amber.feature.ui.context.LocalToaster

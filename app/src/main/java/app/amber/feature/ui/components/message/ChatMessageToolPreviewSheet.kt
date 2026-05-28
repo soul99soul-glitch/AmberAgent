@@ -47,7 +47,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.highlight.HighlightText
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.repository.MemoryRepository
 import app.amber.feature.ui.components.richtext.HighlightCodeBlock
 import app.amber.feature.ui.components.richtext.MarkdownBlock

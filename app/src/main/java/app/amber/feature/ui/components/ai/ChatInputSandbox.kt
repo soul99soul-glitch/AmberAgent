@@ -63,7 +63,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 import app.amber.feature.webview.WebViewLink

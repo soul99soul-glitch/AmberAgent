@@ -37,7 +37,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS

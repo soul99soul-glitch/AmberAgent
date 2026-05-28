@@ -40,8 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.R
+import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import me.rerere.rikkahub.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.easteregg.EmojiBurstHost

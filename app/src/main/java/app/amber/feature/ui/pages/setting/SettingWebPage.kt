@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.stroke.Stop
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.service.WebServerService
 import app.amber.feature.ui.components.nav.BackButton

@@ -31,7 +31,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.highlight.LocalHighlighter
-import me.rerere.rikkahub.R
+import app.amber.agent.R
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.richtext.HighlightCodeVisualTransformation
 import app.amber.feature.ui.theme.JetbrainsMono
