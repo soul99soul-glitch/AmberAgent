@@ -9,8 +9,12 @@ import app.amber.core.agent.store.RoomAgentEventStore
 import app.amber.feature.chat.api.ChatTurnInput
 import app.amber.feature.chat.api.ChatTurnArtifact
 import app.amber.feature.chat.api.ChatTurnDescriptor
+import app.amber.feature.chat.api.ChatTurnInput as ChatTurnInputAlias
+import app.amber.feature.chat.impl.ChatEventProjector
 import app.amber.feature.chat.impl.ChatSessionResolverImpl
 import app.amber.feature.chat.impl.ChatTurnAgent
+import app.amber.feature.chat.impl.ProjectingEventWriter
+import app.amber.feature.chat.impl.ProjectingRunScope
 import app.amber.feature.deepread.api.DeepReadInput
 import app.amber.feature.deepread.api.DeepReadArtifact
 import app.amber.feature.deepread.api.DeepReadDescriptor
@@ -57,7 +61,29 @@ val agentRuntimeModule = module {
 
     single { RoomAgentEventStore(get()) }
 
-    single<AgentRunner> { InProcessAgentRunner(get(), get<RoomAgentEventStore>()) }
+    single { ChatEventProjector(get<RoomAgentEventStore>(), get(), get(), get()) }
+
+    single<AgentRunner> {
+        val projector: ChatEventProjector = get()
+        InProcessAgentRunner(
+            registry = get(),
+            eventStore = get<RoomAgentEventStore>(),
+            runScopeFactory = { runId, input ->
+                if (input is ChatTurnInput) {
+                    val conversationUuid = kotlin.uuid.Uuid.parse(input.conversationId.value)
+                    val writer = ProjectingEventWriter(runId, conversationUuid, projector)
+                    ProjectingRunScope(
+                        runId = runId,
+                        conversationId = input.conversationId,
+                        messageNodeId = input.messageNodeId,
+                        events = writer,
+                    )
+                } else {
+                    app.amber.core.agent.runtime.adapter.LegacyRunScope(runId = runId)
+                }
+            },
+        )
+    }
 
     single { ChatSessionResolverImpl(get(), get(), get(), get(), get()) }
 

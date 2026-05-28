@@ -27,6 +27,9 @@ private const val TAG = "AgentRunner"
 class InProcessAgentRunner(
     private val registry: AgentRegistry,
     private val eventStore: AgentEventStore,
+    private val runScopeFactory: (AgentRunId, AgentInput) -> app.amber.core.agent.runtime.RunScope = { id, _ ->
+        LegacyRunScope(runId = id)
+    },
 ) : AgentRunner {
 
     private val runnerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -83,7 +86,7 @@ class InProcessAgentRunner(
             try {
                 @Suppress("UNCHECKED_CAST")
                 val agent = registered.factory() as app.amber.core.agent.runtime.Agent<I, *>
-                val runScope = LegacyRunScope(runId = runId)
+                val runScope = runScopeFactory(runId, input)
                 agent.handler.handle(input, runScope)
 
                 val finishedAt = System.currentTimeMillis()
