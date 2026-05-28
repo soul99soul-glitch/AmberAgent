@@ -13,7 +13,7 @@ import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
 import me.rerere.rikkahub.data.agent.tools.TerminalTools
-import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import app.amber.feature.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import org.koin.dsl.module
 

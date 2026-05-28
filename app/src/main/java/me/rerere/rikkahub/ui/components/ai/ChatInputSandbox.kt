@@ -66,10 +66,10 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.SandboxActivityUiState
 import me.rerere.rikkahub.data.agent.ToolActivityStatus
-import me.rerere.rikkahub.data.agent.webview.WebViewLink
-import me.rerere.rikkahub.data.agent.webview.WebViewLoadStatus
-import me.rerere.rikkahub.data.agent.webview.WebViewOperationState
-import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import app.amber.feature.webview.WebViewLink
+import app.amber.feature.webview.WebViewLoadStatus
+import app.amber.feature.webview.WebViewOperationState
+import app.amber.feature.webview.WebViewOperationStore
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState

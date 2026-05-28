@@ -21,7 +21,7 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepo
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
-import me.rerere.rikkahub.data.agent.webview.WebViewOperationStore
+import app.amber.feature.webview.WebViewOperationStore
 import kotlin.uuid.Uuid
 
 class LocalTools(

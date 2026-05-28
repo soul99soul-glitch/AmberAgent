@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webview
+package app.amber.feature.webview
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
