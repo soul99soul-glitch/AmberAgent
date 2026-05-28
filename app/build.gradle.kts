@@ -221,6 +221,14 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        // TD.Rust.1c — the HtmlDiffNormalizer (+ other native bridges)
+        // unconditionally call android.util.Log on first use. Without this
+        // flag, Log methods throw RuntimeExceptionNotMocked in JVM unit
+        // tests. Returning defaults (no-op for void methods) keeps the
+        // bridge's lazy-load path testable without Robolectric.
+        unitTests.isReturnDefaultValues = true
+    }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
         getByName("main").assets.srcDir("$buildDir/generated/assets/embeddedTerminalRuntime")
@@ -320,6 +328,8 @@ val cargoBuildMarkdownPreprocess =
     registerCargoBuild("cargoBuildMarkdownPreprocess", "../native/markdown-preprocess", "markdown_preprocess")
 val cargoBuildJsonExpr =
     registerCargoBuild("cargoBuildJsonExpr", "../native/json-expr", "json_expr")
+val cargoBuildHtmlDiffNormalizer =
+    registerCargoBuild("cargoBuildHtmlDiffNormalizer", "../native/html-diff-normalizer", "html_diff_normalizer")
 
 afterEvaluate {
     tasks.named("preBuild").configure {
@@ -330,6 +340,7 @@ afterEvaluate {
         dependsOn(cargoBuildSyncCrypto)
         dependsOn(cargoBuildMarkdownPreprocess)
         dependsOn(cargoBuildJsonExpr)
+        dependsOn(cargoBuildHtmlDiffNormalizer)
     }
 }
 

@@ -76,6 +76,13 @@ internal object HtmlDiffNormalizer {
      */
     fun normalize(html: String): String {
         if (html.length > MAX_NORMALIZE_INPUT_CHARS) return html
+        // TD.Rust.1c — native fast path. Same MAX guard runs on both sides
+        // so behaviour is identical at the boundary. Null return falls back
+        // to the original Jsoup-based path.
+        if (HtmlDiffNormalizerNative.available) {
+            val nativeOut = HtmlDiffNormalizerNative.normalize(html)
+            if (nativeOut != null) return nativeOut
+        }
         val doc: Document = try {
             Jsoup.parseBodyFragment(html)
         } catch (t: Throwable) {

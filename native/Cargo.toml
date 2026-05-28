@@ -11,6 +11,7 @@ members = [
     "sync-crypto",
     "markdown-preprocess",
     "json-expr",
+    "html-diff-normalizer",
     # `generative-widget-parser` was ABANDONED at Round 1 review (P0 structural
     # mismatch with JVM). Both the Rust crate and the Kotlin adapter have been
     # removed from the spike branch — the abandonment record + revival
