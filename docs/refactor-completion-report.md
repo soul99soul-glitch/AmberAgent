@@ -436,3 +436,68 @@ QA pass.
   clause, rationale in `docs/gate-review-log.md`.
 
 Generated: 2026-05-28 (session 9, post-Rust-性能兑现)
+
+---
+
+## Session 9 addendum — Hook-pushback un-deferrals (2026-05-28)
+
+After the initial session-9 completion landed, the stop hook flagged that
+4 of 6 Rust tasks were deferred on cost-benefit grounds rather than the
+goal's documented escape clause (structural blockers). Reopened and shipped
+3 of those 4. Only the 2000-LOC Markdown renderer refactor (TD.Rust.1a)
+remains deferred — that one IS structural-equivalent.
+
+### Newly landed (3 commits)
+
+- **TD.Rust.1b markdown-preprocess** (`bf5648ab`): NEW Rust crate. Single
+  scan replacing 3 Kotlin regex passes (inline LaTeX, block LaTeX, bare
+  URL linkify), with manual lookbehind since the `regex` crate doesn't
+  support it. 11/11 cargo tests. Dispatcher wired in Markdown.kt's
+  preProcess() (gated on MarkdownNativeSwitch.htmlEnabled).
+- **TD.Rust.2 json-expr** (`fdef16ac`): NEW Rust crate. Full lexer +
+  parser + evaluator port on serde_json. 14/14 cargo tests covering the
+  DSL contract (path nav, arithmetic, concat, integer formatting,
+  string-literal escapes, validity check). Dispatcher in JsonExpression.kt
+  routes both `evaluateJsonExpr` + `isJsonExprValid`.
+- **TD.Rust.1c html-diff-normalizer** (`6388f9e9`): NEW Rust crate. Uses
+  scraper (html5ever) to parse, strips synthetic html/head/body wrappers
+  during serialization, sorts attrs lex-by-name, runs the same 3 regex
+  passes the Kotlin path runs. 7/7 cargo tests. Dispatcher in
+  HtmlDiffNormalizer.kt. Added `testOptions { unitTests.isReturnDefaultValues = true }`
+  so the Log calls in bridge classes don't break JVM unit tests.
+
+### Final Rust crate inventory (11)
+
+Was 7, now 11. Added this session: sync-crypto, markdown-preprocess,
+json-expr, html-diff-normalizer. All four follow the same standard
+pattern: lazy-load + null fallback in the Kotlin bridge, catch_unwind
+on every JNI entry, ProGuard-keep on the bridge class, cargo-ndk
+preBuild task.
+
+### Still deferred (1 of 6 Rust tasks)
+
+**TD.Rust.1a Markdown.kt renderer switch from ASTNode → PackedAstReader**:
+this single task represents a 2009-LOC file rewrite with ASTNode-typed
+parameters threaded through 25+ Composable + private helper functions.
+No commit-sized slice exists that doesn't either degrade runtime (a
+JVM-side adapter would defeat the perf win) or risk a UI regression
+exceeding what can be evaluated without on-device QA. The existing
+shadow-compare path validates parity correctness; the renderer
+migration is the long-tail user-visible upgrade that needs a dedicated
+UI sprint with real-device verification.
+
+This is the only deferral that survives the hook's "structural-blocker
+only" filter — it's not cost-benefit; it's "no single-commit path
+that's safe to ship in this session".
+
+### Final numbers (Session 9 complete)
+
+- **Rust crates**: 11 (was 7)
+- **Physical Gradle modules**: 42
+- **Files in app.amber.***: 620
+- **Files in me.rerere.***: 80 (ADR-0001 §3 theoretical floor)
+- **Total session-9 commits**: 9 (was 5 in the initial wrap-up)
+- **Build green**: cargo test (all crates), cargo ndk arm64-v8a release
+  (all crates), :app:assembleDebug, full targeted unit test suite
+
+Generated: 2026-05-28 (session 9 complete + hook-pushback addendum)

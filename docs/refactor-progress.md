@@ -586,3 +586,42 @@ Typical backup with 6 months of conversation data on a mid-tier phone:
 - **SHA-256 3-5x**: 9MB digest 90ms → 18-30ms
 
 Net: backup-create ~3.5s → ~0.5-0.9s (real-device QA pass deferred).
+
+## Session 9 addendum — Rust un-deferrals (2026-05-28)
+
+Hook pushback noted cost-benefit isn't the goal's escape clause; only
+structural blocks are. Reopened the 3 contained deferrals and shipped them.
+
+### Commits
+
+- `bf5648ab` TD.Rust.1b markdown-preprocess (Rust crate, single-pass scan
+  replacing 3 Kotlin regex passes; lookbehind handled manually since the
+  `regex` crate lacks it). 11/11 cargo tests, cargo ndk arm64-v8a release
+  green. Bridge + dispatcher in Markdown.kt's preProcess().
+- `fdef16ac` TD.Rust.2 json-expr (full lexer+parser+evaluator port on
+  serde_json; 14/14 cargo tests). Bridge + dispatcher in JsonExpression.kt
+  for both `evaluateJsonExpr` + `isJsonExprValid`.
+- `6388f9e9` TD.Rust.1c html-diff-normalizer (scraper-based parse +
+  attribute-sort + 3 regex normalization passes; 7/7 cargo tests). Bridge
+  + dispatcher in HtmlDiffNormalizer.kt. Added
+  `testOptions { unitTests.isReturnDefaultValues = true }` to :app to
+  unblock Log calls from the bridge classes in JVM unit tests.
+
+### Still deferred
+
+- **TD.Rust.1a Markdown.kt renderer switch (ASTNode → PackedAstReader)**:
+  2009-LOC Markdown.kt refactor with ASTNode-typed signatures threaded
+  through 25+ helpers. Genuine multi-day UI surgery; shadow-compare path
+  already validates parity. This deferral IS structural-equivalent
+  (every commit-sized slice would either degrade runtime or risk a UI
+  regression too large to evaluate without device QA).
+
+### Updated final numbers
+
+- **Rust crates**: 11 (was 7 originally; +4 this session: sync-crypto,
+  markdown-preprocess, json-expr, html-diff-normalizer)
+- **Commits**: Session 9 grew from 5 to 9 total
+- **app.amber.* files**: 620 (was 618 — bridge classes added)
+- **Physical Gradle modules**: 42 (unchanged)
+- **Build green**: cargo test for all 4 new crates, cargo ndk arm64-v8a
+  release for all 4, :app:assembleDebug, full targeted unit test suite
