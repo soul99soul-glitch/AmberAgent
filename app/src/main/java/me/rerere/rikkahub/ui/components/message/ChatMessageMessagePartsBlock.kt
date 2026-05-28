@@ -55,8 +55,8 @@ import me.rerere.hugeicons.stroke.MusicNote01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
 import app.amber.core.ai.generative.GenerativeUiPlanner
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock

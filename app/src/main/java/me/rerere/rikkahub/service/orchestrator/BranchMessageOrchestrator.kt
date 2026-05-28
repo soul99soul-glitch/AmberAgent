@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.service.orchestrator
 
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.model.Conversation
 import me.rerere.rikkahub.service.ChatService
 import kotlin.uuid.Uuid
 

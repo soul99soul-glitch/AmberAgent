@@ -16,7 +16,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.MainAgentToolProfile
+import app.amber.core.model.MainAgentToolProfile
 import java.util.Locale
 
 const val TOOL_SEARCH_TOOL_NAME = "tool_search"

@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.favorite.NodeFavoriteAdapter
-import me.rerere.rikkahub.data.model.FavoriteType
-import me.rerere.rikkahub.data.repository.FavoriteRepository
+import app.amber.core.model.FavoriteType
+import app.amber.core.repository.FavoriteRepository
 import kotlin.uuid.Uuid
 
 data class NodeFavoriteListItem(

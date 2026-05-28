@@ -16,7 +16,7 @@ import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveTaskChatModel
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.repository.ConversationRepository
 import kotlin.uuid.Uuid
 
 /**

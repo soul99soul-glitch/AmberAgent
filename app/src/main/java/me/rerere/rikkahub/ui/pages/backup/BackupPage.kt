@@ -44,11 +44,11 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Alignment
-import me.rerere.rikkahub.data.sync.core.SYNC_ARCHIVE_MIME
-import me.rerere.rikkahub.data.sync.core.SyncMode
-import me.rerere.rikkahub.data.sync.core.SyncPreview
-import me.rerere.rikkahub.data.sync.core.SyncSettings
-import me.rerere.rikkahub.data.sync.local.LocalBackupRepository
+import app.amber.core.sync.core.SYNC_ARCHIVE_MIME
+import app.amber.core.sync.core.SyncMode
+import app.amber.core.sync.core.SyncPreview
+import app.amber.core.sync.core.SyncSettings
+import app.amber.core.sync.local.LocalBackupRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

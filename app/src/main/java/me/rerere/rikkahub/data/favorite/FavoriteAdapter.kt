@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.favorite
 
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
-import me.rerere.rikkahub.data.model.FavoriteType
+import app.amber.core.model.FavoriteType
 
 interface FavoriteAdapter<T> {
     val type: FavoriteType

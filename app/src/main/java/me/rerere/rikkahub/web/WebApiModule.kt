@@ -21,8 +21,8 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.files.FilesManager
+import app.amber.core.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.dto.ErrorResponse

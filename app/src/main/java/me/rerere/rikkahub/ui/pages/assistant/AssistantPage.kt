@@ -61,8 +61,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.DEFAULT_ASSISTANTS_IDS
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.repository.MemoryRepository
+import app.amber.core.model.Assistant
+import app.amber.core.repository.MemoryRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag

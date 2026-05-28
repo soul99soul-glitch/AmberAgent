@@ -20,7 +20,7 @@ import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentImageGenerationModel
-import me.rerere.rikkahub.data.repository.ImageGenerationRepository
+import app.amber.core.repository.ImageGenerationRepository
 import app.amber.feature.webview.WebViewOperationStore
 import kotlin.uuid.Uuid
 

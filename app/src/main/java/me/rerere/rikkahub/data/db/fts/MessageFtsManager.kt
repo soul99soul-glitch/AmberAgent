@@ -6,8 +6,8 @@ import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.AppDatabase
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 

@@ -2,7 +2,7 @@ package me.rerere.rikkahub.ui.pages.setting.memory
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import me.rerere.rikkahub.data.memory.model.MemoryRecallSetting
+import app.amber.core.memory.model.MemoryRecallSetting
 
 @Composable
 fun MemoryRecallSettingsSection(setting: MemoryRecallSetting) {

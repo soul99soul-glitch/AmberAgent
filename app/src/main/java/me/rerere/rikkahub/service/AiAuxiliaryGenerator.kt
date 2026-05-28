@@ -10,8 +10,8 @@ import me.rerere.rikkahub.R
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.model.Conversation
+import app.amber.core.repository.ConversationRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.time.Instant
 import java.util.Locale

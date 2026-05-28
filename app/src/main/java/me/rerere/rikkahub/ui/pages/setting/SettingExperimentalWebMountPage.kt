@@ -1304,7 +1304,7 @@ private suspend fun installWebMountSlashCommand(
 
         我的任务:
     """.trimIndent()
-    val quickMessage = existing ?: me.rerere.rikkahub.data.model.QuickMessage(
+    val quickMessage = existing ?: app.amber.core.model.QuickMessage(
         title = "webmount",
         content = template + "\n",  // trailing newline so cursor lands on a fresh line
     )

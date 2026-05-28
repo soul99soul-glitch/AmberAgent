@@ -4,7 +4,7 @@ import android.util.Log
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.MessageNode
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.utils.JsonInstant
 

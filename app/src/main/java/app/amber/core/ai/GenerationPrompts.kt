@@ -6,9 +6,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.Model
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantMemory
+import app.amber.core.repository.ConversationRepository
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.toLocalDate
 

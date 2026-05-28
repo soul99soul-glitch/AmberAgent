@@ -18,9 +18,9 @@ import app.amber.core.ai.transformers.TimeReminderTransformer
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.data.repository.MemoryRepository
+import app.amber.core.model.Conversation
+import app.amber.core.repository.ConversationRepository
+import app.amber.core.repository.MemoryRepository
 import me.rerere.rikkahub.service.ChatService
 import kotlin.uuid.Uuid
 

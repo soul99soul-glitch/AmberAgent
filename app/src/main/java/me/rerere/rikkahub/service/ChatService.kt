@@ -72,7 +72,7 @@ import app.amber.core.ai.tools.buildMemoryTools
 import app.amber.core.ai.tools.createMcpManagementTools
 import app.amber.core.ai.tools.createSearchTools
 import app.amber.core.ai.tools.createSkillTools
-import me.rerere.rikkahub.data.files.SkillManager
+import app.amber.core.files.SkillManager
 import app.amber.core.ai.transformers.Base64ImageToLocalFileTransformer
 import app.amber.core.ai.transformers.DocumentAsPromptTransformer
 import app.amber.core.ai.transformers.MiniAppOutputTransformer
@@ -104,10 +104,10 @@ import app.amber.feature.tools.ToolRegistry
 import app.amber.feature.tools.createToolSearchTool
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.automation.ScreenCaptureManager
-import me.rerere.rikkahub.data.context.ActiveCompactBoundary
-import me.rerere.rikkahub.data.context.CompactLifecycleState
-import me.rerere.rikkahub.data.context.ConversationContextEngine
+import app.amber.core.automation.ScreenCaptureManager
+import app.amber.core.context.ActiveCompactBoundary
+import app.amber.core.context.CompactLifecycleState
+import app.amber.core.context.ConversationContextEngine
 import app.amber.core.settings.toCompactPolicy
 import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
 import app.amber.core.settings.MIN_AGENT_TOOL_LOOP_STEPS
@@ -117,12 +117,12 @@ import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.resolveTaskChatModel
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.toMessageNode
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.data.repository.MemoryRepository
+import app.amber.core.files.FilesManager
+import app.amber.core.memory.extraction.MemoryExtractor
+import app.amber.core.model.Conversation
+import app.amber.core.model.toMessageNode
+import app.amber.core.repository.ConversationRepository
+import app.amber.core.repository.MemoryRepository
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
@@ -1418,7 +1418,7 @@ class ChatService(
             // user never saw it. Now it points users at the 压缩模型 setting where the
             // real fix lives.
             val (errorTitle, surfacedError) = when (it) {
-                is me.rerere.rikkahub.data.context.ContextCompactionFailedException -> {
+                is app.amber.core.context.ContextCompactionFailedException -> {
                     val hint = context.getString(
                         R.string.error_auto_compact_failed_hint,
                         it.phase,
@@ -2338,7 +2338,7 @@ class ChatService(
                     expiresAt = request.expiresAt,
                     confidence = request.confidence,
                 ).let {
-                    me.rerere.rikkahub.data.model.AssistantMemory(
+                    app.amber.core.model.AssistantMemory(
                         id = it.id,
                         content = it.content,
                         scope = it.scope,

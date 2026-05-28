@@ -3,8 +3,8 @@ package me.rerere.rikkahub.ui.pages.chat
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.toMessageNode
+import app.amber.core.model.Conversation
+import app.amber.core.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

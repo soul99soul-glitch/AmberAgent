@@ -34,7 +34,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.model.Tag
+import app.amber.core.model.Tag
 import kotlin.uuid.Uuid
 
 @Composable

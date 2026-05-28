@@ -2,7 +2,7 @@ package me.rerere.rikkahub.ui.pages.setting.memory
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import me.rerere.rikkahub.data.model.AssistantMemory
+import app.amber.core.model.AssistantMemory
 
 @Composable
 fun MemoryRecordsSection(records: List<AssistantMemory>) {

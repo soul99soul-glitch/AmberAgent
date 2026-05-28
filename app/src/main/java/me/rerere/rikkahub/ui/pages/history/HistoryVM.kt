@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.model.Conversation
+import app.amber.core.repository.ConversationRepository
 import kotlin.uuid.Uuid
 
 private const val TAG = "HistoryVM"

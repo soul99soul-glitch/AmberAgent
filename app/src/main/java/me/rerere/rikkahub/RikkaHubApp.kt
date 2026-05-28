@@ -43,13 +43,13 @@ import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.webMountModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.di.workspaceModule
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.files.SkillManager
+import app.amber.core.files.FilesManager
+import app.amber.core.files.SkillManager
 import app.amber.feature.cron.AgentCronManager
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.prefs.SettingsProviderRescue
-import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
+import app.amber.core.nativepath.NativePathBootstrap
+import app.amber.core.memory.dream.MemoryDreamScheduler
 import app.amber.feature.board.collector.NotificationSignalCollector
 import app.amber.feature.board.hotlist.HotListScheduler
 import app.amber.feature.board.worker.BoardScheduler

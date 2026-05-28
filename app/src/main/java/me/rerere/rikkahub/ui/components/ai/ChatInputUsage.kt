@@ -50,11 +50,11 @@ import me.rerere.ai.provider.providers.openai.OpenAICodexUsageStatus
 import me.rerere.ai.provider.providers.openai.OpenAICodexUsageWindow
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.context.CompactLifecycleState
-import me.rerere.rikkahub.data.context.CompactLifecycleStatus
-import me.rerere.rikkahub.data.context.ContextFootprintEstimator
-import me.rerere.rikkahub.data.context.ConversationCompact
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.context.CompactLifecycleState
+import app.amber.core.context.CompactLifecycleStatus
+import app.amber.core.context.ContextFootprintEstimator
+import app.amber.core.context.ConversationCompact
+import app.amber.core.model.Conversation
 import me.rerere.rikkahub.data.usage.ProviderUsageMetric
 import me.rerere.rikkahub.data.usage.ProviderUsageStatus
 import me.rerere.rikkahub.ui.components.ui.workspaceColors

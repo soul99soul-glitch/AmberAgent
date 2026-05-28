@@ -18,7 +18,7 @@ import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.ai.mcp.McpStatus
 import app.amber.core.ai.mcp.parseMcpServersFromJson
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.files.SkillManager
+import app.amber.core.files.SkillManager
 
 fun createMcpManagementTools(
     settingsStore: SettingsAggregator,

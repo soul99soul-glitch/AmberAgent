@@ -19,7 +19,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.automation.AmberAccessibilityService
+import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel

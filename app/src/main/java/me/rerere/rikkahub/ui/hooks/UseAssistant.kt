@@ -7,7 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 
 @Composable
 fun rememberAssistantState(

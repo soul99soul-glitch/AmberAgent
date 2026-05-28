@@ -37,7 +37,7 @@ import app.amber.core.ai.mcp.transport.SseClientTransport
 import app.amber.core.ai.mcp.transport.StreamableHttpClientTransport
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.checkDifferent
 import okhttp3.OkHttpClient

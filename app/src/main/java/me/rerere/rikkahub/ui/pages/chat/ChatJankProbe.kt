@@ -9,7 +9,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.MessageNode
 import me.rerere.rikkahub.service.ConversationTimelineLoadState
 import me.rerere.rikkahub.service.PendingUserMessage
 import kotlin.math.abs

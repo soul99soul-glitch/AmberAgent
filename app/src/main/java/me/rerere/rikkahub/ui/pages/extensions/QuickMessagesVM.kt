@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.model.QuickMessage
+import app.amber.core.model.QuickMessage
 import kotlin.uuid.Uuid
 
 class QuickMessagesVM(

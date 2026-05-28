@@ -13,7 +13,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import me.rerere.rikkahub.R
 import app.amber.feature.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.base64Encode
 import me.rerere.rikkahub.utils.navigateToChatPage

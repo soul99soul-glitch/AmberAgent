@@ -57,10 +57,10 @@ import app.amber.feature.subagent.SubAgentMode
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.getQuickMessagesOfAssistant
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.files.SkillManager
-import me.rerere.rikkahub.data.files.SkillMetadata
-import me.rerere.rikkahub.data.model.QuickMessage
+import app.amber.core.files.FilesManager
+import app.amber.core.files.SkillManager
+import app.amber.core.files.SkillMetadata
+import app.amber.core.model.QuickMessage
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
@@ -107,7 +107,7 @@ internal fun TextInputRow(
     hidePlaceholder: Boolean = false,
     // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到当前 assistant.
     // 为 null 时 (sandbox / 历史预览等场景) footer 不渲染. ChatInput 调用处必传.
-    onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
+    onUpdateAssistant: ((app.amber.core.model.Assistant) -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()

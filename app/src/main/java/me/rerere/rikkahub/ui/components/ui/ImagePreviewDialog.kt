@@ -49,7 +49,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Download01
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.context.LocalToaster
 import org.koin.compose.koinInject
 import kotlin.math.abs

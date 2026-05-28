@@ -46,8 +46,8 @@ import coil3.compose.AsyncImage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.model.Avatar
+import app.amber.core.files.FilesManager
+import app.amber.core.model.Avatar
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import org.koin.compose.koinInject
 

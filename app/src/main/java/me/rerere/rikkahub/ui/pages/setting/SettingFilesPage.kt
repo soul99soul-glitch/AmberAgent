@@ -48,8 +48,8 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.files.FileFolders
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FileFolders
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors

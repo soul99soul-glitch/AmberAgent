@@ -14,7 +14,7 @@ import app.amber.feature.tools.ScreenAutomationTools
 import app.amber.feature.tools.SystemAccessTools
 import app.amber.feature.tools.TerminalTools
 import app.amber.feature.webview.WebViewOperationStore
-import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import app.amber.core.automation.ScreenCaptureManager
 import org.koin.dsl.module
 
 /**

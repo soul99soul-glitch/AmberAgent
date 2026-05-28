@@ -13,9 +13,9 @@ import kotlinx.serialization.json.Json
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
+import app.amber.core.repository.ConversationRepository
 import me.rerere.rikkahub.service.ConversationAccess
 import java.time.Instant
 import kotlin.uuid.Uuid

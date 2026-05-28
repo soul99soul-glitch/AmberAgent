@@ -13,16 +13,16 @@ import kotlinx.coroutines.withContext
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanSource
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
-import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
-import me.rerere.rikkahub.data.memory.export.MemoryImportExportManager
-import me.rerere.rikkahub.data.memory.model.MemoryCandidateStatus
-import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.data.repository.MemoryRepository
+import app.amber.core.memory.dream.MemoryDreamApplier
+import app.amber.core.memory.dream.MemoryDreamPlanSource
+import app.amber.core.memory.dream.MemoryDreamPlanStore
+import app.amber.core.memory.dream.MemoryDreamPlanner
+import app.amber.core.memory.dream.MemoryDreamScheduler
+import app.amber.core.memory.dream.PersistedMemoryDreamPlan
+import app.amber.core.memory.export.MemoryImportExportManager
+import app.amber.core.memory.model.MemoryCandidateStatus
+import app.amber.core.model.AssistantMemory
+import app.amber.core.repository.MemoryRepository
 import java.io.File
 
 class SettingAgentMemoryVM(

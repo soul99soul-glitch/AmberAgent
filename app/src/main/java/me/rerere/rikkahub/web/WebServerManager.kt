@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.files.FilesManager
+import app.amber.core.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.web.startWebServer
 import java.net.ServerSocket

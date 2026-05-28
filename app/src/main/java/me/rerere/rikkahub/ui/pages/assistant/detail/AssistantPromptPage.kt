@@ -71,11 +71,11 @@ import app.amber.core.ai.transformers.DefaultPlaceholderProvider
 import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.core.ai.transformers.TransformerContext
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.AssistantRegex
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.toMessageNode
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
+import app.amber.core.model.Conversation
+import app.amber.core.model.toMessageNode
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem

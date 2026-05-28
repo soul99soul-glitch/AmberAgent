@@ -3,9 +3,9 @@ package me.rerere.rikkahub.ui.components.message
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.cachedMarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.parseMarkdownContent

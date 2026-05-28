@@ -42,9 +42,9 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.context.CompactLifecycleState
-import me.rerere.rikkahub.data.context.CompactSummaryPayloads
-import me.rerere.rikkahub.data.context.ConversationCompact
+import app.amber.core.context.CompactLifecycleState
+import app.amber.core.context.CompactSummaryPayloads
+import app.amber.core.context.ConversationCompact
 import me.rerere.rikkahub.service.PendingUserMessage
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.service.previewText

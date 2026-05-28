@@ -23,10 +23,10 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.files.SkillMetadata
-import me.rerere.rikkahub.data.model.Lorebook
-import me.rerere.rikkahub.data.model.PromptInjection
-import me.rerere.rikkahub.data.model.QuickMessage
+import app.amber.core.files.SkillMetadata
+import app.amber.core.model.Lorebook
+import app.amber.core.model.PromptInjection
+import app.amber.core.model.QuickMessage
 
 @Composable
 fun ModeInjectionsContent(

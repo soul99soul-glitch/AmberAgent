@@ -8,7 +8,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.BuildConfig
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 
 class TransformerContext(
     val context: Context,

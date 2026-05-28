@@ -58,7 +58,7 @@ import me.rerere.hugeicons.stroke.WavingHand01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.isNotConfigured
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select

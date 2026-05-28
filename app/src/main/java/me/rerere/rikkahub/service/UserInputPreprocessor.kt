@@ -3,8 +3,8 @@ package me.rerere.rikkahub.service
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.replaceRegexes
 
 /**
  * Pre-flight user-input transformation surface.

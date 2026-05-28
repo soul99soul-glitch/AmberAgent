@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.fts.MessageSearchResult
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.repository.ConversationRepository
 
 class SearchVM(
     private val conversationRepo: ConversationRepository,

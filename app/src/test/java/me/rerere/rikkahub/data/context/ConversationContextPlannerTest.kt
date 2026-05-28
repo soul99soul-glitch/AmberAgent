@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.context
 
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.MessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

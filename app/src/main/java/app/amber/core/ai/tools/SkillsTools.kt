@@ -14,9 +14,9 @@ import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.files.SkillManager
-import me.rerere.rikkahub.data.files.SkillFrontmatterParser
-import me.rerere.rikkahub.data.files.SkillMetadata
+import app.amber.core.files.SkillManager
+import app.amber.core.files.SkillFrontmatterParser
+import app.amber.core.files.SkillMetadata
 import java.io.ByteArrayInputStream
 import java.util.zip.ZipInputStream
 

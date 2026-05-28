@@ -3,7 +3,7 @@ package me.rerere.rikkahub.ui.pages.setting.memory
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import me.rerere.rikkahub.data.memory.model.MemoryEvent
+import app.amber.core.memory.model.MemoryEvent
 
 @Composable
 fun MemoryDebugPage(events: List<MemoryEvent>) {

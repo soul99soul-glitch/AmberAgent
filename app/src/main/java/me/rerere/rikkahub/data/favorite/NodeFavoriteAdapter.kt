@@ -1,11 +1,11 @@
 package me.rerere.rikkahub.data.favorite
 
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
-import me.rerere.rikkahub.data.model.FavoriteMeta
-import me.rerere.rikkahub.data.model.FavoriteType
-import me.rerere.rikkahub.data.model.NodeFavoriteRef
-import me.rerere.rikkahub.data.model.NodeFavoriteTarget
-import me.rerere.rikkahub.data.model.buildFavoritePreview
+import app.amber.core.model.FavoriteMeta
+import app.amber.core.model.FavoriteType
+import app.amber.core.model.NodeFavoriteRef
+import app.amber.core.model.NodeFavoriteTarget
+import app.amber.core.model.buildFavoritePreview
 import me.rerere.rikkahub.utils.JsonInstant
 
 object NodeFavoriteAdapter : FavoriteAdapter<NodeFavoriteTarget> {

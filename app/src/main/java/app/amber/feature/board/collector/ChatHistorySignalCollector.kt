@@ -3,8 +3,8 @@ package app.amber.feature.board.collector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.amber.feature.board.BoardSignalSourceType
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.model.Conversation
+import app.amber.core.repository.ConversationRepository
 import kotlin.uuid.Uuid
 
 /**

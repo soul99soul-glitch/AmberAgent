@@ -119,14 +119,14 @@ import me.rerere.rikkahub.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 import app.amber.core.ai.vision.ImageAttachmentValidator
-import me.rerere.rikkahub.data.context.CompactLifecycleState
+import app.amber.core.context.CompactLifecycleState
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.files.FilesManager
+import app.amber.core.model.Assistant
+import app.amber.core.model.Conversation
 import me.rerere.rikkahub.data.usage.ProviderUsageClient
 import me.rerere.rikkahub.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
@@ -157,7 +157,7 @@ fun ChatInput(
     state: ChatInputState,
     loading: Boolean,
     conversation: Conversation,
-    contextCompacts: List<me.rerere.rikkahub.data.context.ConversationCompact> = emptyList(),
+    contextCompacts: List<app.amber.core.context.ConversationCompact> = emptyList(),
     compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
     pendingQueueCount: Int = 0,
     settings: Settings,

@@ -11,11 +11,11 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.context.ConversationContextEngine
+import app.amber.core.context.ConversationContextEngine
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.toCompactPolicy
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.model.Conversation
 
 class ConversationContextTools(
     private val contextEngine: ConversationContextEngine,

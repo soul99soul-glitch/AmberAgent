@@ -1,7 +1,7 @@
 package app.amber.core.ai.transformers
 
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import org.koin.java.KoinJavaComponent.getKoin
 
 object Base64ImageToLocalFileTransformer : OutputMessageTransformer {

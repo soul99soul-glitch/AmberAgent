@@ -15,9 +15,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.memory.model.MemoryKind
-import me.rerere.rikkahub.data.memory.model.MemoryScope
-import me.rerere.rikkahub.data.model.AssistantMemory
+import app.amber.core.memory.model.MemoryKind
+import app.amber.core.memory.model.MemoryScope
+import app.amber.core.model.AssistantMemory
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 

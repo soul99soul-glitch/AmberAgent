@@ -32,8 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.model.MainAgentToolProfile
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.MainAgentToolProfile
+import app.amber.core.model.Assistant
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -49,7 +49,7 @@ import me.rerere.rikkahub.utils.toFixed
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import kotlin.math.roundToInt
-import me.rerere.rikkahub.data.model.Tag as DataTag
+import app.amber.core.model.Tag as DataTag
 
 @Composable
 fun AssistantBasicPage(id: String) {

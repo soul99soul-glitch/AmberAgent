@@ -9,10 +9,10 @@ import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
 import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.InjectionPosition
-import me.rerere.rikkahub.data.model.PromptInjection
-import me.rerere.rikkahub.data.model.Lorebook
+import app.amber.core.model.Assistant
+import app.amber.core.model.InjectionPosition
+import app.amber.core.model.PromptInjection
+import app.amber.core.model.Lorebook
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

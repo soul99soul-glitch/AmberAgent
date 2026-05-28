@@ -3,8 +3,8 @@ package app.amber.core.ai.transformers
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.replaceRegexes
 import org.koin.core.component.KoinComponent
 
 object RegexOutputTransformer : TailSafeOutputMessageTransformer, KoinComponent {

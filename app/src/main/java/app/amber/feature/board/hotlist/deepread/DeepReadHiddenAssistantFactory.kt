@@ -3,7 +3,7 @@ package app.amber.feature.board.hotlist.deepread
 import me.rerere.ai.core.ReasoningLevel
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 import kotlin.uuid.Uuid
 
 internal object DeepReadHiddenAssistantFactory {

@@ -17,11 +17,11 @@ import app.amber.core.settings.BackupReminderConfig
 import app.amber.core.settings.DEFAULT_SYSTEM_TTS_ID
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.WebDavConfig
-import me.rerere.rikkahub.data.model.Lorebook
-import me.rerere.rikkahub.data.model.PromptInjection
-import me.rerere.rikkahub.data.model.QuickMessage
-import me.rerere.rikkahub.data.sync.core.SyncSettings
-import me.rerere.rikkahub.data.sync.s3.S3Config
+import app.amber.core.model.Lorebook
+import app.amber.core.model.PromptInjection
+import app.amber.core.model.QuickMessage
+import app.amber.core.sync.core.SyncSettings
+import app.amber.core.sync.s3.S3Config
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 import me.rerere.tts.provider.TTSProviderSetting

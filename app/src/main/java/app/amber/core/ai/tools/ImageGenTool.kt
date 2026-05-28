@@ -13,7 +13,7 @@ import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.getCurrentImageGenerationModel
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.repository.ImageGenerationRepository
+import app.amber.core.repository.ImageGenerationRepository
 import kotlin.uuid.Uuid
 
 /**

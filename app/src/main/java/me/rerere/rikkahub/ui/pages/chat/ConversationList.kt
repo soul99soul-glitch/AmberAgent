@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.model.Conversation
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate

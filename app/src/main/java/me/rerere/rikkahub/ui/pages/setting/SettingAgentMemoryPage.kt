@@ -58,10 +58,10 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
-import me.rerere.rikkahub.data.memory.model.MemoryCandidate
-import me.rerere.rikkahub.data.memory.model.MemoryEvent
-import me.rerere.rikkahub.data.model.AssistantMemory
+import app.amber.core.memory.dream.PersistedMemoryDreamPlan
+import app.amber.core.memory.model.MemoryCandidate
+import app.amber.core.memory.model.MemoryEvent
+import app.amber.core.model.AssistantMemory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog

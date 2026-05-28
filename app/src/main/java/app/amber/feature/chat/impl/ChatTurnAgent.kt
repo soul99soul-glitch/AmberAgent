@@ -16,8 +16,8 @@ import java.time.Instant
 import kotlin.uuid.Uuid
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.model.Assistant
+import app.amber.core.model.Conversation
 
 class ChatTurnAgent(
     private val generationHandler: GenerationHandler,
@@ -142,7 +142,7 @@ private fun mergeMessages(
         .filterNot { it.id in existingIds }
         .map { msg ->
             changed = true
-            me.rerere.rikkahub.data.model.MessageNode(messages = listOf(msg))
+            app.amber.core.model.MessageNode(messages = listOf(msg))
         }
     return if (!changed) conversation
     else conversation.copy(
@@ -162,7 +162,7 @@ data class ChatSession(
     val inputTransformers: List<app.amber.core.ai.transformers.InputMessageTransformer>,
     val outputTransformers: List<app.amber.core.ai.transformers.OutputMessageTransformer>,
     val assistant: Assistant,
-    val memories: List<me.rerere.rikkahub.data.model.AssistantMemory>?,
+    val memories: List<app.amber.core.model.AssistantMemory>?,
     val tools: List<me.rerere.ai.core.Tool>,
     val autoApproveTools: Boolean,
     val autoApproveHighRiskTools: Boolean,

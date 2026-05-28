@@ -2,7 +2,7 @@ package app.amber.feature.tools
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.MainAgentToolProfile
+import app.amber.core.model.MainAgentToolProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

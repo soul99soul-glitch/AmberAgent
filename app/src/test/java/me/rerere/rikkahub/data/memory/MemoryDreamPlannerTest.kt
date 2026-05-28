@@ -1,10 +1,10 @@
 package me.rerere.rikkahub.data.memory
 
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
-import me.rerere.rikkahub.data.memory.model.MemoryCandidate
-import me.rerere.rikkahub.data.memory.model.MemoryKind
-import me.rerere.rikkahub.data.memory.model.MemoryRecord
-import me.rerere.rikkahub.data.memory.model.MemoryScope
+import app.amber.core.memory.dream.MemoryDreamPlanner
+import app.amber.core.memory.model.MemoryCandidate
+import app.amber.core.memory.model.MemoryKind
+import app.amber.core.memory.model.MemoryRecord
+import app.amber.core.memory.model.MemoryScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

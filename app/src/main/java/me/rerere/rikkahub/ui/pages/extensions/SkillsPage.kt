@@ -54,9 +54,9 @@ import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Refresh01
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.files.SkillFrontmatterParser
-import me.rerere.rikkahub.data.files.SkillMetadata
-import me.rerere.rikkahub.data.files.SkillScanIssue
+import app.amber.core.files.SkillFrontmatterParser
+import app.amber.core.files.SkillMetadata
+import app.amber.core.files.SkillScanIssue
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog

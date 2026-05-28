@@ -17,8 +17,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
-import me.rerere.rikkahub.data.automation.AmberAccessibilityService
-import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import app.amber.core.automation.AmberAccessibilityService
+import app.amber.core.automation.ScreenCaptureManager
 
 class ScreenAutomationTools(
     private val context: Context,
@@ -323,7 +323,7 @@ class ScreenAutomationTools(
                 val deadline = System.currentTimeMillis() + (input.long("timeout_ms") ?: 10_000L).coerceIn(500L, 60_000L)
                 val interval = (input.long("interval_ms") ?: 500L).coerceIn(100L, 3_000L)
                 val service = requireService()
-                var matches = emptyList<me.rerere.rikkahub.data.automation.AccessibilityTextMatch>()
+                var matches = emptyList<app.amber.core.automation.AccessibilityTextMatch>()
                 while (System.currentTimeMillis() < deadline) {
                     matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
                     if (matches.isNotEmpty()) break
@@ -477,7 +477,7 @@ class ScreenAutomationTools(
         }
     }
 
-    private fun me.rerere.rikkahub.data.automation.AccessibilityTextMatch.toJson(index: Int) = buildJsonObject {
+    private fun app.amber.core.automation.AccessibilityTextMatch.toJson(index: Int) = buildJsonObject {
         put("index", index)
         put("text", text)
         put("content_description", contentDescription)

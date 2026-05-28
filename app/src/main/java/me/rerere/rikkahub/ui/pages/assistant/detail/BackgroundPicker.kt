@@ -27,7 +27,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import org.koin.compose.koinInject
 

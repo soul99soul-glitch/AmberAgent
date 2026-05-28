@@ -133,8 +133,8 @@ fun ModelSelector(
     onClear: (() -> Unit)? = null,
     // Phase 3.5 thinking-level segment：仅 chat 主入口（ChatPage TopBar / ChatInput）传入这两个
     // 参数即可在 active model 卡片下显示 reasoning 切换段；其他调用方默认 null 即不渲染
-    currentAssistant: me.rerere.rikkahub.data.model.Assistant? = null,
-    onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
+    currentAssistant: app.amber.core.model.Assistant? = null,
+    onUpdateAssistant: ((app.amber.core.model.Assistant) -> Unit)? = null,
     onSelect: (Model) -> Unit
 ) {
     var popup by remember { mutableStateOf(false) }
@@ -437,8 +437,8 @@ private fun ColumnScope.ModelList(
     providers: List<ProviderSetting>,
     modelType: ModelType,
     preferredInputModality: Modality? = null,
-    currentAssistant: me.rerere.rikkahub.data.model.Assistant? = null,
-    onUpdateAssistant: ((me.rerere.rikkahub.data.model.Assistant) -> Unit)? = null,
+    currentAssistant: app.amber.core.model.Assistant? = null,
+    onUpdateAssistant: ((app.amber.core.model.Assistant) -> Unit)? = null,
     onSelect: (Model) -> Unit,
     onDismiss: () -> Unit
 ) {

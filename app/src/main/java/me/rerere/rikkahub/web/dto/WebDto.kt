@@ -6,8 +6,8 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
 
 // ========== Request DTOs ==========
 

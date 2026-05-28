@@ -33,7 +33,7 @@ import app.amber.core.settings.prefs.SearchPrefs
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.prefs.SettingsProviderRescue
 import app.amber.core.settings.prefs.UIPrefs
-import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
+import app.amber.core.nativepath.NativePathBootstrap
 import app.amber.core.settings.settingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
@@ -57,11 +57,11 @@ import app.amber.core.ai.mcp.McpManager
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.defaultToolInvocationHooks
 import app.amber.feature.runtime.PermissionDecisionResolver
-import me.rerere.rikkahub.data.sync.core.SyncArchiveManager
-import me.rerere.rikkahub.data.sync.google.GoogleDriveAppDataClient
-import me.rerere.rikkahub.data.sync.google.GoogleDriveSyncRepository
-import me.rerere.rikkahub.data.sync.google.GoogleOAuthConfigGate
-import me.rerere.rikkahub.data.sync.local.LocalBackupRepository
+import app.amber.core.sync.core.SyncArchiveManager
+import app.amber.core.sync.google.GoogleDriveAppDataClient
+import app.amber.core.sync.google.GoogleDriveSyncRepository
+import app.amber.core.sync.google.GoogleOAuthConfigGate
+import app.amber.core.sync.local.LocalBackupRepository
 import me.rerere.search.SearchService
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor

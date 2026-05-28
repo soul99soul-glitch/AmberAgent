@@ -500,7 +500,7 @@ class DeepReadAgentRunManager(
         settings: Settings,
         model: Model,
         messages: List<UIMessage>,
-        assistant: me.rerere.rikkahub.data.model.Assistant,
+        assistant: app.amber.core.model.Assistant,
         tools: List<me.rerere.ai.core.Tool>,
         writerToolNames: Set<String>,
         statusLabel: String,
@@ -542,7 +542,7 @@ class DeepReadAgentRunManager(
     private suspend fun generateArticlePlan(
         settings: Settings,
         model: Model,
-        assistant: me.rerere.rikkahub.data.model.Assistant,
+        assistant: app.amber.core.model.Assistant,
         topicTitle: String,
         evidencePack: DeepReadEvidencePack,
         playbookMarkdown: String,

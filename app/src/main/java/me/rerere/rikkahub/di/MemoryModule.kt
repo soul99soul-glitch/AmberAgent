@@ -1,15 +1,15 @@
 package me.rerere.rikkahub.di
 
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamNotifier
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanner
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
-import me.rerere.rikkahub.data.memory.export.MemoryFrontmatterCodec
-import me.rerere.rikkahub.data.memory.export.MemoryImportExportManager
-import me.rerere.rikkahub.data.memory.extraction.MemoryCandidateFilter
-import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
-import me.rerere.rikkahub.data.memory.telemetry.MemoryEventLogger
+import app.amber.core.memory.dream.MemoryDreamApplier
+import app.amber.core.memory.dream.MemoryDreamNotifier
+import app.amber.core.memory.dream.MemoryDreamPlanStore
+import app.amber.core.memory.dream.MemoryDreamPlanner
+import app.amber.core.memory.dream.MemoryDreamScheduler
+import app.amber.core.memory.export.MemoryFrontmatterCodec
+import app.amber.core.memory.export.MemoryImportExportManager
+import app.amber.core.memory.extraction.MemoryCandidateFilter
+import app.amber.core.memory.extraction.MemoryExtractor
+import app.amber.core.memory.telemetry.MemoryEventLogger
 import org.koin.dsl.module
 
 /**

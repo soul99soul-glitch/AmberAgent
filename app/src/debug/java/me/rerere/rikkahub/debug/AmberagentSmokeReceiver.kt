@@ -16,8 +16,8 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.tools.SystemAccessTools
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.automation.AmberAccessibilityService
-import me.rerere.rikkahub.data.automation.ScreenCaptureManager
+import app.amber.core.automation.AmberAccessibilityService
+import app.amber.core.automation.ScreenCaptureManager
 import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.service.ChatService
 import org.koin.core.context.GlobalContext

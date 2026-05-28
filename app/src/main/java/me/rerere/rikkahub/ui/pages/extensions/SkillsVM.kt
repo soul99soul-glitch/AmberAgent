@@ -9,10 +9,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
-import me.rerere.rikkahub.data.files.SkillFrontmatterParser
-import me.rerere.rikkahub.data.files.SkillManager
-import me.rerere.rikkahub.data.files.SkillMetadata
-import me.rerere.rikkahub.data.files.SkillScanIssue
+import app.amber.core.files.SkillFrontmatterParser
+import app.amber.core.files.SkillManager
+import app.amber.core.files.SkillMetadata
+import app.amber.core.files.SkillScanIssue
 import java.util.LinkedHashMap
 import org.json.JSONArray
 import java.net.HttpURLConnection

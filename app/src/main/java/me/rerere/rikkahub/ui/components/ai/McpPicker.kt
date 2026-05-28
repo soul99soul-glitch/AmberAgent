@@ -44,7 +44,7 @@ import me.rerere.rikkahub.R
 import app.amber.core.ai.mcp.McpManager
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.ai.mcp.McpStatus
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface

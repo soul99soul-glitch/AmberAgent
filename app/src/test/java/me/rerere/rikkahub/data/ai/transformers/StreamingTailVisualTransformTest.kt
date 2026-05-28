@@ -7,9 +7,9 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.AssistantRegex
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import kotlin.uuid.Uuid

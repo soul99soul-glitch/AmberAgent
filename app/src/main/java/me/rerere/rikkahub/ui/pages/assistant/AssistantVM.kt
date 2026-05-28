@@ -9,11 +9,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.Avatar
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.data.repository.MemoryRepository
+import app.amber.core.files.FilesManager
+import app.amber.core.model.Assistant
+import app.amber.core.model.Avatar
+import app.amber.core.repository.ConversationRepository
+import app.amber.core.repository.MemoryRepository
 
 class AssistantVM(
     private val settingsStore: SettingsAggregator,

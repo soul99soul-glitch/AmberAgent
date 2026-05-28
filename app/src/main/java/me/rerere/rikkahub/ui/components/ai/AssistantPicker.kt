@@ -45,7 +45,7 @@ import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAssistantState

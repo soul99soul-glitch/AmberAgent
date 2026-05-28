@@ -8,7 +8,7 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
-import me.rerere.rikkahub.data.repository.LightConversationEntity
+import app.amber.core.repository.LightConversationEntity
 
 @Dao
 interface ConversationDAO {

@@ -26,9 +26,9 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.MessageNode
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.ui.components.richtext.MarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml

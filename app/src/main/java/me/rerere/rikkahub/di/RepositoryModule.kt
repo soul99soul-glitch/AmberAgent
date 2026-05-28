@@ -4,15 +4,15 @@ import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.feature.prompts.AgentPromptConfigRepository
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.files.SkillManager
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.data.repository.FavoriteRepository
-import me.rerere.rikkahub.data.repository.FilesRepository
-import me.rerere.rikkahub.data.repository.GenMediaRepository
-import me.rerere.rikkahub.data.repository.ImageGenerationRepository
-import me.rerere.rikkahub.data.repository.MemoryRepository
-import me.rerere.rikkahub.data.memory.recall.MemoryRecallStore
+import app.amber.core.files.FilesManager
+import app.amber.core.files.SkillManager
+import app.amber.core.repository.ConversationRepository
+import app.amber.core.repository.FavoriteRepository
+import app.amber.core.repository.FilesRepository
+import app.amber.core.repository.GenMediaRepository
+import app.amber.core.repository.ImageGenerationRepository
+import app.amber.core.repository.MemoryRepository
+import app.amber.core.memory.recall.MemoryRecallStore
 import org.koin.dsl.module
 
 val repositoryModule = module {
@@ -24,7 +24,7 @@ val repositoryModule = module {
         MemoryRepository(get(), get(), get())
     }
 
-    single<me.rerere.rikkahub.data.memory.store.MemoryRepository> {
+    single<app.amber.core.memory.store.MemoryRepository> {
         get<MemoryRepository>()
     }
 

@@ -15,14 +15,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.files.SkillManager
-import me.rerere.rikkahub.data.files.SkillMetadata
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.data.model.Avatar
-import me.rerere.rikkahub.data.model.Tag
-import me.rerere.rikkahub.data.repository.MemoryRepository
+import app.amber.core.files.FilesManager
+import app.amber.core.files.SkillManager
+import app.amber.core.files.SkillMetadata
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantMemory
+import app.amber.core.model.Avatar
+import app.amber.core.model.Tag
+import app.amber.core.repository.MemoryRepository
 import kotlin.uuid.Uuid
 
 private const val TAG = "AssistantDetailVM"

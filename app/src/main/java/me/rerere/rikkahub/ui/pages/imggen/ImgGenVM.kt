@@ -21,9 +21,9 @@ import me.rerere.ai.ui.ImageAspectRatio
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findModelById
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
-import me.rerere.rikkahub.data.files.FilesManager
-import me.rerere.rikkahub.data.repository.GenMediaRepository
-import me.rerere.rikkahub.data.repository.ImageGenerationRepository
+import app.amber.core.files.FilesManager
+import app.amber.core.repository.GenMediaRepository
+import app.amber.core.repository.ImageGenerationRepository
 import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
 

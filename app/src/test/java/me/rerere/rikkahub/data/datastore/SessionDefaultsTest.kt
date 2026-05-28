@@ -2,7 +2,7 @@ package me.rerere.rikkahub.data.datastore
 
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

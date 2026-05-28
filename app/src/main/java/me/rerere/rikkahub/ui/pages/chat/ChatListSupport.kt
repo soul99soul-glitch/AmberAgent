@@ -22,10 +22,10 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.MessageRenderCache
 import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems

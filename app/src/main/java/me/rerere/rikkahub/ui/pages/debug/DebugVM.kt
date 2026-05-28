@@ -12,9 +12,9 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.DEFAULT_ASSISTANT_ID
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.repository.ConversationRepository
+import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
+import app.amber.core.repository.ConversationRepository
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock

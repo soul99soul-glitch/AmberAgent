@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.rikkahub.data.model.MessageNode
+import app.amber.core.model.MessageNode
 
 @Composable
 fun ChatMessageBranchSelector(

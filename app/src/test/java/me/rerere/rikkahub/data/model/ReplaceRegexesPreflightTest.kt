@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.model
 
-import me.rerere.rikkahub.data.model.AssistantAffectScope.USER
+import app.amber.core.model.AssistantAffectScope.USER
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

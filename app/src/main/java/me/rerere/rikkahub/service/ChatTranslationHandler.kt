@@ -10,7 +10,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import app.amber.core.ai.GenerationHandler
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.model.Conversation
 import me.rerere.rikkahub.AppScope
 import java.util.Locale
 import kotlin.uuid.Uuid

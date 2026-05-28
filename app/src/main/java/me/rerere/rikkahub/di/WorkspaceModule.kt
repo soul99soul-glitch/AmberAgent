@@ -6,9 +6,9 @@ import app.amber.feature.tools.FeishuOfficeTools
 import app.amber.feature.tools.WorkspaceArtifactTools
 import app.amber.feature.tools.WorkspaceTools
 import app.amber.feature.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.context.AgentCapabilitySnapshotBuilder
-import me.rerere.rikkahub.data.context.ConversationContextEngine
-import me.rerere.rikkahub.data.context.ConversationContextRepository
+import app.amber.core.context.AgentCapabilitySnapshotBuilder
+import app.amber.core.context.ConversationContextEngine
+import app.amber.core.context.ConversationContextRepository
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import org.koin.dsl.module
 

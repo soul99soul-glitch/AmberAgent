@@ -85,7 +85,7 @@ import app.amber.core.ai.vision.ImageAttachmentStatusKind
 import app.amber.core.ai.vision.ImageAttachmentValidator
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
-import me.rerere.rikkahub.data.files.FilesManager
+import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState

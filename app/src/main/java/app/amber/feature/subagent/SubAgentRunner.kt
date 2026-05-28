@@ -13,7 +13,7 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
-import me.rerere.rikkahub.data.model.Assistant
+import app.amber.core.model.Assistant
 
 interface SubAgentRunner {
     /**

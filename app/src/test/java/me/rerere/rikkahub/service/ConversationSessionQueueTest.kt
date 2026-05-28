@@ -3,7 +3,7 @@ package me.rerere.rikkahub.service
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.Conversation
+import app.amber.core.model.Conversation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

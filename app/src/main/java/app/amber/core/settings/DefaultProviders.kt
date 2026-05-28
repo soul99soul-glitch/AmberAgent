@@ -6,7 +6,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.data.model.QuickMessage
+import app.amber.core.model.QuickMessage
 import kotlin.uuid.Uuid
 
 // Stable UUIDs for the two image-generation models we seed into the built-in

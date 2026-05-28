@@ -6,10 +6,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.db.dao.MemoryDreamPlanDAO
 import me.rerere.rikkahub.data.db.entity.MemoryDreamPlanEntity
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlan
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanSource
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStatus
-import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore
+import app.amber.core.memory.dream.MemoryDreamPlan
+import app.amber.core.memory.dream.MemoryDreamPlanSource
+import app.amber.core.memory.dream.MemoryDreamPlanStatus
+import app.amber.core.memory.dream.MemoryDreamPlanStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

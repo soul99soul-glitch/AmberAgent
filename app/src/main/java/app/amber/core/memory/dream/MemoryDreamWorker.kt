@@ -1,0 +1,76 @@
+package app.amber.core.memory.dream
+
+import android.content.Context
+import androidx.work.CoroutineWorker
+import androidx.work.WorkerParameters
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.first
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.memory.model.MemoryEventType
+import app.amber.core.memory.telemetry.MemoryEventLogger
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.get
+import java.time.LocalDate
+import java.time.ZoneId
+
+class MemoryDreamWorker(
+    appContext: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(appContext, params), KoinComponent {
+    override suspend fun doWork(): Result {
+        val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
+        val workerSetting = settings.agentRuntime.memoryWorker
+        val eventLogger = get<MemoryEventLogger>()
+        val notifier = get<MemoryDreamNotifier>()
+
+        if (!workerSetting.enabled || !workerSetting.dreamEnabled) {
+            notifier.cancel()
+            // Don't reschedule when disabled — user explicitly turned it off.
+            return Result.success()
+        }
+
+        // Always reschedule the next nightly run before doing anything else, so the loop
+        // continues even if this run early-exits or fails. (We use OneTimeWorkRequest with
+        // initialDelay rather than PeriodicWorkRequest so the next slot lands cleanly inside
+        // tomorrow's 00:00–06:00 window in the user's local timezone.) Skip rescheduling for
+        // manual runs — those should only fire once.
+        val isManualRun = tags.contains(MemoryDreamScheduler.MANUAL_RUN_NAME)
+        if (!isManualRun) {
+            get<MemoryDreamScheduler>().scheduleNextNightRun()
+        }
+
+        val todayStart = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val autoRunsToday = get<MemoryDreamPlanStore>().countAutoPlansSince(todayStart)
+        if (autoRunsToday >= workerSetting.dreamMaxDailyRuns.coerceAtLeast(1)) {
+            return Result.success()
+        }
+
+        notifier.notifyRunning()
+        return runCatching {
+            val plan = get<MemoryDreamPlanner>().plan()
+            val planStore = get<MemoryDreamPlanStore>()
+            if (plan.hasChanges) {
+                val appliedPlan = get<MemoryDreamApplier>().apply(plan)
+                if (appliedPlan.hasChanges) {
+                    planStore.saveApplied(appliedPlan, MemoryDreamPlanSource.AUTO)
+                    notifier.notifyApplied(appliedPlan)
+                } else {
+                    planStore.recordAutoRun(plan)
+                    notifier.cancel()
+                }
+            } else {
+                planStore.recordAutoRun(plan)
+                notifier.cancel()
+            }
+            Result.success()
+        }.getOrElse { error ->
+            val message = error.message ?: error::class.java.simpleName
+            eventLogger.log(
+                type = MemoryEventType.DREAM_FAILED,
+                message = message.take(500),
+            )
+            notifier.notifyFailed(message)
+            Result.failure()
+        }
+    }
+}

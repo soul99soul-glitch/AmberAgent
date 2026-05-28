@@ -52,8 +52,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.rikkahub.R
 import app.amber.core.settings.resolveSessionDefaults
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantAffectScope
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantAffectScope
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.workspaceColors

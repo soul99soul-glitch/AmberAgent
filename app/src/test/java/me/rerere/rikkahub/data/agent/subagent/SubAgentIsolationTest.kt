@@ -4,8 +4,8 @@ import me.rerere.ai.ui.UIMessage
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.AssistantRegex
+import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantRegex
 import app.amber.core.settings.SpeculativeToolExecutionSetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

@@ -10,8 +10,8 @@ import kotlinx.coroutines.withContext
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.ai.mcp.parseMcpServersFromJson
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.files.SkillFrontmatterParser
-import me.rerere.rikkahub.data.files.SkillManager
+import app.amber.core.files.SkillFrontmatterParser
+import app.amber.core.files.SkillManager
 import java.io.File
 
 data class SkillFile(
