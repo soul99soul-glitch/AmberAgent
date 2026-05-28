@@ -1,8 +1,8 @@
 package app.amber.feature.modelcouncil
 
-internal const val EXTERNAL_CLI_DEFAULT_TOOL_ID = "gemini_cli"
+const val EXTERNAL_CLI_DEFAULT_TOOL_ID = "gemini_cli"
 
-internal data class ExternalCliToolSpec(
+data class ExternalCliToolSpec(
     val id: String,
     val displayName: String,
     val binary: String,
@@ -15,13 +15,13 @@ internal data class ExternalCliToolSpec(
     val requiresPtyForLogin: Boolean = false,
 )
 
-internal data class ExternalCliLoginHint(
+data class ExternalCliLoginHint(
     val url: String? = null,
     val code: String? = null,
     val needsUserAction: Boolean = false,
 )
 
-internal object ExternalCliToolRegistry {
+object ExternalCliToolRegistry {
     private val safeCliModelRegex = Regex("[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}")
     private val urlRegex = Regex("""https?://[^\s"'<>]+""")
     private val codeRegex = Regex(
@@ -164,5 +164,5 @@ internal object ExternalCliToolRegistry {
     }
 }
 
-internal fun String.shellSingleQuoted(): String =
+fun String.shellSingleQuoted(): String =
     "'" + replace("'", "'\"'\"'") + "'"
