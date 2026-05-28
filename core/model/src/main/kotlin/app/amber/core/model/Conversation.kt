@@ -13,6 +13,7 @@ import me.rerere.ai.util.InstantSerializer
 import java.time.Instant
 import kotlin.uuid.Uuid
 
+@Immutable
 @Serializable
 data class Conversation(
     val id: Uuid = Uuid.random(),
