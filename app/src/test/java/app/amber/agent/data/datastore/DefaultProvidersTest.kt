@@ -9,7 +9,7 @@ class DefaultProvidersTest {
     @Test
     fun `default providers are curated and deletable`() {
         assertEquals(
-            listOf("OpenAI", "Gemini", "DeepSeek", "OpenRouter", "月之暗面", "xAI"),
+            listOf("OpenAI", "Gemini", "DeepSeek", "OpenRouter", "月之暗面 (Kimi)", "智谱 GLM", "小米 MiMo", "xAI"),
             DEFAULT_PROVIDERS.map { it.name },
         )
         assertTrue(DEFAULT_PROVIDERS.all { !it.builtIn })

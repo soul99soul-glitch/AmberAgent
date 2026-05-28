@@ -53,7 +53,7 @@ class ResponseAPIMessageTest {
         return api.buildRequestBody(providerSetting, listOf(UIMessage.user("hello")), params, stream)
     }
 
-    private fun createReasoningParams(reasoningLevel: ReasoningLevel = ReasoningLevel.OFF): TextGenerationParams {
+    private fun createReasoningParams(reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO): TextGenerationParams {
         return TextGenerationParams(
             model = Model(
                 modelId = "test-model",

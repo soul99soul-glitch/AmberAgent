@@ -80,8 +80,8 @@ class FeishuDocRefsTest {
 
     private fun locateTools(): File {
         val candidates = listOf(
-            File("src/main/java/app/amber/agent/data/agent/webmount/adapters/feishudocs/FeishuDocsTools.kt"),
-            File("app/src/main/java/app/amber/agent/data/agent/webmount/adapters/feishudocs/FeishuDocsTools.kt"),
+            File("src/main/java/app/amber/feature/webmount/adapters/feishudocs/FeishuDocsTools.kt"),
+            File("app/src/main/java/app/amber/feature/webmount/adapters/feishudocs/FeishuDocsTools.kt"),
         )
         return candidates.firstOrNull { it.isFile }
             ?: error("Could not locate FeishuDocsTools.kt")
