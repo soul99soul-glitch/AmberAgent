@@ -1,6 +1,6 @@
 # AmberAgent Architecture
 
-> Last updated: 2026-05-28 (Phase 0-E refactoring complete)
+> Last updated: 2026-05-28 (Phase 0-E refactoring complete — 76 commits, see [refactor-completion-report.md](refactor-completion-report.md))
 
 ## Overview
 
