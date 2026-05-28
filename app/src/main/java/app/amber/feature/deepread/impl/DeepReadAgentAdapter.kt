@@ -7,8 +7,8 @@ import app.amber.feature.deepread.api.DeepReadArtifact
 import app.amber.feature.deepread.api.DeepReadDescriptor
 import app.amber.feature.deepread.api.DeepReadEventPayload
 import app.amber.feature.deepread.api.DeepReadInput
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
+import app.amber.feature.board.hotlist.deepread.DeepReadAgentRunManager
+import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 
 class DeepReadAgentAdapter(
     private val runManager: DeepReadAgentRunManager,

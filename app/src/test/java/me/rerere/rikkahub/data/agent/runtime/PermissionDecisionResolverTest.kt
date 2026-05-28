@@ -2,7 +2,7 @@ package me.rerere.rikkahub.data.agent.runtime
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.tools.ToolRisk
+import app.amber.feature.tools.ToolRisk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

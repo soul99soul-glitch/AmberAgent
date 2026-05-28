@@ -27,8 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.board.hotlist.DeepReadHistoryItem
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
+import app.amber.feature.board.hotlist.DeepReadHistoryItem
+import app.amber.feature.board.hotlist.HotListRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone

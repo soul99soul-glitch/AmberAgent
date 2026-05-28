@@ -24,7 +24,7 @@ import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import app.amber.feature.live.LiveModeSetting
 import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
 import app.amber.feature.office.FeishuOfficeEnhancementSetting
-import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
+import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.subagent.SubAgentRuntimeSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.ai.GenerationRetrySetting

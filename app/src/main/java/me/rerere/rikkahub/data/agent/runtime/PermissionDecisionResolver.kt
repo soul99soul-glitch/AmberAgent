@@ -8,9 +8,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.tools.ToolInvocationPolicy
-import me.rerere.rikkahub.data.agent.tools.ToolRisk
-import me.rerere.rikkahub.data.agent.tools.invocationPolicy
+import app.amber.feature.tools.ToolInvocationPolicy
+import app.amber.feature.tools.ToolRisk
+import app.amber.feature.tools.invocationPolicy
 import me.rerere.rikkahub.utils.JsonInstant
 import java.util.UUID
 

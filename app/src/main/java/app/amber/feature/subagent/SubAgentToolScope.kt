@@ -9,9 +9,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.tools.TOOL_SEARCH_TOOL_NAME
-import me.rerere.rikkahub.data.agent.tools.ToolRegistry
-import me.rerere.rikkahub.data.agent.tools.createToolSearchTool
+import app.amber.feature.tools.TOOL_SEARCH_TOOL_NAME
+import app.amber.feature.tools.ToolRegistry
+import app.amber.feature.tools.createToolSearchTool
 import me.rerere.rikkahub.utils.JsonInstant
 
 private const val TOOLS_LIST_TOOL_NAME = "tools_list"

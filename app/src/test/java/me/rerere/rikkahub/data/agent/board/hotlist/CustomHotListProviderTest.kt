@@ -3,9 +3,9 @@ package me.rerere.rikkahub.data.agent.board.hotlist
 import com.sun.net.httpserver.HttpServer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListFieldMapping
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListProvider
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListSourceTypes
+import app.amber.feature.board.hotlist.providers.CustomHotListFieldMapping
+import app.amber.feature.board.hotlist.providers.CustomHotListProvider
+import app.amber.feature.board.hotlist.providers.CustomHotListSourceTypes
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
 import okhttp3.OkHttpClient
 import org.junit.After

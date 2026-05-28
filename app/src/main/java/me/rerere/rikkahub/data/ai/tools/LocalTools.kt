@@ -4,20 +4,20 @@ import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.event.AppEventBus
 import app.amber.feature.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.tools.AgentCronTools
-import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
-import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
-import me.rerere.rikkahub.data.agent.webmount.tools.WebMountPrimitiveTools
-import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
-import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
-import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
-import me.rerere.rikkahub.data.agent.tools.TerminalTools
-import me.rerere.rikkahub.data.agent.tools.ToolRegistry
-import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
-import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import app.amber.feature.tools.AgentCronTools
+import app.amber.feature.tools.FeishuOfficeTools
+import app.amber.feature.tools.ICloudDriveTools
+import app.amber.feature.webmount.core.WebMountManager
+import app.amber.feature.webmount.tools.WebMountPrimitiveTools
+import app.amber.feature.tools.ExternalFileTools
+import app.amber.feature.tools.ScreenAutomationTools
+import app.amber.feature.tools.SystemAccessTools
+import app.amber.feature.tools.TerminalTools
+import app.amber.feature.tools.ToolRegistry
+import app.amber.feature.tools.WorkspaceArtifactTools
+import app.amber.feature.tools.WorkspaceTools
 import app.amber.feature.prompts.AgentPromptConfigRepository
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepository
+import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
@@ -40,7 +40,7 @@ class LocalTools(
     private val agentCronTools: AgentCronTools,
     private val webMountPrimitiveTools: WebMountPrimitiveTools,
     private val webMountManager: WebMountManager,
-    private val userSiteRegistry: me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry,
+    private val userSiteRegistry: app.amber.feature.webmount.usersites.UserSiteRegistry,
     private val settingsStore: SettingsAggregator,
     private val imageGenerationRepository: ImageGenerationRepository,
     private val promptConfigRepository: AgentPromptConfigRepository,

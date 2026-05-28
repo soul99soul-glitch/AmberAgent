@@ -25,11 +25,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListProviderIds
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListFieldMapping
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.CustomHotListSourceTypes
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPreset
-import me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPresets
+import app.amber.feature.board.hotlist.HotListProviderIds
+import app.amber.feature.board.hotlist.providers.CustomHotListFieldMapping
+import app.amber.feature.board.hotlist.providers.CustomHotListSourceTypes
+import app.amber.feature.board.hotlist.providers.NewsNowPreset
+import app.amber.feature.board.hotlist.providers.NewsNowPresets
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.workspaceColors

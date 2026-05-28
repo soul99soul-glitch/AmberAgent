@@ -9,10 +9,10 @@ import app.amber.feature.task.AgentTaskScheduler
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.terminal.AlpineRuntimeInstaller
 import app.amber.feature.terminal.TerminalRuntime
-import me.rerere.rikkahub.data.agent.tools.AgentCronTools
-import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
-import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
-import me.rerere.rikkahub.data.agent.tools.TerminalTools
+import app.amber.feature.tools.AgentCronTools
+import app.amber.feature.tools.ScreenAutomationTools
+import app.amber.feature.tools.SystemAccessTools
+import app.amber.feature.tools.TerminalTools
 import app.amber.feature.webview.WebViewOperationStore
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import org.koin.dsl.module

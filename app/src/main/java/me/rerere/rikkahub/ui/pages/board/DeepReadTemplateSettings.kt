@@ -25,11 +25,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
-import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplatePackage
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadRenderedTemplate
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
+import app.amber.feature.board.DeepReadTemplateIds
+import app.amber.feature.board.TodayBoardSetting
+import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplatePackage
+import app.amber.feature.board.hotlist.deepread.template.DeepReadRenderedTemplate
+import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.theme.LocalDarkMode

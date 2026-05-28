@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.di
 
-import me.rerere.rikkahub.data.agent.board.BoardRepository
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
+import app.amber.feature.board.BoardRepository
+import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.files.FilesManager

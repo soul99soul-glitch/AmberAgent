@@ -66,35 +66,35 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MAX
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MIN
-import me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds
-import me.rerere.rikkahub.data.agent.board.hotlist.DeepReadHistoryItem
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadDiagram
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadAgentRunManager
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationPhase
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadScheduler
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionQuality
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionStatus
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroCaption
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.displayHeroImageUrl
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.isComplete
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.statusOf
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.errorOf
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.hasAnyReadySection
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.withInferredSectionStates
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRenderer
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.verifiedImageUrls
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
+import app.amber.feature.board.DeepReadTemplateIds
+import app.amber.feature.board.hotlist.DeepReadHistoryItem
+import app.amber.feature.board.hotlist.HotListRepository
+import app.amber.feature.board.hotlist.deepread.CorePoint
+import app.amber.feature.board.hotlist.deepread.DeepAnalysis
+import app.amber.feature.board.hotlist.deepread.DeepReadDiagram
+import app.amber.feature.board.hotlist.deepread.DeepReadAgentRunManager
+import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
+import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
+import app.amber.feature.board.hotlist.deepread.DeepReadOutput
+import app.amber.feature.board.hotlist.deepread.DeepReadScheduler
+import app.amber.feature.board.hotlist.deepread.DeepReadSectionQuality
+import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
+import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
+import app.amber.feature.board.hotlist.deepread.Perspective
+import app.amber.feature.board.hotlist.deepread.ReadingLink
+import app.amber.feature.board.hotlist.deepread.TimelineEvent
+import app.amber.feature.board.hotlist.deepread.displayHeroCaption
+import app.amber.feature.board.hotlist.deepread.displayHeroImageUrl
+import app.amber.feature.board.hotlist.deepread.isComplete
+import app.amber.feature.board.hotlist.deepread.statusOf
+import app.amber.feature.board.hotlist.deepread.errorOf
+import app.amber.feature.board.hotlist.deepread.hasAnyReadySection
+import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
+import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
+import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
+import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -502,8 +502,8 @@ private fun DeepReadGenerationPhase.isActiveDeepReadPhase(): Boolean =
 
 @Composable
 private fun RunningStageNotice(
-    stages: Map<DeepReadGenerationStage, me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState>,
-    verificationState: me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSectionState,
+    stages: Map<DeepReadGenerationStage, app.amber.feature.board.hotlist.deepread.DeepReadSectionState>,
+    verificationState: app.amber.feature.board.hotlist.deepread.DeepReadSectionState,
     generationPhase: DeepReadGenerationPhase,
     modifier: Modifier = Modifier,
 ) {

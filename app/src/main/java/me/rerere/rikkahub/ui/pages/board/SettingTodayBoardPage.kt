@@ -45,24 +45,24 @@ import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MAX
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MIN
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_STEP
-import me.rerere.rikkahub.data.agent.board.BoardRepository
-import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
-import me.rerere.rikkahub.data.agent.board.DEFAULT_HOT_LIST_FOCUS_KEYWORDS
-import me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy
-import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
-import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
-import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
-import me.rerere.rikkahub.data.agent.board.hotlist.normalizeHotListFocusKeywords
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_STEP
+import app.amber.feature.board.BoardRepository
+import app.amber.feature.board.BoardSignalSourceType
+import app.amber.feature.board.DEFAULT_HOT_LIST_FOCUS_KEYWORDS
+import app.amber.feature.board.TodayBoardBackgroundStrategy
+import app.amber.feature.board.TodayBoardHotListFilterMode
+import app.amber.feature.board.TodayBoardReadingFontMode
+import app.amber.feature.board.TodayBoardSetting
+import app.amber.feature.board.hotlist.HotListRepository
+import app.amber.feature.board.hotlist.HotListScheduler
+import app.amber.feature.board.hotlist.normalizeHotListFocusKeywords
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTemplateRepository
+import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import me.rerere.rikkahub.data.font.FontPackCategory
 import me.rerere.rikkahub.data.font.FontPackState
 import me.rerere.rikkahub.data.font.SlidesFontRepository
@@ -193,14 +193,14 @@ fun SettingTodayBoardPage(
         }
     }
 
-    fun addNewsNowPresets(presets: List<me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPreset>) {
+    fun addNewsNowPresets(presets: List<app.amber.feature.board.hotlist.providers.NewsNowPreset>) {
         if (presets.isEmpty()) return
         val now = System.currentTimeMillis()
         val baseOrder = (customHotListSources.maxOfOrNull { it.sortOrder } ?: 0) + 1
         scope.launch {
             presets.forEachIndexed { index, preset ->
                 hotListRepository.upsertSource(
-                    me.rerere.rikkahub.data.agent.board.hotlist.providers.NewsNowPresets.entityFor(
+                    app.amber.feature.board.hotlist.providers.NewsNowPresets.entityFor(
                         preset = preset,
                         now = now,
                         sortOrder = baseOrder + index,
@@ -353,7 +353,7 @@ fun SettingTodayBoardPage(
                                         if (board.deepReadTemplateId == template.id) {
                                             update {
                                                 it.copy(
-                                                    deepReadTemplateId = me.rerere.rikkahub.data.agent.board.DeepReadTemplateIds.COMPOSE_MAGAZINE
+                                                    deepReadTemplateId = app.amber.feature.board.DeepReadTemplateIds.COMPOSE_MAGAZINE
                                                 )
                                             }
                                         }

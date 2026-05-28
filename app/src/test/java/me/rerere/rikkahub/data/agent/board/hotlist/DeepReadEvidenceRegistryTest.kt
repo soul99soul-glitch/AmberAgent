@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadEvidenceRegistry
+import app.amber.feature.board.hotlist.deepread.DeepReadEvidenceRegistry
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

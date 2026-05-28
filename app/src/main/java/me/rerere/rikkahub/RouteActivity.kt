@@ -131,8 +131,8 @@ import me.rerere.rikkahub.ui.pages.board.SettingTodayBoardPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadScreen
 import me.rerere.rikkahub.ui.pages.board.DeepReadHistoryPage
 import me.rerere.rikkahub.ui.pages.board.DeepReadTemplateWorkbenchPage
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadNotifier
-import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
+import app.amber.feature.board.hotlist.deepread.DeepReadNotifier
+import app.amber.feature.board.worker.BoardNotifier
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
@@ -163,7 +163,7 @@ class RouteActivity : ComponentActivity() {
     private val highlighter by inject<Highlighter>()
     private val okHttpClient by inject<OkHttpClient>()
     private val settingsStore by inject<SettingsAggregator>()
-    private val oauthCallbackDispatcher by inject<me.rerere.rikkahub.data.agent.webmount.oauth.OAuthCallbackDispatcher>()
+    private val oauthCallbackDispatcher by inject<app.amber.feature.webmount.oauth.OAuthCallbackDispatcher>()
     private var navStack: MutableList<NavKey>? = null
     private var newIntentHandler: ((Intent) -> Unit)? = null
 

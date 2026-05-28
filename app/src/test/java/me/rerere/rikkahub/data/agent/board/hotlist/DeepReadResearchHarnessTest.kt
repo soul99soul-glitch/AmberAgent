@@ -1,15 +1,15 @@
 package me.rerere.rikkahub.data.agent.board.hotlist
 
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadCoverageItem
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadGenerationStage
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadResearchHarness
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadSource
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
+import app.amber.feature.board.hotlist.deepread.CorePoint
+import app.amber.feature.board.hotlist.deepread.DeepAnalysis
+import app.amber.feature.board.hotlist.deepread.DeepReadCoverageItem
+import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
+import app.amber.feature.board.hotlist.deepread.DeepReadOutput
+import app.amber.feature.board.hotlist.deepread.DeepReadResearchHarness
+import app.amber.feature.board.hotlist.deepread.DeepReadSource
+import app.amber.feature.board.hotlist.deepread.Perspective
+import app.amber.feature.board.hotlist.deepread.ReadingLink
+import app.amber.feature.board.hotlist.deepread.TimelineEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

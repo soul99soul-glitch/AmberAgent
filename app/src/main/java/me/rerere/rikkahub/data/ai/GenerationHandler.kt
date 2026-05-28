@@ -54,7 +54,7 @@ import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
 import me.rerere.rikkahub.data.agent.runtime.AgentLoopBudgetPrompt
 import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
-import me.rerere.rikkahub.data.agent.tools.ToolExposureState
+import app.amber.feature.tools.ToolExposureState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider

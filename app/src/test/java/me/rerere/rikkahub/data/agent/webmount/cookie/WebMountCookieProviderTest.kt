@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.agent.webmount.cookie
 
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountCookieBundle
+import app.amber.feature.webmount.core.WebMountCookieBundle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

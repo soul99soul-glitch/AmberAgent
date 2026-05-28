@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.agent.board.hotlist
 
-import me.rerere.rikkahub.data.agent.board.TodayBoardHotListFilterMode
+import app.amber.feature.board.TodayBoardHotListFilterMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

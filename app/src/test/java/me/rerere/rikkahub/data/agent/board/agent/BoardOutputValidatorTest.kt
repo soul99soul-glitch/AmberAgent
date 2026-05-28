@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.agent.board.agent
 
-import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
-import me.rerere.rikkahub.data.agent.board.aggregator.ScoredSignal
+import app.amber.feature.board.BoardSignalSourceType
+import app.amber.feature.board.aggregator.ScoredSignal
 import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

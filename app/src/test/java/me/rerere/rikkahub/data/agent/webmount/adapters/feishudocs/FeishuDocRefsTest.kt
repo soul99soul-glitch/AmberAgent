@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.adapters.feishudocs
+package app.amber.feature.webmount.adapters.feishudocs
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull

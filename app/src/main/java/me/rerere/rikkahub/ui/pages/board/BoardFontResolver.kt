@@ -5,7 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
+import app.amber.feature.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.font.FontPackState
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import java.io.File

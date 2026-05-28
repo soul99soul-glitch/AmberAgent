@@ -1,14 +1,14 @@
 package me.rerere.rikkahub.data.agent.board.hotlist
 
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.CorePoint
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepAnalysis
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageAsset
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutput
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.Perspective
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.ReadingLink
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.TimelineEvent
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.hasEnoughChinese
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.hasReadableArticle
+import app.amber.feature.board.hotlist.deepread.CorePoint
+import app.amber.feature.board.hotlist.deepread.DeepAnalysis
+import app.amber.feature.board.hotlist.deepread.DeepReadImageAsset
+import app.amber.feature.board.hotlist.deepread.DeepReadOutput
+import app.amber.feature.board.hotlist.deepread.Perspective
+import app.amber.feature.board.hotlist.deepread.ReadingLink
+import app.amber.feature.board.hotlist.deepread.TimelineEvent
+import app.amber.feature.board.hotlist.deepread.hasEnoughChinese
+import app.amber.feature.board.hotlist.deepread.hasReadableArticle
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -11,8 +11,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.tools.ToolExposureState
-import me.rerere.rikkahub.data.agent.tools.ToolRegistry
+import app.amber.feature.tools.ToolExposureState
+import app.amber.feature.tools.ToolRegistry
 
 /**
  * Factory for the `tools_list` agent tool — lets the model enumerate currently

@@ -21,7 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
+import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.AppDatabase

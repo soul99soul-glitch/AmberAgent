@@ -63,24 +63,24 @@ import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.PlayCircle02
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountCapability
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountManager
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountStationState
-import me.rerere.rikkahub.data.agent.webmount.core.WebMountStatus
-import me.rerere.rikkahub.data.agent.webmount.cookie.WebMountCookieProvider
-import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginController
-import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginDetector
-import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginStatus
-import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginTarget
-import me.rerere.rikkahub.data.agent.webmount.login.WebMountLoginWebViewState
-import me.rerere.rikkahub.data.agent.webmount.oauth.OAuthAppCredentials
-import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthClient
-import me.rerere.rikkahub.data.agent.webmount.oauth.WebMountOAuthTokenStore
-import me.rerere.rikkahub.data.agent.webmount.usersites.AuthKind
-import me.rerere.rikkahub.data.agent.webmount.usersites.UserSite
-import me.rerere.rikkahub.data.agent.webmount.usersites.UserSiteRegistry
-import me.rerere.rikkahub.data.agent.webmount.usersites.loginCookieCandidatesFor
-import me.rerere.rikkahub.data.agent.webmount.usersites.requiredLoginCookieSetsFor
+import app.amber.feature.webmount.core.WebMountCapability
+import app.amber.feature.webmount.core.WebMountManager
+import app.amber.feature.webmount.core.WebMountStationState
+import app.amber.feature.webmount.core.WebMountStatus
+import app.amber.feature.webmount.cookie.WebMountCookieProvider
+import app.amber.feature.webmount.login.WebMountLoginController
+import app.amber.feature.webmount.login.WebMountLoginDetector
+import app.amber.feature.webmount.login.WebMountLoginStatus
+import app.amber.feature.webmount.login.WebMountLoginTarget
+import app.amber.feature.webmount.login.WebMountLoginWebViewState
+import app.amber.feature.webmount.oauth.OAuthAppCredentials
+import app.amber.feature.webmount.oauth.WebMountOAuthClient
+import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
+import app.amber.feature.webmount.usersites.AuthKind
+import app.amber.feature.webmount.usersites.UserSite
+import app.amber.feature.webmount.usersites.UserSiteRegistry
+import app.amber.feature.webmount.usersites.loginCookieCandidatesFor
+import app.amber.feature.webmount.usersites.requiredLoginCookieSetsFor
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.plus
@@ -105,7 +105,7 @@ fun SettingExperimentalWebMountPage(
     oauthStore: WebMountOAuthTokenStore = koinInject(),
     userSiteRegistry: UserSiteRegistry = koinInject(),
     cookieProvider: WebMountCookieProvider = koinInject(),
-    profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry = koinInject(),
+    profileRegistry: app.amber.feature.webmount.profile.ProfileRegistry = koinInject(),
     settingsStore: me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
@@ -551,7 +551,7 @@ private fun UserSiteCard(
     cookieProvider: WebMountCookieProvider,
     oauthStore: WebMountOAuthTokenStore,
     webMountManager: WebMountManager,
-    profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry,
+    profileRegistry: app.amber.feature.webmount.profile.ProfileRegistry,
     /** Bumped by the parent on cookie-state changes so this row re-probes. */
     cookieRevision: Int,
     busy: Boolean,
@@ -1248,14 +1248,14 @@ private fun AddCustomSiteDialog(
 /**
  * Compatibility wrapper — kept so the page's existing call sites stay
  * unchanged. Delegates to the shared
- * [me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls]
+ * [app.amber.feature.webmount.usersites.collectSiteUrls]
  * which also includes synthesized-profile origins (Plan-v2 review B-2).
  */
 private fun collectKnownUrlsFor(
     site: UserSite,
     manager: WebMountManager,
-    profileRegistry: me.rerere.rikkahub.data.agent.webmount.profile.ProfileRegistry,
-): List<String> = me.rerere.rikkahub.data.agent.webmount.usersites.collectSiteUrls(site, manager, profileRegistry)
+    profileRegistry: app.amber.feature.webmount.profile.ProfileRegistry,
+): List<String> = app.amber.feature.webmount.usersites.collectSiteUrls(site, manager, profileRegistry)
 
 private fun iconForIconKey(iconKey: String?) = when (iconKey) {
     "hackernews" -> HugeIcons.News01

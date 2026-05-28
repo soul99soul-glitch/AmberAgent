@@ -50,9 +50,9 @@ import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
-import me.rerere.rikkahub.data.agent.board.collector.NotificationSignalCollector
-import me.rerere.rikkahub.data.agent.board.hotlist.HotListScheduler
-import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
+import app.amber.feature.board.collector.NotificationSignalCollector
+import app.amber.feature.board.hotlist.HotListScheduler
+import app.amber.feature.board.worker.BoardScheduler
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -319,7 +319,7 @@ class RikkaHubApp : Application() {
                             // FOREGROUND_ONLY users explicitly chose no background work —
                             // respect that even for app-start compensation.
                             if (board.backgroundStrategy ==
-                                me.rerere.rikkahub.data.agent.board.TodayBoardBackgroundStrategy.FOREGROUND_ONLY
+                                app.amber.feature.board.TodayBoardBackgroundStrategy.FOREGROUND_ONLY
                             ) return@runCatching
                             val now = System.currentTimeMillis()
                             val last = lastForegroundCompensationMs.get()

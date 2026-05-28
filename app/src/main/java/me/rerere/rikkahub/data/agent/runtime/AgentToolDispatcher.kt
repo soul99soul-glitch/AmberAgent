@@ -20,8 +20,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.toAgentToolFailurePayload
 import me.rerere.rikkahub.data.ai.GenerationFailureClassifier
 import me.rerere.rikkahub.data.ai.GenerationRetrySetting
-import me.rerere.rikkahub.data.agent.tools.ToolRisk
-import me.rerere.rikkahub.data.agent.tools.invocationPolicy
+import app.amber.feature.tools.ToolRisk
+import app.amber.feature.tools.invocationPolicy
 
 private const val TAG = "AgentToolDispatcher"
 

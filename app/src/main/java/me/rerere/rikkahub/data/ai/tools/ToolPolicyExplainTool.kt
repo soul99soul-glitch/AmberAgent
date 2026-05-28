@@ -8,7 +8,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.tools.ToolRegistry
+import app.amber.feature.tools.ToolRegistry
 import me.rerere.rikkahub.utils.JsonInstant
 
 /**

@@ -9,7 +9,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepository
+import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 
 class DeepReadPlaybookTools(
     private val repository: DeepReadPlaybookRepository,
@@ -78,7 +78,7 @@ class DeepReadPlaybookTools(
     )
 }
 
-private fun me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookSnapshot.toJson(
+private fun app.amber.feature.board.hotlist.deepread.DeepReadPlaybookSnapshot.toJson(
     status: String = "ok",
 ) = buildJsonObject {
     put("status", status)
@@ -87,7 +87,7 @@ private fun me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlayboo
     put("markdown", markdown)
 }
 
-private fun Result<me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookSnapshot>.toToolJson(
+private fun Result<app.amber.feature.board.hotlist.deepread.DeepReadPlaybookSnapshot>.toToolJson(
     successStatus: String,
 ) = fold(
     onSuccess = { it.toJson(successStatus) },

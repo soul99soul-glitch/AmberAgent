@@ -3,7 +3,7 @@ package me.rerere.rikkahub.data.context
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessage
 import app.amber.feature.task.AgentTaskStore
-import me.rerere.rikkahub.data.agent.tools.ToolRegistry
+import app.amber.feature.tools.ToolRegistry
 
 class AgentCapabilitySnapshotBuilder(
     private val agentTaskStore: AgentTaskStore? = null,

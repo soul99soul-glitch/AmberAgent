@@ -4,7 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import me.rerere.rikkahub.data.agent.board.TODAY_BOARD_HARD_MUTE_WEIGHT
+import app.amber.feature.board.TODAY_BOARD_HARD_MUTE_WEIGHT
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 
 @Dao

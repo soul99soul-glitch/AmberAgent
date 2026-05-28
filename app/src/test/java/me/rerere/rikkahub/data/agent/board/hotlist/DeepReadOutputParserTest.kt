@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.agent.board.hotlist
 
 import kotlinx.serialization.json.Json
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadOutputParser
+import app.amber.feature.board.hotlist.deepread.DeepReadOutputParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull

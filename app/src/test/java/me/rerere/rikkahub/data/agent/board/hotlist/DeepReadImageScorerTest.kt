@@ -1,11 +1,11 @@
 package me.rerere.rikkahub.data.agent.board.hotlist
 
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageCandidate
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageQuality
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadImageScorer
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_INLINE
-import me.rerere.rikkahub.data.agent.board.hotlist.deepread.IMAGE_CONFIDENCE_REJECT
+import app.amber.feature.board.hotlist.deepread.DeepReadImageCandidate
+import app.amber.feature.board.hotlist.deepread.DeepReadImageQuality
+import app.amber.feature.board.hotlist.deepread.DeepReadImageScorer
+import app.amber.feature.board.hotlist.deepread.IMAGE_CONFIDENCE_HERO
+import app.amber.feature.board.hotlist.deepread.IMAGE_CONFIDENCE_INLINE
+import app.amber.feature.board.hotlist.deepread.IMAGE_CONFIDENCE_REJECT
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test

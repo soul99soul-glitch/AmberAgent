@@ -1,10 +1,10 @@
 package me.rerere.rikkahub.di
 
 import app.amber.feature.office.FeishuOfficeEnhancementManager
-import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
-import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
-import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
-import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
+import app.amber.feature.tools.ExternalFileTools
+import app.amber.feature.tools.FeishuOfficeTools
+import app.amber.feature.tools.WorkspaceArtifactTools
+import app.amber.feature.tools.WorkspaceTools
 import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.context.AgentCapabilitySnapshotBuilder
 import me.rerere.rikkahub.data.context.ConversationContextEngine

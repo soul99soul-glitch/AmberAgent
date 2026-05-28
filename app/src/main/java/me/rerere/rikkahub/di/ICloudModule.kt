@@ -3,7 +3,7 @@ package me.rerere.rikkahub.di
 import app.amber.feature.icloud.ICloudDriveClient
 import app.amber.feature.icloud.ICloudDriveCookieProvider
 import app.amber.feature.icloud.ICloudDriveManager
-import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
+import app.amber.feature.tools.ICloudDriveTools
 import org.koin.dsl.module
 
 /**

@@ -2,9 +2,9 @@ package me.rerere.rikkahub.ui.pages.board
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MAX
-import me.rerere.rikkahub.data.agent.board.DEEP_READ_FONT_SCALE_MIN
-import me.rerere.rikkahub.data.agent.board.TodayBoardReadingFontMode
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
+import app.amber.feature.board.TodayBoardReadingFontMode
 import me.rerere.rikkahub.data.font.FontPackState
 import java.io.File
 

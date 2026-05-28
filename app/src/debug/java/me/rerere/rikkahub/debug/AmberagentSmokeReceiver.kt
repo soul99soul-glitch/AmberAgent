@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.tools.SystemAccessTools
+import app.amber.feature.tools.SystemAccessTools
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService

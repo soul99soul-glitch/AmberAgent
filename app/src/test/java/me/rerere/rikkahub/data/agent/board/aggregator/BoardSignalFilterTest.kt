@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.agent.board.aggregator
 
-import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
+import app.amber.feature.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
