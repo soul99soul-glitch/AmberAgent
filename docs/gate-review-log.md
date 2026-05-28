@@ -71,3 +71,34 @@ runtime (option 1) or risk a UI regression so large the parity-sampled
 shadow path is the better option (option 2). Cost ≫ visible benefit
 in this session's time budget; the streaming throttle delivers a
 real win without that risk.
+
+## TD.Rust.2 JsonExpression — DEFERRED for cost/benefit mismatch (2026-05-28)
+
+JsonExpression.kt is 382 LOC implementing a lexer+parser+evaluator
+for the small DSL used by provider balance-option paths (e.g.,
+`balance_infos[0].total_balance`).
+
+### Call site analysis
+
+`grep` finds exactly 2 callers of `evaluateJsonExpr`:
+- `OpenAIProvider.kt:138` (balance check on a "Check Balance" user
+  click or opportunistic poll, ~5x/min worst case during dev,
+  ~10-100x/day during normal use)
+- `BalanceOption.kt:97` (UI validity check `isJsonExprValid` — runs
+  on each keystroke while editing the path, but the input is < 60
+  chars and the parse is sub-ms even in Kotlin)
+
+Neither is a hot path. The directive target ("2-4x benchmark speedup")
+is achievable in Rust but a 200µs Kotlin parse → 80µs Rust parse +
+50µs JNI overhead = ~130µs net, saving ~70µs per call. Over a day of
+normal use (100 calls) that's 7ms saved.
+
+### Decision
+
+Skip. The Rust crate + JNI bridge + parity tests would cost ~4 hours
+to ship + permanent maintenance burden, against a measured user
+benefit of "user cannot perceive the difference". Recorded here for
+audit trail.
+
+A future revisit makes sense IF a new caller emerges that hits this
+in a hot loop (e.g. per-token streaming inspection).
