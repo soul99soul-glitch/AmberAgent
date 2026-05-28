@@ -10,7 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
-internal const val MAX_SUB_AGENT_CONTEXT_CHARS = 6_000
+const val MAX_SUB_AGENT_CONTEXT_CHARS = 6_000
 
 object SubAgentValidator {
     private val genericNameParts = listOf(

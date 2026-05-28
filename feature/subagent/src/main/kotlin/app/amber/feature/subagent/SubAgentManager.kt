@@ -17,7 +17,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import app.amber.feature.history.SessionAccessGrantStore
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskOutputRef
 import app.amber.feature.task.AgentTaskRetryPolicy
@@ -402,7 +402,7 @@ class SubAgentManager(
     }
 }
 
-internal fun subAgentRunToPayload(
+fun subAgentRunToPayload(
     run: SubAgentRun,
     json: Json,
     includeDisplayText: Boolean = false,

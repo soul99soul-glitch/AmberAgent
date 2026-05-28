@@ -9,7 +9,7 @@ import java.io.RandomAccessFile
 
 private val transcriptJson = Json { ignoreUnknownKeys = true }
 
-internal fun readSubAgentDisplayTextFromTranscript(
+fun readSubAgentDisplayTextFromTranscript(
     transcriptPath: String,
     runRoot: File,
 ): String {

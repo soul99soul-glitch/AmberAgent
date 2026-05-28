@@ -12,7 +12,7 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.tools.TOOL_SEARCH_TOOL_NAME
 import app.amber.feature.tools.ToolRegistry
 import app.amber.feature.tools.createToolSearchTool
-import app.amber.core.utils.JsonInstant
+import app.amber.core.agent.utils.JsonInstant
 
 private const val TOOLS_LIST_TOOL_NAME = "tools_list"
 private const val TOOL_POLICY_EXPLAIN_TOOL_NAME = "tool_policy_explain"
@@ -23,7 +23,7 @@ private val SUBAGENT_DISCOVERY_TOOL_NAMES = setOf(
     TOOL_POLICY_EXPLAIN_TOOL_NAME,
 )
 
-internal fun scopedSubAgentTools(allowedTools: List<Tool>): List<Tool> {
+fun scopedSubAgentTools(allowedTools: List<Tool>): List<Tool> {
     if (allowedTools.isEmpty()) return emptyList()
     val requestedTools = allowedTools.map { it.name }.toSet()
     val executableTools = allowedTools.filterNot { it.name in SUBAGENT_DISCOVERY_TOOL_NAMES }

@@ -12,13 +12,13 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 
-internal const val SUBAGENT_REPORT_TOOL_NAME = "subagent_report"
+const val SUBAGENT_REPORT_TOOL_NAME = "subagent_report"
 
 /**
  * Subagent-only result channel. The visible answer keeps streaming as Markdown for the user,
  * while this tool captures the compact payload the parent agent should read.
  */
-internal class SubAgentReportCapture {
+class SubAgentReportCapture {
     var latest: SubAgentResult? = null
         private set
 

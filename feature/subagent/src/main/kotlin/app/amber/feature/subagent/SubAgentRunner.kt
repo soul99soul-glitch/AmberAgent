@@ -7,7 +7,7 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.Generator
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
@@ -31,7 +31,7 @@ interface SubAgentRunner {
 }
 
 class GenerationSubAgentRunner(
-    private val generationHandler: GenerationHandler,
+    private val generationHandler: Generator,
 ) : SubAgentRunner {
     override suspend fun run(
         settings: Settings,
@@ -209,7 +209,7 @@ class GenerationSubAgentRunner(
     }
 }
 
-internal fun Assistant.toIsolatedSubAgentAssistant(definition: SubAgentDefinition) = copy(
+fun Assistant.toIsolatedSubAgentAssistant(definition: SubAgentDefinition) = copy(
     name = definition.name,
     systemPrompt = definition.systemPrompt,
     // streamOutput must be true so GenerationHandler emits per-token Messages chunks.
@@ -235,7 +235,7 @@ internal fun Assistant.toIsolatedSubAgentAssistant(definition: SubAgentDefinitio
     reasoningLevel = definition.reasoningLevel ?: reasoningLevel,
 )
 
-internal fun Settings.toIsolatedSubAgentSettings(): Settings = copy(
+fun Settings.toIsolatedSubAgentSettings(): Settings = copy(
     agentRuntime = agentRuntime.copy(
         enableCoreMemory = false,
         enableShortTermMemory = false,
