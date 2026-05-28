@@ -11,3 +11,6 @@ jobs:
 
       - name: New files must not land in me.rerere.*
         run: bash config/check-legacy-package.sh "origin/${{ github.base_ref }}"
+
+      - name: Refactor state invariants must hold
+        run: bash config/check-refactor-state.sh

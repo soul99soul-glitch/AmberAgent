@@ -27,6 +27,8 @@ app/src/main/java/me/rerere/rikkahub/ui/components/richtext/nativebridge/Markdow
 
 # 见 native/regex-transformer/src/lib.rs
 app/src/main/java/me/rerere/rikkahub/data/model/nativebridge/RegexTransformerNative.kt
+# Native 开关（与 JNI bridge 同包，避免 FQN 漂移）
+app/src/main/java/me/rerere/rikkahub/data/model/nativebridge/RegexNativeSwitch.kt
 
 # 整个 highlight 模块的 Kotlin 包（HighlighterNative 在内）
 # 见 native/highlight-parser/src/lib.rs
