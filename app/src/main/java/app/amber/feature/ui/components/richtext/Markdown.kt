@@ -471,6 +471,16 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     // touching the renderer right now risks merge conflicts with active
     // streaming-render fixes). The shadow path gives us correctness telemetry
     // ahead of the eventual full swap.
+    //
+    // TD.Rust.1a — full renderer switch (consume PackedAstReader as primary
+    // AST) is documented in docs/td-rust-1a-feasibility.md as a dedicated
+    // multi-day sprint. The shadow path already validates structural parity
+    // when `markdownAst` flag is on; turning that into a render-time switch
+    // requires either a JVM-side ASTNode adapter over PackedAstReader
+    // (defeats the perf win) or a 2000-LOC renderer rewrite to consume
+    // PackedAstNode directly (needs on-device QA over 30+ markdown samples).
+    // Recommendation: defer until a device-test rig exists; until then the
+    // shadow path provides the same observability with zero render risk.
     maybeShadowCompareNativeAst(preprocessed, astTree)
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtmlBlocks())
 }

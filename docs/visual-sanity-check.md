@@ -94,3 +94,45 @@ data. Audit before merge: `grep -rn 'conversation.messageNodes.add\|conversation
   ChatTopBar / ChatStreamingIndicator)
 - @Stable on smaller data classes used as Compose params
 - Compose compiler metrics report to verify restartable group reduction
+
+---
+
+## T3 — Markdown renderer switch (deferred)
+
+**Files changed**:
+- `app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt` —
+  added inline pointer to `docs/td-rust-1a-feasibility.md`.
+
+**Status**: **Deferred per Session-10 feasibility analysis**
+(`docs/td-rust-1a-feasibility.md`).
+
+The goal task envisioned: "Markdown.kt 渲染器从消费 JetBrains ASTNode
+切到消费 PackedAstReader" with feature flag default-off. The reality
+is that ASTNode is threaded through 41 references in 18+ private
+helpers + cross-file public surface (extractMarkdownTableData,
+containsHtmlBlocks). Swapping the consumer requires either:
+
+a. JVM adapter (PackedAstReader → ASTNode wrapper) — defeats the
+   perf win because the adapter materializes ASTNode equivalents
+   on every children/type/offset access.
+
+b. 2000-LOC renderer rewrite — risk surface exceeds what can be
+   evaluated without an on-device test rig that compares rendered
+   Compose output across 30+ markdown samples (KaTeX, GFM, nested
+   lists, fenced code, HTML blocks).
+
+The shadow path (`maybeShadowCompareNativeAst` at Markdown.kt:491)
+already validates structural parity when `markdownAst` flag is on.
+The renderer-switch is the long-tail user-visible upgrade that
+needs a dedicated sprint with real-device verification.
+
+**Verify on device when this lands** (not in this commit):
+1. 30+ markdown sample comparison (Chinese / English mix / code
+   blocks / tables / KaTeX / nested blockquotes / GFM task lists).
+2. Streaming render: long message (5K+ chars) with mixed content —
+   verify scroll smoothness + no visible re-layout flashes.
+3. HTML-block boundary: confirm raw HTML inline still routes to
+   the special MarkdownNew Composable.
+
+**Banner only this commit**: no behaviour change. The flag (`markdownAst`)
+already exists in NativePathPrefs. Shadow path stays on for telemetry.
