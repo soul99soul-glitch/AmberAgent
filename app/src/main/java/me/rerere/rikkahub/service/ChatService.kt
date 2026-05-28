@@ -230,6 +230,7 @@ class ChatService(
     private val memoryExtractor: MemoryExtractor,
     private val pendingMessageStore: PendingMessageStore,
     private val userInputPreprocessor: UserInputPreprocessor,
+    private val agentRunner: app.amber.core.agent.runtime.AgentRunner? = null,
 ) : ConversationAccess {
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
