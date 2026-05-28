@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.runtime
+package app.amber.feature.runtime
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart

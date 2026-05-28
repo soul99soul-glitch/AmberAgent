@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.runtime
+package app.amber.feature.runtime
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
