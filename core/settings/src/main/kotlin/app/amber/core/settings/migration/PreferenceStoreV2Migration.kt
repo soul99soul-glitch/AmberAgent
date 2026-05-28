@@ -7,8 +7,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.utils.JsonInstant
-import app.amber.core.utils.jsonPrimitiveOrNull
+import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.agent.utils.jsonPrimitiveOrNull
 
 class PreferenceStoreV2Migration : DataMigration<Preferences> {
     override suspend fun shouldMigrate(currentData: Preferences): Boolean {
@@ -63,7 +63,7 @@ private val partTypeMapping = mapOf(
     "me.rerere.ai.ui.UIMessagePart.Tool" to "tool",
 )
 
-internal fun migrateAssistantsJson(assistantsJson: String): String {
+fun migrateAssistantsJson(assistantsJson: String): String {
     return runCatching {
         val element = JsonInstant.parseToJsonElement(assistantsJson)
         val root = element as? JsonArray ?: return@runCatching assistantsJson

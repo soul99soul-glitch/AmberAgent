@@ -2,13 +2,8 @@ package me.rerere.rikkahub.data.datastore.migration
 
 import androidx.datastore.core.DataMigration
 import androidx.datastore.preferences.core.Preferences
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.utils.JsonInstant
+import app.amber.core.settings.migration.migrateMcpServersJson
 
 class PreferenceStoreV1Migration : DataMigration<Preferences> {
     override suspend fun shouldMigrate(currentData: Preferences): Boolean {
@@ -29,22 +24,4 @@ class PreferenceStoreV1Migration : DataMigration<Preferences> {
     }
 
     override suspend fun cleanUp() {}
-}
-
-fun migrateMcpServersJson(json: String): String {
-    val element = JsonInstant.parseToJsonElement(json).jsonArray.map { element ->
-        val jsonObj = element.jsonObject.toMutableMap()
-        val type = jsonObj["type"]?.jsonPrimitive?.content ?: ""
-        when (type) {
-            "me.rerere.rikkahub.data.mcp.McpServerConfig.SseTransportServer" -> {
-                jsonObj["type"] = JsonPrimitive("sse")
-            }
-
-            "me.rerere.rikkahub.data.mcp.McpServerConfig.StreamableHTTPServer" -> {
-                jsonObj["type"] = JsonPrimitive("streamable_http")
-            }
-        }
-        JsonObject(jsonObj)
-    }
-    return JsonInstant.encodeToString(element)
 }
