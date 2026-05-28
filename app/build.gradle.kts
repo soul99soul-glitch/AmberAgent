@@ -588,6 +588,7 @@ dependencies {
     implementation(project(":feature:modelcouncil:api"))
     implementation(project(":feature:office:api"))
     implementation(project(":feature:subagent:api"))
+    implementation(project(":core:ai-prompts"))
     implementation(project(":feature:history"))
     implementation(project(":feature:webview"))
     implementation(project(":feature:task"))

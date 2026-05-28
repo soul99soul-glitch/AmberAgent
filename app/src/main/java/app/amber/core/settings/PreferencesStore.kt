@@ -61,7 +61,7 @@ import kotlin.uuid.Uuid
 // PresetThemes registry.
 const val DEFAULT_PRESET_THEME_ID = "amberagent_clash"
 
-internal val Context.settingsStore by preferencesDataStore(
+val Context.settingsStore by preferencesDataStore(
     name = "settings",
     produceMigrations = { context ->
         listOf(
@@ -515,7 +515,7 @@ private fun Model.findModelProviderFromList(providers: List<ProviderSetting>): P
     return null
 }
 
-internal val DEFAULT_ASSISTANTS = listOf(
+val DEFAULT_ASSISTANTS = listOf(
     Assistant(
         id = DEFAULT_ASSISTANT_ID,
         name = "AmberAgent",
@@ -563,7 +563,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
     ),
 )
 
-internal fun List<Assistant>.withAmberAgentAssistantBranding(): List<Assistant> = map { assistant ->
+fun List<Assistant>.withAmberAgentAssistantBranding(): List<Assistant> = map { assistant ->
     if (assistant.id == DEFAULT_ASSISTANT_ID) {
         assistant.copy(
             name = if (assistant.name in setOf("", "RikkaHub", "Amberagent")) {
@@ -597,17 +597,17 @@ private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS = listOf(
 private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator")
 
 val DEFAULT_SYSTEM_TTS_ID = Uuid.parse("026a01a2-c3a0-4fd5-8075-80e03bdef200")
-internal val REMOVED_DEFAULT_TTS_PROVIDER_IDS = setOf(
+val REMOVED_DEFAULT_TTS_PROVIDER_IDS = setOf(
     Uuid.parse("e36b22ef-ca82-40ab-9e70-60cad861911c"), // AiHubMix TTS
 )
-internal val DEFAULT_TTS_PROVIDERS = listOf(
+val DEFAULT_TTS_PROVIDERS = listOf(
     TTSProviderSetting.SystemTTS(
         id = DEFAULT_SYSTEM_TTS_ID,
         name = "",
     ),
 )
 
-internal val DEFAULT_ASSISTANTS_IDS = DEFAULT_ASSISTANTS.map { it.id }
+val DEFAULT_ASSISTANTS_IDS = DEFAULT_ASSISTANTS.map { it.id }
 
 val DEFAULT_MODE_INJECTIONS = listOf(
     PromptInjection.ModeInjection(

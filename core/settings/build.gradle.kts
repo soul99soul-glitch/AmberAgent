@@ -34,6 +34,7 @@ dependencies {
     api(project(":feature:modelcouncil:api"))
     api(project(":feature:office:api"))
     api(project(":feature:subagent:api"))
+    api(project(":core:ai-prompts"))
     api(libs.androidx.datastore.preferences)
     api(libs.kotlinx.serialization.json)
     implementation(platform(libs.androidx.compose.bom))

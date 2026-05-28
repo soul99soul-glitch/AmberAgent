@@ -1,6 +1,6 @@
 package app.amber.core.ai.prompts
 
-internal val DEFAULT_COMPRESS_PROMPT = """
+val DEFAULT_COMPRESS_PROMPT = """
     You are a conversation compression assistant. Compress the following conversation into a structured continuation handoff.
 
     Requirements:
