@@ -10,8 +10,8 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import app.amber.feature.tools.long
-import app.amber.feature.tools.requiredString
+import app.amber.core.agent.utils.long
+import app.amber.core.agent.utils.requiredString
 
 internal fun createObserveTool(deps: WebMountDeps): Tool = Tool(
     name = "wm_observe",

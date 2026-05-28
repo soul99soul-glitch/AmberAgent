@@ -6,8 +6,8 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import app.amber.feature.tools.requiredString
-import app.amber.feature.tools.string
+import app.amber.core.agent.utils.requiredString
+import app.amber.core.agent.utils.string
 
 internal fun createTabListTool(deps: WebMountDeps): Tool = Tool(
     name = "wm_tab_list",
