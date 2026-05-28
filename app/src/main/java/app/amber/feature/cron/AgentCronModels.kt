@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.cron
+package app.amber.feature.cron
 
 import kotlinx.serialization.Serializable
 

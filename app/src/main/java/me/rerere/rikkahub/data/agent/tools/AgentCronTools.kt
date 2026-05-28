@@ -6,8 +6,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.agent.cron.AgentCronManager
-import me.rerere.rikkahub.data.agent.cron.AgentCronTask
+import app.amber.feature.cron.AgentCronManager
+import app.amber.feature.cron.AgentCronTask
 
 class AgentCronTools(
     private val manager: AgentCronManager,

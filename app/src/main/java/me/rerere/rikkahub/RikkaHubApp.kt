@@ -45,7 +45,7 @@ import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.di.workspaceModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
-import me.rerere.rikkahub.data.agent.cron.AgentCronManager
+import app.amber.feature.cron.AgentCronManager
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
