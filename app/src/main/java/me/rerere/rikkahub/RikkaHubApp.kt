@@ -329,6 +329,7 @@ class RikkaHubApp : Application() {
                             get<BoardScheduler>().runOnce()
                             // Also trigger doc radar check on foreground return
                             runCatching { get<app.amber.feature.office.radar.DocRadar>().runOnce() }
+                                .onFailure { Log.e(TAG, "DocRadar.runOnce failed", it) }
                         }.onFailure { Log.e(TAG, "foreground compensation failed", it) }
                     }
                 }
