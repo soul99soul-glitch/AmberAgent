@@ -736,7 +736,7 @@ class ChatService(
         return true
     }
 
-    private var useKernelPath = false
+    var useKernelPath = false
 
     private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
         val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
