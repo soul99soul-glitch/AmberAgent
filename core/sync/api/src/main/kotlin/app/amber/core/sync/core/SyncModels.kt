@@ -84,7 +84,7 @@ data class SyncManifest(
  * holder can decrypt, anyone else can't get the file off Google Drive's
  * AppData folder in the first place".
  */
-internal const val NO_PASSPHRASE_FALLBACK = "AmberAgent-NoPassphrase-v1"
+const val NO_PASSPHRASE_FALLBACK = "AmberAgent-NoPassphrase-v1"
 
 @Serializable
 data class SyncKdfInfo(
@@ -125,7 +125,7 @@ data class SyncSecretSnapshot(
 )
 
 @Serializable
-internal data class SyncPayloadManifest(
+data class SyncPayloadManifest(
     val datasets: List<SyncDatasetSummary> = emptyList(),
 )
 
@@ -182,5 +182,5 @@ const val CURRENT_ARCHIVE_VERSION = 1
 const val SYNC_ARCHIVE_MIME = "application/vnd.amberagent.backup+zip"
 const val SYNC_ARCHIVE_EXTENSION = "amberbackup"
 
-internal const val SYNC_MANIFEST_ENTRY = "manifest.json"
-internal const val SYNC_PAYLOAD_ENTRY = "payload.enc"
+const val SYNC_MANIFEST_ENTRY = "manifest.json"
+const val SYNC_PAYLOAD_ENTRY = "payload.enc"
