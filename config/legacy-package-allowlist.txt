@@ -7,7 +7,19 @@
 # 部分条目不在 guard 的自动检测范围内（如 res/xml），仅供人工迁移 checklist。
 
 # ─── Room schema 路径绑定 @Database 类的 FQN ───
+# AppDatabase.kt + 所有 @Entity / @Dao / Migration 文件
+# 改 FQN 会导致 Room 找不到迁移路径或 schema 文件不匹配
 app/src/main/java/me/rerere/rikkahub/data/db/AppDatabase.kt
+app/src/main/java/me/rerere/rikkahub/data/db/**
+
+# ─── 应用根类（manifest android:namespace 引用 .RikkaHubApp / .RouteActivity）───
+# namespace = me.rerere.rikkahub；改 FQN 需要同时改 manifest
+app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt
+app/src/main/java/me/rerere/rikkahub/RouteActivity.kt
+app/src/main/java/me/rerere/rikkahub/LaunchStartMode.kt
+
+# ─── PreferencesKeys typealias（兼容旧 import 路径）───
+app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesKeys.kt
 
 # ─── JNI 符号名硬编码 Java 包路径（Java_me_rerere_*_*）───
 # 见 native/markdown-parser/src/lib.rs
