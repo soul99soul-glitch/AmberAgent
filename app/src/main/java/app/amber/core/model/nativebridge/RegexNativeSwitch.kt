@@ -3,6 +3,7 @@ package app.amber.core.model.nativebridge
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
+import me.rerere.rikkahub.data.model.nativebridge.RegexTransformerNative
 
 /**
  * Phase 2 switch in front of [RegexTransformerNative]. Default is disabled —

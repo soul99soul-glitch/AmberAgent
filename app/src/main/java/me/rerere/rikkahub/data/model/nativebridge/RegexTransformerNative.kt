@@ -1,4 +1,4 @@
-package app.amber.core.model.nativebridge
+package me.rerere.rikkahub.data.model.nativebridge
 
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean

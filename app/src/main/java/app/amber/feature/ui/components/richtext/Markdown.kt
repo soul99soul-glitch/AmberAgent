@@ -98,7 +98,7 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
-import app.amber.feature.ui.components.richtext.nativebridge.PackedAstReader
+import me.rerere.rikkahub.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
 import kotlin.random.Random
 

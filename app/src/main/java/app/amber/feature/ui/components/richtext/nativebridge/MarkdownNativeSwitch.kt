@@ -4,6 +4,7 @@ import android.os.Looper
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
+import me.rerere.rikkahub.ui.components.richtext.nativebridge.MarkdownParserNative
 
 /**
  * Phase 2 switch in front of [MarkdownParserNative]. Two independent stages:
