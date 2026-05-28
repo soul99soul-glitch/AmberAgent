@@ -6,7 +6,7 @@ import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.model.Assistant
 import kotlin.uuid.Uuid
 
-internal object DeepReadHiddenAssistantFactory {
+object DeepReadHiddenAssistantFactory {
     fun create(settings: Settings): Assistant {
         val base = settings.getCurrentAssistant()
         return base.copy(

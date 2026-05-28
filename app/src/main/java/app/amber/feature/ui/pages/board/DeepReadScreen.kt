@@ -1553,9 +1553,10 @@ private fun CorePointsSection(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light, color = palette.ink)
                             .withReadingFont(fontFamily),
                     )
-                    if (!point.supporting.isNullOrBlank()) {
+                    val pointSupporting = point.supporting
+                    if (!pointSupporting.isNullOrBlank()) {
                         Text(
-                            point.supporting,
+                            pointSupporting,
                             style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp)
                                 .withReadingFont(fontFamily),
                             color = palette.muted,
@@ -1717,9 +1718,10 @@ private fun EditorialImage(
 private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
         SectionKicker("深度分析", palette)
-        if (!analysis.coreDispute.isNullOrBlank()) {
+        val analysisCoreDispute = analysis.coreDispute
+        if (!analysisCoreDispute.isNullOrBlank()) {
             Text(
-                analysis.coreDispute,
+                analysisCoreDispute,
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
                     .withReadingFont(fontFamily),
             )
@@ -1732,9 +1734,10 @@ private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fo
                 perspectives.forEach { PerspectiveRow(it, palette, fontFamily) }
             }
         }
-        if (!analysis.implications.isNullOrBlank()) {
+        val analysisImplications = analysis.implications
+        if (!analysisImplications.isNullOrBlank()) {
             Text(
-                analysis.implications,
+                analysisImplications,
                 style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
                     .withReadingFont(fontFamily),
             )

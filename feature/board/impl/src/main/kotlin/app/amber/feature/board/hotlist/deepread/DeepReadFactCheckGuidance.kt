@@ -1,6 +1,6 @@
 package app.amber.feature.board.hotlist.deepread
 
-internal object DeepReadFactCheckGuidance {
+object DeepReadFactCheckGuidance {
     val prompt: String = """
         ## 内置验真 Skill：deep-read-fact-check
         在调用任何 deep_read_write_* 写入工具前，你必须执行这套验真流程。AmberAgent 深度阅读隐藏链路通常只暴露 search_web / scrape_web；不要声称使用了未暴露的 browser、terminal、xurl 或 GitHub 专用工具。

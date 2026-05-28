@@ -5,12 +5,12 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 
-internal fun Model.boardRequestHeaders(providers: List<ProviderSetting>): List<CustomHeader> {
+fun Model.boardRequestHeaders(providers: List<ProviderSetting>): List<CustomHeader> {
     val canonicalHeaders = providers.findCanonicalModel(this)?.customHeaders.orEmpty()
     return mergeHeaders(canonicalHeaders, customHeaders)
 }
 
-internal fun Model.boardRequestBodies(providers: List<ProviderSetting>): List<CustomBody> {
+fun Model.boardRequestBodies(providers: List<ProviderSetting>): List<CustomBody> {
     val canonicalBodies = providers.findCanonicalModel(this)?.customBodies.orEmpty()
     return mergeBodies(canonicalBodies, customBodies)
 }
