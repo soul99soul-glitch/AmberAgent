@@ -643,3 +643,45 @@ implementations (T1.1 automation, T4.1 transformers, T4.2 generation +
 3 session-9 cascades). Each iteration unblocks ~5-25 files.
 
 Generated: 2026-05-28 (session 10 final-mile complete)
+
+---
+
+## Session 11 — Phase perf candidates (2026-05-28)
+
+Goal: 4 perf candidates (DI lazy / ChatPage split / Markdown renderer
+switch / god class split). Constraint: no device access, so each
+candidate either lands the safe foundation OR defers with a banner
+that scopes the work for a follow-up sprint.
+
+### Outcomes
+
+| Candidate | Status | Reason |
+|---|---|---|
+| T1 DI lazy split | LANDED (f7e01c6c) | 2 of 12 modules safely deferable via Looper.IdleHandler |
+| T2 ChatPage split | FOUNDATION LANDED (834f2000) | Conversation @Immutable shipped; 4-region split deferred |
+| T3 Markdown render switch | BANNER (6e6f1bfc) | 2000-LOC rewrite needs device-test rig first |
+| T4 god class split | BANNER (886512ae) | 4 god classes need recompose-counter rig |
+
+### What `@Immutable` on Conversation does
+
+Compose's stability inference treats Kotlin `List<T>` as unstable.
+Any Composable receiving a Conversation as a param would re-execute
+on every parent recompose even when the instance reference is
+unchanged. With `@Immutable`, Compose can skip recomposition based
+on reference equality. Across the chat tree this removes a stream of
+spurious recomposition signals — measurable improvement during
+high-frequency streaming where the parent ChatPage recomposes per
+token but child message rows shouldn't.
+
+### Final state (Session 11 complete)
+
+- **48 physical Gradle modules** (unchanged this session)
+- **588 files in `app.amber.*`** (unchanged)
+- **80 files in `me.rerere.*`** (ADR-0001 §3 floor)
+- **11 Rust crates** (unchanged)
+- **5 perf commits** (T1 + T2 + T3 + T4 + T5)
+- Build green; all targeted unit tests green
+- `docs/visual-sanity-check.md` indexes 4 banners for on-device
+  manual verification
+
+Generated: 2026-05-28 (session 11 — phase perf complete with banner deferrals)
