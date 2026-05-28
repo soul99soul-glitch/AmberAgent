@@ -8,9 +8,9 @@ import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
 
 private val databaseEntryNames = setOf(
-    "rikka_hub.db",
-    "rikka_hub-wal",
-    "rikka_hub-shm",
+    "amber_agent.db",
+    "amber_agent-wal",
+    "amber_agent-shm",
 )
 
 internal data class BackupArchiveInspection(
@@ -27,7 +27,7 @@ internal fun inspectBackupArchive(backupFile: File): BackupArchiveInspection {
             requireSafeZipEntryName(entry.name)
             if (!entry.isDirectory && entry.name in databaseEntryNames) {
                 hasDatabasePayload = true
-                hasMainDatabase = hasMainDatabase || entry.name == "rikka_hub.db"
+                hasMainDatabase = hasMainDatabase || entry.name == "amber_agent.db"
             }
             zipIn.closeEntry()
         }
@@ -73,9 +73,9 @@ internal fun copyZipEntryToFile(zipIn: ZipInputStream, targetFile: File) {
 }
 
 internal fun databaseTempFile(tempDir: File, entryName: String): File? = when (entryName) {
-    "rikka_hub.db" -> File(tempDir, "rikka_hub")
-    "rikka_hub-wal" -> File(tempDir, "rikka_hub-wal")
-    "rikka_hub-shm" -> File(tempDir, "rikka_hub-shm")
+    "amber_agent.db" -> File(tempDir, "amber_agent")
+    "amber_agent-wal" -> File(tempDir, "amber_agent-wal")
+    "amber_agent-shm" -> File(tempDir, "amber_agent-shm")
     else -> null
 }
 
@@ -84,14 +84,14 @@ internal fun replaceDatabaseFilesFromTemp(
     appDatabase: AppDatabase,
     tempDir: File,
 ) {
-    val mainTemp = File(tempDir, "rikka_hub")
-    require(mainTemp.isFile) { "Backup archive is missing rikka_hub.db" }
+    val mainTemp = File(tempDir, "amber_agent")
+    require(mainTemp.isFile) { "Backup archive is missing amber_agent.db" }
 
-    val dbFile = context.getDatabasePath("rikka_hub")
+    val dbFile = context.getDatabasePath("amber_agent")
     val targets = listOf(
-        File(tempDir, "rikka_hub") to dbFile,
-        File(tempDir, "rikka_hub-wal") to File(dbFile.parentFile, "rikka_hub-wal"),
-        File(tempDir, "rikka_hub-shm") to File(dbFile.parentFile, "rikka_hub-shm"),
+        File(tempDir, "amber_agent") to dbFile,
+        File(tempDir, "amber_agent-wal") to File(dbFile.parentFile, "amber_agent-wal"),
+        File(tempDir, "amber_agent-shm") to File(dbFile.parentFile, "amber_agent-shm"),
     )
 
     appDatabase.close()

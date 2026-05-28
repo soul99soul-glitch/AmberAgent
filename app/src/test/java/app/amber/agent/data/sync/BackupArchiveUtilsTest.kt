@@ -13,7 +13,7 @@ class BackupArchiveUtilsTest {
     fun inspectBackupArchiveRejectsUploadZipSlip() {
         val zip = createZip(
             "settings.json" to "{}",
-            "upload/../../databases/rikka_hub.db" to "owned",
+            "upload/../../databases/amber_agent.db" to "owned",
         )
 
         val error = runCatching { inspectBackupArchive(zip) }.exceptionOrNull()
@@ -25,8 +25,8 @@ class BackupArchiveUtilsTest {
     fun inspectBackupArchiveDetectsDatabasePayload() {
         val zip = createZip(
             "settings.json" to "{}",
-            "rikka_hub.db" to "db",
-            "rikka_hub-wal" to "wal",
+            "amber_agent.db" to "db",
+            "amber_agent-wal" to "wal",
         )
 
         val inspection = inspectBackupArchive(zip)

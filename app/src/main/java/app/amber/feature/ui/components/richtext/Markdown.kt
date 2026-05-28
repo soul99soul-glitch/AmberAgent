@@ -285,7 +285,7 @@ private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 // the leaf's absolute startOffset in the source content string so the
 // overlay can map static positions back to CharRevealController offsets.
 // See applyRevealOverlay below. internal so the parity test can pin it.
-internal const val REVEAL_LEAF_TAG = "rikkahub.reveal.leaf"
+internal const val REVEAL_LEAF_TAG = "amber_agent.reveal.leaf"
 
 private data class MarkdownParseCacheKey(
     val content: String,

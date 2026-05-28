@@ -157,19 +157,19 @@ class WebDavSync(
 
             // Backup database files
             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
-                val dbFile = context.getDatabasePath("rikka_hub")
+                val dbFile = context.getDatabasePath("amber_agent")
                 if (dbFile.exists()) {
-                    addFileToZip(zipOut, dbFile, "rikka_hub.db")
+                    addFileToZip(zipOut, dbFile, "amber_agent.db")
                 }
 
-                val walFile = File(dbFile.parentFile, "rikka_hub-wal")
+                val walFile = File(dbFile.parentFile, "amber_agent-wal")
                 if (walFile.exists()) {
-                    addFileToZip(zipOut, walFile, "rikka_hub-wal")
+                    addFileToZip(zipOut, walFile, "amber_agent-wal")
                 }
 
-                val shmFile = File(dbFile.parentFile, "rikka_hub-shm")
+                val shmFile = File(dbFile.parentFile, "amber_agent-shm")
                 if (shmFile.exists()) {
-                    addFileToZip(zipOut, shmFile, "rikka_hub-shm")
+                    addFileToZip(zipOut, shmFile, "amber_agent-shm")
                 }
             }
 
@@ -217,7 +217,7 @@ class WebDavSync(
             inspection.hasDatabasePayload &&
             !inspection.hasMainDatabase
         ) {
-            throw Exception("Backup archive contains database sidecar files but is missing rikka_hub.db")
+            throw Exception("Backup archive contains database sidecar files but is missing amber_agent.db")
         }
 
         val databaseRestoreDir = if (
@@ -259,7 +259,7 @@ class WebDavSync(
                             }
                         }
 
-                        "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
+                        "amber_agent.db", "amber_agent-wal", "amber_agent-shm" -> {
                             databaseRestoreDir?.let { tempDir ->
                                 databaseTempFile(tempDir, zipEntry.name)?.let { targetFile ->
                                     Log.i(

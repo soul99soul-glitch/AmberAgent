@@ -47,7 +47,7 @@ class S3Sync(
     suspend fun backupToS3(config: S3Config) = withContext(Dispatchers.IO) {
         val file = prepareBackupFile(config)
         val client = getS3Client(config)
-        val key = "rikkahub_backups/${file.name}"
+        val key = "amber_agent_backups/${file.name}"
 
         client.putObject(
             key = key,
@@ -64,12 +64,12 @@ class S3Sync(
     suspend fun listBackupFiles(config: S3Config): List<S3BackupItem> = withContext(Dispatchers.IO) {
         val client = getS3Client(config)
         val result = client.listObjects(
-            prefix = "rikkahub_backups/",
+            prefix = "amber_agent_backups/",
             maxKeys = 1000
         ).getOrThrow()
 
         result.objects
-            .filter { it.key.startsWith("rikkahub_backups/backup_") && it.key.endsWith(".zip") }
+            .filter { it.key.startsWith("amber_agent_backups/backup_") && it.key.endsWith(".zip") }
             .map { obj ->
                 S3BackupItem(
                     key = obj.key,
@@ -127,19 +127,19 @@ class S3Sync(
 
             // Backup database files
             if (config.items.contains(S3Config.BackupItem.DATABASE)) {
-                val dbFile = context.getDatabasePath("rikka_hub")
+                val dbFile = context.getDatabasePath("amber_agent")
                 if (dbFile.exists()) {
-                    addFileToZip(zipOut, dbFile, "rikka_hub.db")
+                    addFileToZip(zipOut, dbFile, "amber_agent.db")
                 }
 
-                val walFile = File(dbFile.parentFile, "rikka_hub-wal")
+                val walFile = File(dbFile.parentFile, "amber_agent-wal")
                 if (walFile.exists()) {
-                    addFileToZip(zipOut, walFile, "rikka_hub-wal")
+                    addFileToZip(zipOut, walFile, "amber_agent-wal")
                 }
 
-                val shmFile = File(dbFile.parentFile, "rikka_hub-shm")
+                val shmFile = File(dbFile.parentFile, "amber_agent-shm")
                 if (shmFile.exists()) {
-                    addFileToZip(zipOut, shmFile, "rikka_hub-shm")
+                    addFileToZip(zipOut, shmFile, "amber_agent-shm")
                 }
             }
 
@@ -187,7 +187,7 @@ class S3Sync(
             inspection.hasDatabasePayload &&
             !inspection.hasMainDatabase
         ) {
-            throw Exception("Backup archive contains database sidecar files but is missing rikka_hub.db")
+            throw Exception("Backup archive contains database sidecar files but is missing amber_agent.db")
         }
 
         val databaseRestoreDir = if (
@@ -229,7 +229,7 @@ class S3Sync(
                             }
                         }
 
-                        "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
+                        "amber_agent.db", "amber_agent-wal", "amber_agent-shm" -> {
                             databaseRestoreDir?.let { tempDir ->
                                 databaseTempFile(tempDir, zipEntry.name)?.let { targetFile ->
                                     Log.i(

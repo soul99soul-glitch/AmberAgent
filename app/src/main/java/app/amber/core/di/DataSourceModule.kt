@@ -120,7 +120,7 @@ val dataSourceModule = module {
 
     single {
         val context: Context = get()
-        Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
+        Room.databaseBuilder(context, AppDatabase::class.java, "amber_agent")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                         .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
