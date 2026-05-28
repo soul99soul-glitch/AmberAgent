@@ -136,3 +136,74 @@ needs a dedicated sprint with real-device verification.
 
 **Banner only this commit**: no behaviour change. The flag (`markdownAst`)
 already exists in NativePathPrefs. Shadow path stays on for telemetry.
+
+---
+
+## T4 — God class second pass (deferred with banner)
+
+The four UI god classes (DeepReadScreen 2102, Markdown 2061,
+GenerativeWidgetCard 1952, ChatPage 1563) are documented for a
+dedicated UI-refactor sprint. None can be safely split in a no-device
+session because each renders complex content where a subtle
+state-hoisting bug is only visible at runtime.
+
+### DeepReadScreen.kt (2102 LOC)
+
+**Status**: deferred. The file has ~15 private Composables and 5
+extension helpers. Splitting requires:
+1. Identifying the 4-6 region boundaries (article header / template
+   article / running-stage notice / confirmation / immersive window
+   effect / partial-error notice).
+2. Hoisting per-region state — currently the main DeepReadScreen
+   composable collects ALL state then passes it down via params.
+3. Verifying scroll position retention + animation continuity when
+   regions independently recompose.
+
+**Verify on device when split lands**:
+- Open a DeepRead article. Scroll halfway. Trigger regeneration of
+  one section. Confirm the rest of the article doesn't visibly
+  flicker / jump.
+- Test the running-stage notice during long generation — should
+  recompose only when stage changes, not when other sections update.
+- Immersive window effect — verify it still toggles correctly with
+  the theme without flicker.
+
+### Markdown.kt (2061 LOC)
+
+**Status**: deferred AND covered by T3 banner. The renderer migration
+(TD.Rust.1a) and a sub-Composable split overlap: both require
+auditing the 18+ private helpers that take ASTNode params, and both
+need on-device markdown-render comparison rigs.
+
+**Verify on device when split lands**: same 30+ markdown sample
+suite documented in T3 banner.
+
+### GenerativeWidgetCard.kt (1952 LOC)
+
+**Status**: deferred. Generative UI rendering — the card runs
+user-provided HTML/JS-like markup through a sandboxed renderer.
+Splitting requires understanding the sanitizer + composition lifecycle
+which has its own active maintenance churn (memory-system files
+reference 12+ commits/month).
+
+**Verify on device when split lands**:
+- Generate a widget via /draw command. Verify it renders correctly
+  and respects width limits.
+- Long-running widget generation: streaming chunks should update
+  the visible card without full re-layout flashes.
+- Width-limit override path: verify the warning banner shows when
+  the widget exceeds maxWidgetCodeChars.
+
+### ChatPage.kt (1563 LOC) — see T2
+
+Same constraints. T2 landed the `@Immutable` foundation; the full
+region-split is the follow-up sprint.
+
+### Sprint scoping
+
+All four extractions together would be ~3-5 days of focused work +
+on-device QA pass. Pre-requisite: build a recompose-counter test
+rig that records Compose compiler metrics + samples per-Composable
+recomposition counts across a known interaction trace. Without
+that, the size of these files is the bigger of two risks (vs.
+keeping them monolithic).
