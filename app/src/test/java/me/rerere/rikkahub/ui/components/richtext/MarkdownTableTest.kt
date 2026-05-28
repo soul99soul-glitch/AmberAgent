@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.richtext
+package app.amber.feature.ui.components.richtext
 
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.gfm.GFMElementTypes

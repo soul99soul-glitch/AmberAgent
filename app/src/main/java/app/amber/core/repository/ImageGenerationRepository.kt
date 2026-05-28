@@ -14,7 +14,7 @@ import java.io.File
 import kotlin.uuid.Uuid
 
 /**
- * Shared image-generation entry point used by both [me.rerere.rikkahub.ui.pages.imggen.ImgGenVM]
+ * Shared image-generation entry point used by both [app.amber.feature.ui.pages.imggen.ImgGenVM]
  * (the standalone "create images" page) and the `generate_image` chat tool
  * (inline image generation triggered by the main chat model).
  *

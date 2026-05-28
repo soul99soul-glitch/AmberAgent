@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.pages.setting.components
+package app.amber.feature.ui.pages.setting.components
 
 import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Model

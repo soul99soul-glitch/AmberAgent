@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.ai
+package app.amber.feature.ui.components.ai
 
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_MAX_TURNS

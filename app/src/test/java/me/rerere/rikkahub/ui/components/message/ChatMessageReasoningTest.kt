@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.message
+package app.amber.feature.ui.components.message
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

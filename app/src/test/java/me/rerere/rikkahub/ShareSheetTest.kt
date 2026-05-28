@@ -3,8 +3,8 @@ package me.rerere.rikkahub
 import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
-import me.rerere.rikkahub.ui.components.ui.encodeForShare
+import app.amber.feature.ui.components.ui.decodeProviderSetting
+import app.amber.feature.ui.components.ui.encodeForShare
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

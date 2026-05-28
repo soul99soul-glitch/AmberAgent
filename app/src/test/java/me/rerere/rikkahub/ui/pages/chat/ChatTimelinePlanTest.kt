@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.pages.chat
+package app.amber.feature.ui.pages.chat
 
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage

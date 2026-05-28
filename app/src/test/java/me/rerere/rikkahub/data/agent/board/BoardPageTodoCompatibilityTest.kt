@@ -1,7 +1,7 @@
 package app.amber.feature.board
 
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
-import me.rerere.rikkahub.ui.pages.board.visibleTodayReviewTodoItems
+import app.amber.feature.ui.pages.board.visibleTodayReviewTodoItems
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

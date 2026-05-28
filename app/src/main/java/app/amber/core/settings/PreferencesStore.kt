@@ -43,7 +43,7 @@ import app.amber.core.model.QuickMessage
 import app.amber.core.model.Tag
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
-import me.rerere.rikkahub.ui.theme.PresetThemes
+import app.amber.feature.ui.theme.PresetThemes
 import app.amber.core.utils.JsonInstant
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchServiceOptions

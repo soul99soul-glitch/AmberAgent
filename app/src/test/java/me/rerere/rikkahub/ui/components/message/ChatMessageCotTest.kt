@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.message
+package app.amber.feature.ui.components.message
 
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.reasoningContentPresentMetadata

@@ -17,7 +17,7 @@ import app.amber.core.settings.SeedOpenAIImageModelId
 import app.amber.core.settings.SeedRoutingQuickMessages
 import app.amber.core.settings.Settings
 import app.amber.core.model.QuickMessage
-import me.rerere.rikkahub.ui.theme.PresetThemes
+import app.amber.feature.ui.theme.PresetThemes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

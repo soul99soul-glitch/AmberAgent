@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.richtext.nativebridge
+package app.amber.feature.ui.components.richtext.nativebridge
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals

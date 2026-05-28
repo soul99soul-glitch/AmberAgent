@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.pages.chat
+package app.amber.feature.ui.pages.chat
 
 import app.amber.core.agent.runtime.AgentDescriptorId
 import app.amber.core.agent.runtime.AgentInput

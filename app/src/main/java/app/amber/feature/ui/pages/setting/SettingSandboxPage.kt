@@ -1,0 +1,384 @@
+package app.amber.feature.ui.pages.setting
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Code
+import me.rerere.hugeicons.stroke.Database02
+import me.rerere.hugeicons.stroke.ServerStack01
+import me.rerere.rikkahub.R
+import app.amber.feature.terminal.AlpineRuntimeInstaller
+import app.amber.feature.terminal.InstallStatus
+import app.amber.feature.terminal.TerminalRuntime
+import app.amber.feature.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TermuxRuntimeStatus
+import app.amber.feature.workspace.WorkspaceManager
+import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.CardGroup
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ui.Select
+import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.CustomColors
+import app.amber.core.utils.plus
+import kotlinx.coroutines.launch
+import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
+
+@Composable
+fun SettingSandboxPage(
+    vm: SettingVM = koinViewModel(),
+    workspaceManager: WorkspaceManager = koinInject(),
+    alpineRuntimeInstaller: AlpineRuntimeInstaller = koinInject(),
+    terminalRuntime: TerminalRuntime = koinInject(),
+) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val workspaceState by workspaceManager.state.collectAsStateWithLifecycle()
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    val workspaceSavedToast = stringResource(R.string.setting_files_page_workspace_saved)
+    val workspaceClearedToast = stringResource(R.string.setting_files_page_workspace_cleared)
+    var installStatus by remember { mutableStateOf<InstallStatus?>(null) }
+    var installingRuntime by remember { mutableStateOf(false) }
+    LaunchedEffect(alpineRuntimeInstaller) {
+        installStatus = alpineRuntimeInstaller.getInstallStatus()
+    }
+    var termuxProbeKey by remember { mutableIntStateOf(0) }
+    val termuxStatus by produceState<TermuxRuntimeStatus?>(initialValue = null, termuxProbeKey) {
+        value = terminalRuntime.probeTermuxRuntime()
+    }
+    val runtimeOptions = remember { TerminalRuntimeKind.entries }
+    val concurrentJobOptions = remember { listOf(1, 2, 3, 4) }
+    val outputTailOptions = remember { listOf(64, 128, 256, 512).map { it * 1024 } }
+    val installTimeoutOptions = remember { listOf(5, 15, 30).map { it * 60_000L } }
+    val workspaceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            workspaceManager.setWorkspace(uri)
+            toaster.show(workspaceSavedToast)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_sandbox_page_title),
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = workspaceColors().canvas,
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = innerPadding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                CardGroup(
+                    title = { Text(stringResource(R.string.setting_sandbox_workspace_section)) },
+                ) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.Database02, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_files_page_workspace_title)) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(stringResource(R.string.setting_files_page_workspace_desc))
+                                Text(
+                                    text = if (workspaceState.configured) {
+                                        "${stringResource(R.string.setting_files_page_workspace_selected)}: ${workspaceState.displayName.orEmpty()}"
+                                    } else {
+                                        stringResource(R.string.setting_files_page_workspace_not_set)
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick = { workspaceLauncher.launch(null) },
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.setting_files_page_workspace_choose),
+                                            maxLines = 1,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            workspaceManager.clearWorkspace()
+                                            toaster.show(workspaceClearedToast)
+                                        },
+                                        enabled = workspaceState.configured,
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.setting_files_page_workspace_clear),
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+
+            item {
+                // Runtime section: an inline status block above the operational items.
+                // The previous Alpine + "终端会话" rows were styled like clickable
+                // ListItems but had no action — confusing affordance. Now the install
+                // status sits in its own non-interactive Surface (clearly read-only),
+                // and the static "non-PTY shell" implementation note is dropped (users
+                // don't need to know about PTY plumbing).
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 4.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_sandbox_runtime_section),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    RuntimeStatusBlock(
+                        installStatus = installStatus,
+                        installing = installingRuntime,
+                        onRefresh = {
+                            scope.launch {
+                                installStatus = alpineRuntimeInstaller.getInstallStatus()
+                            }
+                        },
+                        onInstallOrRepair = {
+                            scope.launch {
+                                installingRuntime = true
+                                try {
+                                    installStatus = alpineRuntimeInstaller.installOrRepair()
+                                } finally {
+                                    installingRuntime = false
+                                }
+                            }
+                        },
+                    )
+                    CardGroup {
+                        item(
+                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = runtimeOptions,
+                                selectedOption = settings.agentRuntime.terminalDefaultRuntime,
+                                onOptionSelected = { runtime ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                terminalDefaultRuntime = runtime
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = { runtime ->
+                                    when (runtime) {
+                                        TerminalRuntimeKind.BUILTIN_ALPINE ->
+                                            stringResource(R.string.setting_sandbox_terminal_runtime_builtin)
+
+                                        TerminalRuntimeKind.ANDROID_SHELL ->
+                                            stringResource(R.string.setting_sandbox_terminal_runtime_android_shell)
+
+                                        TerminalRuntimeKind.TERMUX_EXTERNAL ->
+                                            stringResource(R.string.setting_sandbox_terminal_runtime_termux)
+                                    }
+                                },
+                                // V3 ValueChip 内容自适应,
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = concurrentJobOptions,
+                                selectedOption = settings.agentRuntime.terminalMaxConcurrentJobs.coerceIn(1, 4),
+                                onOptionSelected = { count ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                terminalMaxConcurrentJobs = count
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = { stringResource(R.string.setting_sandbox_terminal_jobs_value, it) },
+                                // V3 ValueChip 内容自适应,
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = outputTailOptions,
+                                selectedOption = settings.agentRuntime.terminalOutputTailChars,
+                                onOptionSelected = { chars ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                terminalOutputTailChars = chars
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = {
+                                    stringResource(R.string.setting_sandbox_terminal_output_value, it / 1024)
+                                },
+                                // V3 ValueChip 内容自适应,
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_desc)) },
+                        trailingContent = {
+                            Select(
+                                options = installTimeoutOptions,
+                                selectedOption = settings.agentRuntime.terminalInstallTimeoutMs,
+                                onOptionSelected = { timeout ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            agentRuntime = settings.agentRuntime.copy(
+                                                terminalInstallTimeoutMs = timeout
+                                            )
+                                        )
+                                    )
+                                },
+                                optionToString = {
+                                    stringResource(R.string.setting_sandbox_terminal_install_timeout_value, it / 60_000L)
+                                },
+                                // V3 ValueChip 内容自适应,
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.setting_sandbox_termux_title)) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(termuxStatus?.message ?: stringResource(R.string.calculating))
+                                OutlinedButton(onClick = { termuxProbeKey++ }) {
+                                    Text(stringResource(R.string.setting_sandbox_termux_probe))
+                                }
+                            }
+                        },
+                    )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Lightweight status block above the operational items in the Runtime section. Entering
+ * the page only checks file state; the expensive asset copy/repair path is button-driven.
+ */
+@Composable
+private fun RuntimeStatusBlock(
+    installStatus: InstallStatus?,
+    installing: Boolean,
+    onRefresh: () -> Unit,
+    onInstallOrRepair: () -> Unit,
+) {
+    val isFailed = installStatus?.success == false
+    val text = installStatus?.let { status ->
+        if (status.success) {
+            stringResource(R.string.setting_sandbox_alpine_ready)
+        } else {
+            stringResource(R.string.setting_sandbox_alpine_failed, status.message)
+        }
+    } ?: stringResource(R.string.calculating)
+    Surface(
+        color = if (isFailed) {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isFailed) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedButton(
+                    onClick = onRefresh,
+                    enabled = !installing,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text("重新检查", maxLines = 1)
+                }
+                Button(
+                    onClick = onInstallOrRepair,
+                    enabled = !installing,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = if (installing) "安装中…" else "安装/修复 runtime",
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}

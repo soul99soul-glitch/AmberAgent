@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.PreferencesKeys
-import me.rerere.rikkahub.ui.theme.PresetThemes
+import app.amber.feature.ui.theme.PresetThemes
 import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.toMutableStateFlow
 

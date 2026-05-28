@@ -5,7 +5,7 @@ import android.net.Uri
 import android.util.Log
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.ui.context.Navigator
+import app.amber.feature.ui.context.Navigator
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatUtil"

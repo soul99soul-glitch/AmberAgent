@@ -14,7 +14,7 @@ import me.rerere.highlight.nativebridge.HighlightNativeSwitch
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.prefs.NativePathPrefs
 import app.amber.core.model.nativebridge.RegexNativeSwitch
-import me.rerere.rikkahub.ui.components.richtext.nativebridge.MarkdownNativeSwitch
+import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 
 /**
  * Wires the 4 `*NativeSwitch` objects to user prefs + Remote Config + Crashlytics.

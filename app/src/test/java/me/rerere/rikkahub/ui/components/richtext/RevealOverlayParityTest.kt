@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.ui.components.richtext
+package app.amber.feature.ui.components.richtext
 
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color

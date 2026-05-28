@@ -29,7 +29,7 @@ import app.amber.feature.board.worker.BoardScheduler
 import app.amber.feature.office.radar.DocRadar
 import app.amber.feature.office.radar.FeishuChangeNotifier
 import app.amber.feature.tools.AgentToolSetFactory
-import me.rerere.rikkahub.ui.pages.board.BoardViewModel
+import app.amber.feature.ui.pages.board.BoardViewModel
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
