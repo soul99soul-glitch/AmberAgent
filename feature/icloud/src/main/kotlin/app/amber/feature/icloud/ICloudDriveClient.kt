@@ -26,7 +26,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.agent.utils.JsonInstant
 import java.util.UUID
 
 class ICloudDriveClient(

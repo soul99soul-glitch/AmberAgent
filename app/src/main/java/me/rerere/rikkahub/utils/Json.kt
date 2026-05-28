@@ -1,30 +1,13 @@
 package me.rerere.rikkahub.utils
 
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 
-@OptIn(ExperimentalSerializationApi::class)
-val JsonInstant by lazy {
-    Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-        isLenient = true
-        allowTrailingComma = true
-    }
-}
-
-@OptIn(ExperimentalSerializationApi::class)
-val JsonInstantPretty by lazy {
-    Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-        isLenient = true
-        allowTrailingComma = true
-        prettyPrint = true
-    }
-}
+// Re-exports from the shared :core:agent-utils module.
+// Kept here as type aliases so existing me.rerere.rikkahub.utils.JsonInstant
+// callers continue to compile during the package migration.
+val JsonInstant = app.amber.core.agent.utils.JsonInstant
+val JsonInstantPretty = app.amber.core.agent.utils.JsonInstantPretty
 
 val JsonElement.jsonPrimitiveOrNull: JsonPrimitive?
     get() = this as? JsonPrimitive
