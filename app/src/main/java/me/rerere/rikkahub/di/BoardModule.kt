@@ -26,8 +26,8 @@ import me.rerere.rikkahub.data.agent.board.hotlist.deepread.template.DeepReadTem
 import me.rerere.rikkahub.data.agent.board.hotlist.providers.BuiltInHotListProviders
 import me.rerere.rikkahub.data.agent.board.worker.BoardNotifier
 import me.rerere.rikkahub.data.agent.board.worker.BoardScheduler
-import me.rerere.rikkahub.data.agent.office.radar.DocRadar
-import me.rerere.rikkahub.data.agent.office.radar.FeishuChangeNotifier
+import app.amber.feature.office.radar.DocRadar
+import app.amber.feature.office.radar.FeishuChangeNotifier
 import me.rerere.rikkahub.data.agent.tools.AgentToolSetFactory
 import me.rerere.rikkahub.ui.pages.board.BoardViewModel
 import org.koin.core.module.dsl.viewModel

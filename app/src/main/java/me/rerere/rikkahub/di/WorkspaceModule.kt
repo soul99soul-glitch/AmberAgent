@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.di
 
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
+import app.amber.feature.office.FeishuOfficeEnhancementManager
 import me.rerere.rikkahub.data.agent.tools.ExternalFileTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools

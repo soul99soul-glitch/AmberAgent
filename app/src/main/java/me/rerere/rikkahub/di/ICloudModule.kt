@@ -1,8 +1,8 @@
 package me.rerere.rikkahub.di
 
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveClient
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCookieProvider
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
+import app.amber.feature.icloud.ICloudDriveClient
+import app.amber.feature.icloud.ICloudDriveCookieProvider
+import app.amber.feature.icloud.ICloudDriveManager
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
 import org.koin.dsl.module
 

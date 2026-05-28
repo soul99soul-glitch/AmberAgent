@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.icloud
+package app.amber.feature.icloud
 
 object ICloudDrivePath {
     fun normalizeUserPath(path: String): String {

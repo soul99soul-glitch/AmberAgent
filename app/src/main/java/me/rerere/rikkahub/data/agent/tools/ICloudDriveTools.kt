@@ -9,13 +9,13 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveCapability
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveEntry
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveLoginSnapshot
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveManager
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveSearchResult
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveState
-import me.rerere.rikkahub.data.agent.icloud.ICloudDriveWebEndpoints
+import app.amber.feature.icloud.ICloudDriveCapability
+import app.amber.feature.icloud.ICloudDriveEntry
+import app.amber.feature.icloud.ICloudDriveLoginSnapshot
+import app.amber.feature.icloud.ICloudDriveManager
+import app.amber.feature.icloud.ICloudDriveSearchResult
+import app.amber.feature.icloud.ICloudDriveState
+import app.amber.feature.icloud.ICloudDriveWebEndpoints
 
 class ICloudDriveTools(
     private val manager: ICloudDriveManager,

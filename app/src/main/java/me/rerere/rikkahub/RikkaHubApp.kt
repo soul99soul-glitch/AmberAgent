@@ -328,7 +328,7 @@ class RikkaHubApp : Application() {
                             if (!lastForegroundCompensationMs.compareAndSet(last, now)) return@runCatching
                             get<BoardScheduler>().runOnce()
                             // Also trigger doc radar check on foreground return
-                            runCatching { get<me.rerere.rikkahub.data.agent.office.radar.DocRadar>().runOnce() }
+                            runCatching { get<app.amber.feature.office.radar.DocRadar>().runOnce() }
                         }.onFailure { Log.e(TAG, "foreground compensation failed", it) }
                     }
                 }

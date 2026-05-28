@@ -19,18 +19,18 @@ import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
 import me.rerere.rikkahub.data.agent.task.AgentTaskQueueState
 import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
 import me.rerere.rikkahub.data.agent.task.AgentTaskStore
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementPlanner
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementState
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeContextBundle
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeDashboardSummary
-import me.rerere.rikkahub.data.agent.office.FeishuDocumentWarroomTemplate
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeReportResult
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeScreenSnapshot
-import me.rerere.rikkahub.data.agent.office.FeishuWorkDraft
-import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
-import me.rerere.rikkahub.data.agent.office.FeishuWorkReport
+import app.amber.feature.office.FeishuOfficeAnalysisTemplate
+import app.amber.feature.office.FeishuOfficeEnhancementManager
+import app.amber.feature.office.FeishuOfficeEnhancementPlanner
+import app.amber.feature.office.FeishuOfficeEnhancementState
+import app.amber.feature.office.FeishuOfficeContextBundle
+import app.amber.feature.office.FeishuOfficeDashboardSummary
+import app.amber.feature.office.FeishuDocumentWarroomTemplate
+import app.amber.feature.office.FeishuOfficeReportResult
+import app.amber.feature.office.FeishuOfficeScreenSnapshot
+import app.amber.feature.office.FeishuWorkDraft
+import app.amber.feature.office.FeishuWorkProject
+import app.amber.feature.office.FeishuWorkReport
 
 class FeishuOfficeTools(
     private val manager: FeishuOfficeEnhancementManager,

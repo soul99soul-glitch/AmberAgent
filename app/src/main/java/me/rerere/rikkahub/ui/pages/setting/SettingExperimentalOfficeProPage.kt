@@ -46,9 +46,9 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementManager
-import me.rerere.rikkahub.data.agent.office.FeishuWorkProject
-import me.rerere.rikkahub.data.agent.office.radar.DocRadar
+import app.amber.feature.office.FeishuOfficeEnhancementManager
+import app.amber.feature.office.FeishuWorkProject
+import app.amber.feature.office.radar.DocRadar
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
 import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO

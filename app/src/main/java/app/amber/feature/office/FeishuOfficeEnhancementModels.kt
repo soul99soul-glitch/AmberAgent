@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.office
+package app.amber.feature.office
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

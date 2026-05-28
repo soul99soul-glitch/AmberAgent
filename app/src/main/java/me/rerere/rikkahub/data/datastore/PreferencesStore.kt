@@ -23,7 +23,7 @@ import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import app.amber.feature.live.LiveModeSetting
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
+import app.amber.feature.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
 import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind

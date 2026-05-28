@@ -41,7 +41,7 @@ import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.office.FeishuOfficeAnalysisTemplate
+import app.amber.feature.office.FeishuOfficeAnalysisTemplate
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
