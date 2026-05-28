@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.utils.JsonInstant
+import app.amber.core.agent.utils.JsonInstant
 import kotlin.uuid.Uuid
 
 class PreferenceStoreV3Migration : DataMigration<Preferences> {
@@ -57,7 +57,7 @@ class PreferenceStoreV3Migration : DataMigration<Preferences> {
  * 为每条消息生成新 UUID，将其替换为 quickMessageIds（仅 ID 列表），
  * 并返回补充了 id 的全局消息列表。
  */
-internal fun migrateAssistantsQuickMessages(
+fun migrateAssistantsQuickMessages(
     assistantsJson: String
 ): Pair<String, JsonArray> {
     return runCatching {

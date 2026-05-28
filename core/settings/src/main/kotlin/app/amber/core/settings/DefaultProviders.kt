@@ -13,8 +13,8 @@ import kotlin.uuid.Uuid
 // OpenAI and Gemini providers. Stable so the per-load migration that adds the
 // model to existing user providers can detect "already added by us" without
 // matching on modelId (users could later rename it).
-internal val SeedOpenAIImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5d")
-internal val SeedGeminiImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5e")
+val SeedOpenAIImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5d")
+val SeedGeminiImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5e")
 
 /**
  * gpt-image-2 entry seeded into the built-in OpenAI provider. Set as
@@ -22,7 +22,7 @@ internal val SeedGeminiImageModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a
  * (ModelType.IMAGE filter) and does NOT pollute the chat-model dropdown.
  * Output modality is IMAGE only — input is the user's text prompt.
  */
-internal val SeedOpenAIImageModel = Model(
+val SeedOpenAIImageModel = Model(
     id = SeedOpenAIImageModelId,
     modelId = "gpt-image-2",
     displayName = "gpt-image-2",
@@ -38,7 +38,7 @@ internal val SeedOpenAIImageModel = Model(
  * and image generation requires the standard generativelanguage.googleapis.com
  * route, which only the API-Key auth mode hits.
  */
-internal val SeedGeminiImageModel = Model(
+val SeedGeminiImageModel = Model(
     id = SeedGeminiImageModelId,
     modelId = "gemini-3.1-flash-image-preview",
     displayName = "Gemini 3.1 Flash Image (Nano Banana 2)",
@@ -56,11 +56,11 @@ internal val SeedGeminiImageModel = Model(
 //
 // Trailing newline so the cursor lands on a fresh line after the tag, and
 // the user can type their prompt unprefixed.
-internal val SeedDrawQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e01")
-internal val SeedDiagramQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e02")
-internal val SeedSlideQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e03")
+val SeedDrawQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e01")
+val SeedDiagramQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e02")
+val SeedSlideQuickMessageId = Uuid.parse("ce1f8a2b-7d3c-4e9f-b210-1a3b5c7d9e03")
 
-internal val SeedRoutingQuickMessages: List<QuickMessage> = listOf(
+val SeedRoutingQuickMessages: List<QuickMessage> = listOf(
     QuickMessage(
         id = SeedDrawQuickMessageId,
         title = "draw",
@@ -83,8 +83,8 @@ val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 // Exposed so the per-load migration in PreferencesStore can target these two
 // specific providers when backfilling the seeded image models. The other
 // brand-IDs below remain private — they have no migration tied to them.
-internal val OpenAIProviderIdRef = Uuid.parse("1eeea727-9ee5-4cae-93e6-6fb01a4d051e")
-internal val GeminiProviderIdRef = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa6d")
+val OpenAIProviderIdRef = Uuid.parse("1eeea727-9ee5-4cae-93e6-6fb01a4d051e")
+val GeminiProviderIdRef = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa6d")
 private val OpenAIProviderId = OpenAIProviderIdRef
 private val GeminiProviderId = GeminiProviderIdRef
 private val DeepSeekProviderId = Uuid.parse("f099ad5b-ef03-446d-8e78-7e36787f780b")

@@ -573,6 +573,7 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":core:app-infra"))
     implementation(project(":core:model"))
+    implementation(project(":core:settings"))
     implementation(project(":core:event"))
     implementation(project(":core:usage"))
     implementation(project(":core:llm"))
