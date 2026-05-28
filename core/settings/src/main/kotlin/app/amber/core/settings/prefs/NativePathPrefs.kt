@@ -1,18 +1,20 @@
 package app.amber.core.settings.prefs
 
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.IOException
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import me.rerere.rikkahub.AppScope
+import kotlinx.coroutines.launch
+import app.amber.core.infra.AppScope
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.utils.toMutableStateFlow
 
 /**
  * Per-component enable flags for the Rust JNI production switch.
@@ -71,8 +73,17 @@ class NativePathPrefs(
         .map { readFrom(it) }
         .distinctUntilChanged()
 
-    val flow: StateFlow<NativePathPrefsData> = rawFlow
-        .toMutableStateFlow(scope, NativePathPrefsData())
+    val flow: StateFlow<NativePathPrefsData> = MutableStateFlow(NativePathPrefsData()).also { state ->
+        scope.launch {
+            runCatching {
+                rawFlow.collect { state.value = it }
+            }.onFailure {
+                it.printStackTrace()
+                Log.e("NativePathPrefs", "Error while collecting flow: ${it.message}", it)
+                Runtime.getRuntime().halt(1)
+            }
+        }
+    }
 
     suspend fun update(transform: (NativePathPrefsData) -> NativePathPrefsData) {
         dataStore.edit { p ->
