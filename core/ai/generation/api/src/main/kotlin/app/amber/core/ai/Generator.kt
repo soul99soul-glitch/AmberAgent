@@ -11,9 +11,9 @@ import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.Tool
-import me.rerere.ai.provider.Model
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.core.Tool
+import app.amber.ai.provider.Model
+import app.amber.ai.ui.UIMessage
 import kotlin.uuid.Uuid
 
 /**
@@ -79,7 +79,7 @@ data class GenerationUpdate(
 
         fun streamingTail(messages: List<UIMessage>): GenerationUpdate {
             val tailId = messages
-                .lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+                .lastOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
                 ?.id
             return GenerationUpdate(
                 messages = messages,

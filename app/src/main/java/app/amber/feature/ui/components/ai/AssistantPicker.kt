@@ -43,7 +43,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.hugeicons.stroke.LookTop
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.settings.Settings
 import app.amber.core.model.Assistant
 import app.amber.feature.ui.components.ui.UIAvatar

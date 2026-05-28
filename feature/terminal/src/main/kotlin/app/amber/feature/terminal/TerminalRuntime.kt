@@ -807,7 +807,7 @@ class TerminalRuntime(
         private const val TERMUX_SHELL_PATH = "/data/data/com.termux/files/usr/bin/sh"
         private const val TERMUX_HOME = "/data/data/com.termux/files/home"
 
-        private const val ACTION_TERMUX_RESULT = "me.rerere.rikkahub.action.TERMUX_COMMAND_RESULT"
+        private const val ACTION_TERMUX_RESULT = "app.amber.agent.action.TERMUX_COMMAND_RESULT"
         private const val ACTION_TERMUX_RUN_COMMAND = "com.termux.RUN_COMMAND"
         private const val EXTRA_JOB_ID = "job_id"
         private const val EXTRA_TERMUX_COMMAND_PATH = "com.termux.RUN_COMMAND_PATH"

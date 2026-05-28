@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.db.dao.ConversationDAO
-import me.rerere.rikkahub.data.db.dao.MessageStatsDAO
+import app.amber.agent.data.db.dao.ConversationDAO
+import app.amber.agent.data.db.dao.MessageStatsDAO
 import app.amber.core.settings.prefs.SettingsAggregator
 import java.time.DayOfWeek
 import java.time.LocalDate

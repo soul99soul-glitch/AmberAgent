@@ -38,8 +38,8 @@ import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
-import me.rerere.search.SearchService
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchService
+import app.amber.search.SearchServiceOptions
 import kotlin.reflect.full.primaryConstructor
 
 @Composable

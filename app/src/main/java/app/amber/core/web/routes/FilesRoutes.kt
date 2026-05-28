@@ -16,7 +16,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.utils.io.readAvailable
-import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
+import app.amber.agent.data.db.entity.ManagedFileEntity
 import app.amber.core.files.FilesManager
 import app.amber.core.web.BadRequestException
 import app.amber.core.web.NotFoundException

@@ -60,7 +60,7 @@ import app.amber.feature.ui.context.LocalTTSState
 import app.amber.feature.ui.pages.setting.components.TTSProviderConfigure
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.plus
-import me.rerere.tts.provider.TTSProviderSetting
+import app.amber.tts.provider.TTSProviderSetting
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState

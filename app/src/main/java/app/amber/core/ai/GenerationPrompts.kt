@@ -3,7 +3,7 @@ package app.amber.core.ai
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.provider.Model
+import app.amber.ai.provider.Model
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.model.Assistant

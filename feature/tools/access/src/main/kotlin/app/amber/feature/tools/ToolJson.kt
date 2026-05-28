@@ -6,7 +6,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 
 fun JsonElement.string(name: String): String? =
     jsonObject[name]?.jsonPrimitive?.contentOrNull

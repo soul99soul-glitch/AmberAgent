@@ -66,9 +66,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.provider.ProviderSetting
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.WorkspaceSearchField

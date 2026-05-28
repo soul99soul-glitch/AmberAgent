@@ -1,7 +1,7 @@
 package app.amber.core.ai.transformers
 
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.utils.toLocalDate
 import app.amber.core.utils.toLocalTime

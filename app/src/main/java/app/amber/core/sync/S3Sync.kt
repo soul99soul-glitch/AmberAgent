@@ -10,8 +10,7 @@ import app.amber.core.files.FileFolders
 import app.amber.core.files.SkillPaths
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.migration.SettingsJsonMigrator
-import me.rerere.rikkahub.data.db.AppDatabase
+import app.amber.agent.data.db.AppDatabase
 import app.amber.core.sync.s3.S3Client
 import app.amber.core.sync.s3.S3Config
 import app.amber.core.utils.fileSizeToString
@@ -220,7 +219,7 @@ class S3Sync(
                             val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
                             Log.i(TAG, "restoreFromBackupFile: Restoring settings")
                             try {
-                                val migratedJson = SettingsJsonMigrator.migrate(settingsJson)
+                                val migratedJson = settingsJson
                                 val settings = json.decodeFromString<Settings>(migratedJson)
                                 settingsStore.update(settings)
                                 Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")

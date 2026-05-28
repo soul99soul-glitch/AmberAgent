@@ -1,11 +1,11 @@
 package app.amber.core.web.dto
 
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.core.TokenUsage
-import me.rerere.ai.ui.UIMessageAnnotation
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.core.TokenUsage
+import app.amber.ai.ui.UIMessageAnnotation
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 

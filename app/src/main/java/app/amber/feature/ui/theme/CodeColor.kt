@@ -1,7 +1,7 @@
 package app.amber.feature.ui.theme
 
 import androidx.compose.ui.graphics.Color
-import me.rerere.highlight.HighlightTextColorPalette
+import app.amber.highlight.HighlightTextColorPalette
 
 // Atom One Dark Theme Colors
 val AtomOneDarkPalette = HighlightTextColorPalette(

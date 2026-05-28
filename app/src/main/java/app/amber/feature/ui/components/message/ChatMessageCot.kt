@@ -4,7 +4,7 @@ import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 
 /** Tool names whose calls represent a single subagent task and should be coalesced by run_id. */
 private val SUBAGENT_TASK_TOOLS = setOf(

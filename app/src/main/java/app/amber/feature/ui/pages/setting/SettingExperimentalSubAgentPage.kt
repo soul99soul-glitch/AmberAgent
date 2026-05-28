@@ -32,13 +32,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS

@@ -1,11 +1,11 @@
 package app.amber.core.ai.vision
 
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.provider.Modality
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.Modality
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider

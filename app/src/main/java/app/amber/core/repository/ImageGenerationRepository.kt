@@ -2,9 +2,9 @@ package app.amber.core.repository
 
 import android.util.Log
 import kotlinx.coroutines.flow.first
-import me.rerere.ai.provider.ImageGenerationParams
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.ui.ImageAspectRatio
+import app.amber.ai.provider.ImageGenerationParams
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.ui.ImageAspectRatio
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findModelById
@@ -21,7 +21,7 @@ import kotlin.uuid.Uuid
  * Two destinations are supported:
  *  - [generateToGallery]: writes results to the global images dir
  *    (`filesDir/images/`) — the historic gallery used by [ImgGenVM].
- *    Caller is responsible for inserting [me.rerere.rikkahub.data.db.entity.GenMediaEntity]
+ *    Caller is responsible for inserting [app.amber.agent.data.db.entity.GenMediaEntity]
  *    rows after success (kept out of this repo to preserve the existing
  *    ImgGenVM ordering: insert *after* the file write succeeds).
  *  - [generateForConversation]: writes results to a per-conversation dir
@@ -126,7 +126,7 @@ class ImageGenerationRepository(
     }
 
     private data class Invocation(
-        val results: List<me.rerere.ai.ui.ImageGenerationItem>,
+        val results: List<app.amber.ai.ui.ImageGenerationItem>,
         val modelDisplayName: String,
     )
 

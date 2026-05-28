@@ -15,10 +15,10 @@ import app.amber.feature.board.hotlist.HotTopicSource
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.search.SearchCommonOptions
-import me.rerere.search.SearchResult
-import me.rerere.search.SearchService
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchCommonOptions
+import app.amber.search.SearchResult
+import app.amber.search.SearchService
+import app.amber.search.SearchServiceOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URI

@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.AppScope
+import app.amber.ai.core.Tool
+import app.amber.agent.AppScope
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore

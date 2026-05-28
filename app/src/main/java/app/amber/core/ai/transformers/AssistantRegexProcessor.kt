@@ -4,7 +4,7 @@ import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
 import kotlin.uuid.Uuid
-import me.rerere.rikkahub.data.model.nativebridge.RegexNativeSwitch
+import app.amber.agent.data.model.nativebridge.RegexNativeSwitch
 
 fun String.replaceRegexes(
     assistant: Assistant?,

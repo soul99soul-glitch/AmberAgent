@@ -5,9 +5,9 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.DeepReadTemplateIds
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders

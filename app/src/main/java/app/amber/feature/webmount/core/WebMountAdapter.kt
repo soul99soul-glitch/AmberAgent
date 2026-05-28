@@ -1,7 +1,7 @@
 package app.amber.feature.webmount.core
 
 import kotlinx.coroutines.flow.StateFlow
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.feature.webmount.cookie.EndpointSpec
 
 /**

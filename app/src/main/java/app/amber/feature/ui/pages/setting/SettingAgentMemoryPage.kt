@@ -55,7 +55,7 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Play
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
 import app.amber.core.memory.dream.PersistedMemoryDreamPlan

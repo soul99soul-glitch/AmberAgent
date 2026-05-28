@@ -8,9 +8,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import me.rerere.ai.provider.GoogleAuthMode
-import me.rerere.ai.provider.OpenAIAuthMode
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.ProviderSetting
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.Settings

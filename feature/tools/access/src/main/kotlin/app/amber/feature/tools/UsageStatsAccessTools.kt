@@ -5,7 +5,7 @@ import android.content.Context
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 
 fun createUsageStatsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "usage_stats_list",

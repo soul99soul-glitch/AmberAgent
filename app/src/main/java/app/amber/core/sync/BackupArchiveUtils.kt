@@ -1,7 +1,7 @@
 package app.amber.core.sync
 
 import android.content.Context
-import me.rerere.rikkahub.data.db.AppDatabase
+import app.amber.agent.data.db.AppDatabase
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

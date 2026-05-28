@@ -35,7 +35,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.model.Assistant
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.ui.AutoAIIcon

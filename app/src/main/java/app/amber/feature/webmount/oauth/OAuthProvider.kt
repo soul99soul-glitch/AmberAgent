@@ -1,7 +1,7 @@
 package app.amber.feature.webmount.oauth
 
 import io.ktor.client.HttpClient
-import me.rerere.common.oauth.LoopbackOAuthCallbackServer
+import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import app.amber.feature.webmount.core.WebMountOAuthToken
 
 /**

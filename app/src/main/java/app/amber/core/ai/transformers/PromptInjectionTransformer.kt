@@ -2,11 +2,11 @@ package app.amber.core.ai.transformers
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
-import me.rerere.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
+import app.amber.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Assistant
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.PromptInjection

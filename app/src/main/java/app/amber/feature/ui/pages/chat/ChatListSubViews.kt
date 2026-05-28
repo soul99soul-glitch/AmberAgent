@@ -108,7 +108,7 @@ internal fun ChatListPreview(
                 key = { index, item -> item.second.id },
             ) { _, (originalIndex, node) ->
                 val message = node.currentMessage
-                val isUser = message.role == me.rerere.ai.core.MessageRole.USER
+                val isUser = message.role == app.amber.ai.core.MessageRole.USER
                 val workspace = workspaceColors()
                 // Per-role light fill — user messages get the very-light blue
                 // (blueContainer #EAF4FF), AI gets the very-light green

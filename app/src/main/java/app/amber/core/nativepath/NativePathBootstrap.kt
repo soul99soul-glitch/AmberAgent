@@ -9,11 +9,11 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfigException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import me.rerere.document.nativebridge.OfficeNativeSwitch
-import me.rerere.highlight.nativebridge.HighlightNativeSwitch
-import me.rerere.rikkahub.AppScope
+import app.amber.document.nativebridge.OfficeNativeSwitch
+import app.amber.highlight.nativebridge.HighlightNativeSwitch
+import app.amber.agent.AppScope
 import app.amber.core.settings.prefs.NativePathPrefs
-import me.rerere.rikkahub.data.model.nativebridge.RegexNativeSwitch
+import app.amber.agent.data.model.nativebridge.RegexNativeSwitch
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 
 /**
@@ -21,7 +21,7 @@ import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitc
  *
  * Lifecycle:
  * 1. App startup constructs this via Koin, then calls [install] from
- *    [me.rerere.rikkahub.RikkaHubApp].
+ *    [app.amber.agent.RikkaHubApp].
  * 2. [install] reads the current [NativePathPrefs] snapshot and pushes a
  *    config impl into each Switch. Subsequent user-toggle edits are picked
  *    up on the next call because each impl reads `prefs.flow.value` lazily.

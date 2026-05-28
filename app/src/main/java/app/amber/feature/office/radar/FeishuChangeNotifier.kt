@@ -9,9 +9,9 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import me.rerere.rikkahub.FEISHU_DOC_CHANGE_CHANNEL_ID
+import app.amber.agent.FEISHU_DOC_CHANGE_CHANNEL_ID
 import app.amber.agent.R
-import me.rerere.rikkahub.RouteActivity
+import app.amber.agent.RouteActivity
 
 class FeishuChangeNotifier(
     private val context: Context,

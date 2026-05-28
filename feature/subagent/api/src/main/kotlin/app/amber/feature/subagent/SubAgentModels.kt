@@ -2,7 +2,7 @@ package app.amber.feature.subagent
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.ReasoningLevel
+import app.amber.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 const val DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS = 2

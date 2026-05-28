@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.AppScope
+import app.amber.agent.AppScope
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionStatus
 import app.amber.feature.system.AmberNotificationListenerService

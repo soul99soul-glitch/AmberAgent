@@ -1,7 +1,7 @@
 package app.amber.feature.board.agent
 
 import kotlinx.serialization.Serializable
-import me.rerere.rikkahub.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.BoardItemEntity
 
 /**
  * Parsed board output from the agent, before validation and persistence.

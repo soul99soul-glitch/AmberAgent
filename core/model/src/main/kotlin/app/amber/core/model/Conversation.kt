@@ -5,10 +5,10 @@ import androidx.compose.runtime.Immutable
 import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.util.InstantSerializer
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.util.InstantSerializer
 
 import java.time.Instant
 import kotlin.uuid.Uuid

@@ -68,9 +68,9 @@ import com.yalantis.ucrop.UCrop
 import com.yalantis.ucrop.UCropActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.common.android.appTempFolder
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.ui.UIMessagePart
+import app.amber.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Cancel01

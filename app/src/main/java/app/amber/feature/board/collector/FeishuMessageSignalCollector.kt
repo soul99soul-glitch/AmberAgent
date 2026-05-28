@@ -10,7 +10,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.board.BoardSignalSourceType
 import app.amber.core.ai.mcp.McpManager
 

@@ -12,7 +12,7 @@ import kotlinx.coroutines.SupervisorJob
  * cancelled in Application.onTerminate(). Use for fire-and-forget work that must
  * survive Activity lifecycle (notifications, background sync, etc.).
  *
- * Moved from me.rerere.rikkahub.AppScope so feature modules can depend on it
+ * Moved from app.amber.agent.AppScope so feature modules can depend on it
  * without pulling in the entire :app module.
  */
 class AppScope : CoroutineScope by CoroutineScope(

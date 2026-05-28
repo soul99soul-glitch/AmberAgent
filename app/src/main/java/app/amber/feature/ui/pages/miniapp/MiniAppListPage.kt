@@ -27,9 +27,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.miniapp.components.MiniAppGridCard

@@ -2,7 +2,7 @@ package app.amber.feature.modelcouncil
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.ReasoningLevel
+import app.amber.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 // Bumped from 4 → 8 to fit the new "3 core seats + up to 5 lens" model.

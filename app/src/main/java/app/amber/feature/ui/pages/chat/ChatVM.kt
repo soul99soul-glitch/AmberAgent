@@ -21,11 +21,11 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.Model
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.isEmptyInputMessage
-import me.rerere.rikkahub.LAST_CONVERSATION_ID_PREF
+import app.amber.ai.provider.Model
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.isEmptyInputMessage
+import app.amber.agent.LAST_CONVERSATION_ID_PREF
 import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator

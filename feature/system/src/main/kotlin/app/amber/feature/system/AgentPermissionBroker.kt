@@ -12,7 +12,7 @@ import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
-import me.rerere.common.android.Logging
+import app.amber.common.android.Logging
 
 private const val TAG = "AgentPermissionBroker"
 

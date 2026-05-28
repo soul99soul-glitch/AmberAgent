@@ -2,7 +2,7 @@ package app.amber.core.memory.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.ReasoningLevel
+import app.amber.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 // MemoryScope and MemoryKind moved to app.amber.core.model.MemoryEnums so

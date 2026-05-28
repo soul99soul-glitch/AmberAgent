@@ -56,7 +56,7 @@ import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.WavingHand01
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.settings.isNotConfigured
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.nav.BackButton

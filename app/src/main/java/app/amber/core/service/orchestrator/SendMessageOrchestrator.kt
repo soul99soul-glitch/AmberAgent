@@ -1,8 +1,8 @@
 package app.amber.core.service.orchestrator
 
 import com.google.firebase.analytics.FirebaseAnalytics
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.isEmptyInputMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.isEmptyInputMessage
 import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import app.amber.core.event.AppEventBus
 import app.amber.core.service.ChatService

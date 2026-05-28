@@ -3,7 +3,7 @@ package app.amber.core.ai.transformers
 import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.utils.toLocalDateTime
 import java.time.ZoneId
 import java.time.format.TextStyle

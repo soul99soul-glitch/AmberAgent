@@ -15,7 +15,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.core.infra.AppScope
 import app.amber.feature.task.AgentTaskSnapshot

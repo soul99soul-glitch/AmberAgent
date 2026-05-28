@@ -16,7 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import app.amber.feature.board.hotlist.HotListItem
 import app.amber.feature.board.hotlist.HotListProvider
 import app.amber.feature.board.hotlist.HotListResult
-import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
+import app.amber.agent.data.db.entity.HotListSourceEntity
 import okhttp3.OkHttpClient
 import okhttp3.Request
 

@@ -5,7 +5,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import java.io.File
 
 fun createAudioRecordOnceTool(context: Context, deps: SystemAccessDeps): Tool = Tool(

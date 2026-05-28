@@ -26,8 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
-import me.rerere.rikkahub.data.db.entity.MiniAppVersionEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppVersionEntity
 import app.amber.feature.ui.theme.JetbrainsMono
 
 @Composable

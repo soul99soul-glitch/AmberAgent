@@ -2,11 +2,11 @@ package app.amber.core.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.provider.CustomBody
-import me.rerere.ai.provider.CustomHeader
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.core.ReasoningLevel
+import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.core.ReasoningLevel
 import app.amber.core.model.LocalToolOption
 import app.amber.core.model.MemoryKind
 import app.amber.core.model.MemoryScope

@@ -1,6 +1,6 @@
 package app.amber.feature.webmount.adapters.juejin
 
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.feature.webmount.cookie.EndpointSpec
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.core.WebMountAdapter

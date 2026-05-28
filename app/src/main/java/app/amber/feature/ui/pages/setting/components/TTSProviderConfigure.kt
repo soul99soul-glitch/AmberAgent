@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.OutlinedNumberInput
-import me.rerere.tts.provider.TTSProviderSetting
+import app.amber.tts.provider.TTSProviderSetting
 
 @Composable
 fun TTSProviderConfigure(

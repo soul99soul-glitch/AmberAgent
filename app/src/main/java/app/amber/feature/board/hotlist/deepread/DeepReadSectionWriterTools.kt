@@ -13,9 +13,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.board.hotlist.HotListRepository
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference

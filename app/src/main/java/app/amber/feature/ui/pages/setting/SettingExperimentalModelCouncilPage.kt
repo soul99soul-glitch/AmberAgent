@@ -29,9 +29,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import app.amber.agent.R
@@ -330,7 +330,7 @@ fun SettingExperimentalModelCouncilPage(
 private fun ModelCouncilSeatEditor(
     index: Int,
     seat: ModelCouncilSeat,
-    settingsProviders: List<me.rerere.ai.provider.ProviderSetting>,
+    settingsProviders: List<app.amber.ai.provider.ProviderSetting>,
     onSeatChanged: (ModelCouncilSeat) -> Unit,
     onPresetSelected: (app.amber.feature.modelcouncil.ModelCouncilRolePreset) -> Unit,
     onDelete: () -> Unit,

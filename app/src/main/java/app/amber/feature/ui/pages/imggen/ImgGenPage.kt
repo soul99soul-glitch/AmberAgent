@@ -83,8 +83,8 @@ import coil3.compose.AsyncImage
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.ui.ImageAspectRatio
+import app.amber.ai.provider.ModelType
+import app.amber.ai.ui.ImageAspectRatio
 import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.files.FilesManager

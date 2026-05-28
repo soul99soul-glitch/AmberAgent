@@ -6,13 +6,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.hasUsableAuth
-import me.rerere.ai.registry.ModelRegistry
+import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.hasUsableAuth
+import app.amber.ai.registry.ModelRegistry
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT
@@ -28,9 +28,6 @@ import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.subagent.SubAgentRuntimeSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.core.ai.GenerationRetrySetting
-import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
-import app.amber.core.settings.migration.PreferenceStoreV2Migration
-import app.amber.core.settings.migration.PreferenceStoreV3Migration
 import app.amber.core.context.CompactPolicy
 import app.amber.core.memory.model.MemoryRecallSetting
 import app.amber.core.memory.model.MemoryWorkerSetting
@@ -49,9 +46,9 @@ import app.amber.core.sync.s3.S3Config
 // free of UI/Compose-flavored dependencies. The themeId field stores a
 // String anyway, so no behavior change.
 import app.amber.core.agent.utils.JsonInstant
-import me.rerere.search.SearchCommonOptions
-import me.rerere.search.SearchServiceOptions
-import me.rerere.tts.provider.TTSProviderSetting
+import app.amber.search.SearchCommonOptions
+import app.amber.search.SearchServiceOptions
+import app.amber.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 
 
@@ -63,13 +60,7 @@ const val DEFAULT_PRESET_THEME_ID = "amberagent_clash"
 
 val Context.settingsStore by preferencesDataStore(
     name = "settings",
-    produceMigrations = { context ->
-        listOf(
-            PreferenceStoreV1Migration(),
-            PreferenceStoreV2Migration(),
-            PreferenceStoreV3Migration()
-        )
-    }
+    produceMigrations = { emptyList() }
 )
 
 

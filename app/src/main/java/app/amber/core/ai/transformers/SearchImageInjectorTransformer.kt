@@ -1,9 +1,9 @@
 package app.amber.core.ai.transformers
 
 import android.util.Log
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray

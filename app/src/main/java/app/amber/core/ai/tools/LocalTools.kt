@@ -1,7 +1,7 @@
 package app.amber.core.ai.tools
 
 import android.content.Context
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.core.model.LocalToolOption
 import app.amber.core.event.AppEventBus
 import app.amber.feature.system.AgentPermissionBroker

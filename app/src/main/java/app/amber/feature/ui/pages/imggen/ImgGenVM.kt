@@ -17,10 +17,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import me.rerere.ai.ui.ImageAspectRatio
+import app.amber.ai.ui.ImageAspectRatio
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findModelById
-import me.rerere.rikkahub.data.db.entity.GenMediaEntity
+import app.amber.agent.data.db.entity.GenMediaEntity
 import app.amber.core.files.FilesManager
 import app.amber.core.repository.GenMediaRepository
 import app.amber.core.repository.ImageGenerationRepository

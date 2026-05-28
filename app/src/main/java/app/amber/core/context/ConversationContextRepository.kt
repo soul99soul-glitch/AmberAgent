@@ -2,11 +2,11 @@ package app.amber.core.context
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.db.dao.ConversationCompactDAO
-import me.rerere.rikkahub.data.db.dao.ConversationContextEventDAO
-import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
-import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
+import app.amber.ai.ui.UIMessage
+import app.amber.agent.data.db.dao.ConversationCompactDAO
+import app.amber.agent.data.db.dao.ConversationContextEventDAO
+import app.amber.agent.data.db.entity.ConversationCompactEntity
+import app.amber.agent.data.db.entity.ConversationContextEventEntity
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.JsonInstant

@@ -20,13 +20,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.core.settings.prefs.NativePathPrefs
-import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.agent.BuildConfig
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.db.AppDatabase
-import me.rerere.rikkahub.data.db.fts.MessageFtsManager
+import app.amber.agent.data.db.AppDatabase
+import app.amber.agent.data.db.fts.MessageFtsManager
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
 import java.io.File

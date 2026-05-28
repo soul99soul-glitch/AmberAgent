@@ -27,7 +27,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.ai.generative.GenerativeWidgetParser

@@ -3,8 +3,8 @@ package app.amber.feature.board.collector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.amber.feature.board.BoardSignalSourceType
-import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
-import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
+import app.amber.agent.data.db.dao.DocChangeLogDAO
+import app.amber.agent.data.db.dao.DocSubscriptionDAO
 
 /**
  * Bridges the document radar change log into the Today Board signal stream.

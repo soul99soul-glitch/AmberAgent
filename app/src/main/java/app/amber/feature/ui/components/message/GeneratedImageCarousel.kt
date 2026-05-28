@@ -52,7 +52,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Share2
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.feature.ui.components.ui.workspaceColors

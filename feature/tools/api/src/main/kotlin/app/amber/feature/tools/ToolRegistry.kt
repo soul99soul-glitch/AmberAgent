@@ -8,9 +8,9 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
 import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS

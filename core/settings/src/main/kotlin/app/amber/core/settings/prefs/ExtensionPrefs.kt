@@ -24,7 +24,7 @@ import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.toMutableStateFlow
-import me.rerere.tts.provider.TTSProviderSetting
+import app.amber.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 
 data class ExtensionPrefsData(

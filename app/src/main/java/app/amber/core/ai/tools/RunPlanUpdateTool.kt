@@ -5,9 +5,9 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 
 /**
  * Factory for the `run_plan_update` agent tool — lets a long-running task

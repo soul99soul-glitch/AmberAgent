@@ -11,12 +11,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.AppScope
+import app.amber.agent.AppScope
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.files.FilesManager
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ChatService
-import me.rerere.rikkahub.web.startWebServer
+import app.amber.agent.web.startWebServer
 import java.net.ServerSocket
 
 private const val TAG = "WebServerManager"

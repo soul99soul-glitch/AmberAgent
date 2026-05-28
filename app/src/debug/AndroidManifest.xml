@@ -7,11 +7,11 @@
       android:enabled="true"
       android:exported="true">
       <intent-filter>
-        <action android:name="me.rerere.amberagent.debug.SMOKE_TERMINAL" />
-        <action android:name="me.rerere.amberagent.debug.SMOKE_SCREEN" />
-        <action android:name="me.rerere.amberagent.debug.SMOKE_SCREENSHOT" />
-        <action android:name="me.rerere.amberagent.debug.SMOKE_SYSTEM_ACCESS" />
-        <action android:name="me.rerere.amberagent.debug.SMOKE_AGENT_TOOL" />
+        <action android:name="app.amber.agent.debug.SMOKE_TERMINAL" />
+        <action android:name="app.amber.agent.debug.SMOKE_SCREEN" />
+        <action android:name="app.amber.agent.debug.SMOKE_SCREENSHOT" />
+        <action android:name="app.amber.agent.debug.SMOKE_SYSTEM_ACCESS" />
+        <action android:name="app.amber.agent.debug.SMOKE_AGENT_TOOL" />
       </intent-filter>
     </receiver>
   </application>

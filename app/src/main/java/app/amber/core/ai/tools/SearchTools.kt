@@ -8,16 +8,16 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
 import app.amber.core.utils.JsonInstantPretty
 import app.amber.core.utils.toLocalString
-import me.rerere.search.JinaSearchService
-import me.rerere.search.ScrapedResult
-import me.rerere.search.SearchService
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.JinaSearchService
+import app.amber.search.ScrapedResult
+import app.amber.search.SearchService
+import app.amber.search.SearchServiceOptions
 import java.time.LocalDate
 
 fun createSearchTools(settings: Settings): Set<Tool> {

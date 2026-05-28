@@ -4,7 +4,7 @@ import app.amber.feature.webmount.cookie.EndpointSpec
 
 /**
  * Lifecycle state of a WebMount station as surfaced to the unified panel.
- * Mirrors [me.rerere.rikkahub.data.agent.icloud.ICloudDriveStatus] for the
+ * Mirrors [app.amber.agent.data.agent.icloud.ICloudDriveStatus] for the
  * iCloud prototype but adds [DEGRADED] for "auth still valid but the site is
  * rate-limiting / captcha-challenging us".
  */

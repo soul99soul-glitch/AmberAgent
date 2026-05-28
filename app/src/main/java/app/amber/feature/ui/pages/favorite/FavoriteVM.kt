@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.db.entity.FavoriteEntity
+import app.amber.agent.data.db.entity.FavoriteEntity
 import app.amber.core.favorite.NodeFavoriteAdapter
 import app.amber.core.model.FavoriteType
 import app.amber.core.repository.FavoriteRepository

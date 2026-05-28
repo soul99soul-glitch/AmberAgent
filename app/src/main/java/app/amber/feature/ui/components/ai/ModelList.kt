@@ -74,14 +74,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.GoogleAuthMode
-import me.rerere.ai.provider.Modality
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelAbility
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.OpenAIAuthMode
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.providers.isCodexOAuthReviewModel
+import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.Modality
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.providers.isCodexOAuthReviewModel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -97,7 +97,7 @@ import me.rerere.hugeicons.stroke.Text
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Wrench01
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -682,7 +682,7 @@ private fun ColumnScope.ModelList(
                     Column {
                         groupModels.forEachIndexed { idx, model ->
                             val isActive = model.id == currentModel
-                            val hasReasoning = model.abilities.contains(me.rerere.ai.provider.ModelAbility.REASONING)
+                            val hasReasoning = model.abilities.contains(app.amber.ai.provider.ModelAbility.REASONING)
                             if (idx > 0) {
                                 Box(
                                     modifier = Modifier
@@ -923,7 +923,7 @@ private fun V3CapabilityIcons(model: Model, tint: Color) {
             tint = tint,
         )
         // tool wrench —— TOOL ability
-        if (model.abilities.contains(me.rerere.ai.provider.ModelAbility.TOOL)) {
+        if (model.abilities.contains(app.amber.ai.provider.ModelAbility.TOOL)) {
             Icon(
                 imageVector = HugeIcons.Wrench01,
                 contentDescription = "tool",
@@ -932,7 +932,7 @@ private fun V3CapabilityIcons(model: Model, tint: Color) {
             )
         }
         // sci/magic —— REASONING ability（设计稿是原子/sci 图标，库里最接近 AiMagic）
-        if (model.abilities.contains(me.rerere.ai.provider.ModelAbility.REASONING)) {
+        if (model.abilities.contains(app.amber.ai.provider.ModelAbility.REASONING)) {
             Icon(
                 imageVector = HugeIcons.AiMagic,
                 contentDescription = "reasoning",
@@ -1038,9 +1038,9 @@ private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
     return isCodexOAuthProvider() && model.isCodexOAuthReviewModel()
 }
 
-// V3: hasUsableAuth 已迁到 me.rerere.ai.provider.hasUsableAuth (ai/ProviderSetting.kt),
+// V3: hasUsableAuth 已迁到 app.amber.ai.provider.hasUsableAuth (ai/ProviderSetting.kt),
 // picker (这里) 和 data 层 fallback 共用同一份判定 (避免 picker 显示但 fallback 漏选
-// 出无 auth 的模型). 调用方直接 import me.rerere.ai.provider.hasUsableAuth.
+// 出无 auth 的模型). 调用方直接 import app.amber.ai.provider.hasUsableAuth.
 
 /**
  * Phase 3.5 thinking-level segment —— model-picker.jsx 的 ThinkingLevel 段控。
@@ -1062,13 +1062,13 @@ private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
  *  - Kimi / GLM: off/auto (2 段)
  *  - 默认: off/auto/low/med/high/max (6 段)
  */
-internal fun reasoningLevelsForModel(model: Model): List<Pair<me.rerere.ai.core.ReasoningLevel, String>> {
+internal fun reasoningLevelsForModel(model: Model): List<Pair<app.amber.ai.core.ReasoningLevel, String>> {
     val id = model.modelId.lowercase()
     return when {
         id.contains("deepseek") -> listOf(
-            me.rerere.ai.core.ReasoningLevel.OFF to "off",
-            me.rerere.ai.core.ReasoningLevel.HIGH to "high",
-            me.rerere.ai.core.ReasoningLevel.MAX to "max",
+            app.amber.ai.core.ReasoningLevel.OFF to "off",
+            app.amber.ai.core.ReasoningLevel.HIGH to "high",
+            app.amber.ai.core.ReasoningLevel.MAX to "max",
         )
         // Claude (Anthropic) extended thinking + adaptive auto：
         // Anthropic 在 claude-sonnet-4.5 / opus-4.1 起暴露 thinking_budget=auto，模型自己
@@ -1076,35 +1076,35 @@ internal fun reasoningLevelsForModel(model: Model): List<Pair<me.rerere.ai.core.
         // 作为首段，方便用户日常聊天直接选 "让 Claude 自己决定" 而不用挑 low/med/high。
         // 段集：auto / low / med / high / xhigh / max (6 段)
         id.contains("claude") -> listOf(
-            me.rerere.ai.core.ReasoningLevel.AUTO to "auto",
-            me.rerere.ai.core.ReasoningLevel.LOW to "low",
-            me.rerere.ai.core.ReasoningLevel.MEDIUM to "med",
-            me.rerere.ai.core.ReasoningLevel.HIGH to "high",
-            me.rerere.ai.core.ReasoningLevel.XHIGH to "xhigh",
-            me.rerere.ai.core.ReasoningLevel.MAX to "max",
+            app.amber.ai.core.ReasoningLevel.AUTO to "auto",
+            app.amber.ai.core.ReasoningLevel.LOW to "low",
+            app.amber.ai.core.ReasoningLevel.MEDIUM to "med",
+            app.amber.ai.core.ReasoningLevel.HIGH to "high",
+            app.amber.ai.core.ReasoningLevel.XHIGH to "xhigh",
+            app.amber.ai.core.ReasoningLevel.MAX to "max",
         )
         id.contains("gpt") || id.contains("o1") || id.contains("o3") || id.contains("o4") -> listOf(
-            me.rerere.ai.core.ReasoningLevel.LOW to "low",
-            me.rerere.ai.core.ReasoningLevel.MEDIUM to "med",
-            me.rerere.ai.core.ReasoningLevel.HIGH to "high",
-            me.rerere.ai.core.ReasoningLevel.XHIGH to "xhigh",
+            app.amber.ai.core.ReasoningLevel.LOW to "low",
+            app.amber.ai.core.ReasoningLevel.MEDIUM to "med",
+            app.amber.ai.core.ReasoningLevel.HIGH to "high",
+            app.amber.ai.core.ReasoningLevel.XHIGH to "xhigh",
         )
         id.contains("kimi") || id.contains("glm") || id.contains("zhipu") -> listOf(
-            me.rerere.ai.core.ReasoningLevel.OFF to "off",
-            me.rerere.ai.core.ReasoningLevel.AUTO to "auto",
+            app.amber.ai.core.ReasoningLevel.OFF to "off",
+            app.amber.ai.core.ReasoningLevel.AUTO to "auto",
         )
         else -> listOf(
-            me.rerere.ai.core.ReasoningLevel.OFF to "off",
-            me.rerere.ai.core.ReasoningLevel.AUTO to "auto",
+            app.amber.ai.core.ReasoningLevel.OFF to "off",
+            app.amber.ai.core.ReasoningLevel.AUTO to "auto",
         )
     }
 }
 
 @Composable
 internal fun ThinkingLevelSegment(
-    levels: List<Pair<me.rerere.ai.core.ReasoningLevel, String>>,
-    current: me.rerere.ai.core.ReasoningLevel,
-    onChange: (me.rerere.ai.core.ReasoningLevel) -> Unit,
+    levels: List<Pair<app.amber.ai.core.ReasoningLevel, String>>,
+    current: app.amber.ai.core.ReasoningLevel,
+    onChange: (app.amber.ai.core.ReasoningLevel) -> Unit,
 ) {
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     // V3 紧凑段控: 外 padding 1.5dp + 内段 vertical 1dp + 字号 10sp (再压扁一档)

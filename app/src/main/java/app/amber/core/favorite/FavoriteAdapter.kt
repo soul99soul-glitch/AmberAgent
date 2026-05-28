@@ -1,6 +1,6 @@
 package app.amber.core.favorite
 
-import me.rerere.rikkahub.data.db.entity.FavoriteEntity
+import app.amber.agent.data.db.entity.FavoriteEntity
 import app.amber.core.model.FavoriteType
 
 interface FavoriteAdapter<T> {

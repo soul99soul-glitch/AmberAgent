@@ -1,6 +1,6 @@
 package app.amber.core.service.orchestrator
 
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.model.Conversation
 import app.amber.core.service.ChatService
 import kotlin.uuid.Uuid

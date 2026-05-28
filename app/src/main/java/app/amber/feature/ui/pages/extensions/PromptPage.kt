@@ -79,7 +79,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.ai.core.MessageRole
+import app.amber.ai.core.MessageRole
 import app.amber.agent.R
 import app.amber.core.export.LorebookSerializer
 import app.amber.core.export.ModeInjectionSerializer

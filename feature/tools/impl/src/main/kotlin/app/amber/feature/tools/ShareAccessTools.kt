@@ -5,7 +5,7 @@ import android.content.Intent
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 

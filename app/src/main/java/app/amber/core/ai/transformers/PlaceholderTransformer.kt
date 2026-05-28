@@ -6,9 +6,9 @@ import android.os.Build
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import me.rerere.ai.provider.Model
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.provider.Model
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.R
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant

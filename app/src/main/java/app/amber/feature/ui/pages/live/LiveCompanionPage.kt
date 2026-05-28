@@ -71,7 +71,7 @@ import me.rerere.hugeicons.stroke.Play
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.VolumeHigh
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
 import app.amber.feature.ui.components.nav.BackButton

@@ -1,18 +1,18 @@
 package app.amber.feature.runtime
 
-import me.rerere.rikkahub.data.agent.AgentNotificationActionReceiver
+import app.amber.agent.feature.runtime.AgentNotificationActionReceiver
 
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import androidx.core.app.NotificationCompat
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
-import me.rerere.rikkahub.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
+import app.amber.agent.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
 import app.amber.core.utils.NotificationActionConfig
 import app.amber.core.utils.XiaomiSuperIslandConfig

@@ -23,7 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.ui.components.ai.ExtensionEmptyState
 import app.amber.feature.ui.components.ai.LorebooksContent
 import app.amber.feature.ui.components.ai.ModeInjectionsContent

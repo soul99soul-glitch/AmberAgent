@@ -1,6 +1,6 @@
 package app.amber.core.service
 
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.AssistantAffectScope

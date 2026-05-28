@@ -1,7 +1,7 @@
 package app.amber.core.ai
 
-import me.rerere.common.android.LogEntry
-import me.rerere.common.android.Logging
+import app.amber.common.android.LogEntry
+import app.amber.common.android.Logging
 import okhttp3.Interceptor
 import okhttp3.Response
 import okio.Buffer

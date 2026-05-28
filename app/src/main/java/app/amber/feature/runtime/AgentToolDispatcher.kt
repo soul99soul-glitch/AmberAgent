@@ -14,9 +14,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.runtime.toAgentToolFailurePayload
 import app.amber.core.ai.GenerationFailureClassifier
 import app.amber.core.ai.GenerationRetrySetting

@@ -14,14 +14,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import me.rerere.tts.model.PlaybackState
+import app.amber.tts.model.PlaybackState
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getSelectedTTSProvider
 import app.amber.core.utils.stripMarkdown
-import me.rerere.tts.model.TTSResponse
-import me.rerere.tts.provider.TTSManager
-import me.rerere.tts.provider.TTSProviderSetting
-import me.rerere.tts.controller.TtsController
+import app.amber.tts.model.TTSResponse
+import app.amber.tts.provider.TTSManager
+import app.amber.tts.provider.TTSProviderSetting
+import app.amber.tts.controller.TtsController
 import org.koin.compose.koinInject
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -121,7 +121,7 @@ private class CustomTtsStateImpl(
 ) : CustomTtsState, KoinComponent {
 
     private val ttsManager by inject<TTSManager>()
-    private val controller by lazy { me.rerere.tts.controller.TtsController(context, ttsManager) }
+    private val controller by lazy { app.amber.tts.controller.TtsController(context, ttsManager) }
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var currentJob: Job? = null

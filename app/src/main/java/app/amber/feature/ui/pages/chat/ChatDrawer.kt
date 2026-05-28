@@ -71,7 +71,7 @@ import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.TransactionHistory
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.ui.Greeting

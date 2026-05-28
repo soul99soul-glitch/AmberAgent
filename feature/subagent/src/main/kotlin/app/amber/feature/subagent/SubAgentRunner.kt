@@ -1,11 +1,11 @@
 package app.amber.feature.subagent
 
 import kotlinx.coroutines.flow.MutableStateFlow
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.Generator
 import app.amber.feature.runtime.ToolInvocationContext

@@ -31,7 +31,7 @@ use regex::Regex;
 /// - `null` on JString conversion failure or panic (Kotlin adapter falls back
 ///   to the JVM implementation)
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_rikkahub_data_model_nativebridge_RegexTransformerNative_applyRegexesNative<'local>(
+pub extern "system" fn Java_app_amber_agent_data_model_nativebridge_RegexTransformerNative_applyRegexesNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     input: JString<'local>,

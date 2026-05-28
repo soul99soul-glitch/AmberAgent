@@ -1,6 +1,6 @@
 package app.amber.feature.board.collector
 
-import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
+import app.amber.agent.data.db.entity.BoardSignalEntity
 
 /**
  * Raw, pre-persistence shape of a captured signal. Collectors emit these; the aggregator

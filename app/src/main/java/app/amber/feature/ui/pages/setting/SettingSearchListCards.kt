@@ -60,8 +60,8 @@ import app.amber.core.settings.Settings
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
-import me.rerere.search.SearchCommonOptions
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchCommonOptions
+import app.amber.search.SearchServiceOptions
 import sh.calvin.reorderable.ReorderableColumn
 import kotlin.uuid.Uuid
 

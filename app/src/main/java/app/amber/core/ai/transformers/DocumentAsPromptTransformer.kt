@@ -4,13 +4,13 @@ import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.document.DocxParser
-import me.rerere.document.EpubParser
-import me.rerere.document.PdfParser
-import me.rerere.document.PptxParser
-import me.rerere.document.nativebridge.OfficeNativeSwitch
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.document.DocxParser
+import app.amber.document.EpubParser
+import app.amber.document.PdfParser
+import app.amber.document.PptxParser
+import app.amber.document.nativebridge.OfficeNativeSwitch
 import java.io.File
 
 object DocumentAsPromptTransformer : InputMessageTransformer {

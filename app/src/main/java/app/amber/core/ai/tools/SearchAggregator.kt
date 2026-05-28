@@ -16,10 +16,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.core.settings.Settings
 import app.amber.core.utils.toLocalString
-import me.rerere.search.SearchCommonOptions
-import me.rerere.search.SearchResult
-import me.rerere.search.SearchService
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchCommonOptions
+import app.amber.search.SearchResult
+import app.amber.search.SearchService
+import app.amber.search.SearchServiceOptions
 import java.net.URI
 import java.time.LocalDate
 import java.util.Locale

@@ -43,10 +43,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.provider.providers.defaultCodexOAuthModelList
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.providers.defaultCodexOAuthModelList
+import app.amber.ai.ui.UIMessage
 import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.nav.BackButton

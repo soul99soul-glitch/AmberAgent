@@ -9,10 +9,10 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.MessageRole
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_WAIT_TIMEOUT_MS
 import app.amber.feature.modelcouncil.ExternalCliToolRegistry
 import app.amber.feature.modelcouncil.ModelCouncilManager

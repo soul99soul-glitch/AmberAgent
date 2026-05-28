@@ -20,11 +20,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.common.android.Logging
-import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.common.android.Logging
+import app.amber.agent.AppScope
+import app.amber.agent.data.db.entity.ManagedFileEntity
 import app.amber.core.repository.FilesRepository
 import app.amber.core.utils.exportImage
 import app.amber.core.utils.exportImageFile

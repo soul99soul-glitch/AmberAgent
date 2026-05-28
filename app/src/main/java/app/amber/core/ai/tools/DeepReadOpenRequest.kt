@@ -1,6 +1,6 @@
 package app.amber.core.ai.tools
 
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.event.AppEvent
 import java.net.URI
 import java.security.MessageDigest

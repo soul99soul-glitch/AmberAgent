@@ -15,7 +15,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 
 fun createBatteryStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "battery_status",

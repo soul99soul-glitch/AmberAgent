@@ -37,11 +37,11 @@ import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.SlidersHorizontal
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.GoogleAuthMode
-import me.rerere.ai.provider.OpenAIAuthMode
-import me.rerere.ai.provider.OpenAIBrand
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.fixedBaseUrl
+import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.fixedBaseUrl
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import app.amber.agent.R

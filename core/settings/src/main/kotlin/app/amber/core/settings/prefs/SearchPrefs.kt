@@ -15,8 +15,8 @@ import app.amber.core.infra.AppScope
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.toMutableStateFlow
-import me.rerere.search.SearchCommonOptions
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchCommonOptions
+import app.amber.search.SearchServiceOptions
 import kotlin.uuid.Uuid
 
 data class SearchPrefsData(

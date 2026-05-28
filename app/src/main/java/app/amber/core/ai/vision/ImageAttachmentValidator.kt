@@ -1,10 +1,10 @@
 package app.amber.core.ai.vision
 
-import me.rerere.ai.provider.Modality
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.util.ImageEncodingException
-import me.rerere.ai.util.encodeBase64
+import app.amber.ai.provider.Modality
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.util.ImageEncodingException
+import app.amber.ai.util.encodeBase64
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider

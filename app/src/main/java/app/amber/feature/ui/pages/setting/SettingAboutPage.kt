@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import app.amber.agent.BuildConfig
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.easteregg.EmojiBurstHost
 import app.amber.feature.ui.components.ui.CardGroup

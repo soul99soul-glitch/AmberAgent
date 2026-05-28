@@ -6,11 +6,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.OpenAIBrand
-import me.rerere.ai.provider.OpenAIAuthMode
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.common.http.await
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.ProviderSetting
+import app.amber.common.http.await
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request

@@ -10,9 +10,9 @@ import app.amber.feature.chat.api.ChatEventPayload
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.repository.ConversationRepository

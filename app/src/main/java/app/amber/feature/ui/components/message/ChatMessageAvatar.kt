@@ -18,10 +18,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.datetime.toJavaLocalDateTime
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.provider.Model
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.isEmptyUIMessage
+import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.Model
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.R
 import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar

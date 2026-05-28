@@ -1,7 +1,7 @@
 package app.amber.feature.webmount.core
 
 import kotlinx.serialization.json.JsonElement
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.cookie.EndpointSpec
 import app.amber.feature.webmount.cookie.WebMountCookieProvider

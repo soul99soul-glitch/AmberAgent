@@ -8,8 +8,8 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.route
 import io.ktor.server.sse.heartbeat
 import io.ktor.server.sse.sse
-import me.rerere.ai.provider.BuiltInTools
-import me.rerere.ai.provider.ModelType
+import app.amber.ai.provider.BuiltInTools
+import app.amber.ai.provider.ModelType
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findModelById
 import app.amber.core.utils.JsonInstant

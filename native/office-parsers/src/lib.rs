@@ -83,7 +83,7 @@ where
 /// Standard JNI signature; receives an environment pointer and arguments owned
 /// by the JVM. All Rust panics are caught.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_parseDocxNative<'local>(
+pub extern "system" fn Java_app_amber_document_nativebridge_OfficeParserNative_parseDocxNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     path: JString<'local>,
@@ -98,7 +98,7 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
 
 /// JNI entry: `OfficeParserNative.parsePptxNative(path: String): String`.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_parsePptxNative<'local>(
+pub extern "system" fn Java_app_amber_document_nativebridge_OfficeParserNative_parsePptxNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     path: JString<'local>,
@@ -113,7 +113,7 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
 
 /// JNI entry: `OfficeParserNative.parseEpubNative(path: String): String`.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_parseEpubNative<'local>(
+pub extern "system" fn Java_app_amber_document_nativebridge_OfficeParserNative_parseEpubNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     path: JString<'local>,
@@ -131,7 +131,7 @@ pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_p
 /// Phase 3 D-1 — net-new (no JVM `XlsxParser` exists). Markdown-pipe-table
 /// representation of every sheet, see `xlsx::parse_to_markdown`.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_document_nativebridge_OfficeParserNative_parseXlsxNative<'local>(
+pub extern "system" fn Java_app_amber_document_nativebridge_OfficeParserNative_parseXlsxNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     path: JString<'local>,

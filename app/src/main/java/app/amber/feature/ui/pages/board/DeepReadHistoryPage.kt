@@ -26,7 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.board.hotlist.DeepReadHistoryItem
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.ui.components.nav.BackButton

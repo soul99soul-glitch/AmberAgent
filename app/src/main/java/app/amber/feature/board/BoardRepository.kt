@@ -1,16 +1,16 @@
 package app.amber.feature.board
 
 import kotlinx.coroutines.flow.Flow
-import me.rerere.rikkahub.data.db.dao.BoardFocusRuleDAO
-import me.rerere.rikkahub.data.db.dao.BoardItemDAO
-import me.rerere.rikkahub.data.db.dao.BoardSignalDAO
-import me.rerere.rikkahub.data.db.dao.BoardWeightDAO
-import me.rerere.rikkahub.data.db.dao.DailyReviewDAO
-import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
-import me.rerere.rikkahub.data.db.entity.BoardItemEntity
-import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
-import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
-import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
+import app.amber.agent.data.db.dao.BoardFocusRuleDAO
+import app.amber.agent.data.db.dao.BoardItemDAO
+import app.amber.agent.data.db.dao.BoardSignalDAO
+import app.amber.agent.data.db.dao.BoardWeightDAO
+import app.amber.agent.data.db.dao.DailyReviewDAO
+import app.amber.agent.data.db.entity.BoardFocusRuleEntity
+import app.amber.agent.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.BoardSignalEntity
+import app.amber.agent.data.db.entity.BoardWeightEntity
+import app.amber.agent.data.db.entity.DailyReviewEntity
 import java.time.ZoneId
 
 /**

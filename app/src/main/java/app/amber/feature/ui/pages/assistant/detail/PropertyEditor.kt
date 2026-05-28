@@ -28,9 +28,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
-import me.rerere.ai.provider.CustomBody
-import me.rerere.ai.provider.CustomHeader
-import me.rerere.highlight.LocalHighlighter
+import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
+import app.amber.highlight.LocalHighlighter
 import app.amber.agent.R
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.richtext.HighlightCodeVisualTransformation

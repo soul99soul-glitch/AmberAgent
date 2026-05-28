@@ -11,8 +11,7 @@ import app.amber.core.files.SkillPaths
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.WebDavConfig
-import app.amber.core.settings.migration.SettingsJsonMigrator
-import me.rerere.rikkahub.data.db.AppDatabase
+import app.amber.agent.data.db.AppDatabase
 import app.amber.core.sync.copyZipEntryToFile
 import app.amber.core.sync.databaseTempFile
 import app.amber.core.sync.encodeSettingsForBackup
@@ -250,7 +249,7 @@ class WebDavSync(
                             val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
                             Log.i(TAG, "restoreFromBackupFile: Restoring settings")
                             try {
-                                val migratedJson = SettingsJsonMigrator.migrate(settingsJson)
+                                val migratedJson = settingsJson
                                 val settings = json.decodeFromString<Settings>(migratedJson)
                                 settingsStore.update(settings)
                                 Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")

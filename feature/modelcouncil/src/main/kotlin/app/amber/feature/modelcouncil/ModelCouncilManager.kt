@@ -26,11 +26,11 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.infra.AppScope
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskOutputRef

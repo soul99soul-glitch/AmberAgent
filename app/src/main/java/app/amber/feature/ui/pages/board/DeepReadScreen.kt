@@ -113,7 +113,7 @@ fun DeepReadScreen(
     fromHistory: Boolean = false,
 ) {
     // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
-    if (me.rerere.rikkahub.PerfFlags.USE_SPLIT_DEEPREAD_SCREEN) {
+    if (app.amber.agent.PerfFlags.USE_SPLIT_DEEPREAD_SCREEN) {
         DeepReadScreenSplit(
             topicId = topicId,
             title = title,

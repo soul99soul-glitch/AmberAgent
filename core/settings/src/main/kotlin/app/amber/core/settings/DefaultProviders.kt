@@ -1,11 +1,11 @@
 package app.amber.core.settings
 
-import me.rerere.ai.provider.BalanceOption
-import me.rerere.ai.provider.Modality
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.OpenAIBrand
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.provider.BalanceOption
+import app.amber.ai.provider.Modality
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.ProviderSetting
 import app.amber.core.model.QuickMessage
 import kotlin.uuid.Uuid
 

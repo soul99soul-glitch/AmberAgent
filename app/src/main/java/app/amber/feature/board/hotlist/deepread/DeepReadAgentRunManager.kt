@@ -10,11 +10,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import me.rerere.ai.core.Tool
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelAbility
-import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.AppScope
+import app.amber.ai.core.Tool
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.ui.UIMessage
+import app.amber.agent.AppScope
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
 import app.amber.feature.board.hotlist.HotListRepository
@@ -501,7 +501,7 @@ class DeepReadAgentRunManager(
         model: Model,
         messages: List<UIMessage>,
         assistant: app.amber.core.model.Assistant,
-        tools: List<me.rerere.ai.core.Tool>,
+        tools: List<app.amber.ai.core.Tool>,
         writerToolNames: Set<String>,
         statusLabel: String,
     ): List<UIMessage> {
@@ -1148,7 +1148,7 @@ private fun DeepReadGenerationStage.promptExcerptLimit(): Int = when (this) {
 
 private fun List<UIMessage>.latestAssistantText(): String =
     asReversed()
-        .firstOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+        .firstOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
         ?.toText()
         .orEmpty()
 

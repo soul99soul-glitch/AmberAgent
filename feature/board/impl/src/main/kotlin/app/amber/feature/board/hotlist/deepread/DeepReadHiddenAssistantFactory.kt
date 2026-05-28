@@ -1,6 +1,6 @@
 package app.amber.feature.board.hotlist.deepread
 
-import me.rerere.ai.core.ReasoningLevel
+import app.amber.ai.core.ReasoningLevel
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.model.Assistant

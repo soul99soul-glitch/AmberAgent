@@ -30,7 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.ai.provider.ModelType
+import app.amber.ai.provider.ModelType
 import app.amber.agent.R
 import app.amber.core.model.MainAgentToolProfile
 import app.amber.core.model.Assistant
@@ -103,7 +103,7 @@ private fun MainAgentToolProfile.label(): String = when (this) {
 internal fun AssistantBasicContent(
     modifier: Modifier = Modifier,
     assistant: Assistant,
-    providers: List<me.rerere.ai.provider.ProviderSetting>,
+    providers: List<app.amber.ai.provider.ProviderSetting>,
     tags: List<DataTag>,
     onUpdate: (Assistant) -> Unit,
     vm: AssistantDetailVM

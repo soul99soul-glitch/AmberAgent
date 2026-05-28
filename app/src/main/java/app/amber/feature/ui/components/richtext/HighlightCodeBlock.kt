@@ -54,11 +54,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import me.rerere.highlight.HighlightText
-import me.rerere.highlight.HighlightTextColorPalette
-import me.rerere.highlight.Highlighter
-import me.rerere.highlight.LocalHighlighter
-import me.rerere.highlight.buildHighlightText
+import app.amber.highlight.HighlightText
+import app.amber.highlight.HighlightTextColorPalette
+import app.amber.highlight.Highlighter
+import app.amber.highlight.LocalHighlighter
+import app.amber.highlight.buildHighlightText
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
@@ -66,7 +66,7 @@ import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Eye
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.Navigator

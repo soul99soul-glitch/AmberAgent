@@ -11,11 +11,11 @@ import io.ktor.http.HttpHeaders
 import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import io.requery.android.database.sqlite.SQLiteCustomExtension
 import kotlinx.serialization.json.Json
-import me.rerere.ai.provider.providers.google.GoogleGeminiAuthStore
-import me.rerere.ai.provider.providers.google.GoogleGeminiOAuthClient
-import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.common.http.AcceptLanguageBuilder
+import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
+import app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
+import app.amber.ai.provider.ProviderManager
+import app.amber.common.http.AcceptLanguageBuilder
 import app.amber.agent.BuildConfig
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
@@ -36,24 +36,9 @@ import app.amber.core.settings.prefs.SettingsProviderRescue
 import app.amber.core.settings.prefs.UIPrefs
 import app.amber.core.nativepath.NativePathBootstrap
 import app.amber.core.settings.settingsStore
-import me.rerere.rikkahub.data.db.AppDatabase
-import me.rerere.rikkahub.data.db.fts.MessageFtsManager
-import me.rerere.rikkahub.data.db.fts.SimpleDictManager
-import me.rerere.rikkahub.data.db.migrations.Migration_6_7
-import me.rerere.rikkahub.data.db.migrations.Migration_11_12
-import me.rerere.rikkahub.data.db.migrations.Migration_13_14
-import me.rerere.rikkahub.data.db.migrations.Migration_14_15
-import me.rerere.rikkahub.data.db.migrations.Migration_15_16
-import me.rerere.rikkahub.data.db.migrations.Migration_18_19
-import me.rerere.rikkahub.data.db.migrations.Migration_19_20
-import me.rerere.rikkahub.data.db.migrations.Migration_20_21
-import me.rerere.rikkahub.data.db.migrations.Migration_21_22
-import me.rerere.rikkahub.data.db.migrations.Migration_22_23
-import me.rerere.rikkahub.data.db.migrations.Migration_25_26
-import me.rerere.rikkahub.data.db.migrations.Migration_26_27
-import me.rerere.rikkahub.data.db.migrations.Migration_27_28
-import me.rerere.rikkahub.data.db.migrations.Migration_28_29
-import me.rerere.rikkahub.data.db.migrations.Migration_29_30
+import app.amber.agent.data.db.AppDatabase
+import app.amber.agent.data.db.fts.MessageFtsManager
+import app.amber.agent.data.db.fts.SimpleDictManager
 import app.amber.core.ai.mcp.McpManager
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.defaultToolInvocationHooks
@@ -63,7 +48,7 @@ import app.amber.core.sync.google.GoogleDriveAppDataClient
 import app.amber.core.sync.google.GoogleDriveSyncRepository
 import app.amber.core.sync.google.GoogleOAuthConfigGate
 import app.amber.core.sync.local.LocalBackupRepository
-import me.rerere.search.SearchService
+import app.amber.search.SearchService
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.koin.dsl.module
@@ -137,24 +122,7 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(
-                Migration_6_7,
-                Migration_11_12,
-                Migration_13_14,
-                Migration_14_15,
-                Migration_15_16,
-                Migration_18_19,
-                Migration_19_20,
-                Migration_20_21,
-                Migration_21_22,
-                Migration_22_23,
-                Migration_25_26,
-                Migration_26_27,
-                Migration_27_28,
-                Migration_28_29,
-                Migration_29_30,
-            )
-            .addCallback(object : RoomDatabase.Callback() {
+                        .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     val dictDir = SimpleDictManager.extractDict(context)
                     val cursor = db.query("SELECT jieba_dict(?)", arrayOf(dictDir.absolutePath))

@@ -1,8 +1,8 @@
 package app.amber.core.ai.transformers
 
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.miniapp.MiniAppOutputParser
 import app.amber.feature.miniapp.MiniAppRepository
 import org.koin.core.component.KoinComponent

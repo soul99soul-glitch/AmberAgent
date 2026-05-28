@@ -6,7 +6,7 @@ import android.provider.MediaStore
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 
 fun createMediaSearchTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "media_search",

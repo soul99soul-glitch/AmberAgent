@@ -30,8 +30,8 @@ import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.ui.UIMessageAnnotation
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessageAnnotation
+import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.R
 import app.amber.agent.BuildConfig
 import app.amber.feature.ui.components.ui.Favicon

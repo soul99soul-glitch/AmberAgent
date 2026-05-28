@@ -13,8 +13,8 @@ import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.TODAY_BOARD_HARD_MUTE_WEIGHT
 import app.amber.feature.board.collector.BoardSignalCollector
 import app.amber.feature.board.collector.RawBoardSignal
-import me.rerere.rikkahub.data.db.entity.BoardSignalEntity
-import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
+import app.amber.agent.data.db.entity.BoardSignalEntity
+import app.amber.agent.data.db.entity.BoardWeightEntity
 import java.security.MessageDigest
 import kotlin.uuid.Uuid
 

@@ -308,7 +308,7 @@ internal fun TextInputRow(
                             {
                                 val currentModel = settings.getCurrentChatModel()
                                 val hasReasoning = currentModel?.abilities?.contains(
-                                    me.rerere.ai.provider.ModelAbility.REASONING
+                                    app.amber.ai.provider.ModelAbility.REASONING
                                 ) == true
                                 if (hasReasoning) {
                                     SlashCommandThinkingFooter(
@@ -568,9 +568,9 @@ private fun SlashCommandPanel(
 
 @Composable
 private fun SlashCommandThinkingFooter(
-    currentLevel: me.rerere.ai.core.ReasoningLevel,
-    levels: List<Pair<me.rerere.ai.core.ReasoningLevel, String>>,
-    onChange: (me.rerere.ai.core.ReasoningLevel) -> Unit,
+    currentLevel: app.amber.ai.core.ReasoningLevel,
+    levels: List<Pair<app.amber.ai.core.ReasoningLevel, String>>,
+    onChange: (app.amber.ai.core.ReasoningLevel) -> Unit,
 ) {
     val workspace = workspaceColors()
     Column(

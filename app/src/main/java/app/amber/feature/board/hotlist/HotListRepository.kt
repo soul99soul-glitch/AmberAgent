@@ -7,11 +7,11 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
-import me.rerere.rikkahub.data.db.dao.HotListDAO
-import me.rerere.rikkahub.data.db.entity.DeepReadCacheEntity
-import me.rerere.rikkahub.data.db.entity.HotListCacheEntity
-import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
-import me.rerere.rikkahub.data.db.entity.HotTopicCacheEntity
+import app.amber.agent.data.db.dao.HotListDAO
+import app.amber.agent.data.db.entity.DeepReadCacheEntity
+import app.amber.agent.data.db.entity.HotListCacheEntity
+import app.amber.agent.data.db.entity.HotListSourceEntity
+import app.amber.agent.data.db.entity.HotTopicCacheEntity
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 

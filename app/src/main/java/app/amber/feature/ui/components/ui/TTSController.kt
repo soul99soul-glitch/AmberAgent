@@ -36,8 +36,8 @@ import me.rerere.hugeicons.stroke.Pause
 import me.rerere.hugeicons.stroke.Play
 import app.amber.feature.ui.context.LocalTTSState
 import app.amber.feature.ui.hooks.CustomTtsState
-import me.rerere.tts.model.PlaybackState
-import me.rerere.tts.model.PlaybackStatus
+import app.amber.tts.model.PlaybackState
+import app.amber.tts.model.PlaybackStatus
 
 @Composable
 fun TTSController() {

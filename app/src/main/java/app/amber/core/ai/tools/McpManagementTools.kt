@@ -10,9 +10,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.core.utils.JsonInstant
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.mcp.McpManager
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.ai.mcp.McpStatus

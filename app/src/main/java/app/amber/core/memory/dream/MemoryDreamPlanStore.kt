@@ -3,8 +3,8 @@ package app.amber.core.memory.dream
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
-import me.rerere.rikkahub.data.db.dao.MemoryDreamPlanDAO
-import me.rerere.rikkahub.data.db.entity.MemoryDreamPlanEntity
+import app.amber.agent.data.db.dao.MemoryDreamPlanDAO
+import app.amber.agent.data.db.entity.MemoryDreamPlanEntity
 import kotlin.uuid.Uuid
 
 enum class MemoryDreamPlanStatus(val wireName: String) {

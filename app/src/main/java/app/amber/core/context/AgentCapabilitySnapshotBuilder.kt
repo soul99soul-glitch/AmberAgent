@@ -1,7 +1,7 @@
 package app.amber.core.context
 
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessage
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.tools.ToolRegistry
 

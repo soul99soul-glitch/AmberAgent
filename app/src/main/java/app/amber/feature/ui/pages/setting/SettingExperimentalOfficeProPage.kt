@@ -50,9 +50,9 @@ import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.office.FeishuWorkProject
 import app.amber.feature.office.radar.DocRadar
 import app.amber.feature.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
-import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
-import me.rerere.rikkahub.data.db.entity.DocSubscriptionEntity
+import app.amber.agent.data.db.dao.DocChangeLogDAO
+import app.amber.agent.data.db.dao.DocSubscriptionDAO
+import app.amber.agent.data.db.entity.DocSubscriptionEntity
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.core.utils.plus

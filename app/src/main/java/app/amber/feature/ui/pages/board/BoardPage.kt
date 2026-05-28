@@ -69,8 +69,8 @@ import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.TransactionHistory
-import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.Screen.DeepRead
+import app.amber.agent.Screen
+import app.amber.agent.Screen.DeepRead
 import app.amber.feature.board.TodayBoardHotListFilterMode
 import app.amber.feature.board.hotlist.HotListDashboard
 import app.amber.feature.board.hotlist.HOT_LIST_TOPIC_DISPLAY_LIMIT
@@ -78,8 +78,8 @@ import app.amber.feature.board.hotlist.HotListItem
 import app.amber.feature.board.hotlist.HotListProviderSnapshot
 import app.amber.feature.board.hotlist.HotTopic
 import app.amber.feature.board.hotlist.presentationTitle
-import me.rerere.rikkahub.data.db.entity.BoardItemEntity
-import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
+import app.amber.agent.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.DailyReviewEntity
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill

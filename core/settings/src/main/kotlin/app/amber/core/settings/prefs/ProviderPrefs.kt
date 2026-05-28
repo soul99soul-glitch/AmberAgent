@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.provider.ProviderSetting
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.PreferencesKeys

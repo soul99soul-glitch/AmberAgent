@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * JNI bridge to the `json-expr` Rust crate (TD.Rust.2).
  *
- * Drop-in for `me.rerere.common.http.JsonExpression`'s
+ * Drop-in for `app.amber.common.http.JsonExpression`'s
  * `evaluateJsonExpr` + `isJsonExprValid`. When loaded + flag-enabled,
  * routes through the native lexer+parser+evaluator on serde_json. Falls
  * back to the Kotlin implementation on null return / not loaded.

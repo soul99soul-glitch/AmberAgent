@@ -1,8 +1,8 @@
 package app.amber.core.settings.prefs
 
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.OpenAIBrand
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.ProviderSetting
 import app.amber.core.settings.DEFAULT_ASSISTANTS
 import app.amber.core.model.DEFAULT_ASSISTANT_ID
 import app.amber.core.settings.DEFAULT_PROVIDERS

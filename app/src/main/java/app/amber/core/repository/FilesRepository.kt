@@ -1,8 +1,8 @@
 package app.amber.core.repository
 
 import kotlinx.coroutines.flow.Flow
-import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
-import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
+import app.amber.agent.data.db.dao.ManagedFileDAO
+import app.amber.agent.data.db.entity.ManagedFileEntity
 
 class FilesRepository(
     private val dao: ManagedFileDAO,

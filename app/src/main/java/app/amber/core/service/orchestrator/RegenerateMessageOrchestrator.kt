@@ -1,7 +1,7 @@
 package app.amber.core.service.orchestrator
 
 import com.google.firebase.analytics.FirebaseAnalytics
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.service.ChatService
 import kotlin.uuid.Uuid
 

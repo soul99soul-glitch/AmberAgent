@@ -36,16 +36,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.BuiltInTools
-import me.rerere.ai.provider.Model
-import me.rerere.ai.registry.ModelRegistry
+import app.amber.ai.provider.BuiltInTools
+import app.amber.ai.provider.Model
+import app.amber.ai.registry.ModelRegistry
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.AiSearch02
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.ui.components.ui.AutoAIIcon
@@ -53,7 +53,7 @@ import app.amber.feature.ui.components.ui.ToggleSurface
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.pages.setting.SearchAbilityTagLine
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchServiceOptions
 import org.koin.compose.koinInject
 
 @Composable

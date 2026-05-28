@@ -2,9 +2,9 @@ package app.amber.core.context
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 
 object PreparedContextEditor {
     fun edit(

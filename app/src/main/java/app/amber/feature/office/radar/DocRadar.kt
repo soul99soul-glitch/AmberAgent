@@ -17,10 +17,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import app.amber.core.ai.mcp.McpManager
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
-import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
-import me.rerere.rikkahub.data.db.entity.DocChangeLogEntity
-import me.rerere.rikkahub.data.db.entity.DocSubscriptionEntity
+import app.amber.agent.data.db.dao.DocChangeLogDAO
+import app.amber.agent.data.db.dao.DocSubscriptionDAO
+import app.amber.agent.data.db.entity.DocChangeLogEntity
+import app.amber.agent.data.db.entity.DocSubscriptionEntity
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.security.MessageDigest
@@ -249,7 +249,7 @@ class DocRadar(
                 toolName = tool.second,
                 args = args as JsonObject,
             )
-            val text = parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>()
+            val text = parts.filterIsInstance<app.amber.ai.ui.UIMessagePart.Text>()
                 .joinToString("\n") { it.text }
             if (text.isBlank()) return@runCatching null
             FetchedContent(

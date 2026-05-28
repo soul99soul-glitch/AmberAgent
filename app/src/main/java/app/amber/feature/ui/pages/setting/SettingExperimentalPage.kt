@@ -32,7 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import me.rerere.ai.provider.Model
+import app.amber.ai.provider.Model
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.DashboardSquare01
 import me.rerere.hugeicons.stroke.File02
@@ -40,7 +40,7 @@ import me.rerere.hugeicons.stroke.Globe02
 import me.rerere.hugeicons.stroke.News01
 import me.rerere.hugeicons.stroke.ServerStack01
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.office.FeishuOfficeAnalysisTemplate
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup

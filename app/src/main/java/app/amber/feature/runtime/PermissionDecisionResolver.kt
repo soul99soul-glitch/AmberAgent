@@ -5,9 +5,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.tools.ToolInvocationPolicy
 import app.amber.feature.tools.ToolRisk
 import app.amber.feature.tools.invocationPolicy

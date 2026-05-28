@@ -1,7 +1,7 @@
 package app.amber.feature.board.agent
 
 import app.amber.feature.board.aggregator.ScoredSignal
-import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
+import app.amber.agent.data.db.entity.BoardFocusRuleEntity
 
 object BoardPrompt {
     const val MAX_TODO_ITEMS = 5

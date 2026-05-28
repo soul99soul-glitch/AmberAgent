@@ -8,7 +8,7 @@ import app.amber.feature.chat.api.ChatTurnArtifact
 import app.amber.feature.chat.api.ChatTurnDescriptor
 import app.amber.feature.chat.api.ChatTurnInput
 import kotlinx.coroutines.flow.last
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationHandler
 import app.amber.core.service.ConversationAccess
@@ -157,13 +157,13 @@ interface ChatSessionResolver {
 
 data class ChatSession(
     val settings: Settings,
-    val model: me.rerere.ai.provider.Model,
+    val model: app.amber.ai.provider.Model,
     val messages: List<UIMessage>,
     val inputTransformers: List<app.amber.core.ai.transformers.InputMessageTransformer>,
     val outputTransformers: List<app.amber.core.ai.transformers.OutputMessageTransformer>,
     val assistant: Assistant,
     val memories: List<app.amber.core.model.AssistantMemory>?,
-    val tools: List<me.rerere.ai.core.Tool>,
+    val tools: List<app.amber.ai.core.Tool>,
     val autoApproveTools: Boolean,
     val autoApproveHighRiskTools: Boolean,
     val autoApprovedToolNames: Set<String>,

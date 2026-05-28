@@ -10,7 +10,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
-import me.rerere.ai.core.MessageRole
+import app.amber.ai.core.MessageRole
 import app.amber.agent.R
 import app.amber.core.model.Conversation
 

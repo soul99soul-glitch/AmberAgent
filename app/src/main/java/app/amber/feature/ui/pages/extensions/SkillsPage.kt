@@ -57,7 +57,7 @@ import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.SkillFrontmatterParser
 import app.amber.core.files.SkillMetadata
 import app.amber.core.files.SkillScanIssue
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.RikkaConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton

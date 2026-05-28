@@ -1,9 +1,9 @@
 package app.amber.feature.board.agent
 
 import android.util.Log
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.aggregator.ScoredSignal
 import app.amber.feature.board.boardRequestBodies
@@ -12,7 +12,7 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveTaskChatModel
-import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
+import app.amber.agent.data.db.entity.BoardFocusRuleEntity
 import kotlin.uuid.Uuid
 
 /**
@@ -107,7 +107,7 @@ class BoardAgent(
         }.getOrNull()
     }
 
-    private fun resolveModel(settings: Settings): me.rerere.ai.provider.Model? {
+    private fun resolveModel(settings: Settings): app.amber.ai.provider.Model? {
         val boardModelIdStr = settings.agentRuntime.todayBoard.boardModelId
         val specific = boardModelIdStr
             ?.let { runCatching { Uuid.parse(it) }.getOrNull() }

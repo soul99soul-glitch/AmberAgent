@@ -48,7 +48,7 @@ import org.koin.core.parameter.parametersOf
  *    [ChatPage] body in `ChatPage.kt` is untouched.
  *
  * Verifying on device when the flag is flipped:
- *  1. Toggle [me.rerere.rikkahub.PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES] to true; rebuild.
+ *  1. Toggle [app.amber.agent.PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES] to true; rebuild.
  *  2. Open any conversation. You should see the scaffold screen ("T2
  *     ChatPage scaffold active") instead of the normal chat UI. This
  *     confirms the dispatcher works.

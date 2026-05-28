@@ -5,7 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 
 fun createSettingsOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "settings_open",

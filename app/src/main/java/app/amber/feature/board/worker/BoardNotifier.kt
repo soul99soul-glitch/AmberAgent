@@ -9,9 +9,9 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import me.rerere.rikkahub.BOARD_NOTIFICATION_CHANNEL_ID
+import app.amber.agent.BOARD_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
-import me.rerere.rikkahub.RouteActivity
+import app.amber.agent.RouteActivity
 
 /**
  * Surfaces board-update outcomes via system notifications. Low-priority by default -

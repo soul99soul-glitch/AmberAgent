@@ -9,8 +9,8 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import me.rerere.common.oauth.LoopbackOAuthCallbackServer
-import me.rerere.rikkahub.AppScope
+import app.amber.common.oauth.LoopbackOAuthCallbackServer
+import app.amber.agent.AppScope
 import app.amber.feature.webmount.core.WebMountOAuthToken
 import java.util.concurrent.ConcurrentHashMap
 
@@ -292,7 +292,7 @@ class WebMountOAuthClient(
      *  which carries a `provider` tag. The tag is supplied by the caller (always equals
      *  the in-flight [providerId]), so this is a pure projection — same wire data, just
      *  tagged for downstream dispatcher routing if anyone wants to re-emit later. */
-    private fun me.rerere.common.oauth.OAuthCallbackResult.toWebMountCallback(providerId: String): OAuthCallback =
+    private fun app.amber.common.oauth.OAuthCallbackResult.toWebMountCallback(providerId: String): OAuthCallback =
         OAuthCallback(
             provider = providerId,
             code = code,

@@ -1,8 +1,8 @@
 package app.amber.core.repository
 
-import me.rerere.rikkahub.data.db.dao.MemoryCandidateDAO
-import me.rerere.rikkahub.data.db.dao.MemoryDAO
-import me.rerere.rikkahub.data.db.dao.MemoryEventDAO
+import app.amber.agent.data.db.dao.MemoryCandidateDAO
+import app.amber.agent.data.db.dao.MemoryDAO
+import app.amber.agent.data.db.dao.MemoryEventDAO
 
 class MemoryRepository(
     memoryDAO: MemoryDAO,

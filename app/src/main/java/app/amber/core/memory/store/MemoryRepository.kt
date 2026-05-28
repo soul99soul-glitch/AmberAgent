@@ -2,12 +2,12 @@ package app.amber.core.memory.store
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import me.rerere.rikkahub.data.db.dao.MemoryCandidateDAO
-import me.rerere.rikkahub.data.db.dao.MemoryDAO
-import me.rerere.rikkahub.data.db.dao.MemoryEventDAO
-import me.rerere.rikkahub.data.db.entity.MemoryCandidateEntity
-import me.rerere.rikkahub.data.db.entity.MemoryEntity
-import me.rerere.rikkahub.data.db.entity.MemoryEventEntity
+import app.amber.agent.data.db.dao.MemoryCandidateDAO
+import app.amber.agent.data.db.dao.MemoryDAO
+import app.amber.agent.data.db.dao.MemoryEventDAO
+import app.amber.agent.data.db.entity.MemoryCandidateEntity
+import app.amber.agent.data.db.entity.MemoryEntity
+import app.amber.agent.data.db.entity.MemoryEventEntity
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryCandidateStatus
 import app.amber.core.memory.model.MemoryEvent

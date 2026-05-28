@@ -29,7 +29,7 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.core.utils.plus
-import me.rerere.search.SearchServiceOptions
+import app.amber.search.SearchServiceOptions
 import org.koin.androidx.compose.koinViewModel
 
 @Composable

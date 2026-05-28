@@ -8,9 +8,9 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentChatModel
@@ -21,7 +21,7 @@ class ConversationContextTools(
     private val contextEngine: ConversationContextEngine,
     private val conversationProvider: suspend () -> Conversation,
     private val settingsProvider: suspend () -> Settings,
-    private val modelProvider: suspend () -> me.rerere.ai.provider.Model?,
+    private val modelProvider: suspend () -> app.amber.ai.provider.Model?,
 ) {
     fun tools(): List<Tool> = listOf(
         contextStatusTool(),

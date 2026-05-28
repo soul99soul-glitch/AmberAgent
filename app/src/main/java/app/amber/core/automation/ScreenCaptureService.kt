@@ -28,8 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import app.amber.agent.R
-import me.rerere.rikkahub.RouteActivity
-import me.rerere.rikkahub.SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID
+import app.amber.agent.RouteActivity
+import app.amber.agent.SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID
 import org.koin.android.ext.android.inject
 import java.io.File
 import java.time.Instant
@@ -309,9 +309,9 @@ class ScreenCaptureService : Service() {
     }
 
     companion object {
-        const val ACTION_START_SESSION_CAPTURE = "me.rerere.amberagent.action.SCREEN_CAPTURE_START_SESSION"
-        const val ACTION_CAPTURE_EXISTING = "me.rerere.amberagent.action.SCREEN_CAPTURE_EXISTING"
-        const val ACTION_STOP_SESSION = "me.rerere.amberagent.action.SCREEN_CAPTURE_STOP_SESSION"
+        const val ACTION_START_SESSION_CAPTURE = "app.amber.agent.action.SCREEN_CAPTURE_START_SESSION"
+        const val ACTION_CAPTURE_EXISTING = "app.amber.agent.action.SCREEN_CAPTURE_EXISTING"
+        const val ACTION_STOP_SESSION = "app.amber.agent.action.SCREEN_CAPTURE_STOP_SESSION"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val NOTIFICATION_ID = 2101

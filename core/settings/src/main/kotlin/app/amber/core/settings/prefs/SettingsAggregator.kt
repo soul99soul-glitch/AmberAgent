@@ -9,9 +9,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.OpenAIBrand
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.ProviderSetting
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.DEFAULT_ASSISTANTS
 import app.amber.core.settings.DEFAULT_ASSISTANTS_IDS

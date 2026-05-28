@@ -43,8 +43,8 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.highlight.HighlightText
+import app.amber.ai.ui.UIMessagePart
+import app.amber.highlight.HighlightText
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
 import app.amber.agent.R

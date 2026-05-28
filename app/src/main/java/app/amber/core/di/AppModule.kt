@@ -5,15 +5,15 @@ import com.google.firebase.analytics.analytics
 import com.google.firebase.crashlytics.crashlytics
 import com.google.firebase.remoteconfig.remoteConfig
 import kotlinx.serialization.json.Json
-import me.rerere.highlight.Highlighter
-import me.rerere.rikkahub.AppScope
+import app.amber.highlight.Highlighter
+import app.amber.agent.AppScope
 import app.amber.core.ai.AILoggingManager
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.event.AppEventBus
 import app.amber.core.utils.EmojiData
 import app.amber.core.utils.EmojiUtils
 import app.amber.core.utils.JsonInstant
-import me.rerere.tts.provider.TTSManager
+import app.amber.tts.provider.TTSManager
 import org.koin.dsl.module
 
 val appModule = module {

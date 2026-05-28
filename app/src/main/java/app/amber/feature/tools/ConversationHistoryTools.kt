@@ -12,10 +12,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
@@ -98,7 +98,7 @@ class ConversationHistoryTools(
             val limit = input.obj["limit"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 30) ?: 10
             val sessionIds = input.stringArray("session_ids").toSet()
             val currentAssistantId = currentConversationProvider().assistantId
-            val hits = mutableListOf<me.rerere.rikkahub.data.db.fts.MessageSearchResult>()
+            val hits = mutableListOf<app.amber.agent.data.db.fts.MessageSearchResult>()
             for (hit in conversationRepo.searchMessages(query)) {
                 if (sessionIds.isNotEmpty() && hit.conversationId !in sessionIds) continue
                 if (scope != "all") {

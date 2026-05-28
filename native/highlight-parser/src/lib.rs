@@ -20,7 +20,7 @@ use jni::JNIEnv;
 
 /// JNI entry: `HighlighterNative.highlightNative(code, language): ByteArray`.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_highlightNative<'local>(
+pub extern "system" fn Java_app_amber_highlight_nativebridge_HighlighterNative_highlightNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     code: JString<'local>,
@@ -69,7 +69,7 @@ pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_h
 /// (possibly empty) Java array — never `null_mut()` — so the Kotlin side
 /// cannot NPE (review P0 fix).
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_highlight_nativebridge_HighlighterNative_supportedLanguages<'local>(
+pub extern "system" fn Java_app_amber_highlight_nativebridge_HighlighterNative_supportedLanguages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jobjectArray {

@@ -1,8 +1,8 @@
 package app.amber.core.repository
 
 import androidx.paging.PagingSource
-import me.rerere.rikkahub.data.db.dao.GenMediaDAO
-import me.rerere.rikkahub.data.db.entity.GenMediaEntity
+import app.amber.agent.data.db.dao.GenMediaDAO
+import app.amber.agent.data.db.entity.GenMediaEntity
 
 class GenMediaRepository(private val dao: GenMediaDAO) {
     fun getAllMedia(): PagingSource<Int, GenMediaEntity> = dao.getAll()

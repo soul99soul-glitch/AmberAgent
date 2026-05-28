@@ -56,7 +56,7 @@ use jni::JNIEnv;
 /// # Safety
 /// Standard JNI signature. Panics are caught and converted to empty returns.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownNative<'local>(
+pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     text: JString<'local>,
@@ -108,7 +108,7 @@ fn parse_to_packed(text: &str) -> Vec<u8> {
 /// Returns `null` on JString conversion failure / panic — Kotlin adapter then
 /// falls back to the JVM HtmlGenerator path.
 #[no_mangle]
-pub extern "system" fn Java_me_rerere_rikkahub_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownToHtmlNative<'local>(
+pub extern "system" fn Java_app_amber_agent_ui_components_richtext_nativebridge_MarkdownParserNative_parseMarkdownToHtmlNative<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     text: JString<'local>,

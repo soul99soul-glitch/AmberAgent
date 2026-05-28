@@ -75,7 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.ai.core.InputSchema
+import app.amber.ai.core.InputSchema
 import app.amber.agent.R
 import app.amber.core.ai.mcp.McpManager
 import app.amber.core.ai.mcp.McpServerConfig

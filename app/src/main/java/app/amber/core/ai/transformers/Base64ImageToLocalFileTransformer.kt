@@ -1,6 +1,6 @@
 package app.amber.core.ai.transformers
 
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.files.FilesManager
 import org.koin.java.KoinJavaComponent.getKoin
 

@@ -7,10 +7,10 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.ProviderSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById

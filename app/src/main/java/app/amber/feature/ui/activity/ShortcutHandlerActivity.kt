@@ -8,7 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import app.amber.agent.BuildConfig
-import me.rerere.rikkahub.RouteActivity
+import app.amber.agent.RouteActivity
 import java.io.File
 
 class ShortcutHandlerActivity : ComponentActivity() {

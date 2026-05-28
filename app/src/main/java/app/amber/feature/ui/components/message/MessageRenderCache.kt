@@ -2,7 +2,7 @@ package app.amber.feature.ui.components.message
 
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.ai.transformers.replaceRegexes

@@ -3,8 +3,8 @@ package app.amber.core.utils
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.Screen
+import app.amber.ai.ui.UIMessage
+import app.amber.agent.Screen
 import app.amber.feature.ui.context.Navigator
 import kotlin.uuid.Uuid
 

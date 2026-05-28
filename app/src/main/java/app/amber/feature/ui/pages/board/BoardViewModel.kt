@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import me.rerere.rikkahub.AppScope
+import app.amber.agent.AppScope
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT
 import app.amber.feature.board.TODAY_BOARD_HARD_MUTE_WEIGHT
@@ -22,9 +22,9 @@ import app.amber.feature.board.hotlist.filterEnabledSources
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.feature.board.worker.BoardScheduler
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.db.entity.BoardItemEntity
-import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
-import me.rerere.rikkahub.data.db.entity.DailyReviewEntity
+import app.amber.agent.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.BoardWeightEntity
+import app.amber.agent.data.db.entity.DailyReviewEntity
 import kotlinx.coroutines.launch
 
 class BoardViewModel(

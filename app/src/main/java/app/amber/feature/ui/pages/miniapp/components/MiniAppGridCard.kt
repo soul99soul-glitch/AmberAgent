@@ -33,7 +33,7 @@ import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Pin
 import me.rerere.hugeicons.stroke.PinOff
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

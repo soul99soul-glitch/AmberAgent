@@ -1,7 +1,7 @@
 package app.amber.core.context
 
 import kotlinx.serialization.Serializable
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 
 @Serializable
 data class ConversationCompact(

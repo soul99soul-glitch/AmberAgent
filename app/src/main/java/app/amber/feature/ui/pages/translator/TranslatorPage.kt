@@ -53,7 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.ModelType
+import app.amber.ai.provider.ModelType
 import app.amber.agent.R
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.nav.BackButton

@@ -1,9 +1,9 @@
 package app.amber.feature.board
 
-import me.rerere.ai.provider.CustomBody
-import me.rerere.ai.provider.CustomHeader
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ProviderSetting
+import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ProviderSetting
 
 fun Model.boardRequestHeaders(providers: List<ProviderSetting>): List<CustomHeader> {
     val canonicalHeaders = providers.findCanonicalModel(this)?.customHeaders.orEmpty()

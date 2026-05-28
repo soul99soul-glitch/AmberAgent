@@ -5,9 +5,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator

@@ -9,7 +9,7 @@ import android.os.CancellationSignal
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import kotlin.coroutines.resume
 
 fun createLocationCurrentTool(context: Context, deps: SystemAccessDeps): Tool = Tool(

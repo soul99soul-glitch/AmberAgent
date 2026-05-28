@@ -40,7 +40,7 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.Play
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.cron.AgentCronTask
 import app.amber.feature.task.AgentTaskScheduler

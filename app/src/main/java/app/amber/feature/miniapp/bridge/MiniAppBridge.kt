@@ -38,7 +38,7 @@ import app.amber.feature.miniapp.MiniAppSystemBridge
 import app.amber.feature.miniapp.MiniAppUserConfirmation
 import app.amber.feature.miniapp.MiniAppValidationException
 import app.amber.feature.miniapp.minimalHostContext
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
 

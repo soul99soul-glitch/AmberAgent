@@ -83,13 +83,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
-import me.rerere.ai.registry.ModelRegistry
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.isEmptyInputMessage
+import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
+import app.amber.ai.registry.ModelRegistry
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.isEmptyInputMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
@@ -147,7 +147,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     // Default flag = false → legacy path below runs unchanged. See PerfFlags.kt
     // + ChatPageSplit.kt for the new code path and on-device verification
     // steps in docs/visual-sanity-check.md.
-    if (me.rerere.rikkahub.PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES) {
+    if (app.amber.agent.PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES) {
         ChatPageSplit(id = id, text = text, files = files, nodeId = nodeId)
         return
     }
@@ -1491,7 +1491,7 @@ private fun TopBar(
                 // promptTokens (下一轮 LLM 实际加载的上下文长度), 也是用户最直观的"已占用".
                 if (conversation.messageNodes.isNotEmpty()) {
                     val lastAssistant = conversation.currentMessages
-                        .lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+                        .lastOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
                     val lastUsage = lastAssistant?.usage
                     val messagesFingerprint = remember(conversation.currentMessages) {
                         ContextFootprintEstimator.inputFingerprint(conversation.currentMessages)

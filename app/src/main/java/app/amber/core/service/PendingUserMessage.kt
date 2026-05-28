@@ -1,7 +1,7 @@
 package app.amber.core.service
 
 import kotlinx.serialization.Serializable
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 
 const val MAX_PENDING_USER_MESSAGES = 20
 

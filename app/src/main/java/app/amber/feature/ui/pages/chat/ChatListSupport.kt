@@ -18,9 +18,9 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.ToolApprovalState
+import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.BuildConfig
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope

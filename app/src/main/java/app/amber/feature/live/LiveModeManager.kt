@@ -14,11 +14,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.AppScope
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
+import app.amber.agent.AppScope
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findProvider

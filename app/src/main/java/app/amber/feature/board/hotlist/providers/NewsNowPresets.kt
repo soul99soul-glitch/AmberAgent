@@ -1,6 +1,6 @@
 package app.amber.feature.board.hotlist.providers
 
-import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
+import app.amber.agent.data.db.entity.HotListSourceEntity
 
 data class NewsNowPreset(
     val id: String,

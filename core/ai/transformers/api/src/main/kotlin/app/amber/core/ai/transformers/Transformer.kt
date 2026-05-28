@@ -2,10 +2,10 @@ package app.amber.core.ai.transformers
 
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.provider.Model
-import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.Model
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
 import app.amber.core.model.Assistant
 

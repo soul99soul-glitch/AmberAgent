@@ -101,7 +101,7 @@ import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownPreprocessNative
-import me.rerere.rikkahub.ui.components.richtext.nativebridge.PackedAstReader
+import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
 import kotlin.random.Random
 
@@ -476,7 +476,7 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     // correctness signal is upgraded from sample-rate shadow to
     // every-parse hard-validation, so any divergence in a single
     // user-visible render trips immediately rather than statistically.
-    if (me.rerere.rikkahub.PerfFlags.USE_RUST_MARKDOWN_RENDERER) {
+    if (app.amber.agent.PerfFlags.USE_RUST_MARKDOWN_RENDERER) {
         val nativeOk = runCatching {
             val blob = MarkdownNativeSwitch.parseAstOrNull(preprocessed)
             if (blob != null) {
@@ -704,7 +704,7 @@ fun MarkdownBlock(
     onClickCitation: (String) -> Unit = {}
 ) {
     // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
-    if (me.rerere.rikkahub.PerfFlags.USE_SPLIT_MARKDOWN) {
+    if (app.amber.agent.PerfFlags.USE_SPLIT_MARKDOWN) {
         MarkdownBlockSplit(
             content = content,
             modifier = modifier,

@@ -1,6 +1,6 @@
 package app.amber.feature.tools
 
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.core.model.MainAgentToolProfile
 
 data class ToolProfileFilterResult(

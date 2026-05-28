@@ -69,8 +69,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
-import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
@@ -171,7 +171,7 @@ internal fun ChatListNormal(
     // tune buffer freely.
     val bottomFollowBufferPx = with(density) { 24.dp.toPx().toInt() }
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
-    val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val activity = LocalContext.current as? app.amber.agent.RouteActivity
     val workspace = workspaceColors()
     val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
         conversation.actionSuggestionTexts()

@@ -142,8 +142,8 @@ val boardModule = module {
 
     single {
         FeishuDocSignalCollector(
-            subscriptionDao = get<me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO>(),
-            changeLogDao = get<me.rerere.rikkahub.data.db.dao.DocChangeLogDAO>(),
+            subscriptionDao = get<app.amber.agent.data.db.dao.DocSubscriptionDAO>(),
+            changeLogDao = get<app.amber.agent.data.db.dao.DocChangeLogDAO>(),
         )
     }
 
@@ -188,7 +188,7 @@ val boardModule = module {
         NotificationSignalCollector(
             context = get(),
             aggregator = get(),
-            ioScope = get<me.rerere.rikkahub.AppScope>(),
+            ioScope = get<app.amber.agent.AppScope>(),
         )
     }
 

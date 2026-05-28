@@ -1,6 +1,6 @@
 package app.amber.feature.webmount.tools
 
-import me.rerere.ai.core.Tool
+import app.amber.ai.core.Tool
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.cookie.WebMountCookieProvider

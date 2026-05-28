@@ -2,7 +2,7 @@ package app.amber.feature.ui.context
 
 import androidx.compose.runtime.compositionLocalOf
 import androidx.navigation3.runtime.NavKey
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 
 class Navigator(private val backStack: MutableList<NavKey>) {
     fun navigate(screen: Screen, builder: NavigateOptionsBuilder.() -> Unit = {}) {

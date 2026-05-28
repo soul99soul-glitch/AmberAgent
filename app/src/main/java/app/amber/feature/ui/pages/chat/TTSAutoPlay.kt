@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
-import me.rerere.ai.core.MessageRole
+import app.amber.ai.core.MessageRole
 import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.context.LocalTTSState

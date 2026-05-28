@@ -1,6 +1,6 @@
 package app.amber.core.context
 
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 
 object ToolResultCompactor {
     fun summarize(parts: List<UIMessagePart>, maxChars: Int = 8_000): String {

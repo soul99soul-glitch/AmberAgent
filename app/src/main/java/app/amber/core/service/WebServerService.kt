@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import app.amber.agent.R
-import me.rerere.rikkahub.WEB_SERVER_NOTIFICATION_CHANNEL_ID
+import app.amber.agent.WEB_SERVER_NOTIFICATION_CHANNEL_ID
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.web.WebServerManager
 import org.koin.android.ext.android.inject
@@ -28,8 +28,8 @@ private const val TAG = "WebServerService"
 class WebServerService : Service() {
 
     companion object {
-        const val ACTION_START = "me.rerere.rikkahub.action.WEB_SERVER_START"
-        const val ACTION_STOP = "me.rerere.rikkahub.action.WEB_SERVER_STOP"
+        const val ACTION_START = "app.amber.agent.action.WEB_SERVER_START"
+        const val ACTION_STOP = "app.amber.agent.action.WEB_SERVER_STOP"
         const val EXTRA_PORT = "port"
         const val EXTRA_LOCALHOST_ONLY = "localhost_only"
         const val NOTIFICATION_ID = 2001

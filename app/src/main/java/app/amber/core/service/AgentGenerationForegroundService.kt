@@ -12,9 +12,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import me.rerere.rikkahub.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
+import app.amber.agent.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
-import me.rerere.rikkahub.RouteActivity
+import app.amber.agent.RouteActivity
 import app.amber.core.utils.NotificationUtil
 import java.util.concurrent.ConcurrentHashMap
 
@@ -115,8 +115,8 @@ class AgentGenerationForegroundService : Service() {
     }
 
     companion object {
-        private const val ACTION_START = "me.rerere.rikkahub.action.GENERATION_KEEPALIVE_START"
-        private const val ACTION_STOP = "me.rerere.rikkahub.action.GENERATION_KEEPALIVE_STOP"
+        private const val ACTION_START = "app.amber.agent.action.GENERATION_KEEPALIVE_START"
+        private const val ACTION_STOP = "app.amber.agent.action.GENERATION_KEEPALIVE_STOP"
         private const val EXTRA_CONVERSATION_ID = "conversation_id"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_CONTENT = "content"

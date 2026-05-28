@@ -1,6 +1,6 @@
 package app.amber.core.memory.prompt
 
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 
 object MemoryExtractionPrompt {
     fun build(messages: List<UIMessage>, sourceMessageIds: List<String>, locale: String): String {

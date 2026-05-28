@@ -2,10 +2,10 @@ package app.amber.core.service
 
 import android.content.Context
 import kotlinx.coroutines.flow.first
-import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
 import app.amber.agent.R
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator

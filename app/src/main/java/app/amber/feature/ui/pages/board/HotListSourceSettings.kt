@@ -30,7 +30,7 @@ import app.amber.feature.board.hotlist.providers.CustomHotListFieldMapping
 import app.amber.feature.board.hotlist.providers.CustomHotListSourceTypes
 import app.amber.feature.board.hotlist.providers.NewsNowPreset
 import app.amber.feature.board.hotlist.providers.NewsNowPresets
-import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
+import app.amber.agent.data.db.entity.HotListSourceEntity
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull

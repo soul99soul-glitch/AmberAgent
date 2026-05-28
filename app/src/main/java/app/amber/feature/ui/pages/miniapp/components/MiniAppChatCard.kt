@@ -33,7 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.Code
@@ -41,7 +41,7 @@ import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.MoreVertical
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.pages.miniapp.MiniAppSourceDialog
 import app.amber.feature.ui.pages.miniapp.MiniAppVersionHistoryDialog
 import app.amber.feature.ui.pages.miniapp.rememberMiniAppHtmlExporter

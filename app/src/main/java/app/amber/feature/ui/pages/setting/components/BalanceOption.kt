@@ -27,9 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import me.rerere.ai.provider.BalanceOption
-import me.rerere.ai.provider.ProviderSetting
-import me.rerere.common.http.isJsonExprValid
+import app.amber.ai.provider.BalanceOption
+import app.amber.ai.provider.ProviderSetting
+import app.amber.common.http.isJsonExprValid
 import app.amber.agent.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.feature.ui.theme.JetbrainsMono

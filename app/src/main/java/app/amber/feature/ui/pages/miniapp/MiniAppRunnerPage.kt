@@ -44,7 +44,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.feature.miniapp.AndroidMiniAppUserConfirmation
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppHttpClient
@@ -59,7 +59,7 @@ import app.amber.feature.miniapp.MiniAppSystemBridge
 import app.amber.feature.miniapp.bridge.MiniAppBridge
 import app.amber.feature.miniapp.bridge.MiniAppTheme
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.writeClipboardText
 import androidx.lifecycle.compose.collectAsStateWithLifecycle

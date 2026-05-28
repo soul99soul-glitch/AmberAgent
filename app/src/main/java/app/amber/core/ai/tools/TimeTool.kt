@@ -2,9 +2,9 @@ package app.amber.core.ai.tools
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
 import java.time.ZonedDateTime
 import java.time.format.TextStyle
 import java.util.Locale

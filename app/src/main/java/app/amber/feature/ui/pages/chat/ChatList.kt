@@ -22,7 +22,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.withTimeoutOrNull
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.context.ActiveCompactBoundary
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads

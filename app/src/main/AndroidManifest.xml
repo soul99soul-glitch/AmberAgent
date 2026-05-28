@@ -82,7 +82,7 @@
   </queries>
 
   <application
-    android:name="me.rerere.rikkahub.RikkaHubApp"
+    android:name="app.amber.agent.RikkaHubApp"
     android:largeHeap="true"
     android:allowBackup="false"
     android:appCategory="productivity"
@@ -113,7 +113,7 @@
       android:exported="false"
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     <activity
-      android:name="me.rerere.rikkahub.RouteActivity"
+      android:name="app.amber.agent.RouteActivity"
       android:configChanges="keyboardHidden|orientation|screenSize"
       android:exported="true"
       android:importantForAutofill="noExcludeDescendants"
@@ -201,7 +201,7 @@
     </activity>
 
     <receiver
-      android:name="me.rerere.rikkahub.data.agent.AgentNotificationActionReceiver"
+      android:name="app.amber.agent.feature.runtime.AgentNotificationActionReceiver"
       android:exported="false" />
     <receiver
       android:name="app.amber.feature.terminal.TermuxCommandResultReceiver"

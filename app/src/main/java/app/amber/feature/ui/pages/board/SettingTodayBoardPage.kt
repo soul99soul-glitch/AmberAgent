@@ -42,9 +42,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
-import me.rerere.rikkahub.Screen
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelType
+import app.amber.agent.Screen
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_STEP
@@ -59,9 +59,9 @@ import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.HotListScheduler
 import app.amber.feature.board.hotlist.normalizeHotListFocusKeywords
 import app.amber.core.settings.findModelById
-import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
-import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
-import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
+import app.amber.agent.data.db.entity.BoardFocusRuleEntity
+import app.amber.agent.data.db.entity.BoardWeightEntity
+import app.amber.agent.data.db.entity.HotListSourceEntity
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.core.font.FontPackCategory
 import app.amber.core.font.FontPackState

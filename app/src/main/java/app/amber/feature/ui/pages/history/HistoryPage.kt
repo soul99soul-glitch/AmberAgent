@@ -50,7 +50,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import kotlinx.coroutines.launch
 import app.amber.agent.R
-import me.rerere.rikkahub.Screen
+import app.amber.agent.Screen
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController

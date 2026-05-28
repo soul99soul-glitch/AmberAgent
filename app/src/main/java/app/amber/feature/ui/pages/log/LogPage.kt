@@ -35,8 +35,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import me.rerere.common.android.LogEntry
-import me.rerere.common.android.Logging
+import app.amber.common.android.LogEntry
+import app.amber.common.android.Logging
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.JsonTree
 import app.amber.feature.ui.theme.CustomColors

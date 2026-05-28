@@ -21,13 +21,13 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.core.utils.readClipboardText
 import java.time.LocalDate
 import kotlin.coroutines.resume

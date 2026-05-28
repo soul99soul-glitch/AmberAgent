@@ -45,12 +45,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
-import me.rerere.rikkahub.LAUNCH_START_MODE_PREF
-import me.rerere.rikkahub.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
-import me.rerere.rikkahub.LaunchStartMode
+import app.amber.agent.LAUNCH_START_MODE_PREF
+import app.amber.agent.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
+import app.amber.agent.LaunchStartMode
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
-import me.rerere.rikkahub.migrateLaunchStartMode
+import app.amber.agent.migrateLaunchStartMode
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.CardGroup

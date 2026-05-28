@@ -30,9 +30,9 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.ClassDiscriminatorMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.AppScope
+import app.amber.ai.core.InputSchema
+import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.AppScope
 import app.amber.core.ai.mcp.transport.SseClientTransport
 import app.amber.core.ai.mcp.transport.StreamableHttpClientTransport
 import app.amber.core.settings.prefs.SettingsAggregator

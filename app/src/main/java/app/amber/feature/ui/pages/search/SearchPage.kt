@@ -45,7 +45,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import app.amber.agent.R
-import me.rerere.rikkahub.data.db.fts.MessageSearchResult
+import app.amber.agent.data.db.fts.MessageSearchResult
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors

@@ -1,6 +1,6 @@
 package app.amber.core.memory.recall
 
-import me.rerere.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.Settings
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
