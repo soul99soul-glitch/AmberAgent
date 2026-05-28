@@ -107,7 +107,6 @@ fun ChatPageSplit(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = nul
  */
 @Composable
 private fun ChatTopBarSection(vm: ChatVM) {
-    val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     Column {
         Text(
@@ -115,7 +114,7 @@ private fun ChatTopBarSection(vm: ChatVM) {
             style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            text = "theme=${setting.themeId}  msgs=${conversation.messageNodes.size}",
+            text = "msgs=${conversation.messageNodes.size}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
