@@ -312,12 +312,15 @@ val cargoBuildRegexTransformer =
     registerCargoBuild("cargoBuildRegexTransformer", "../native/regex-transformer", "regex_transformer")
 val cargoBuildTokenizer =
     registerCargoBuild("cargoBuildTokenizer", "../native/tokenizer", "tokenizer")
+val cargoBuildReaderExtractor =
+    registerCargoBuild("cargoBuildReaderExtractor", "../native/reader-extractor", "reader_extractor")
 
 afterEvaluate {
     tasks.named("preBuild").configure {
         dependsOn(cargoBuildMarkdownParser)
         dependsOn(cargoBuildRegexTransformer)
         dependsOn(cargoBuildTokenizer)
+        dependsOn(cargoBuildReaderExtractor)
     }
 }
 
