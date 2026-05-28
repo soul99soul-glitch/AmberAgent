@@ -207,3 +207,67 @@
   history, webview, task, workspace, icloud, core/*)
 - Full APK assembleDebug passes
 - All kernel unit tests pass (8 InProcessAgentRunner+ProjectorProperty tests + 4 KernelRunObserve tests)
+
+## Session 7+ — 2026-05-28 (Task 1 SettingsAggregator cascade — partial)
+
+Goal-stop-hook directive: complete 6 ordered tasks with Gate Reviews.
+Task 1 demanded the 17-file SettingsAggregator cascade move into
+`:core:app-infra` or `:core:settings`. Outcome: 6 of 17 files migrated;
+remaining 11 structurally blocked.
+
+### What landed (commits 4e89aced, d725028a, 15f28c6e)
+
+Created `:core:settings` Android lib (compose plugin required because
+ProviderSetting's @Composable lambda params change default-args bitmask
+layout). Files moved:
+
+1. PreferencesKeys.kt (typealias re-export)
+2. DefaultProviders.kt (internal vals widened to public for cross-module access)
+3. migration/PreferenceStoreV3Migration.kt (internal helper widened)
+4. migration/PreferenceStoreV2Migration.kt (internal helper widened)
+5. migration/SettingsJsonMigrator.kt
+6. prefs/NativePathPrefs.kt (toMutableStateFlow inlined at one call site)
+
+Helper extractions to enable the moves:
+- core/settings/migration/McpServersJsonMigration.kt (NEW — extracted
+  from V1Migration.kt; the V1Migration class FQN stays frozen per
+  ADR-0001 §3 but the helper function FQN is NOT frozen)
+- core/agent-utils Json.kt — adds jsonPrimitiveOrNull alongside JsonInstant
+
+### Structural blocker (files 7-17)
+
+The remaining 11 files all transitively depend on `PreferencesStore.kt`
+(30 external deps including app.amber.feature.{board,live,modelcouncil,
+office,subagent,terminal,ui.theme} and app.amber.core.{ai,memory,sync}).
+None of those feature/core packages have been physically extracted —
+they're still in `:app`.
+
+The dependency direction is wrong for module extraction:
+- `:core:settings` should be UNDER feature/* in the graph
+- But it imports feature/* and core.{ai,memory,sync}
+- So extracting SettingsAggregator + PreferencesStore requires extracting
+  the feature modules FIRST (which is Task 2's scope), which in turn
+  needs `:core:ai` extracted from `:app`
+
+This is the cascade the original plan documented in REFACTOR_EXECUTION_ROADMAP.md.
+The achievable Task 1 result without Task 2 unblocking is the 6-file slice landed.
+
+### State invariants
+
+- 25 physical Gradle modules (was 24)
+- 677 files in app.amber.* (was 683 — 6 moved out)
+- Allowlist clean per ADR-0001
+- `:app:assembleDebug` green
+- Targeted unit tests (AmberAgentToolDefaults, ReplaceRegexesPreflight,
+  InProcessAgentRunner, KernelRunObserve, ProjectorProperty) green
+- CI invariant guard locks in current state (commits a4962fe1, d171e3ca)
+
+### Gate Review
+
+NOT executed for this slice — the parallel-subagent Gate Review protocol
+was designed for atomic Task completion. Since this is Task 1 partial
+(6/17), running Gate Review now would just surface the same blocker
+already documented above. Deferred until either:
+(a) PreferencesStore cascade unblocked by feature/core extraction, or
+(b) explicit user decision to declare Task 1 done at 6/17 and run Gate
+    Review on what landed.
