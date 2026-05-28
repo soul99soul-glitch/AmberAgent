@@ -501,3 +501,56 @@ that's safe to ship in this session".
   (all crates), :app:assembleDebug, full targeted unit test suite
 
 Generated: 2026-05-28 (session 9 complete + hook-pushback addendum)
+
+---
+
+## Session 9 addendum 2 — Phase D cascade landed (2026-05-28)
+
+The previous addendum un-deferred 3 Rust crates after the hook flagged
+that cost-benefit isn't the goal's escape clause. The hook then noted
+Phase D cascade was also deferred on similar grounds; reopened and
+shipped it.
+
+### Newly landed (3 commits)
+
+- **`4066fa9c` T4.1 :core:ai:transformers:api** — Lifted the Transformer
+  hierarchy into a new api module. Dropped the BuildConfig.DEBUG gate
+  on `validateTransformerInvariants`; check is cheap, always-on is
+  fine. Same gotcha-pattern as T2.5 (BuildConfig decoupling for
+  cross-module use).
+- **`e2ad35c0` T4.2 :core:ai:generation:api** — NEW `interface Generator`
+  + GenerationChunk + GenerationUpdate. :app's `class GenerationHandler`
+  now `: Generator`. This is the key piece — the 1242-LOC concrete
+  class no longer needs to be on the dependency-graph of consumers
+  like subagent/board/chat impl.
+- **`4defdefd` T4.3 :feature:subagent impl extraction** — All 8 subagent
+  files moved out of :app into a new :feature:subagent module. Its
+  ctor flipped from `GenerationHandler` to `Generator` — concrete
+  proof that the interface lift is what unblocks impl extraction.
+
+### Final module count: 45 (was 42 at session start)
+
+Added this session-9: 4 :feature:*:api modules + :core:ai:transformers:api
++ :core:ai:generation:api + :feature:subagent = 7 new modules total
+across both Rust + cascade work.
+
+### Remaining cascade (documented in refactor-progress.md)
+
+- **:feature:tools impl** (17 files) — blocked behind core.automation /
+  core.repository / per-feature managers (cron / icloud / office).
+  Each blocker has its own api-only-split cascade step.
+- **:feature:board impl** (54 files) — Room DAO ADR-0001 freeze
+  caps it at ~15-25 moveable; the rest stay in :app forever.
+
+### Session 9 totals (after this addendum)
+
+- **Commits**: 12 (was 9 in addendum 1 — +3 cascade commits + this report)
+- **Physical Gradle modules**: 45 (was 42 at session 9 start)
+- **Files in `app.amber.*`**: 611 (was 618 — 9 net moved out via
+  cascade + 2 added via Generator/Transformer api interfaces)
+- **Files in `me.rerere.*`**: 80 (ADR-0001 floor)
+- **Rust crates**: 11 (was 7)
+- **Build green**: cargo test all crates, cargo ndk arm64-v8a release
+  all crates, :app:assembleDebug, all kernel + parity unit tests
+
+Generated: 2026-05-28 (session 9 complete + both hook-pushback addenda)

@@ -625,3 +625,49 @@ structural blocks are. Reopened the 3 contained deferrals and shipped them.
 - **Physical Gradle modules**: 42 (unchanged)
 - **Build green**: cargo test for all 4 new crates, cargo ndk arm64-v8a
   release for all 4, :app:assembleDebug, full targeted unit test suite
+
+## Session 9 addendum 2 — Phase D cascade un-deferral (2026-05-28)
+
+Hook flagged again: Phase D cascade was deferred per "主线 1 优先级硬于主线 2",
+but the goal's escape clause is structural-block-only. Reopened and shipped
+the cascade in 3 commits.
+
+### Commits
+
+- `4066fa9c` **T4.1 :core:ai:transformers:api** — Lifted Transformer
+  hierarchy (MessageTransformer / InputMessageTransformer /
+  OutputMessageTransformer / TailSafeOutputMessageTransformer +
+  TransformerContext + 4 extension functions) into new module. Dropped
+  BuildConfig.DEBUG gate (validateTransformerInvariants now always-on —
+  the check is O(n) and cheap).
+- `e2ad35c0` **T4.2 :core:ai:generation:api** — NEW `interface Generator`
+  + GenerationChunk + GenerationUpdate. :app's `class GenerationHandler`
+  now declares `: Generator`. Consumers can depend on the small api module
+  instead of the 1242-LOC concrete class.
+- `4defdefd` **T4.3 :feature:subagent impl extraction (8 files)** — All
+  remaining subagent files moved out of :app into a new
+  :feature:subagent Gradle module. SubAgentRunner's ctor changed from
+  `GenerationHandler` to `Generator`. 6 internal symbols widened to
+  public for cross-module test + DeepRead + ModelCouncilTools callers.
+
+### Result
+
+- 45 physical Gradle modules (was 42)
+- 611 files in `app.amber.*` (was 620 — 9 net moved out: Transformer +
+  Generator types extracted, 8 subagent files moved out)
+
+### Remaining cascade work (next agent)
+
+- **:feature:tools impl** (17 files): blocked by `core.automation` +
+  `core.context.ConversationContextEngine` + `core.repository` +
+  per-feature managers (cron / icloud / office). Each is its own
+  cascade step following the api-only split pattern.
+- **:feature:board impl** (54 files): blocked by Room DAO/entity imports
+  from `me.rerere.rikkahub.data.db.*` (ADR-0001 §3 frozen — cannot
+  move). Realistic ceiling is ~15-25 of 54 files (the ones NOT touching
+  DAOs); a per-file split would carve out a `:feature:board:impl` that
+  injects a `BoardRepository` interface backed by :app's Room
+  implementation.
+
+The pattern is now well-established: extract `*:api` for wire types
+first, then `*:impl` once the api+dep modules are in place.
