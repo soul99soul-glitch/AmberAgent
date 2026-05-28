@@ -20,7 +20,7 @@ import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_TITLE_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import app.amber.core.ai.prompts.LEARNING_MODE_PROMPT
-import app.amber.core.ai.tools.LocalToolOption
+import app.amber.core.model.LocalToolOption
 import app.amber.feature.live.LiveModeSetting
 import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
 import app.amber.feature.office.FeishuOfficeEnhancementSetting
@@ -36,6 +36,7 @@ import app.amber.core.memory.model.MemoryRecallSetting
 import app.amber.core.memory.model.MemoryWorkerSetting
 import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar
+import app.amber.core.model.DEFAULT_ASSISTANT_ID
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
@@ -505,7 +506,6 @@ private fun Model.findModelProviderFromList(providers: List<ProviderSetting>): P
     return null
 }
 
-internal val DEFAULT_ASSISTANT_ID = Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")
 internal val DEFAULT_ASSISTANTS = listOf(
     Assistant(
         id = DEFAULT_ASSISTANT_ID,

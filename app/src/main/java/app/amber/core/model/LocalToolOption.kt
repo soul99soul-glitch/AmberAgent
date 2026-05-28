@@ -1,4 +1,4 @@
-package app.amber.core.ai.tools
+package app.amber.core.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

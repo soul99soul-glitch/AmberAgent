@@ -7,7 +7,7 @@ import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.core.ReasoningLevel
-import app.amber.core.ai.tools.LocalToolOption
+import app.amber.core.model.LocalToolOption
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.model.nativebridge.RegexNativeSwitch
@@ -422,3 +422,7 @@ fun getTriggeredInjections(
         .filter { it.isTriggered(context) }
         .sortedByDescending { it.priority }
 }
+
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+val DEFAULT_ASSISTANT_ID: kotlin.uuid.Uuid =
+    kotlin.uuid.Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")

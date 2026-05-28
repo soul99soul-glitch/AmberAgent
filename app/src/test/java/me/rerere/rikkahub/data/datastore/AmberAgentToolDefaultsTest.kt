@@ -1,6 +1,6 @@
 package app.amber.core.settings
 
-import app.amber.core.ai.tools.LocalToolOption
+import app.amber.core.model.LocalToolOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

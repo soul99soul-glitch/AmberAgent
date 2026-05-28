@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import app.amber.core.settings.DEFAULT_ASSISTANT_ID
+import app.amber.core.model.DEFAULT_ASSISTANT_ID
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.Conversation
