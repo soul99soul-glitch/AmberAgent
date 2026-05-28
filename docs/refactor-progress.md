@@ -59,19 +59,44 @@
 - Commits: efed227e, b42875ef (2 commits)
 - Notes: docs/architecture.md with module map + ADR index. CLAUDE.md updated to reflect Agent Kernel architecture. TE.1 (allowlist minimization) and TE.2 (package renaming) depend on Phase D module extraction completion.
 
+## Session 2 — 2026-05-28
+
+### TA.3a — Tokenizer Gradle pipeline
+- Registered tokenizer in cargo-ndk build pipeline (registerCargoBuild)
+- TokenCounterNative JNI bridge + TokenCounter suspend API with JVM fallback
+- libtokenizer.so verified in arm64-v8a output
+- Commit: 8381ce12
+
+### Phase A.5 — HARD GATE template
+- ADR-0004 documenting the 5-item gate checklist
+- All 5 items confirmed already implemented (NativePathBootstrap, NativePathPrefs, Crashlytics, sampling)
+- Commit: 3e07ff4b
+
+### TC.5 — ChatEventProjector
+- AgentEvent.Final → chat.db bridge via ConversationRepository
+- Unfinished run replay on process restart
+- Commit: 8c7d1509
+
+### TC.6 — Projector property tests
+- 4 kotest properties: determinism, idempotency, truncation safety, regenerate candidate preservation
+- All 4 pass
+- Commit: 849afaf6
+
 ## Remaining Work
 
-### Needs Connected Device / CI Infrastructure
-- TA.3a: UniFFI Gradle plugin integration (cargo-ndk build is verified; Gradle wiring + ProGuard + .so packaging remains)
-- Phase A.5: markdown + regex Rust crate production wiring (HARD GATE 5-item checklist)
-- TC.4-TC.6: ChatPage UI ViewModel, projector persistence, property-based tests
+### Phase C behavior switch (not yet wired to production)
+- TC.3 sendMessage → runner.launch: ChatService still uses direct GenerationHandler path. ChatTurnAgent + InProcessAgentRunner exist but aren't connected to sendMessage yet. Feature flag dual-path needed.
+- TC.4 ChatPage UI: Still uses ChatVM → ChatService direct path. Needs observe(runId) ViewModel migration.
 
-### Needs Extended Business Logic Work
-- TB.1: reader-extractor Rust crate (readability + section splitting)
-- TB.3: Full DeepRead pipeline with Rust extractor integration
-- TB.4: DeepReadSurface ViewModel migration
+### Phase B behavior switch
+- TB.1: reader-extractor Rust crate (readability + section splitting) — new Rust crate to write
+- TB.3: DeepReadAgentRunManager collectRun → scope.llm bridging (~40 lines)
+- TB.4: DeepReadSurface ViewModel observe(runId) migration
 
-### Volume Mechanical Work
-- Phase D Sprint 2-4: Physical module extraction (file moves + import path updates)
-- TE.1: Minimize legacy allowlist
-- TE.2: Rename highlight/document module packages
+### Phase D module extraction (blocked on shared infra)
+- Sprint 2-4 physical module extraction blocked: agent subsystems (live, miniapp, webmount, etc.) depend on app-internal types (SettingsAggregator, AppScope, AmberAccessibilityService). Extracting to separate Gradle modules requires extracting shared infrastructure first.
+- Approach: extract SettingsAggregator/AppScope to :core:app-infra first, then modules can depend on it
+
+### Phase E legacy cleanup
+- TE.1: 781 files in me.rerere.* vs 8 in app.amber.* — bulk migration is Phase D's mechanical work
+- TE.2: highlight/document package renaming depends on JNI crate UniFFI migration
