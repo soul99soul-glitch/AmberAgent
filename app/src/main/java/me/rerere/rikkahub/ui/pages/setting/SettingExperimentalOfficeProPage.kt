@@ -49,7 +49,7 @@ import me.rerere.rikkahub.R
 import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.office.FeishuWorkProject
 import app.amber.feature.office.radar.DocRadar
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
 import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
 import me.rerere.rikkahub.data.db.entity.DocSubscriptionEntity

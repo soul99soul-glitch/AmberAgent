@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.workspace
+package app.amber.feature.workspace
 
 internal object WorkspacePaths {
     fun normalize(path: String): String {

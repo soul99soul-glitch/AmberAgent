@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.modelcouncil
+package app.amber.feature.modelcouncil
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
@@ -38,8 +38,8 @@ import app.amber.feature.task.AgentTaskRetryPolicy
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.toQueueState
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TerminalRuntime
+import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById

@@ -10,9 +10,9 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.terminal.TerminalJobSnapshot
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TerminalJobSnapshot
+import app.amber.feature.terminal.TerminalRuntime
+import app.amber.feature.terminal.TerminalRuntimeKind
 
 class TerminalTools(
     private val terminalRuntime: TerminalRuntime,

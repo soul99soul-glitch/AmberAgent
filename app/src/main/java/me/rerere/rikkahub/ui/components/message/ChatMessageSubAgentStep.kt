@@ -50,9 +50,9 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.MagicWand01
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
-import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
-import me.rerere.rikkahub.data.agent.subagent.SubAgentRunStatus
+import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentManager
+import app.amber.feature.subagent.SubAgentRunStatus
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import org.koin.compose.koinInject

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.workspace
+package app.amber.feature.workspace
 
 import android.content.Context
 import android.content.Intent

@@ -1,11 +1,11 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
-import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_MAX_TURNS
-import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
-import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
+import app.amber.feature.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
+import app.amber.feature.subagent.DEFAULT_SUB_AGENT_MAX_TURNS
+import app.amber.feature.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import app.amber.feature.subagent.SubAgentDefinition
+import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

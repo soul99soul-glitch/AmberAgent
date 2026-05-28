@@ -7,7 +7,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import org.junit.Assert.assertEquals

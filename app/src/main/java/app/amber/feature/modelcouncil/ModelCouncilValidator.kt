@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.modelcouncil
+package app.amber.feature.modelcouncil
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -11,7 +11,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import java.util.Locale

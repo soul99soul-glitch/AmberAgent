@@ -12,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.base64Encode

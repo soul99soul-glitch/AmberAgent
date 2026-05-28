@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.subagent
+package app.amber.feature.subagent
 
 object SmartSubAgentNames {
     private val pool = listOf(

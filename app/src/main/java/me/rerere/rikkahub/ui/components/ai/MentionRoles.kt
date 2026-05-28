@@ -1,8 +1,8 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinition
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
-import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
+import app.amber.feature.subagent.SubAgentDefinition
+import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentMode
 
 internal enum class MentionRoleKind {
     SUBAGENT,

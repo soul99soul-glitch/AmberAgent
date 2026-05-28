@@ -45,7 +45,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Share01
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import java.io.File
 

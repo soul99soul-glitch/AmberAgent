@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 import java.util.PriorityQueue
 

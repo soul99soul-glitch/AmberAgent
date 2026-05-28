@@ -57,10 +57,10 @@ import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.MagicWand01
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
-import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
-import me.rerere.rikkahub.data.agent.subagent.readSubAgentDisplayTextFromTranscript
+import app.amber.feature.modelcouncil.ModelCouncilManager
+import app.amber.feature.modelcouncil.ModelCouncilRolePresets
+import app.amber.feature.subagent.SubAgentManager
+import app.amber.feature.subagent.readSubAgentDisplayTextFromTranscript
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.utils.JsonInstant
@@ -640,7 +640,7 @@ private fun JsonObject.payloadArray(name: String): JsonArray? {
 /**
  * Pull the canonical final-text field from the latest tool result.
  *
- * Note: [me.rerere.rikkahub.data.agent.subagent.SubAgentManager.runToPayload] encodes the
+ * Note: [app.amber.feature.subagent.SubAgentManager.runToPayload] encodes the
  * `SubAgentResult` as a **JSON-encoded string field** (calls `json.encodeToString(result)` and
  * stores the resulting string), not a nested object. So `payload["result"]` is a
  * `JsonPrimitive` carrying serialized JSON text — must be re-parsed before reading `summary`.

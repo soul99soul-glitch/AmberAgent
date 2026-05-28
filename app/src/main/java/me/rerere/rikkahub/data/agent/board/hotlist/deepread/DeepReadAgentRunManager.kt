@@ -19,7 +19,7 @@ import me.rerere.rikkahub.data.agent.board.boardRequestBodies
 import me.rerere.rikkahub.data.agent.board.boardRequestHeaders
 import me.rerere.rikkahub.data.agent.board.hotlist.HotListRepository
 import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
-import me.rerere.rikkahub.data.agent.subagent.toIsolatedSubAgentSettings
+import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import me.rerere.rikkahub.data.agent.tools.AgentToolSetFactory
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler

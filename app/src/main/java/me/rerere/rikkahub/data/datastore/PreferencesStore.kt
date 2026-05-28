@@ -22,11 +22,11 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
 import app.amber.feature.live.LiveModeSetting
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
+import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
 import app.amber.feature.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting
-import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import app.amber.feature.subagent.SubAgentRuntimeSetting
+import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.ai.GenerationRetrySetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration

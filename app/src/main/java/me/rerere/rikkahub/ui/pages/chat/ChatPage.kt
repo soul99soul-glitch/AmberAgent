@@ -125,7 +125,7 @@ import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.components.workspace.WorkspaceFilePreview
 import me.rerere.rikkahub.ui.components.workspace.WorkspaceFileSheet
 import me.rerere.rikkahub.ui.components.workspace.WorkspaceFileVM
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator

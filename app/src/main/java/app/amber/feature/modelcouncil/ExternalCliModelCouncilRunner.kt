@@ -1,11 +1,11 @@
-package me.rerere.rikkahub.data.agent.modelcouncil
+package app.amber.feature.modelcouncil
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntimeKind
+import app.amber.feature.terminal.TerminalRuntime
+import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 
 /**

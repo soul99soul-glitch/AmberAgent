@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.modelcouncil
+package app.amber.feature.modelcouncil
 
 internal const val EXTERNAL_CLI_DEFAULT_TOOL_ID = "gemini_cli"
 

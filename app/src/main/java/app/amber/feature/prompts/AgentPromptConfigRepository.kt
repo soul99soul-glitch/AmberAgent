@@ -5,12 +5,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeat
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
-import me.rerere.rikkahub.data.agent.subagent.SubAgentOverride
-import me.rerere.rikkahub.data.agent.subagent.SubAgentRuntimeSetting
-import me.rerere.rikkahub.data.agent.subagent.applyOverride
+import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
+import app.amber.feature.modelcouncil.ModelCouncilSeat
+import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentOverride
+import app.amber.feature.subagent.SubAgentRuntimeSetting
+import app.amber.feature.subagent.applyOverride
 import java.io.File
 
 const val DEFAULT_IMAGE_PROMPT_INJECTION: String =

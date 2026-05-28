@@ -6,7 +6,7 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 
 internal fun createShareTextTool(context: Context, deps: SystemAccessDeps): Tool = Tool(

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.terminal
+package app.amber.feature.terminal
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers

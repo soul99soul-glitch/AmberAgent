@@ -12,11 +12,11 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliToolRegistry
-import me.rerere.rikkahub.data.agent.subagent.SubAgentDefinitions
-import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
-import me.rerere.rikkahub.data.agent.subagent.SubAgentMode
-import me.rerere.rikkahub.data.agent.subagent.SubAgentToolProfile
+import app.amber.feature.modelcouncil.ExternalCliToolRegistry
+import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentManager
+import app.amber.feature.subagent.SubAgentMode
+import app.amber.feature.subagent.SubAgentToolProfile
 import kotlin.uuid.Uuid
 
 class SubAgentTools(

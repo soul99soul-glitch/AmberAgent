@@ -35,19 +35,19 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
-import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
-import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS
-import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
-import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS
-import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS
-import me.rerere.rikkahub.data.agent.modelcouncil.EXTERNAL_CLI_DEFAULT_TOOL_ID
-import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliToolRegistry
-import me.rerere.rikkahub.data.agent.modelcouncil.MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeat
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeatRunner
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS
+import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
+import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS
+import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_TOTAL_TIMEOUT_MS
+import app.amber.feature.modelcouncil.EXTERNAL_CLI_DEFAULT_TOOL_ID
+import app.amber.feature.modelcouncil.ExternalCliToolRegistry
+import app.amber.feature.modelcouncil.MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER
+import app.amber.feature.modelcouncil.ModelCouncilRolePresets
+import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
+import app.amber.feature.modelcouncil.ModelCouncilSeat
+import app.amber.feature.modelcouncil.ModelCouncilSeatRunner
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ui.Select
@@ -332,7 +332,7 @@ private fun ModelCouncilSeatEditor(
     seat: ModelCouncilSeat,
     settingsProviders: List<me.rerere.ai.provider.ProviderSetting>,
     onSeatChanged: (ModelCouncilSeat) -> Unit,
-    onPresetSelected: (me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePreset) -> Unit,
+    onPresetSelected: (app.amber.feature.modelcouncil.ModelCouncilRolePreset) -> Unit,
     onDelete: () -> Unit,
 ) {
     val workspace = workspaceColors()

@@ -7,8 +7,8 @@ import app.amber.feature.live.LiveModeManager
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.task.AgentTaskScheduler
 import app.amber.feature.task.AgentTaskStore
-import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
-import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
+import app.amber.feature.terminal.AlpineRuntimeInstaller
+import app.amber.feature.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.ScreenAutomationTools
 import me.rerere.rikkahub.data.agent.tools.SystemAccessTools

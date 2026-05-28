@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.terminal
+package app.amber.feature.terminal
 
 import android.app.PendingIntent
 import android.content.Context
@@ -22,7 +22,7 @@ import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.running
 import app.amber.feature.task.toQueueState
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.io.BufferedWriter
 import java.io.File

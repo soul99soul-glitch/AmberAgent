@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.subagent
+package app.amber.feature.subagent
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import me.rerere.ai.core.MessageRole

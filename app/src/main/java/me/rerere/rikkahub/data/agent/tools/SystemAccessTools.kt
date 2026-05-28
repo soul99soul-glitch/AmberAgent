@@ -4,7 +4,7 @@ import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import app.amber.feature.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceManager
 
 /**
  * Thin coordinator for the 28 system-access tools. All per-tool logic lives

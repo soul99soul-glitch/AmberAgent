@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.subagent
+package app.amber.feature.subagent
 
 /**
  * Built-in subagent roles. Inspired by oh-my-opencode-slim's pantheon, adapted to AmberAgent.

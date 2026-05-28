@@ -11,10 +11,10 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
-import me.rerere.rikkahub.data.agent.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
-import me.rerere.rikkahub.data.agent.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
-import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
+import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
+import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.utils.JsonInstant
 import java.util.Locale
 

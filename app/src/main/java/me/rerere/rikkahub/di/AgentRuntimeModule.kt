@@ -2,11 +2,11 @@ package me.rerere.rikkahub.di
 
 import android.content.Context
 import app.amber.feature.history.SessionAccessGrantStore
-import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliModelCouncilRunner
-import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
-import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner
-import me.rerere.rikkahub.data.agent.subagent.GenerationSubAgentRunner
-import me.rerere.rikkahub.data.agent.subagent.SubAgentManager
+import app.amber.feature.modelcouncil.ExternalCliModelCouncilRunner
+import app.amber.feature.modelcouncil.ModelCouncilManager
+import app.amber.feature.modelcouncil.ProviderModelCouncilTextRunner
+import app.amber.feature.subagent.GenerationSubAgentRunner
+import app.amber.feature.subagent.SubAgentManager
 import org.koin.dsl.module
 
 /**

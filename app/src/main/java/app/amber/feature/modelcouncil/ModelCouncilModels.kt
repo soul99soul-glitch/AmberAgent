@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.modelcouncil
+package app.amber.feature.modelcouncil
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
