@@ -31,10 +31,11 @@ document/src/main/java/me/rerere/document/**
 app/src/main/res/xml/shortcuts.xml
 
 # Broadcast action 常量（发送方/接收方必须同步迁移）
-# STOP_GENERATION 等常量分布在以下文件中：
+# STOP_GENERATION 等常量定义在 AgentNotificationActionReceiver（保留在
+# me.rerere.rikkahub.data.agent 包，FQN 用于 PendingIntent target）。
+# AgentLiveStatusNotifier 和 TerminalRuntime 调用方已迁到 app.amber.feature.*，
+# 通过显式 import 引用 receiver；receiver 本身的 ComponentName 不变。
 app/src/main/java/me/rerere/rikkahub/data/agent/AgentNotificationActionReceiver.kt
-app/src/main/java/me/rerere/rikkahub/data/agent/AgentLiveStatusNotifier.kt
-app/src/main/java/me/rerere/rikkahub/data/agent/terminal/TerminalRuntime.kt
 
 # JSON class discriminator（历史数据中的 FQN，永不可改）
 app/src/main/java/me/rerere/rikkahub/data/datastore/migration/PreferenceStoreV1Migration.kt

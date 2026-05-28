@@ -175,3 +175,35 @@
 ### Phase E legacy cleanup
 - TE.1: 563 files remain in me.rerere.* (non-agent: UI, data models, DI, services)
 - TE.2: highlight/document package renaming (depends on JNI crate migration)
+
+## Session 4 — 2026-05-28 (TC.4 + Phase D runtime + TE.1)
+
+### TC.4 — Kernel run observe in ChatVM
+- ChatService.activeKernelRuns map tracks active kernel runs per conversation
+- ChatService.getActiveKernelRunFlow + kernelRunner() public accessors
+- ChatVM.activeKernelRunId + kernelRunStatus StateFlow chain via flatMapLatest
+- KernelRunObserveTest (4 tests) verifies the flow composition logic
+- Per goal directive: UI sub-Composable split (16 collectAsState → sub-tree)
+  deferred to dedicated UI sprint; visual regression requires real device test.
+- Commits: bb9c3c8b (ChatVM observe), b762fddb (4 unit tests)
+
+### TC.6 — Already done (session 2 ProjectorPropertyTest, 4 kotest properties pass)
+
+### Phase D — runtime/ + root agent files relocated
+- runtime/ sub-package (5 files) → app.amber.feature.runtime
+- 4 root agent files (Notifier, RuntimeModels, ActivityStore, ToolFailure) → app.amber.feature.runtime
+- AgentNotificationActionReceiver stays in me.rerere (broadcast action FQN per ADR-0001 §8)
+- 5 test files updated to match new packages
+- Commits: 3398b8eb, 2d4a29a0
+
+### TE.1 — Legacy allowlist updated
+- Removed obsolete entries (AgentLiveStatusNotifier, TerminalRuntime now in app.amber)
+- Only AgentNotificationActionReceiver remains as a real broadcast frozen surface
+- Legacy guard still passes (0 new files in me.rerere.*)
+
+### Status
+- Only 1 file remains in me.rerere.rikkahub.data.agent (AgentNotificationActionReceiver)
+- 224 files in app.amber.* + 39 files in separate modules (chat:api, deepread:api,
+  history, webview, task, workspace, icloud, core/*)
+- Full APK assembleDebug passes
+- All kernel unit tests pass (8 InProcessAgentRunner+ProjectorProperty tests + 4 KernelRunObserve tests)
