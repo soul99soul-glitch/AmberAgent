@@ -112,6 +112,18 @@ fun DeepReadScreen(
     initialForceRegenerate: Boolean = false,
     fromHistory: Boolean = false,
 ) {
+    // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
+    if (me.rerere.rikkahub.PerfFlags.USE_SPLIT_DEEPREAD_SCREEN) {
+        DeepReadScreenSplit(
+            topicId = topicId,
+            title = title,
+            sourceUrl = sourceUrl,
+            initialForceRegenerate = initialForceRegenerate,
+            fromHistory = fromHistory,
+        )
+        return
+    }
+
     val agent: DeepReadAgentRunManager = koinInject()
     val deepReadScheduler: DeepReadScheduler = koinInject()
     val settingsStore: SettingsAggregator = koinInject()

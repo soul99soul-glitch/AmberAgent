@@ -146,6 +146,12 @@ fun GenerativeWidgetCard(
     modifier: Modifier = Modifier,
     onAction: (String) -> Unit = {},
 ) {
+    // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
+    if (me.rerere.rikkahub.PerfFlags.USE_SPLIT_GENERATIVE_WIDGET_CARD) {
+        GenerativeWidgetCardSplit(widget = widget, modifier = modifier, onAction = onAction)
+        return
+    }
+
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
