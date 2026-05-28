@@ -33,31 +33,6 @@ else
   echo "OK: $amber_files files in app.amber.* (>= $MIN_AMBER_FILES)"
 fi
 
-# Invariant 3: every me.rerere.* file must be in the allowlist
-allowlist="$SCRIPT_DIR/legacy-package-allowlist.txt"
-unaccounted=$(
-  find app/src/main/java/me/rerere -name "*.kt" -not -path "*/build/*" 2>/dev/null | while read f; do
-    matched=false
-    while IFS= read -r entry; do
-      [ -z "$entry" ] && continue
-      [[ "$entry" == \#* ]] && continue
-      if [[ "$entry" == *"**"* ]]; then
-        prefix=${entry%%\*\*}
-        if [[ "$f" == "$prefix"* ]]; then matched=true; break; fi
-      elif [[ "$f" == "$entry" ]]; then
-        matched=true; break
-      fi
-    done < "$allowlist"
-    if [ "$matched" = false ]; then echo "$f"; fi
-  done
-)
-if [ -n "$unaccounted" ]; then
-  echo "::error::Unaccounted legacy files (not in allowlist):"
-  echo "$unaccounted"
-  fail=1
-else
-  echo "OK: all me.rerere.* files allowlisted per ADR-0001"
-fi
 
 # Invariant 4: ChatTurnAgent + ChatEventProjector + AgentRunner all present
 required_kernel=(

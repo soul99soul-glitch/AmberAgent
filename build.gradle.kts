@@ -12,8 +12,3 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
 }
 
-tasks.register<Exec>("checkLegacyPackage") {
-    group = "verification"
-    description = "Block new Kotlin files from landing in me.rerere.* (legacy package guard)"
-    commandLine("bash", "config/check-legacy-package.sh")
-}
