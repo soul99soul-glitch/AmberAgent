@@ -554,3 +554,92 @@ across both Rust + cascade work.
   all crates, :app:assembleDebug, all kernel + parity unit tests
 
 Generated: 2026-05-28 (session 9 complete + both hook-pushback addenda)
+
+---
+
+## Session 10 — Final-mile cascade (2026-05-28)
+
+5 commits closing out the moveable subset of Task 1 (:feature:tools impl)
++ Task 2 (:feature:board impl) + Task 3 verification + Task 4 feasibility
+decision doc.
+
+### Module additions (3 new)
+
+- **`:core:automation:api`** — `interface AccessibilityController` (8 methods)
+  + AccessibilityTextMatch data class + AccessibilityActive holder.
+  AmberAccessibilityService in :app implements the interface;
+  ScreenAutomationTools calls via getActiveAccessibilityController().
+- **`:feature:tools:impl`** — 6 of 17 tools files (AgentTaskTools /
+  ModelCouncilTools / ShareAccessTools / SubAgentTools / TerminalTools /
+  WorkspaceTools). 11 held in :app awaiting per-feature-manager interface
+  lifts (ScreenCapture / Cron / iCloud / Office / R+notification channel /
+  registry).
+- **`:feature:board:impl`** — 17 of 41 moveable board files (BoardModelRequestOptions
+  + 11 DeepRead helpers + 5 DeepRead template helpers). 11 of 52 board
+  files are Room-DAO-locked per ADR-0001 §3; remaining 24 either
+  transitively reference DAO types or need their own cascade steps.
+
+### Task 4 — TD.Rust.1a renderer feasibility (decision doc, no code)
+
+`docs/td-rust-1a-feasibility.md` — 3 options analyzed (JVM adapter /
+renderer rewrite / interface dual-track). Markdown.kt has 41 ASTNode
+references across 18+ private helpers + cross-file public surface.
+**Recommendation: defer** until a device-test rig validates 30+
+representative markdown samples; shadow path provides parity
+observability today without the rewrite risk.
+
+### Final session-10 numbers
+
+- **48 physical Gradle modules** (was 45; +3 new)
+- **588 files in `app.amber.*`** (was 611; 23 net moved out)
+- **80 files in `me.rerere.*`** (ADR-0001 §3 theoretical floor)
+- **11 Rust crates** (unchanged)
+- **Build green**: :app:assembleDebug + targeted unit tests
+  (AmberAgentToolDefaults, KernelRunObserve, InProcessAgentRunner,
+  ProjectorProperty, SyncCryptoParity) all green
+
+### Module census (48 total)
+
+**Top-level (8)**: :app, :ai, :common, :document, :highlight, :search,
+:tts, :web
+
+**:core (16)**: agent-runtime, agent-runtime-impl, agent-store-room,
+agent-utils, ai-prompts, ai:api, ai:generation:api, ai:transformers:api,
+app-infra, automation:api, context:api, event, llm, memory:api, model,
+settings, sync:api, usage  (count: 18 actually — including ai:api/
+ai:generation:api/ai:transformers:api as 3 separate sub-modules under
+:core:ai/, similar for others)
+
+**:feature (24)**: board:api, board:impl, chat:api, deepread:api, history,
+icloud, live:api, modelcouncil, modelcouncil:api, office:api,
+runtime:api, subagent, subagent:api, system, task, terminal,
+terminal:api, tools:access, tools:api, tools:impl, webview, workspace
+
+### Total Rust crates (11)
+
+| Crate | Purpose |
+|---|---|
+| jni-common | Shared JNI helpers (panic_to_string, init_logger_once, varint) |
+| office-parsers | DOCX/PPTX/XLSX parsers |
+| markdown-parser | pulldown-cmark + packed binary AST |
+| markdown-preprocess | LaTeX delimiter + bare-URL preprocess |
+| highlight-parser | tree-sitter syntax highlighter |
+| regex-transformer | regex-crate replace pipeline |
+| html-diff-normalizer | scraper + 3 regex normalization passes |
+| tokenizer | tiktoken-rs (cl100k/o200k) |
+| reader-extractor | readability + section splitting |
+| sync-crypto | PBKDF2/AES-GCM/SHA-256/HMAC via ring |
+| json-expr | Custom DSL lexer/parser/evaluator on serde_json |
+
+### Remaining work documented in docs/gate-review-log.md
+
+- :feature:tools — 11 remaining (per-feature-manager interface lifts)
+- :feature:board — 24 remaining (BoardAgent types in :app, RawBoardSignal
+  collectors, HotListRepository Room-locked, DeepRead Worker cascade)
+- TD.Rust.1a — defer-only per feasibility analysis
+
+The api-only split pattern is now established through 6 reference
+implementations (T1.1 automation, T4.1 transformers, T4.2 generation +
+3 session-9 cascades). Each iteration unblocks ~5-25 files.
+
+Generated: 2026-05-28 (session 10 final-mile complete)

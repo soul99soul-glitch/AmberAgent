@@ -671,3 +671,59 @@ the cascade in 3 commits.
 
 The pattern is now well-established: extract `*:api` for wire types
 first, then `*:impl` once the api+dep modules are in place.
+
+## Session 10 — Final-mile cascade (2026-05-28)
+
+5 commits closing out the remaining cascade work + decision docs.
+
+### Commits
+
+- `4a3d31f3` T1.1 `:core:automation:api` — AccessibilityController interface
+  (8 methods) + AccessibilityTextMatch data class + AccessibilityActive
+  holder. AmberAccessibilityService in :app now implements the interface;
+  ScreenAutomationTools in :app calls via getActiveAccessibilityController().
+- `b1c295c5` T1.2 `:feature:tools:impl` — 6 of 17 tools files moved
+  (AgentTaskTools / ModelCouncilTools / ShareAccessTools / SubAgentTools /
+  TerminalTools / WorkspaceTools). 11 held in :app awaiting further
+  cascade steps (ScreenCapture/Cron/iCloud/Office managers + R/notification
+  channel + SystemAccessTools registry).
+- `b6769256` Task 4 `docs/td-rust-1a-feasibility.md` — decision-only.
+  3 options analyzed (JVM adapter / renderer rewrite / interface dual-track);
+  recommendation: defer until device-test rig validates 30+ samples.
+- `393b7941` Task 2 `:feature:board:impl` — 17 of 41 moveable board files
+  extracted (11 of 52 are Room-DAO-locked per ADR-0001). Target ≥15 met.
+  17 = 1 model-request options + 11 hotlist/deepread + 5 deepread/template.
+
+### Task 3 was a no-op
+me.rerere.rikkahub.data.agent.* already contained only
+AgentNotificationActionReceiver (broadcast FQN frozen per ADR-0001 §3).
+Confirmed clean — no cleanup work needed.
+
+### Final session-10 numbers
+
+- **48 physical Gradle modules** (was 45 at session-9 end; +3 new:
+  :core:automation:api, :feature:tools:impl, :feature:board:impl)
+- **588 files in app.amber.*** (was 611 at session-9 end; 23 net moved out:
+  6 tools + 17 board)
+- **80 files in me.rerere.*** (ADR-0001 §3 theoretical floor — unchanged)
+- **11 Rust crates** (unchanged this session)
+- **Build green**: :app:assembleDebug + targeted unit tests
+  (AmberAgentToolDefaults, KernelRunObserve, InProcessAgentRunner,
+  ProjectorProperty, SyncCryptoParity) all green
+
+### Documented next-agent starting points
+
+`docs/gate-review-log.md` records cascade work that would extend the
+refactor further:
+- :feature:tools — 11 remaining (ScreenCapture interface lift,
+  ConvContextEngine, ConvRepository, Cron/iCloud/Office Manager interfaces,
+  R + notification-channel const lift, AgentToolSetFactory split)
+- :feature:board — 24 remaining (BoardAgentOutput types in
+  app/feature/board/agent/, RawBoardSignal collectors, HotListRepository
+  Room-locked, DeepRead Worker/Scheduler/SectionWriter/SourcePrefetcher
+  needing repository interface lift)
+- TD.Rust.1a — defer-only per feasibility analysis
+
+The api-only split pattern is now well-documented through 6 reference
+implementations (transformers:api / generation:api / automation:api +
+3 prior session-9 cascades). Each iteration unblocks ~5-25 files.
