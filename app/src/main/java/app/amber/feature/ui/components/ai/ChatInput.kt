@@ -191,7 +191,7 @@ fun ChatInput(
     // corner 38dp = 76/2 = 单行/空状态时完美半圆胶囊.
     // 多行扩高 N>76dp 时, 38dp < N/2, 两端不再完美半圆 (长方圆角). 这正是用户要的.
     val composerShape = RoundedCornerShape(38.dp)
-    val useComposerBlur = settings.displaySetting.enableBlurEffect && !BuildConfig.NOTION_LIKE && !timelineScrolling
+    val useComposerBlur = false
     val suggestionFillPulse = remember(conversation.id) { Animatable(0f) }
 
     LaunchedEffect(conversation.id, suggestionFillPulseKey) {

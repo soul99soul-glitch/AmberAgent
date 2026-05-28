@@ -144,7 +144,6 @@ android {
         applicationIdSuffix = packageSuffix
         buildConfigField("String", "VERSION_NAME", "\"${defaultConfig.versionName}\"")
         buildConfigField("String", "VERSION_CODE", "\"${defaultConfig.versionCode}\"")
-        buildConfigField("Boolean", "NOTION_LIKE", "true")
         buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
         buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
         buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId$packageSuffix").toString())
@@ -162,7 +161,6 @@ android {
             )
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
-            buildConfigField("Boolean", "NOTION_LIKE", "false")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured(baseApplicationId).toString())
@@ -172,7 +170,6 @@ android {
             applicationIdSuffix = ".debug"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
-            buildConfigField("Boolean", "NOTION_LIKE", "false")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.debug").toString())
@@ -205,7 +202,6 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             isProfileable = true
-            buildConfigField("Boolean", "NOTION_LIKE", "false")
             buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
             buildConfigField("String", "XIAOMI_XMS_APP_ID", "\"${xiaomiXmsAppId.asBuildConfigString()}\"")
             buildConfigField("Boolean", "GOOGLE_OAUTH_CONFIGURED", googleOAuthConfigured("$baseApplicationId.debug").toString())

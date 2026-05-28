@@ -719,8 +719,6 @@
   <string name="setting_page_documentation_desc">Просмотрите инструкции по использованию приложения и справочную документацию</string>
   <string name="setting_page_donate">Поддержать</string>
   <string name="setting_page_donate_desc">Если вам нравится, поддержите автора</string>
-  <string name="setting_page_dynamic_color">Динамический цвет</string>
-  <string name="setting_page_dynamic_color_desc">Использовать динамический цвет</string>
   <string name="setting_page_extensions">Расширения</string>
   <string name="setting_page_extensions_desc">Управление внедрением подсказок, навыками и другими возможностями</string>
   <string name="setting_page_general_settings">Общие настройки</string>
@@ -951,12 +949,6 @@
   <string name="text_area_import_from_file">Импорт из файла</string>
   <string name="text_area_import_success">Файл успешно импортирован</string>
   <string name="text_area_save">Сохранить</string>
-  <string name="theme_name_autumn">Осенний жёлтый</string>
-  <string name="theme_name_amberagent_clash">Amber Clash</string>
-  <string name="theme_name_black">Нейтральный чёрный</string>
-  <string name="theme_name_ocean">Океанический синий</string>
-  <string name="theme_name_sakura">Сакура Розовый</string>
-  <string name="theme_name_spring">Луговой зелёный</string>
   <string name="title_activity_safe_mode">Безопасный режим</string>
   <string name="tools_warning">Текущая модель не поддерживает вызов инструментов. Чтобы использовать функции поиска/MCP, включите возможности инструментов модели в настройках.</string>
   <string name="translate">Перевести</string>

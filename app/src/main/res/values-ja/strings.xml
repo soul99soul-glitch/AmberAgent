@@ -719,8 +719,6 @@
   <string name="setting_page_documentation_desc">アプリの使用方法とヘルプドキュメントを表示</string>
   <string name="setting_page_donate">寄付</string>
   <string name="setting_page_donate_desc">このアプリを気に入った場合は、作者の作品をスポンサーしてください</string>
-  <string name="setting_page_dynamic_color">ダイナミックカラー</string>
-  <string name="setting_page_dynamic_color_desc">ダイナミックカラーを使用するかどうか</string>
   <string name="setting_page_extensions">拡張機能</string>
   <string name="setting_page_extensions_desc">プロンプトインジェクション、スキルなどを管理</string>
   <string name="setting_page_general_settings">一般設定</string>
@@ -951,12 +949,6 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="text_area_import_from_file">ファイルからインポート</string>
   <string name="text_area_import_success">ファイルが正常にインポートされました</string>
   <string name="text_area_save">保存</string>
-  <string name="theme_name_autumn">秋の黄色</string>
-  <string name="theme_name_amberagent_clash">Amber Clash</string>
-  <string name="theme_name_black">ニュートラルブラック</string>
-  <string name="theme_name_ocean">オーシャンブルー</string>
-  <string name="theme_name_sakura">サクラピンク</string>
-  <string name="theme_name_spring">メドウグリーン</string>
   <string name="title_activity_safe_mode">セーフモード</string>
   <string name="tools_warning">現在のモデルではツール呼び出しが有効になっていません。設定でモデルのツール機能を有効にしてから、検索/MCPなどの機能を使用してください。</string>
   <string name="translate">翻訳</string>

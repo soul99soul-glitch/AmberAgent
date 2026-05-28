@@ -44,7 +44,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.LAUNCH_START_MODE_PREF
 import me.rerere.rikkahub.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
@@ -64,7 +63,6 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberSharedPreferenceBoolean
 import app.amber.feature.ui.hooks.rememberSharedPreferenceString
-import app.amber.feature.ui.pages.setting.components.PresetThemeButtonGroup
 import app.amber.feature.ui.pages.chat.ChatThemeChoice
 import app.amber.feature.ui.components.ui.IntLabel
 import app.amber.feature.ui.components.ui.NotionSlider
@@ -241,100 +239,62 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         color = workspace.faint,
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
                     )
-                    if (BuildConfig.NOTION_LIKE) {
-                        val darkMode = LocalDarkMode.current
-                        val themeOptions = remember(darkMode) {
-                            ChatThemeChoice.choicesFor(darkMode)
-                        }
-                        val currentTheme = remember(displaySetting.chatThemeChoice, darkMode) {
-                            ChatThemeChoice.resolve(displaySetting.chatThemeChoice, darkMode)
-                        }
-                        ListItem(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 16.dp,
-                                        topEnd = 16.dp,
-                                        bottomStart = 2.dp,
-                                        bottomEnd = 2.dp
-                                    )
-                                ),
-                            headlineContent = { Text("聊天主题") },
-                            supportingContent = {
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                    val darkMode = LocalDarkMode.current
+                    val themeOptions = remember(darkMode) {
+                        ChatThemeChoice.choicesFor(darkMode)
+                    }
+                    val currentTheme = remember(displaySetting.chatThemeChoice, darkMode) {
+                        ChatThemeChoice.resolve(displaySetting.chatThemeChoice, darkMode)
+                    }
+                    ListItem(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 16.dp,
+                                    topEnd = 16.dp,
+                                    bottomStart = 2.dp,
+                                    bottomEnd = 2.dp
+                                )
+                            ),
+                        headlineContent = { Text("聊天主题") },
+                        supportingContent = {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (darkMode) {
+                                        "深色主题; 横向滑动查看更多"
+                                    } else {
+                                        "浅色主题; 横向滑动查看更多"
+                                    }
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(90.dp)
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        if (darkMode) {
-                                            "深色主题; 横向滑动查看更多"
-                                        } else {
-                                            "浅色主题; 横向滑动查看更多"
-                                        }
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(90.dp)
-                                            .horizontalScroll(rememberScrollState())
-                                            .padding(vertical = 2.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        themeOptions.forEach { choice ->
-                                            ChatThemeChoiceCard(
-                                                choice = choice,
-                                                selected = choice == currentTheme,
-                                                onClick = {
-                                                    updateDisplaySetting(
-                                                        displaySetting.copy(chatThemeChoice = choice.name)
-                                                    )
-                                                },
-                                            )
-                                        }
+                                    themeOptions.forEach { choice ->
+                                        ChatThemeChoiceCard(
+                                            choice = choice,
+                                            selected = choice == currentTheme,
+                                            onClick = {
+                                                updateDisplaySetting(
+                                                    displaySetting.copy(chatThemeChoice = choice.name)
+                                                )
+                                            },
+                                        )
                                     }
                                 }
-                            },
-                            colors = CustomColors.listItemColors,
-                        )
-                    } else {
-                        ListItem(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(
-                                    RoundedCornerShape(
-                                        topStart = 16.dp,
-                                        topEnd = 16.dp,
-                                        bottomStart = 2.dp,
-                                        bottomEnd = 2.dp
-                                    )
-                                ),
-                            headlineContent = { Text(stringResource(R.string.setting_page_dynamic_color)) },
-                            supportingContent = { Text(stringResource(R.string.setting_page_dynamic_color_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = settings.dynamicColor,
-                                    onCheckedChange = { vm.updateSettings(settings.copy(dynamicColor = it)) },
-                                )
-                            },
-                            colors = CustomColors.listItemColors,
-                        )
-                    }
-                    if (!settings.dynamicColor && !BuildConfig.NOTION_LIKE) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(MaterialTheme.colorScheme.surfaceBright)
-                        ) {
-                            PresetThemeButtonGroup(
-                                themeId = settings.themeId,
-                                modifier = Modifier.fillMaxWidth(),
-                                onChangeTheme = { vm.updateSettings(settings.copy(themeId = it)) }
-                            )
-                        }
-                    }
+                            }
+                        },
+                        colors = CustomColors.listItemColors,
+                    )
                     ListItem(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -694,34 +654,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 )
                             },
                         )
-                        if (!BuildConfig.NOTION_LIKE) {
-                            item(
-                                headlineContent = { Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_title)) },
-                                supportingContent = {
-                                    Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_desc))
-                                },
-                                trailingContent = {
-                                    Switch(
-                                        checked = displaySetting.useAppIconStyleLoadingIndicator,
-                                        onCheckedChange = {
-                                            updateDisplaySetting(displaySetting.copy(useAppIconStyleLoadingIndicator = it))
-                                        }
-                                    )
-                                },
-                            )
-                            item(
-                                headlineContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_title)) },
-                                supportingContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_desc)) },
-                                trailingContent = {
-                                    Switch(
-                                        checked = displaySetting.enableBlurEffect,
-                                        onCheckedChange = {
-                                            updateDisplaySetting(displaySetting.copy(enableBlurEffect = it))
-                                        }
-                                    )
-                                },
-                            )
-                        }
                         item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },

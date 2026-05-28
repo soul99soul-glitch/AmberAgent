@@ -1,17 +1,12 @@
 package app.amber.feature.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -21,7 +16,6 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
@@ -29,7 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import kotlinx.serialization.Serializable
-import me.rerere.rikkahub.BuildConfig
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.hooks.rememberUserSettingsState
@@ -146,8 +139,6 @@ enum class ColorMode {
 fun RikkahubTheme(
     content: @Composable () -> Unit
 ) {
-    val settings by rememberUserSettingsState()
-
     val colorMode by rememberColorMode()
     val darkTheme = when (colorMode) {
         ColorMode.SYSTEM -> isSystemInDarkTheme()
@@ -156,15 +147,7 @@ fun RikkahubTheme(
     }
     val amoledDarkMode by rememberAmoledDarkMode()
 
-    val colorScheme = when {
-        BuildConfig.NOTION_LIKE -> if (darkTheme) NotionDarkScheme else NotionLightScheme
-        settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> findPresetTheme(settings.themeId).getColorScheme(dark = true)
-        else -> findPresetTheme(settings.themeId).getColorScheme(dark = false)
-    }
+    val colorScheme = if (darkTheme) NotionDarkScheme else NotionLightScheme
     val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
         if (darkTheme && amoledDarkMode) {
             colorScheme.copy(
@@ -200,22 +183,13 @@ fun RikkahubTheme(
         }
     }
 
-    // V3 chat theme：用户可选浅色/深色主题；当前系统模式与已存选择不匹配时，
-    // 回落到该模式默认主题，避免浅色模式误套深色 token。
+    val settings by rememberUserSettingsState()
     val chatTheme = app.amber.feature.ui.pages.chat.ChatThemeChoice
         .resolve(settings.displaySetting.chatThemeChoice, darkTheme)
         .instance
 
-    // V3 Phase 4 二级页面适配：把 LocalChatTheme 映射到 MaterialTheme.colorScheme 的核心字段。
-    // 例外：
-    //   - dynamicColor 模式：用户明确选 Material You，跳过 chatTheme override
-    //   - AmoledDark：终审 #2 fix——AmoledDark 时仍应用 chatTheme accent/outline 体系，
-    //     但保留 bg/surface 为 #000 以省电。下方 cherry-pick override 处理。
-    val shouldApplyChatTheme = !(settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-    val themedColorScheme = remember(colorSchemeConverted, chatTheme, shouldApplyChatTheme) {
-        if (!shouldApplyChatTheme) {
-            colorSchemeConverted
-        } else {
+    val themedColorScheme = remember(colorSchemeConverted, chatTheme, amoledDarkMode, darkTheme) {
+        run {
             // AmoledDark 时保留纯黑 bg/surface（省电），其他主题 token 仍跟 chatTheme
             val useAmoledBlack = amoledDarkMode && darkTheme
             colorSchemeConverted.copy(
@@ -274,21 +248,12 @@ fun RikkahubTheme(
         // 这里显式 provide onSurface (= chatTheme.ink) 作为全局默认前景色.
         LocalContentColor provides themedColorScheme.onSurface,
     ) {
-        if (BuildConfig.NOTION_LIKE) {
-            MaterialTheme(
-                colorScheme = themedColorScheme,
-                typography = NotionTypography,
-                shapes = NotionShapes,
-                content = content,
-            )
-        } else {
-            MaterialExpressiveTheme(
-                colorScheme = themedColorScheme,
-                typography = Typography,
-                content = content,
-                motionScheme = MotionScheme.expressive()
-            )
-        }
+        MaterialTheme(
+            colorScheme = themedColorScheme,
+            typography = NotionTypography,
+            shapes = NotionShapes,
+            content = content,
+        )
     }
 }
 

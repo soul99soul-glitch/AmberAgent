@@ -174,25 +174,17 @@ object CustomColors {
     var black = false
 
     val topBarColors: TopAppBarColors
-        @Composable get() {
-            if (BuildConfig.NOTION_LIKE) {
-                return TopAppBarDefaults.topAppBarColors(
-                    containerColor = colorScheme.background,
-                    scrolledContainerColor = colorScheme.surface,
-                    titleContentColor = colorScheme.onSurface,
-                    navigationIconContentColor = colorScheme.onSurfaceVariant,
-                    actionIconContentColor = colorScheme.primary,
-                )
-            }
-            return if (!LocalDarkMode.current) TopAppBarDefaults.topAppBarColors(
-                containerColor = colorScheme.surfaceContainer,
-                scrolledContainerColor = colorScheme.surfaceContainer
-            ) else TopAppBarDefaults.topAppBarColors()
-        }
+        @Composable get() = TopAppBarDefaults.topAppBarColors(
+            containerColor = colorScheme.background,
+            scrolledContainerColor = colorScheme.surface,
+            titleContentColor = colorScheme.onSurface,
+            navigationIconContentColor = colorScheme.onSurfaceVariant,
+            actionIconContentColor = colorScheme.primary,
+        )
 
     val cardColors: CardColors
         @Composable get() = CardDefaults.cardColors(
-            containerColor = if (BuildConfig.NOTION_LIKE) colorScheme.surface else colorScheme.surfaceContainer
+            containerColor = colorScheme.surface
         )
 
     val cardColorsOnSurfaceContainer: CardColors
@@ -200,7 +192,7 @@ object CustomColors {
 
     val listItemColors: ListItemColors
         @Composable get() = ListItemDefaults.colors(
-            containerColor = if (BuildConfig.NOTION_LIKE) colorScheme.surface else colorScheme.surfaceBright,
+            containerColor = colorScheme.surface,
             headlineColor = colorScheme.onSurface,
             supportingColor = colorScheme.onSurfaceVariant,
             leadingIconColor = colorScheme.onSurfaceVariant,

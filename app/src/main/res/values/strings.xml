@@ -800,8 +800,6 @@
   <string name="setting_page_documentation_desc">View app usage instructions and help documentation</string>
   <string name="setting_page_donate">Donate</string>
   <string name="setting_page_donate_desc">If you like it, sponsor the author\'s work</string>
-  <string name="setting_page_dynamic_color">Dynamic Color</string>
-  <string name="setting_page_dynamic_color_desc">Use dynamic color</string>
   <string name="setting_page_extensions">Extensions</string>
   <string name="setting_page_extensions_desc">Manage quick messages and prompts</string>
   <string name="setting_page_favorites_desc">Review saved conversation snippets</string>
@@ -1167,12 +1165,6 @@
   <string name="text_area_import_from_file">Import from file</string>
   <string name="text_area_import_success">File imported successfully</string>
   <string name="text_area_save">Save</string>
-  <string name="theme_name_autumn">Autumn Yellow</string>
-  <string name="theme_name_amberagent_clash">Amber Clash</string>
-  <string name="theme_name_black">Neutral Black</string>
-  <string name="theme_name_ocean">Ocean Blue</string>
-  <string name="theme_name_sakura">Sakura Pink</string>
-  <string name="theme_name_spring">Meadow Green</string>
   <string name="title_activity_safe_mode">Safe Mode</string>
   <string name="tools_warning">The current model does not have tool calling enabled. Please enable the model\'s tool capabilities in the settings to use features like search/MCP.</string>
   <string name="translate">Translate</string>
