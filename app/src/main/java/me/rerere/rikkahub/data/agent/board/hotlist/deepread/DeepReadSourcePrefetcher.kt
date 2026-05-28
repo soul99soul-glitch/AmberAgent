@@ -361,7 +361,7 @@ class DeepReadSourcePrefetcher(
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@withContext null
             val body = response.peekBody(DIRECT_FETCH_MAX_BYTES).string()
-            body.extractReadableText().takeIf { it.length >= MIN_SOURCE_CHARS }?.take(SOURCE_EXCERPT_LIMIT)
+            body.extractReadableText(sourceUrl = url).takeIf { it.length >= MIN_SOURCE_CHARS }?.take(SOURCE_EXCERPT_LIMIT)
         }
     }
 
@@ -631,7 +631,19 @@ class DeepReadSourcePrefetcher(
                 match.groupValues.drop(2).firstOrNull { it.isNotBlank() }?.trim()
             }
 
-    private fun String.extractReadableText(): String =
+    private fun String.extractReadableText(sourceUrl: String? = null): String {
+        val nativeResult = sourceUrl?.let { url ->
+            runCatching {
+                app.amber.feature.deepread.nativebridge.ReaderExtractorNative.extract(this, url)
+            }.getOrNull()
+        }
+        if (nativeResult != null && nativeResult.contentText.length >= 18) {
+            return nativeResult.contentText
+        }
+        return extractReadableTextJvm()
+    }
+
+    private fun String.extractReadableTextJvm(): String =
         replace(Regex("(?is)<(script|style|noscript|svg|canvas)\\b.*?</\\1>"), " ")
             .replace(Regex("(?is)<br\\s*/?>"), "\n")
             .replace(Regex("(?is)</(p|div|section|article|li|h[1-6])>"), "\n")
