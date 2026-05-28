@@ -61,7 +61,6 @@ import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.androidx.workmanager.koin.workManagerFactory
-import org.koin.core.context.loadKoinModules
 import org.koin.core.context.startKoin
 
 private const val TAG = "RikkaHubApp"
@@ -78,42 +77,11 @@ const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 class RikkaHubApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        // T1 perf — DI lazy split. onCreate resolves Board / Memory / Office /
-        // ChatService eagerly (BoardScheduler / MemoryDreamScheduler /
-        // DocRadar / NotificationSignalCollector all bound in those modules),
-        // so those must stay in the eager list. iCloud and webMount have
-        // no startup-path consumers — defer their HashMap-mutation cost to
-        // the first idle frame after onCreate, saving a small slice of
-        // cold-start critical-path time.
-        //
-        // The IdleHandler trick: addIdleHandler() fires when the main
-        // Looper has no more pending work. Returns false to remove the
-        // handler after the one-shot load. Guaranteed to run on the main
-        // thread before the user can navigate to iCloud/webMount features
-        // (those entry points are user-driven, so trivially post-idle).
         startKoin {
             androidLogger()
             androidContext(this@RikkaHubApp)
             workManagerFactory()
-            modules(
-                appModule,
-                chatModule,
-                memoryModule,
-                agentRuntimeModule,
-                agentInfraModule,
-                boardModule,
-                workspaceModule,
-                viewModelModule,
-                dataSourceModule,
-                repositoryModule,
-            )
-        }
-        // Deferred feature modules: iCloud + webMount only — they're
-        // touched only via user navigation into those screens, never in
-        // onCreate or any startup background launch.
-        android.os.Looper.myQueue().addIdleHandler {
-            loadKoinModules(listOf(iCloudModule, webMountModule))
-            false  // remove the idle handler after the one-shot load
+            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
 
