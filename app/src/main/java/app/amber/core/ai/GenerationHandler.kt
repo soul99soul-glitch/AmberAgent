@@ -116,34 +116,10 @@ private class GenerativeUiInvalidWidgetStreamException(
     val issue: String,
 ) : RuntimeException("Generative UI stream completed without a valid widget: $issue")
 
-@Serializable
-sealed interface GenerationChunk {
-    data class Messages(
-        val messages: List<UIMessage>,
-        val update: GenerationUpdate = GenerationUpdate.full(messages),
-    ) : GenerationChunk
-}
-
-data class GenerationUpdate(
-    val messages: List<UIMessage>,
-    val streamingTailMessageId: Uuid?,
-) {
-    val isStreamingTail: Boolean get() = streamingTailMessageId != null
-
-    fun withMessages(messages: List<UIMessage>): GenerationUpdate =
-        copy(messages = messages)
-
-    companion object {
-        fun full(messages: List<UIMessage>): GenerationUpdate =
-            GenerationUpdate(messages = messages, streamingTailMessageId = null)
-
-        fun streamingTail(messages: List<UIMessage>): GenerationUpdate =
-            GenerationUpdate(
-                messages = messages,
-                streamingTailMessageId = messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.id,
-            )
-    }
-}
+// GenerationChunk + GenerationUpdate moved to :core:ai:generation:api so
+// consumers (subagent, board, chat impl, DeepRead) can depend on the
+// interface module without pulling the heavy :app implementation. See
+// commit T4.2 — Phase D cascade un-deferral.
 
 class GenerationHandler(
     private val context: Context,
@@ -155,24 +131,24 @@ class GenerationHandler(
     private val aiLoggingManager: AILoggingManager,
     private val conversationContextEngine: ConversationContextEngine,
     private val toolDispatcher: AgentToolDispatcher,
-) {
-    fun generateText(
+) : Generator {
+    override fun generateText(
         settings: Settings,
         model: Model,
         messages: List<UIMessage>,
-        inputTransformers: List<InputMessageTransformer> = emptyList(),
-        outputTransformers: List<OutputMessageTransformer> = emptyList(),
+        inputTransformers: List<InputMessageTransformer>,
+        outputTransformers: List<OutputMessageTransformer>,
         assistant: Assistant,
-        memories: List<AssistantMemory>? = null,
-        tools: List<Tool> = emptyList(),
-        maxSteps: Int = 256,
-        processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
-        autoApproveTools: Boolean = false,
-        autoApproveHighRiskTools: Boolean = false,
-        autoApprovedToolNames: Set<String> = emptySet(),
-        invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
-        conversation: Conversation? = null,
-        consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
+        memories: List<AssistantMemory>?,
+        tools: List<Tool>,
+        maxSteps: Int,
+        processingStatus: MutableStateFlow<String?>,
+        autoApproveTools: Boolean,
+        autoApproveHighRiskTools: Boolean,
+        autoApprovedToolNames: Set<String>,
+        invocationContext: ToolInvocationContext,
+        conversation: Conversation?,
+        consumeSteerMessages: suspend () -> List<UIMessage>,
     ): Flow<GenerationChunk> = flow {
         coroutineScope {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
@@ -1162,11 +1138,11 @@ class GenerationHandler(
         ).any { it in message }
     }
 
-    fun translateText(
+    override fun translateText(
         settings: Settings,
         sourceText: String,
         targetLanguage: Locale,
-        onStreamUpdate: ((String) -> Unit)? = null
+        onStreamUpdate: ((String) -> Unit)?,
     ): Flow<String> = flow {
         val model = settings.providers.findModelById(settings.translateModeId)
             ?: error("Translation model not found")

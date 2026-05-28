@@ -614,6 +614,7 @@ dependencies {
     implementation(project(":core:context:api"))
     implementation(project(":core:ai:api"))
     implementation(project(":core:ai:transformers:api"))
+    implementation(project(":core:ai:generation:api"))
     implementation(project(":feature:runtime:api"))
     implementation(project(":feature:tools:api"))
     implementation(project(":feature:terminal"))
