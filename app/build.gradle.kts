@@ -577,6 +577,8 @@ dependencies {
     implementation(project(":feature:chat:api"))
     implementation(project(":feature:history"))
     implementation(project(":feature:webview"))
+    implementation(project(":feature:task"))
+    implementation(project(":feature:workspace"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 
