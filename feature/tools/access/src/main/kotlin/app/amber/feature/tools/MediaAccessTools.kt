@@ -8,7 +8,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createMediaSearchTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createMediaSearchTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "media_search",
     description = "Search Android MediaStore images, videos, or audio after the matching media permission is granted.",
     parameters = {

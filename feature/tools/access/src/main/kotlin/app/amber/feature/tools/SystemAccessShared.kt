@@ -17,7 +17,7 @@ import kotlin.math.min
  * Kept as a thin wrapper (no equality, no copy) because every sibling
  * file pulls the same pair — passing two args each would just be noise.
  */
-internal class SystemAccessDeps(
+class SystemAccessDeps(
     val activityStore: AgentToolActivityStore,
     val permissionBroker: AgentPermissionBroker,
 )
@@ -28,7 +28,7 @@ internal class SystemAccessDeps(
  * activity log audits each system-access invocation. Re-throws whatever
  * [block] throws after recording the failure.
  */
-internal suspend fun SystemAccessDeps.trackSystemTool(
+suspend fun SystemAccessDeps.trackSystemTool(
     toolName: String,
     title: String,
     capabilityId: String,
@@ -70,7 +70,7 @@ private fun List<UIMessagePart>.previewText(): String =
 // helper file (ToolJson.kt) is a separate cleanup, intentionally
 // out of scope for the SystemAccess god-class split. ---
 
-internal fun obj(vararg properties: Pair<String, JsonElement>, required: List<String>? = null) =
+fun obj(vararg properties: Pair<String, JsonElement>, required: List<String>? = null) =
     InputSchema.Obj(
         properties = buildJsonObject {
             properties.forEach { (name, schema) -> put(name, schema) }
@@ -78,22 +78,22 @@ internal fun obj(vararg properties: Pair<String, JsonElement>, required: List<St
         required = required
     )
 
-internal fun accessStringProp(description: String) = buildJsonObject {
+fun accessStringProp(description: String) = buildJsonObject {
     put("type", "string")
     put("description", description)
 }
 
-internal fun booleanProp(description: String) = buildJsonObject {
+fun booleanProp(description: String) = buildJsonObject {
     put("type", "boolean")
     put("description", description)
 }
 
-internal fun integerProp(description: String) = buildJsonObject {
+fun integerProp(description: String) = buildJsonObject {
     put("type", "integer")
     put("description", description)
 }
 
-internal fun enumProp(description: String, values: List<String>) = buildJsonObject {
+fun enumProp(description: String, values: List<String>) = buildJsonObject {
     put("type", "string")
     put("description", description)
     put("enum", buildJsonArray { values.forEach(::add) })
@@ -101,7 +101,7 @@ internal fun enumProp(description: String, values: List<String>) = buildJsonObje
 
 // --- JsonElement helpers used across system-access tools ---
 
-internal fun JsonElement.limit(name: String = "limit", default: Int, max: Int): Int =
+fun JsonElement.limit(name: String = "limit", default: Int, max: Int): Int =
     min(int(name) ?: default, max).coerceAtLeast(1)
 
 /**
@@ -109,7 +109,7 @@ internal fun JsonElement.limit(name: String = "limit", default: Int, max: Int): 
  * into the activity log preview. Phones / sender / email are masked;
  * long free-text fields collapse to their char count.
  */
-internal fun JsonElement.safePreview(): JsonElement = buildJsonObject {
+fun JsonElement.safePreview(): JsonElement = buildJsonObject {
     jsonObject.forEach { (key, value) ->
         when (key) {
             "message", "body", "description" -> put("${key}_chars", value.toString().length)
@@ -122,7 +122,7 @@ internal fun JsonElement.safePreview(): JsonElement = buildJsonObject {
 
 // --- Masking primitives ---
 
-internal fun maskPhone(value: String): String {
+fun maskPhone(value: String): String {
     val digits = value.filter { it.isDigit() }
     if (digits.length <= 4) return value.take(2) + "***"
     val prefix = digits.take(3)
@@ -130,7 +130,7 @@ internal fun maskPhone(value: String): String {
     return "$prefix****$suffix"
 }
 
-internal fun maskEmail(value: String): String {
+fun maskEmail(value: String): String {
     val parts = value.split("@", limit = 2)
     if (parts.size != 2) return value.take(2) + "***"
     val name = parts[0]

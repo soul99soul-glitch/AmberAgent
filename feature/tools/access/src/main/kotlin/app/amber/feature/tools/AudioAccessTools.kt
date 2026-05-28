@@ -8,7 +8,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import java.io.File
 
-internal fun createAudioRecordOnceTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createAudioRecordOnceTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "audio_record_once",
     description = "Record a short microphone clip to app-private storage. Requires RECORD_AUDIO and explicit approval.",
     parameters = {

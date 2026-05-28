@@ -7,7 +7,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createUsageStatsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createUsageStatsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "usage_stats_list",
     description = "List recent app usage stats after Usage Access is enabled.",
     parameters = {

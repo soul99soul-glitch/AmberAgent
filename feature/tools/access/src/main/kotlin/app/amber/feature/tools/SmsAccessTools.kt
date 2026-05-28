@@ -10,7 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createSmsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createSmsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "sms_list",
     description = "List SMS messages from inbox, sent, or all after READ_SMS is granted. Bodies are returned as short previews by default.",
     parameters = {
@@ -30,7 +30,7 @@ internal fun createSmsListTool(context: Context, deps: SystemAccessDeps): Tool =
     }
 )
 
-internal fun createSmsReadTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createSmsReadTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "sms_read",
     description = "Read SMS content by message_id or thread_id after READ_SMS is granted.",
     parameters = {
@@ -49,7 +49,7 @@ internal fun createSmsReadTool(context: Context, deps: SystemAccessDeps): Tool =
     }
 )
 
-internal fun createSmsSendTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createSmsSendTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "sms_send",
     description = "Send an SMS from this device. Requires SEND_SMS and explicit approval.",
     parameters = {

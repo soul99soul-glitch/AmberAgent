@@ -597,6 +597,8 @@ dependencies {
     implementation(project(":feature:tools:api"))
     implementation(project(":feature:terminal"))
     implementation(project(":feature:modelcouncil"))
+    implementation(project(":feature:tools:access"))
+    implementation(project(":feature:system"))
     implementation(project(":feature:history"))
     implementation(project(":feature:webview"))
     implementation(project(":feature:task"))

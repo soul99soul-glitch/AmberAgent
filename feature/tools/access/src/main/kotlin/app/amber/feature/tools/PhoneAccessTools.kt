@@ -10,7 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createDevicePhoneStateTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createDevicePhoneStateTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "device_phone_state",
     description = "Read coarse phone/SIM state after READ_PHONE_STATE or READ_PHONE_NUMBERS is granted.",
     parameters = { obj() },
@@ -28,7 +28,7 @@ internal fun createDevicePhoneStateTool(context: Context, deps: SystemAccessDeps
     }
 )
 
-internal fun createCallLogListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createCallLogListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "call_log_list",
     description = "List recent Android call log entries after READ_CALL_LOG is granted.",
     parameters = {
@@ -46,7 +46,7 @@ internal fun createCallLogListTool(context: Context, deps: SystemAccessDeps): To
     }
 )
 
-internal fun createCallPhoneTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createCallPhoneTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "call_phone",
     description = "Open the dialer by default. If direct_call=true, directly starts a phone call and requires CALL_PHONE plus explicit approval.",
     parameters = {

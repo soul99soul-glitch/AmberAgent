@@ -9,7 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createContactsSearchTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createContactsSearchTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "contacts_search",
     description = "Search Android contacts by name, phone, or email after READ_CONTACTS is granted. Phone numbers are masked by default.",
     parameters = {
@@ -27,7 +27,7 @@ internal fun createContactsSearchTool(context: Context, deps: SystemAccessDeps):
     }
 )
 
-internal fun createContactsWriteTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createContactsWriteTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "contacts_write",
     description = "Create a contact in Android Contacts. Requires WRITE_CONTACTS and explicit approval.",
     parameters = {

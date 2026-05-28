@@ -17,7 +17,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createBatteryStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createBatteryStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "battery_status",
     description = "Read device battery level, charging state, and power-save mode.",
     parameters = { obj() },
@@ -28,7 +28,7 @@ internal fun createBatteryStatusTool(context: Context, deps: SystemAccessDeps): 
     }
 )
 
-internal fun createNetworkStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createNetworkStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "network_status",
     description = "Read coarse connectivity status, transport type, and VPN/roaming hints.",
     parameters = { obj() },
@@ -39,7 +39,7 @@ internal fun createNetworkStatusTool(context: Context, deps: SystemAccessDeps): 
     }
 )
 
-internal fun createWifiStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createWifiStatusTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "wifi_status",
     description = "Read Wi-Fi enabled state and redacted current SSID/IP if available. Does not scan nearby Wi-Fi.",
     parameters = { obj() },
@@ -50,7 +50,7 @@ internal fun createWifiStatusTool(context: Context, deps: SystemAccessDeps): Too
     }
 )
 
-internal fun createDeviceInfoTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createDeviceInfoTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "device_info",
     description = "Read device brand, model, Android version, ABI, and screen metrics.",
     parameters = { obj() },

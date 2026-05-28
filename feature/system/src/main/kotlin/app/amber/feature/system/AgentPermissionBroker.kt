@@ -13,7 +13,6 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import me.rerere.common.android.Logging
-import me.rerere.rikkahub.BuildConfig
 
 private const val TAG = "AgentPermissionBroker"
 
@@ -71,6 +70,7 @@ data class AgentPermissionCapability(
 
 class AgentPermissionBroker(
     private val context: Context,
+    private val isDebugBuild: Boolean,
 ) {
     val capabilities: List<AgentPermissionCapability> = AgentPermissionRegistry.capabilities
 
@@ -81,7 +81,7 @@ class AgentPermissionBroker(
         getStatus(getCapability(capabilityId))
 
     fun getStatus(capability: AgentPermissionCapability): AgentPermissionStatus {
-        if (capability.debugOnly && !BuildConfig.DEBUG) return AgentPermissionStatus.Unsupported
+        if (capability.debugOnly && !isDebugBuild) return AgentPermissionStatus.Unsupported
         if (Build.VERSION.SDK_INT < capability.minSdk) return AgentPermissionStatus.Unsupported
 
         capability.specialAccess?.let { special ->

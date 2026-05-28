@@ -7,7 +7,7 @@ import android.provider.Settings
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createSettingsOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createSettingsOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "settings_open",
     description = "Open a whitelisted Android settings page, such as accessibility, notification access, app details, overlay, battery optimization, location, or default apps.",
     parameters = {
@@ -41,7 +41,7 @@ internal fun createSettingsOpenTool(context: Context, deps: SystemAccessDeps): T
     }
 )
 
-internal fun createIntentOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createIntentOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "intent_open",
     description = "Open a whitelisted Android intent action with optional data URI. Dangerous or non-whitelisted actions are rejected.",
     parameters = {

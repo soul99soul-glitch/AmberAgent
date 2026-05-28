@@ -12,7 +12,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 
-internal fun createAppsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createAppsListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "apps_list",
     description = "List launchable apps visible to AmberAgent without requesting QUERY_ALL_PACKAGES.",
     parameters = {
@@ -30,7 +30,7 @@ internal fun createAppsListTool(context: Context, deps: SystemAccessDeps): Tool 
     }
 )
 
-internal fun createAppOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createAppOpenTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "app_open",
     description = "Open an installed launchable app by package name.",
     parameters = {
@@ -54,7 +54,7 @@ internal fun createAppOpenTool(context: Context, deps: SystemAccessDeps): Tool =
     }
 )
 
-internal fun createAppsInstalledListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createAppsInstalledListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "apps_installed_list",
     description = "List installed packages visible to AmberAgent. Debug/advanced experiment path; QUERY_ALL_PACKAGES may be restricted by Google Play policy.",
     parameters = {
@@ -84,7 +84,7 @@ internal fun createAppsInstalledListTool(context: Context, deps: SystemAccessDep
     }
 )
 
-internal fun createAppInfoTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createAppInfoTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "app_info",
     description = "Return label, version, launchability, install source, and optional declared permissions for a package.",
     parameters = {

@@ -12,7 +12,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import kotlin.coroutines.resume
 
-internal fun createLocationCurrentTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createLocationCurrentTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "location_current",
     description = "Return the latest available device location from LocationManager after location permission is granted.",
     parameters = { obj() },

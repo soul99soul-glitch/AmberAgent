@@ -12,7 +12,7 @@ import me.rerere.ai.core.Tool
 import java.time.Instant
 import java.time.ZoneId
 
-internal fun createCalendarListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createCalendarListTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "calendar_list",
     description = "List Android calendar events after READ_CALENDAR is granted.",
     parameters = {
@@ -31,7 +31,7 @@ internal fun createCalendarListTool(context: Context, deps: SystemAccessDeps): T
     }
 )
 
-internal fun createCalendarCreateTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createCalendarCreateTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "calendar_create",
     description = "Create an Android calendar event. Requires WRITE_CALENDAR and explicit approval.",
     parameters = {
