@@ -120,11 +120,53 @@
 ### Full APK verified
 - `./gradlew :app:assembleDebug` BUILD SUCCESSFUL
 
+## Session 3 — 2026-05-28 (Kernel path fully wired)
+
+### ChatSessionResolverImpl
+- Reads SettingsAggregator + ConversationRepo + MemoryRepo to build ChatSession
+- Commit: 86591396
+
+### Koin DI — full Kernel registration
+- AgentRuntimeDatabase + DAO in DataSourceModule
+- InMemoryAgentRegistry (ChatTurnAgent + DeepReadAgentAdapter registered) in AgentRuntimeModule
+- InProcessAgentRunner + RoomAgentEventStore
+- ChatService receives agentRunner via constructor
+- Commit: 4cfb1fef
+
+### useKernelPath flag exposed
+- ChatService.useKernelPath now public, flip to activate kernel path
+- Commit: 5532b507
+
+### InProcessAgentRunner persists runs to DB
+- appendRun(running/completed/failed) + markInterrupted on cancel
+- Job tracked per run for real cancellation
+- Commit: 2471bdf2
+
+### Real ChatEventProjector
+- projectFinalized writes MessageNode to chat.db (not just metadata)
+- commitEvent persists Final AgentEventRecord to agent_event table
+- ProjectingEventWriter bridges AgentEventWriter → Projector
+- ProjectingRunScope used for ChatTurnInput runs (via runScopeFactory)
+- Commit: 310fa5e8
+
+### Physical Gradle module splits
+- :feature:history + :feature:webview (zero me.rerere deps)
+- :feature:task + :feature:workspace (visibility fixes for cross-module access)
+- :feature:icloud (JsonInstant moved to :core:agent-utils as shared dep)
+- Commits: 1ee7c018, 79b5402d, fb3bc9bb
+
+### Plan revision #8 (Compose optimizations, no new tasks)
+- ChatPage 16x collectAsState → sub-Composable split: attach to TC.4 (+2-3d)
+- Markdown streaming throttled parse: attach to TD.Rust.1a (+1-2d)
+- Conversation full-load guard: any time in Phase D (+0.5d)
+- DI lazy module: zero cost, automatic from module split
+
 ## Remaining Work
 
 ### Phase C behavior switch (partial)
-- TC.3: ChatService has AgentRunner param but sendMessage() still uses direct path
-- TC.4: ChatPage UI observe(runId) migration
+- TC.4: ChatPage UI observe(runId) migration (with修订 #8 sub-Composable split)
+
+### Phase D — physical module splits still in :app
 
 ### Phase D remaining
 - runtime/ sub-package (5 files: AgentToolDispatcher, PermissionDecisionResolver, etc.) — too many cross-references to move atomically
