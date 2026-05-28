@@ -18,4 +18,10 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.kotest.runner.junit5)
+    testImplementation(libs.kotest.property)
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
