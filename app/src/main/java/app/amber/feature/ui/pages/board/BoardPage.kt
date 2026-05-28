@@ -528,8 +528,9 @@ private fun ProviderSection(provider: HotListProviderSnapshot, onItemClick: (Hot
                             Text("${item.rank}.", style = MaterialTheme.typography.bodyMedium, color = workspaceColors().muted)
                             Column(Modifier.weight(1f)) {
                                 Text(item.presentationTitle, style = MaterialTheme.typography.bodyMedium)
-                                if (!item.heat.isNullOrBlank()) {
-                                    Text(item.heat, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+                                val heat = item.heat
+                                if (!heat.isNullOrBlank()) {
+                                    Text(heat, style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
                                 }
                             }
                         }
