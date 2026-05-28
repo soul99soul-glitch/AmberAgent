@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.transformers
+package app.amber.core.ai.transformers
 
 import android.content.ContextWrapper
 import kotlinx.coroutines.runBlocking

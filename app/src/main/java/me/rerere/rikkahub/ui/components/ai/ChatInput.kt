@@ -118,7 +118,7 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
-import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
+import app.amber.core.ai.vision.ImageAttachmentValidator
 import me.rerere.rikkahub.data.context.CompactLifecycleState
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider

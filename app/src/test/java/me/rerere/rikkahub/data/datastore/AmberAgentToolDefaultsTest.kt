@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.datastore
 
-import me.rerere.rikkahub.data.ai.tools.LocalToolOption
+import app.amber.core.ai.tools.LocalToolOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -57,8 +57,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
+import app.amber.core.ai.generative.GenerativeUiPlanner
+import app.amber.core.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought

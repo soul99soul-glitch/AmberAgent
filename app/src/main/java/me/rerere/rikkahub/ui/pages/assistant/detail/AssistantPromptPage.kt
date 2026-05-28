@@ -67,9 +67,9 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.ai.transformers.DefaultPlaceholderProvider
-import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
-import me.rerere.rikkahub.data.ai.transformers.TransformerContext
+import app.amber.core.ai.transformers.DefaultPlaceholderProvider
+import app.amber.core.ai.transformers.TemplateTransformer
+import app.amber.core.ai.transformers.TransformerContext
 import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope

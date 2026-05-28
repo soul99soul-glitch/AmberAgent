@@ -6,8 +6,8 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.ai.GenerationChunk
-import me.rerere.rikkahub.data.ai.GenerationHandler
+import app.amber.core.ai.GenerationChunk
+import app.amber.core.ai.GenerationHandler
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById

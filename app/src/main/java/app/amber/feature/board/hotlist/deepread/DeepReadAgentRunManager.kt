@@ -21,8 +21,8 @@ import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import app.amber.feature.tools.AgentToolSetFactory
-import me.rerere.rikkahub.data.ai.GenerationChunk
-import me.rerere.rikkahub.data.ai.GenerationHandler
+import app.amber.core.ai.GenerationChunk
+import app.amber.core.ai.GenerationHandler
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel

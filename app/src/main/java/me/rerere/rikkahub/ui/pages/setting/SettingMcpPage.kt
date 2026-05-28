@@ -77,11 +77,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.InputSchema
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
-import me.rerere.rikkahub.data.ai.mcp.McpStatus
-import me.rerere.rikkahub.data.ai.mcp.McpTool
-import me.rerere.rikkahub.data.ai.mcp.parseMcpServersFromJson
+import app.amber.core.ai.mcp.McpManager
+import app.amber.core.ai.mcp.McpServerConfig
+import app.amber.core.ai.mcp.McpStatus
+import app.amber.core.ai.mcp.McpTool
+import app.amber.core.ai.mcp.parseMcpServersFromJson
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag

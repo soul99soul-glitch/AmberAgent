@@ -7,7 +7,7 @@ import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.core.ReasoningLevel
-import me.rerere.rikkahub.data.ai.tools.LocalToolOption
+import app.amber.core.ai.tools.LocalToolOption
 import me.rerere.rikkahub.data.memory.model.MemoryKind
 import me.rerere.rikkahub.data.memory.model.MemoryScope
 import me.rerere.rikkahub.data.model.nativebridge.RegexNativeSwitch

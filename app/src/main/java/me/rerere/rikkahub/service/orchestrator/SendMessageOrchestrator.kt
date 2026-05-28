@@ -3,7 +3,7 @@ package me.rerere.rikkahub.service.orchestrator
 import com.google.firebase.analytics.FirebaseAnalytics
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
-import me.rerere.rikkahub.data.ai.tools.parseDeepReadSlashCommand
+import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.PendingUserMessageMode

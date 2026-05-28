@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.prompts
+package app.amber.core.ai.prompts
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals

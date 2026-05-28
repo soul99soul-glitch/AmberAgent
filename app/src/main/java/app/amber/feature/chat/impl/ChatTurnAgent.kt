@@ -9,8 +9,8 @@ import app.amber.feature.chat.api.ChatTurnDescriptor
 import app.amber.feature.chat.api.ChatTurnInput
 import kotlinx.coroutines.flow.last
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.ai.GenerationChunk
-import me.rerere.rikkahub.data.ai.GenerationHandler
+import app.amber.core.ai.GenerationChunk
+import app.amber.core.ai.GenerationHandler
 import me.rerere.rikkahub.service.ConversationAccess
 import java.time.Instant
 import kotlin.uuid.Uuid
@@ -159,8 +159,8 @@ data class ChatSession(
     val settings: Settings,
     val model: me.rerere.ai.provider.Model,
     val messages: List<UIMessage>,
-    val inputTransformers: List<me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer>,
-    val outputTransformers: List<me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer>,
+    val inputTransformers: List<app.amber.core.ai.transformers.InputMessageTransformer>,
+    val outputTransformers: List<app.amber.core.ai.transformers.OutputMessageTransformer>,
     val assistant: Assistant,
     val memories: List<me.rerere.rikkahub.data.model.AssistantMemory>?,
     val tools: List<me.rerere.ai.core.Tool>,

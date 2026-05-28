@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.settings.BackupReminderConfig
 import app.amber.core.settings.DEFAULT_SYSTEM_TTS_ID
 import app.amber.core.settings.PreferencesKeys

@@ -14,7 +14,7 @@ import app.amber.feature.tools.boolean
 import app.amber.feature.tools.long
 import app.amber.feature.tools.requiredString
 import app.amber.feature.tools.string
-import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
+import app.amber.core.ai.transformers.OcrTransformer
 import app.amber.feature.webmount.primitives.WebViewScreenshot
 
 internal fun createScreenshotTool(deps: WebMountDeps): Tool = Tool(

@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.ui.pages.developer
 
 import androidx.lifecycle.ViewModel
-import me.rerere.rikkahub.data.ai.AILoggingManager
+import app.amber.core.ai.AILoggingManager
 
 class DeveloperVM(
     private val aiLoggingManager: AILoggingManager

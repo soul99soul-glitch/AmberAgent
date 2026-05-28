@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.ai.GenerationHandler
+import app.amber.core.ai.GenerationHandler
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import java.util.Locale

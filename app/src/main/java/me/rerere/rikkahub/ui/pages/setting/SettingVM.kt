@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.ai.mcp.McpManager
+import app.amber.core.ai.mcp.McpManager
 
 class SettingVM(
     private val settingsStore: SettingsAggregator,

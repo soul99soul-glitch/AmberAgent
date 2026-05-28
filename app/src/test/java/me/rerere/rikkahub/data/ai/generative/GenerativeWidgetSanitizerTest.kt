@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.generative
+package app.amber.core.ai.generative
 
 import app.amber.core.settings.GenerativeUiSetting
 import org.junit.Assert.assertEquals

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.tools
+package app.amber.core.ai.tools
 
 import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.assertEquals

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.tools
+package app.amber.core.ai.tools
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject

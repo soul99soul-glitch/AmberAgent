@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.transformers
+package app.amber.core.ai.transformers
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive

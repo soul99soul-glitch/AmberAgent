@@ -1,8 +1,8 @@
 package app.amber.feature.tools
 
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.ai.tools.LocalTools
-import me.rerere.rikkahub.data.ai.tools.createSearchTools
+import app.amber.core.ai.tools.LocalTools
+import app.amber.core.ai.tools.createSearchTools
 import app.amber.core.settings.Settings
 
 class AgentToolSetFactory(

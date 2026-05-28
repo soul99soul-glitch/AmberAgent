@@ -100,7 +100,7 @@ import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 import app.amber.core.settings.AgentOperationPreviewMode
-import me.rerere.rikkahub.data.ai.tools.parseDeepReadSlashCommand
+import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getAssistantById
 import app.amber.core.settings.getCurrentAssistant

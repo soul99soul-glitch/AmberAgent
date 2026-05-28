@@ -29,7 +29,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
+import app.amber.core.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.ui.components.richtext.MarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.richtext.canRenderByTopLevelBlocks

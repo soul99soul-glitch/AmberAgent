@@ -12,7 +12,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.board.BoardSignalSourceType
-import me.rerere.rikkahub.data.ai.mcp.McpManager
+import app.amber.core.ai.mcp.McpManager
 
 /**
  * Pulls Feishu unread/recent IM messages via the user's configured Feishu MCP server.

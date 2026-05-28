@@ -12,11 +12,11 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
+import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT
+import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
+import app.amber.core.ai.prompts.DEFAULT_TITLE_PROMPT
+import app.amber.core.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.ModelGroupSessionDefault
 import app.amber.core.settings.PreferencesKeys

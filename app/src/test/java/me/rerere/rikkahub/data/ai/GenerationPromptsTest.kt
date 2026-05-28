@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
 import me.rerere.ai.provider.Model
-import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
+import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.settings.GenerativeUiSetting
 import me.rerere.rikkahub.data.model.AssistantMemory
 import org.junit.Assert.assertFalse

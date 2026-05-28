@@ -15,7 +15,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.rikkahub.data.ai.mcp.McpManager
+import app.amber.core.ai.mcp.McpManager
 import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.dao.DocChangeLogDAO
 import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO

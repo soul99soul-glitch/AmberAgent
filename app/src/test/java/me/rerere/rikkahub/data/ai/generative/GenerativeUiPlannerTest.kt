@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.generative
+package app.amber.core.ai.generative
 
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage

@@ -30,8 +30,8 @@ import androidx.compose.ui.unit.dp
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
+import app.amber.core.ai.generative.GenerativeWidgetParser
+import app.amber.core.ai.generative.GenerativeWidgetSegment
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownTopLevelBlock
 import me.rerere.rikkahub.ui.components.richtext.topLevelBlockCount

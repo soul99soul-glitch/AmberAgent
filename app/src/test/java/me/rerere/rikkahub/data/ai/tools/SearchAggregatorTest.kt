@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.tools
+package app.amber.core.ai.tools
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject

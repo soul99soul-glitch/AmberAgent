@@ -93,11 +93,11 @@ import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.FileZip
 import me.rerere.hugeicons.stroke.Pause
 import me.rerere.hugeicons.stroke.Play
-import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizeStatus
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
-import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
-import me.rerere.rikkahub.data.ai.generative.VChartSpecValidator
+import app.amber.core.ai.generative.GuizangHtmlDeckValidator
+import app.amber.core.ai.generative.GenerativeWidgetSanitizeStatus
+import app.amber.core.ai.generative.GenerativeWidgetSanitizer
+import app.amber.core.ai.generative.GenerativeWidgetSegment
+import app.amber.core.ai.generative.VChartSpecValidator
 import app.amber.core.settings.GenerativeUiSetting
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock

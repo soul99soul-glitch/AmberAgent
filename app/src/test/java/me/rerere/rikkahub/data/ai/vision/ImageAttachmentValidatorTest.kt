@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.vision
+package app.amber.core.ai.vision
 
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings

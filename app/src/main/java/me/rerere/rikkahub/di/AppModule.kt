@@ -7,8 +7,8 @@ import com.google.firebase.remoteconfig.remoteConfig
 import kotlinx.serialization.json.Json
 import me.rerere.highlight.Highlighter
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.ai.AILoggingManager
-import me.rerere.rikkahub.data.ai.tools.LocalTools
+import app.amber.core.ai.AILoggingManager
+import app.amber.core.ai.tools.LocalTools
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai.transformers
+package app.amber.core.ai.transformers
 
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage

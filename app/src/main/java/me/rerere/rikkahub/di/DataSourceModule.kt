@@ -17,10 +17,10 @@ import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.http.AcceptLanguageBuilder
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.data.ai.AIRequestInterceptor
-import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
-import me.rerere.rikkahub.data.ai.GenerationHandler
-import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
+import app.amber.core.ai.AIRequestInterceptor
+import app.amber.core.ai.RequestLoggingInterceptor
+import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppSearchBridge
 import app.amber.core.settings.prefs.AgentPrefs
@@ -53,7 +53,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_26_27
 import me.rerere.rikkahub.data.db.migrations.Migration_27_28
 import me.rerere.rikkahub.data.db.migrations.Migration_28_29
 import me.rerere.rikkahub.data.db.migrations.Migration_29_30
-import me.rerere.rikkahub.data.ai.mcp.McpManager
+import app.amber.core.ai.mcp.McpManager
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.defaultToolInvocationHooks
 import app.amber.feature.runtime.PermissionDecisionResolver
