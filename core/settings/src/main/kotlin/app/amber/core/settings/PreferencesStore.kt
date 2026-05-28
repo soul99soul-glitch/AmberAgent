@@ -48,7 +48,7 @@ import app.amber.core.sync.s3.S3Config
 // id as default — hardcoded to "amberagent_clash" to keep PreferencesStore
 // free of UI/Compose-flavored dependencies. The themeId field stores a
 // String anyway, so no behavior change.
-import app.amber.core.utils.JsonInstant
+import app.amber.core.agent.utils.JsonInstant
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchServiceOptions
 import me.rerere.tts.provider.TTSProviderSetting

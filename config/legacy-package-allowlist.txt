@@ -52,4 +52,7 @@ app/src/main/res/xml/shortcuts.xml
 app/src/main/java/me/rerere/rikkahub/data/agent/AgentNotificationActionReceiver.kt
 
 # JSON class discriminator（历史数据中的 FQN，永不可改）
-app/src/main/java/me/rerere/rikkahub/data/datastore/migration/PreferenceStoreV1Migration.kt
+# 文件已物理迁入 :core:settings 模块，class FQN
+# me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
+# 保持不变。源路径变更，但 ADR-0001 §3 的约束（class FQN 不可变）依然成立。
+# allowlist 不再扫到 :app 下该路径——这是预期行为，不是缺口。

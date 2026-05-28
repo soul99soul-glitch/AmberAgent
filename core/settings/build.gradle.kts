@@ -39,6 +39,8 @@ dependencies {
     api(project(":core:sync:api"))
     api(project(":core:context:api"))
     api(project(":core:ai:api"))
+    api(project(":search"))
+    api(project(":tts"))
     api(libs.androidx.datastore.preferences)
     api(libs.kotlinx.serialization.json)
     implementation(platform(libs.androidx.compose.bom))
