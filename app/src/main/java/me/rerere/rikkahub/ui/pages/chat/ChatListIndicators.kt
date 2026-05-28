@@ -45,9 +45,9 @@ import me.rerere.rikkahub.R
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
 import app.amber.core.context.ConversationCompact
-import me.rerere.rikkahub.service.PendingUserMessage
-import me.rerere.rikkahub.service.PendingUserMessageMode
-import me.rerere.rikkahub.service.previewText
+import app.amber.core.service.PendingUserMessage
+import app.amber.core.service.PendingUserMessageMode
+import app.amber.core.service.previewText
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 
 @Composable

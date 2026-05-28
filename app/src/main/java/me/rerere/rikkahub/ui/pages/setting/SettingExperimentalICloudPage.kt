@@ -42,7 +42,7 @@ import app.amber.feature.icloud.ICloudDriveManager
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 
 @Composable

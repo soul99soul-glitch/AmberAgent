@@ -56,7 +56,7 @@ import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.extendColors
-import me.rerere.rikkahub.utils.UiState
+import app.amber.core.utils.UiState
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
 

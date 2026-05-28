@@ -29,7 +29,7 @@ import app.amber.core.model.MessageNode
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.MessageRenderCache
 import me.rerere.rikkahub.ui.components.message.buildChatMessageVirtualItems
-import me.rerere.rikkahub.utils.ChatSendTransitionTracker
+import app.amber.core.utils.ChatSendTransitionTracker
 import java.util.Locale
 import kotlin.uuid.Uuid
 

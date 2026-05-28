@@ -28,7 +28,7 @@ import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
-import me.rerere.rikkahub.utils.readClipboardText
+import app.amber.core.utils.readClipboardText
 import java.time.LocalDate
 import kotlin.coroutines.resume
 import kotlin.uuid.Uuid

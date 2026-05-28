@@ -103,10 +103,10 @@ import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.exportJpegImage
-import me.rerere.rikkahub.utils.getActivity
-import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.toCssHex
+import app.amber.core.utils.exportJpegImage
+import app.amber.core.utils.getActivity
+import app.amber.core.utils.openUrl
+import app.amber.core.utils.toCssHex
 import org.json.JSONObject
 import org.koin.compose.koinInject
 import java.io.File

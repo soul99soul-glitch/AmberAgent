@@ -54,10 +54,10 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FormItem
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.JsonInstantPretty
-import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
-import me.rerere.rikkahub.utils.openUrl
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.JsonInstantPretty
+import app.amber.core.utils.jsonPrimitiveOrNull
+import app.amber.core.utils.openUrl
 import org.koin.compose.koinInject
 
 @Composable

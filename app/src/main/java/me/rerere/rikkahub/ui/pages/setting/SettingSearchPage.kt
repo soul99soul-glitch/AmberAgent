@@ -28,7 +28,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 import me.rerere.search.SearchServiceOptions
 import org.koin.androidx.compose.koinViewModel
 

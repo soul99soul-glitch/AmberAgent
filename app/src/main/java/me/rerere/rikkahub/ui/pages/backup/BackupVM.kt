@@ -26,7 +26,7 @@ import app.amber.core.sync.google.GoogleDriveSyncRepository
 import app.amber.core.sync.google.GoogleOAuthConfigGate
 import app.amber.core.sync.google.GoogleOAuthConfigStatus
 import app.amber.core.sync.local.LocalBackupRepository
-import me.rerere.rikkahub.utils.UiState
+import app.amber.core.utils.UiState
 import java.io.File
 import kotlin.uuid.Uuid
 

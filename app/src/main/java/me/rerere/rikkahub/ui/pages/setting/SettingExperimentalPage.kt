@@ -46,9 +46,9 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.base64Encode
-import me.rerere.rikkahub.utils.navigateToChatPage
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.base64Encode
+import app.amber.core.utils.navigateToChatPage
+import app.amber.core.utils.plus
 
 @Composable
 fun SettingExperimentalPage() {

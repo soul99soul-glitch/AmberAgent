@@ -55,7 +55,7 @@ import me.rerere.rikkahub.data.db.dao.DocSubscriptionDAO
 import me.rerere.rikkahub.data.db.entity.DocSubscriptionEntity
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 import java.text.SimpleDateFormat
 import java.util.Date

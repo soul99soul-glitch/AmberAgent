@@ -9,8 +9,8 @@ import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
 import app.amber.core.repository.ConversationRepository
-import me.rerere.rikkahub.utils.JsonInstantPretty
-import me.rerere.rikkahub.utils.toLocalDate
+import app.amber.core.utils.JsonInstantPretty
+import app.amber.core.utils.toLocalDate
 
 internal fun buildAgentSoulPrompt(soulMarkdown: String) =
     soulMarkdown.trim().takeIf { it.isNotBlank() }?.let { soul ->

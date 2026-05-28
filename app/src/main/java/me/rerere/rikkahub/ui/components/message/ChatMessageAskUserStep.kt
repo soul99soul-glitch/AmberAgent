@@ -57,8 +57,8 @@ import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.modifier.shimmer
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.jsonPrimitiveOrNull
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

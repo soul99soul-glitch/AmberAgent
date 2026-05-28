@@ -44,7 +44,7 @@ import app.amber.core.model.Tag
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
 import me.rerere.rikkahub.ui.theme.PresetThemes
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchServiceOptions
 import me.rerere.tts.provider.TTSProviderSetting

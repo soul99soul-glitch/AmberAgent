@@ -33,7 +33,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.utils.copyMessageToClipboard
+import app.amber.core.utils.copyMessageToClipboard
 
 @Composable
 fun ChatMessageCopySheet(

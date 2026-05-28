@@ -4,7 +4,7 @@ import android.util.Log
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import me.rerere.rikkahub.data.datastore.migration.migrateMcpServersJson
 
 private const val TAG = "SettingsJsonMigrator"

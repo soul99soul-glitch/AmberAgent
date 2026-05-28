@@ -66,9 +66,9 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
-import me.rerere.rikkahub.utils.copyMessageToClipboard
-import me.rerere.rikkahub.utils.extractQuotedContentAsText
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.copyMessageToClipboard
+import app.amber.core.utils.extractQuotedContentAsText
+import app.amber.core.utils.toLocalString
 import java.util.Locale
 
 @Composable

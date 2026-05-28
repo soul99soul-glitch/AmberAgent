@@ -21,7 +21,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
-import me.rerere.rikkahub.service.ChatService
+import app.amber.core.service.ChatService
 import kotlin.uuid.Uuid
 
 class ChatSessionResolverImpl(

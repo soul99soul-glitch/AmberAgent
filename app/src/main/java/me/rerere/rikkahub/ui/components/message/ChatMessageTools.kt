@@ -95,7 +95,7 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceStatusPill
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.modifier.shimmer
-import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
+import app.amber.core.utils.jsonPrimitiveOrNull
 import org.koin.compose.koinInject
 import kotlin.math.PI
 import kotlin.math.cos

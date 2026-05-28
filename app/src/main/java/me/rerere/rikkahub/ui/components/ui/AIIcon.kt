@@ -22,8 +22,8 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
-import me.rerere.rikkahub.utils.computeAIIconByName
-import me.rerere.rikkahub.utils.toCssHex
+import app.amber.core.utils.computeAIIconByName
+import app.amber.core.utils.toCssHex
 
 @Composable
 private fun AIIcon(

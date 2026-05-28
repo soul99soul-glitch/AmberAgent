@@ -69,7 +69,7 @@ import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.utils.applyPlaceholders
+import app.amber.core.utils.applyPlaceholders
 import java.util.Locale
 import kotlin.uuid.Uuid
 import kotlin.time.Clock

@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import app.amber.core.settings.PreferencesKeys
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import kotlin.uuid.Uuid
 
 class PreferenceStoreV3Migration : DataMigration<Preferences> {

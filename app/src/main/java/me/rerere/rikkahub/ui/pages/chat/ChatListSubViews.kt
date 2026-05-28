@@ -57,7 +57,7 @@ import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation
 import me.rerere.rikkahub.ui.components.ui.WorkspaceSearchField
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 
 @Composable
 internal fun ChatListPreview(

@@ -75,7 +75,7 @@ import me.rerere.rikkahub.ui.pages.setting.ExperimentDivider
 import me.rerere.rikkahub.ui.pages.setting.ExperimentSectionCard
 import me.rerere.rikkahub.ui.pages.setting.ExperimentalSettingsScaffold
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.math.roundToInt

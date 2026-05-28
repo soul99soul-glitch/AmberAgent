@@ -41,9 +41,9 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
-import me.rerere.rikkahub.utils.copyMessageToClipboard
+import app.amber.core.utils.copyMessageToClipboard
 import app.amber.core.settings.ChatFontFamily
-import me.rerere.rikkahub.utils.base64Encode
+import app.amber.core.utils.base64Encode
 import java.util.Locale
 
 internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {

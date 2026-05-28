@@ -38,7 +38,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
-import me.rerere.rikkahub.utils.base64Decode
+import app.amber.core.utils.base64Decode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

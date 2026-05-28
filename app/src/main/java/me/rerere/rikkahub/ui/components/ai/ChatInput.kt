@@ -128,7 +128,7 @@ import app.amber.core.files.FilesManager
 import app.amber.core.model.Assistant
 import app.amber.core.model.Conversation
 import me.rerere.rikkahub.data.usage.ProviderUsageClient
-import me.rerere.rikkahub.service.PendingUserMessageMode
+import app.amber.core.service.PendingUserMessageMode
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.WorkspaceIconButton
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
@@ -139,8 +139,8 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ChatInputState
-import me.rerere.rikkahub.utils.ChatSendTransitionTracker
-import me.rerere.rikkahub.utils.formatNumber
+import app.amber.core.utils.ChatSendTransitionTracker
+import app.amber.core.utils.formatNumber
 import org.koin.compose.koinInject
 import okhttp3.OkHttpClient
 import java.io.File

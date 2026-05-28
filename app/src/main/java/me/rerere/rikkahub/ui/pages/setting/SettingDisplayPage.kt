@@ -73,7 +73,7 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
 @Composable

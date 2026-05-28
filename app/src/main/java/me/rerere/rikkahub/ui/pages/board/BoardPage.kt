@@ -88,7 +88,7 @@ import me.rerere.rikkahub.ui.components.ui.WorkspaceTone
 import me.rerere.rikkahub.ui.components.ui.workspaceBorder
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.navigateToChatPage
+import app.amber.core.utils.navigateToChatPage
 import org.koin.compose.koinInject
 import java.time.Instant
 import java.time.ZoneId

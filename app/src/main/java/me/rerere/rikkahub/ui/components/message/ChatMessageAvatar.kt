@@ -28,8 +28,8 @@ import app.amber.core.model.Avatar
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.utils.formatNumber
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.formatNumber
+import app.amber.core.utils.toLocalString
 
 /** 6dp 圆点 background helper（避免在 inline block 里链 background+CircleShape）。 */
 private fun Modifier.androidxBackgroundCircle(color: Color): Modifier =

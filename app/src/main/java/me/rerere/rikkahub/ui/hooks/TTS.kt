@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import me.rerere.tts.model.PlaybackState
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getSelectedTTSProvider
-import me.rerere.rikkahub.utils.stripMarkdown
+import app.amber.core.utils.stripMarkdown
 import me.rerere.tts.model.TTSResponse
 import me.rerere.tts.provider.TTSManager
 import me.rerere.tts.provider.TTSProviderSetting

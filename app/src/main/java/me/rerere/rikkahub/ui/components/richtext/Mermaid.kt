@@ -42,9 +42,9 @@ import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
-import me.rerere.rikkahub.utils.escapeHtml
-import me.rerere.rikkahub.utils.exportImage
-import me.rerere.rikkahub.utils.toCssHex
+import app.amber.core.utils.escapeHtml
+import app.amber.core.utils.exportImage
+import app.amber.core.utils.toCssHex
 
 private val mermaidHeightCache = CacheBuilder.newBuilder()
     .maximumSize(100)

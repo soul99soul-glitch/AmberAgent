@@ -86,8 +86,8 @@ import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
-import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.toDp
+import app.amber.core.utils.openUrl
+import app.amber.core.utils.toDp
 import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes

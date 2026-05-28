@@ -12,8 +12,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.utils.JsonInstantPretty
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.JsonInstantPretty
+import app.amber.core.utils.toLocalString
 import me.rerere.search.JinaSearchService
 import me.rerere.search.ScrapedResult
 import me.rerere.search.SearchService

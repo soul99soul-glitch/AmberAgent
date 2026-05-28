@@ -84,10 +84,10 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TextArea
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
-import me.rerere.rikkahub.utils.UiState
-import me.rerere.rikkahub.utils.insertAtCursor
-import me.rerere.rikkahub.utils.onError
-import me.rerere.rikkahub.utils.onSuccess
+import app.amber.core.utils.UiState
+import app.amber.core.utils.insertAtCursor
+import app.amber.core.utils.onError
+import app.amber.core.utils.onSuccess
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf

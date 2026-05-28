@@ -11,7 +11,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.toLocalString
 import java.time.LocalDateTime
 import kotlin.uuid.Uuid
 

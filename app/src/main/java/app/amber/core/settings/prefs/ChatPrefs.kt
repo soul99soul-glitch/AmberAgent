@@ -20,8 +20,8 @@ import app.amber.core.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.ModelGroupSessionDefault
 import app.amber.core.settings.PreferencesKeys
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 import kotlin.uuid.Uuid
 
 data class ChatPrefsData(

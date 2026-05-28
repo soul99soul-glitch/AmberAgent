@@ -26,9 +26,9 @@ import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import app.amber.core.repository.FilesRepository
-import me.rerere.rikkahub.utils.exportImage
-import me.rerere.rikkahub.utils.exportImageFile
-import me.rerere.rikkahub.utils.getActivity
+import app.amber.core.utils.exportImage
+import app.amber.core.utils.exportImageFile
+import app.amber.core.utils.getActivity
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.uuid.Uuid

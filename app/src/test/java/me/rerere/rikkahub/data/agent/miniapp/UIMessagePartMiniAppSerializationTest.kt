@@ -1,7 +1,7 @@
 package app.amber.feature.miniapp
 
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

@@ -8,7 +8,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.AppDatabase
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import java.time.Instant
 
 data class MessageSearchResult(

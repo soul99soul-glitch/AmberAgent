@@ -70,7 +70,7 @@ import me.rerere.rikkahub.data.db.entity.MiniAppSharedDataEntity
 import me.rerere.rikkahub.data.db.entity.MiniAppVersionEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 
 @Database(
     entities = [

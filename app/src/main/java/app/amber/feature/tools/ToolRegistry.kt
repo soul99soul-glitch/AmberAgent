@@ -15,7 +15,7 @@ import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
 import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import java.util.Locale
 
 data class ToolMetadata(

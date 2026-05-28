@@ -36,8 +36,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.theme.extendColors
-import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.urlDecode
+import app.amber.core.utils.openUrl
+import app.amber.core.utils.urlDecode
 
 @Composable
 private fun TraceChatComposable(section: String, content: @Composable () -> Unit) {

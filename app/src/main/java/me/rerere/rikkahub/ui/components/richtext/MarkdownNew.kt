@@ -79,8 +79,8 @@ import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
-import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.toDp
+import app.amber.core.utils.openUrl
+import app.amber.core.utils.toDp
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser

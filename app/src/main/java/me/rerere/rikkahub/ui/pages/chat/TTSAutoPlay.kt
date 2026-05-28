@@ -8,7 +8,7 @@ import me.rerere.ai.core.MessageRole
 import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation
 import me.rerere.rikkahub.ui.context.LocalTTSState
-import me.rerere.rikkahub.utils.extractQuotedContentAsText
+import app.amber.core.utils.extractQuotedContentAsText
 
 @Composable
 fun TTSAutoPlay(vm: ChatVM, setting: Settings, conversation: Conversation) {

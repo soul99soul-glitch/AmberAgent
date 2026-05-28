@@ -8,7 +8,7 @@ import androidx.core.app.NotificationCompat
 import me.rerere.rikkahub.DEEP_READ_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
-import me.rerere.rikkahub.utils.sendNotification
+import app.amber.core.utils.sendNotification
 
 class DeepReadNotifier(
     private val context: Context,

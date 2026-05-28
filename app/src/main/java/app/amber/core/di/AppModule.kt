@@ -1,0 +1,64 @@
+package app.amber.core.di
+
+import com.google.firebase.Firebase
+import com.google.firebase.analytics.analytics
+import com.google.firebase.crashlytics.crashlytics
+import com.google.firebase.remoteconfig.remoteConfig
+import kotlinx.serialization.json.Json
+import me.rerere.highlight.Highlighter
+import me.rerere.rikkahub.AppScope
+import app.amber.core.ai.AILoggingManager
+import app.amber.core.ai.tools.LocalTools
+import me.rerere.rikkahub.data.event.AppEventBus
+import app.amber.core.utils.EmojiData
+import app.amber.core.utils.EmojiUtils
+import app.amber.core.utils.JsonInstant
+import me.rerere.tts.provider.TTSManager
+import org.koin.dsl.module
+
+val appModule = module {
+    single<Json> { JsonInstant }
+
+    single {
+        Highlighter(get())
+    }
+
+    single {
+        AppEventBus()
+    }
+
+
+    single {
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+    }
+
+    single {
+        AppScope()
+    }
+
+    single<EmojiData> {
+        EmojiUtils.loadEmoji(get())
+    }
+
+    single {
+        TTSManager(get())
+    }
+
+    single {
+        Firebase.crashlytics
+    }
+
+    single {
+        Firebase.remoteConfig
+    }
+
+    single {
+        Firebase.analytics
+    }
+
+    single {
+        AILoggingManager()
+    }
+
+
+}

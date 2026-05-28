@@ -20,7 +20,7 @@ import app.amber.core.sync.inspectBackupArchive
 import app.amber.core.sync.replaceDatabaseFilesFromTemp
 import app.amber.core.sync.requireSafeZipEntryName
 import app.amber.core.sync.resolveArchiveChild
-import me.rerere.rikkahub.utils.fileSizeToString
+import app.amber.core.utils.fileSizeToString
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

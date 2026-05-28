@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.service.ChatService
+import app.amber.core.service.ChatService
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import kotlin.uuid.Uuid

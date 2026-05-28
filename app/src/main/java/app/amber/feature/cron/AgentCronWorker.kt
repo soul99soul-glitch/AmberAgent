@@ -19,8 +19,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
-import me.rerere.rikkahub.service.ChatService
-import me.rerere.rikkahub.utils.sendNotification
+import app.amber.core.service.ChatService
+import app.amber.core.utils.sendNotification
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import kotlin.uuid.Uuid

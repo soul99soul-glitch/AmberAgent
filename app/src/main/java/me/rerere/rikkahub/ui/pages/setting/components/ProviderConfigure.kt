@@ -53,8 +53,8 @@ import me.rerere.rikkahub.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.ui.components.ui.FlatTextField
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.writeClipboardText
+import app.amber.core.utils.openUrl
+import app.amber.core.utils.writeClipboardText
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.koin.compose.koinInject

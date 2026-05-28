@@ -112,10 +112,10 @@ import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.ContextFootprintEstimator
 import app.amber.core.context.ConversationCompact
 import app.amber.core.model.Conversation
-import me.rerere.rikkahub.service.ChatError
-import me.rerere.rikkahub.service.PendingUserMessage
-import me.rerere.rikkahub.service.PendingUserMessageMode
-import me.rerere.rikkahub.service.previewText
+import app.amber.core.service.ChatError
+import app.amber.core.service.PendingUserMessage
+import app.amber.core.service.PendingUserMessageMode
+import app.amber.core.service.previewText
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.SandboxActivitySheet
@@ -132,10 +132,10 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.base64Decode
-import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
-import me.rerere.rikkahub.utils.navigateToChatPage
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.base64Decode
+import app.amber.core.utils.jsonPrimitiveOrNull
+import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -452,7 +452,7 @@ private fun ChatPageContent(
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
-    timelineLoadState: me.rerere.rikkahub.service.ConversationTimelineLoadState,
+    timelineLoadState: app.amber.core.service.ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     activeCompactBoundary: ActiveCompactBoundary?,

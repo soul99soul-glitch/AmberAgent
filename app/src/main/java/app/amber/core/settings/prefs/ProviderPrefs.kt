@@ -15,8 +15,8 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.PreferencesKeys
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 
 data class ProviderPrefsData(
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,

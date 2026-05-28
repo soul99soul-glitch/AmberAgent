@@ -6,7 +6,7 @@ import app.amber.core.model.FavoriteType
 import app.amber.core.model.NodeFavoriteRef
 import app.amber.core.model.NodeFavoriteTarget
 import app.amber.core.model.buildFavoritePreview
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 
 object NodeFavoriteAdapter : FavoriteAdapter<NodeFavoriteTarget> {
     override val type: FavoriteType = FavoriteType.NODE

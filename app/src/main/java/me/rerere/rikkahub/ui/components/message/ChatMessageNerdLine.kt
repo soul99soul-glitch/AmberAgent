@@ -24,8 +24,8 @@ import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.utils.formatNumber
-import me.rerere.rikkahub.utils.toFixed
+import app.amber.core.utils.formatNumber
+import app.amber.core.utils.toFixed
 import java.time.Duration
 
 /**

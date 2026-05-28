@@ -16,7 +16,7 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.repository.ConversationRepository
-import me.rerere.rikkahub.service.ConversationAccess
+import app.amber.core.service.ConversationAccess
 import java.time.Instant
 import kotlin.uuid.Uuid
 

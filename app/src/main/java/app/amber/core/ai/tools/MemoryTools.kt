@@ -18,7 +18,7 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.model.AssistantMemory
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.toLocalString
 import java.time.LocalDate
 
 data class MemoryToolWriteRequest(

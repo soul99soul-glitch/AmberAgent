@@ -38,8 +38,8 @@ import app.amber.core.ai.mcp.transport.StreamableHttpClientTransport
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.FilesManager
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.checkDifferent
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.checkDifferent
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64

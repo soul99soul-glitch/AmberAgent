@@ -19,7 +19,7 @@ import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.automation.ScreenCaptureManager
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.service.ChatService
+import app.amber.core.service.ChatService
 import org.koin.core.context.GlobalContext
 import java.time.Instant
 

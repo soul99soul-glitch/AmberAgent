@@ -16,7 +16,7 @@ import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.model.AssistantMemory
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 
 open class MemoryRepository(
     private val memoryDAO: MemoryDAO,

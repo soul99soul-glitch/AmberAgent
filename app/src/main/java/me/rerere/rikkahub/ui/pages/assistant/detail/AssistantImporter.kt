@@ -40,8 +40,8 @@ import app.amber.core.model.Assistant
 import app.amber.core.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.ImageUtils
-import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
+import app.amber.core.utils.ImageUtils
+import app.amber.core.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.R
 import org.koin.compose.koinInject
 

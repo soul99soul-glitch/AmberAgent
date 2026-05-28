@@ -9,7 +9,7 @@ import me.rerere.rikkahub.data.db.entity.ConversationCompactEntity
 import me.rerere.rikkahub.data.db.entity.ConversationContextEventEntity
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import kotlin.uuid.Uuid
 
 class ConversationContextRepository(

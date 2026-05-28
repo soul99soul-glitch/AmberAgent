@@ -3,7 +3,7 @@ package app.amber.core.memory.export
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.store.MemoryRepository
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate

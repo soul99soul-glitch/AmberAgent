@@ -61,7 +61,7 @@ import app.amber.feature.miniapp.bridge.MiniAppTheme
 import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.writeClipboardText
+import app.amber.core.utils.writeClipboardText
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
 import java.io.ByteArrayInputStream

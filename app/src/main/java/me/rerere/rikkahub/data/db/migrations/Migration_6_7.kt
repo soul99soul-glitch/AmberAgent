@@ -6,7 +6,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import me.rerere.ai.ui.UIMessage
 import app.amber.core.model.MessageNode
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 
 private const val TAG = "Migration_6_7"
 

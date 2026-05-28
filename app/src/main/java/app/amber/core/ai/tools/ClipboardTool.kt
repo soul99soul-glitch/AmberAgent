@@ -11,8 +11,8 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.utils.readClipboardText
-import me.rerere.rikkahub.utils.writeClipboardText
+import app.amber.core.utils.readClipboardText
+import app.amber.core.utils.writeClipboardText
 
 /**
  * Factory for the `clipboard_tool` agent tool — read/write text from the

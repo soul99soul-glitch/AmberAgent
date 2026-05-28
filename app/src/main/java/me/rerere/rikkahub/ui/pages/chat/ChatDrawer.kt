@@ -85,7 +85,7 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.modifier.onClick
-import me.rerere.rikkahub.utils.navigateToChatPage
+import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 
 @Composable

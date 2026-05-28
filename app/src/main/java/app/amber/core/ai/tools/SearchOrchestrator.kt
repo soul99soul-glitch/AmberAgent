@@ -16,7 +16,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.core.settings.Settings
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.toLocalString
 import me.rerere.search.BingSearchService
 import me.rerere.search.DuckDuckGoSearchService
 import me.rerere.search.HackerNewsSearchService

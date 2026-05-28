@@ -31,7 +31,7 @@ import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.settings.toCompactPolicy
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
-import me.rerere.rikkahub.utils.applyPlaceholders
+import app.amber.core.utils.applyPlaceholders
 import java.util.Locale
 import kotlin.uuid.Uuid
 

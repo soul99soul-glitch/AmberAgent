@@ -63,7 +63,7 @@ import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.readSubAgentDisplayTextFromTranscript
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import org.koin.compose.koinInject
 import java.io.File
 

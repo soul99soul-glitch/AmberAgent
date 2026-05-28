@@ -14,8 +14,8 @@ import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.PreferencesKeys
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 
 data class AgentPrefsData(
     val agentRuntime: AgentRuntimeSetting = AgentRuntimeSetting(),

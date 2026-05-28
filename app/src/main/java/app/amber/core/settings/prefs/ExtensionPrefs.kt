@@ -22,8 +22,8 @@ import app.amber.core.model.PromptInjection
 import app.amber.core.model.QuickMessage
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 import me.rerere.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 

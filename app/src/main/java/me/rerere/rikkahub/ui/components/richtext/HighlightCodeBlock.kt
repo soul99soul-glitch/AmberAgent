@@ -75,8 +75,8 @@ import me.rerere.rikkahub.ui.theme.AtomOneDarkPalette
 import me.rerere.rikkahub.ui.theme.AtomOneLightPalette
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
-import me.rerere.rikkahub.utils.base64Encode
-import me.rerere.rikkahub.utils.toDp
+import app.amber.core.utils.base64Encode
+import app.amber.core.utils.toDp
 import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10

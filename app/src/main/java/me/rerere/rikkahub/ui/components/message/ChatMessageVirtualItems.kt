@@ -38,8 +38,8 @@ import me.rerere.rikkahub.ui.components.richtext.topLevelBlockKey
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
-import me.rerere.rikkahub.utils.base64Encode
-import me.rerere.rikkahub.utils.copyMessageToClipboard
+import app.amber.core.utils.base64Encode
+import app.amber.core.utils.copyMessageToClipboard
 import java.util.Locale
 
 internal const val ChatMessageVirtualMarkdownMinChars = 600

@@ -87,9 +87,9 @@ import app.amber.core.settings.getAssistantById
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
-import me.rerere.rikkahub.service.ChatError
-import me.rerere.rikkahub.service.ConversationTimelineLoadState
-import me.rerere.rikkahub.service.PendingUserMessage
+import app.amber.core.service.ChatError
+import app.amber.core.service.ConversationTimelineLoadState
+import app.amber.core.service.PendingUserMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItem
 import me.rerere.rikkahub.ui.components.message.ChatMessageVirtualItemContent
@@ -99,7 +99,7 @@ import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
-import me.rerere.rikkahub.utils.ChatSendTransitionTracker
+import app.amber.core.utils.ChatSendTransitionTracker
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid

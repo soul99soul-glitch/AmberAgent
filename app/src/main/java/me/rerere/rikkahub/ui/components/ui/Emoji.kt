@@ -52,8 +52,8 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.utils.Emoji
-import me.rerere.rikkahub.utils.EmojiData
+import app.amber.core.utils.Emoji
+import app.amber.core.utils.EmojiData
 import org.koin.compose.koinInject
 
 @Preview

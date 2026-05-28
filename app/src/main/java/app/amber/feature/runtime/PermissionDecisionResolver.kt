@@ -11,7 +11,7 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.tools.ToolInvocationPolicy
 import app.amber.feature.tools.ToolRisk
 import app.amber.feature.tools.invocationPolicy
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import java.util.UUID
 
 enum class PermissionDecisionAction {

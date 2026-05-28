@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.R
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.service.WebServerService
+import app.amber.core.service.WebServerService
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
@@ -63,8 +63,8 @@ import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
-import me.rerere.rikkahub.utils.plus
-import me.rerere.rikkahub.web.WebServerManager
+import app.amber.core.utils.plus
+import app.amber.core.web.WebServerManager
 import org.koin.compose.koinInject
 
 @Composable

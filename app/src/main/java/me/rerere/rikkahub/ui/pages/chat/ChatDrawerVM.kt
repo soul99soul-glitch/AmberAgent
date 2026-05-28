@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.R
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.repository.ConversationRepository
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.toLocalString
 import java.time.LocalDate
 import java.time.ZoneId
 

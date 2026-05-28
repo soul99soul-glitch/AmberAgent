@@ -56,7 +56,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.UiState
+import app.amber.core.utils.UiState
 import org.koin.androidx.compose.koinViewModel
 
 private enum class GoogleSyncAction {

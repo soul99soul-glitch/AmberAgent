@@ -14,8 +14,8 @@ import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.PreferencesKeys
 import me.rerere.rikkahub.ui.theme.PresetThemes
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 
 data class UIPrefsData(
     val dynamicColor: Boolean = false,

@@ -54,9 +54,9 @@ import me.rerere.rikkahub.Screen
 import app.amber.core.model.Conversation
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.navigateToChatPage
-import me.rerere.rikkahub.utils.plus
-import me.rerere.rikkahub.utils.toLocalDateTime
+import app.amber.core.utils.navigateToChatPage
+import app.amber.core.utils.plus
+import app.amber.core.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
 
 @Composable

@@ -26,7 +26,7 @@ import me.rerere.rikkahub.data.db.entity.MessageNodeStatEntity
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
 

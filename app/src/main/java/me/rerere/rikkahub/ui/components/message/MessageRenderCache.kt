@@ -9,7 +9,7 @@ import app.amber.core.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.cachedMarkdownParseResult
 import me.rerere.rikkahub.ui.components.richtext.parseMarkdownContent
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import java.security.MessageDigest
 
 private const val MESSAGE_RENDER_CACHE_MAX_ENTRIES = 512

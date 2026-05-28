@@ -25,7 +25,7 @@ import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 
 @Composable
 fun ExtensionsPage() {

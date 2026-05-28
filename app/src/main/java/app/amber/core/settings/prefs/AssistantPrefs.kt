@@ -16,8 +16,8 @@ import app.amber.core.settings.DEFAULT_ASSISTANT_ID
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.model.Assistant
 import app.amber.core.model.Tag
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 import kotlin.uuid.Uuid
 
 data class AssistantPrefsData(

@@ -56,7 +56,7 @@ import androidx.paging.compose.itemKey
 import me.rerere.rikkahub.R
 import app.amber.core.model.Conversation
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.toLocalString
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.uuid.Uuid

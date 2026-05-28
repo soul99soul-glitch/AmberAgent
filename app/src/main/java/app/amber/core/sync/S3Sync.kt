@@ -14,7 +14,7 @@ import app.amber.core.settings.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.db.AppDatabase
 import app.amber.core.sync.s3.S3Client
 import app.amber.core.sync.s3.S3Config
-import me.rerere.rikkahub.utils.fileSizeToString
+import app.amber.core.utils.fileSizeToString
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

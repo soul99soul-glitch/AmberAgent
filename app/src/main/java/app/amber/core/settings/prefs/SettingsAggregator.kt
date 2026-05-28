@@ -30,8 +30,8 @@ import app.amber.core.settings.SeedRoutingQuickMessages
 import app.amber.core.settings.Settings
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.withAmberAgentAssistantBranding
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.toMutableStateFlow
 import kotlin.uuid.Uuid
 
 private const val TAG = "SettingsAggregator"

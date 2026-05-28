@@ -58,7 +58,7 @@ import app.amber.core.model.Conversation
 import me.rerere.rikkahub.data.usage.ProviderUsageMetric
 import me.rerere.rikkahub.data.usage.ProviderUsageStatus
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
-import me.rerere.rikkahub.utils.formatNumber
+import app.amber.core.utils.formatNumber
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

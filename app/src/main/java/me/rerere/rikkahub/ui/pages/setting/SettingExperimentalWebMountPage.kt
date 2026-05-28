@@ -83,7 +83,7 @@ import app.amber.feature.webmount.usersites.loginCookieCandidatesFor
 import app.amber.feature.webmount.usersites.requiredLoginCookieSetsFor
 import me.rerere.rikkahub.ui.components.ui.workspaceColors
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.utils.plus
+import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 
 /**

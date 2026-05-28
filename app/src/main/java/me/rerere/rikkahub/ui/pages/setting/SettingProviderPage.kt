@@ -81,7 +81,7 @@ import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderTemplatePickerSheet
 import me.rerere.rikkahub.ui.theme.CustomColors
-import me.rerere.rikkahub.utils.ImageUtils
+import app.amber.core.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
 import androidx.compose.foundation.lazy.items as lazyItems

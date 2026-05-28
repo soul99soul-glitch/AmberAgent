@@ -3,7 +3,7 @@ package app.amber.feature.icloud
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
-import me.rerere.rikkahub.utils.JsonInstant
+import app.amber.core.utils.JsonInstant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

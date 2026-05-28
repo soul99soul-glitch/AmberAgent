@@ -14,10 +14,10 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.utils.NotificationActionConfig
-import me.rerere.rikkahub.utils.XiaomiSuperIslandConfig
-import me.rerere.rikkahub.utils.cancelNotification
-import me.rerere.rikkahub.utils.sendNotification
+import app.amber.core.utils.NotificationActionConfig
+import app.amber.core.utils.XiaomiSuperIslandConfig
+import app.amber.core.utils.cancelNotification
+import app.amber.core.utils.sendNotification
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 

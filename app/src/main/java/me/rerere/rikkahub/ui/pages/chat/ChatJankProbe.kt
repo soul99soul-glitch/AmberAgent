@@ -10,8 +10,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.BuildConfig
 import app.amber.core.model.MessageNode
-import me.rerere.rikkahub.service.ConversationTimelineLoadState
-import me.rerere.rikkahub.service.PendingUserMessage
+import app.amber.core.service.ConversationTimelineLoadState
+import app.amber.core.service.PendingUserMessage
 import kotlin.math.abs
 
 private const val ChatPerfTag = "AmberChatPerf"

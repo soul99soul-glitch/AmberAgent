@@ -76,7 +76,7 @@ import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.navigateToChatPage
+import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
 

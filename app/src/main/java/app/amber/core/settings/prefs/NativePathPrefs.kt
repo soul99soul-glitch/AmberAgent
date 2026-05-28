@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.PreferencesKeys
-import me.rerere.rikkahub.utils.toMutableStateFlow
+import app.amber.core.utils.toMutableStateFlow
 
 /**
  * Per-component enable flags for the Rust JNI production switch.

@@ -98,11 +98,11 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import com.dokar.sonner.rememberToasterState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
-import me.rerere.rikkahub.utils.exportImage
-import me.rerere.rikkahub.utils.getActivity
-import me.rerere.rikkahub.utils.JsonInstantPretty
-import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
-import me.rerere.rikkahub.utils.toLocalString
+import app.amber.core.utils.exportImage
+import app.amber.core.utils.getActivity
+import app.amber.core.utils.JsonInstantPretty
+import app.amber.core.utils.jsonPrimitiveOrNull
+import app.amber.core.utils.toLocalString
 import org.koin.compose.koinInject
 import java.io.FileOutputStream
 import java.time.LocalDateTime

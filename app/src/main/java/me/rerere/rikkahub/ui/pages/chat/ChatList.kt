@@ -30,9 +30,9 @@ import app.amber.core.context.ConversationCompact
 import app.amber.core.settings.Settings
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
-import me.rerere.rikkahub.service.ChatError
-import me.rerere.rikkahub.service.ConversationTimelineLoadState
-import me.rerere.rikkahub.service.PendingUserMessage
+import app.amber.core.service.ChatError
+import app.amber.core.service.ConversationTimelineLoadState
+import app.amber.core.service.PendingUserMessage
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"

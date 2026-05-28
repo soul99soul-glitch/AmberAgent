@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.last
 import me.rerere.ai.ui.UIMessage
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationHandler
-import me.rerere.rikkahub.service.ConversationAccess
+import app.amber.core.service.ConversationAccess
 import java.time.Instant
 import kotlin.uuid.Uuid
 import app.amber.core.settings.Settings

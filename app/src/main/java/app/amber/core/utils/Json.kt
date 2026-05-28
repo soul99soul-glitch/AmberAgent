@@ -1,0 +1,13 @@
+package app.amber.core.utils
+
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+
+// Re-exports from the shared :core:agent-utils module.
+// Kept here as type aliases so existing app.amber.core.utils.JsonInstant
+// callers continue to compile during the package migration.
+val JsonInstant = app.amber.core.agent.utils.JsonInstant
+val JsonInstantPretty = app.amber.core.agent.utils.JsonInstantPretty
+
+val JsonElement.jsonPrimitiveOrNull: JsonPrimitive?
+    get() = this as? JsonPrimitive

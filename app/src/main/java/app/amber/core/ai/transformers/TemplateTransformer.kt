@@ -3,8 +3,8 @@ package app.amber.core.ai.transformers
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.utils.toLocalDate
-import me.rerere.rikkahub.utils.toLocalTime
+import app.amber.core.utils.toLocalDate
+import app.amber.core.utils.toLocalTime
 import java.time.Instant
 
 class TemplateTransformer(
