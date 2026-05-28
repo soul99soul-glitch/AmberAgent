@@ -575,6 +575,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:event"))
     implementation(project(":core:usage"))
+    implementation(project(":core:llm"))
     implementation(project(":core:agent-runtime"))
     implementation(project(":core:agent-store-room"))
     implementation(project(":feature:deepread:api"))
