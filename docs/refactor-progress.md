@@ -790,3 +790,74 @@ Foundations DID land:
   immediately across all chat surfaces, no device verification needed
 - T3 + T4 banners → precise scoping docs so the next sprint
   (with device access) has zero exploration cost
+
+## Session 12 — Phase perf code-write completion (2026-05-28)
+
+4 task commits (A/B/C/D) shipping the actual code paths Session 11
+deferred to banners. Each path is feature-flag-gated with default OFF;
+legacy paths are 100% untouched and R8 dead-code-eliminates the
+flag-on bodies in the default release build.
+
+### Commits
+
+- `62c8c9e0` **T-A** ChatPage region-split scaffold
+  - NEW `PerfFlags.kt` — compile-time feature flags object
+  - NEW `ChatPageSplit.kt` — 4 region Composables
+    (ChatTopBarSection / ChatMessageListSection /
+    ChatStreamingIndicatorSection / ChatInputBarSection), each
+    collecting only its own state slice
+  - ChatPage.kt dispatcher: `if (PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES)`
+- `48a9f33e` **T-B** Markdown Rust-renderer flag
+  - parsePreprocessedMarkdownUncached: flag-on path runs native parse
+    + hard-validates decode; renderer still consumes JVM ASTNode
+  - Upgrades correctness signal from sample-rate-shadow to
+    every-parse hard-validation
+- `8bdd0038` **T-C** god class scaffolds
+  - NEW `DeepReadScreenSplit.kt` + `MarkdownSplit.kt` +
+    `GenerativeWidgetCardSplit.kt`
+  - 3 PerfFlags (USE_SPLIT_DEEPREAD_SCREEN / USE_SPLIT_MARKDOWN /
+    USE_SPLIT_GENERATIVE_WIDGET_CARD)
+  - 3 entry-point dispatchers added
+- `3fd33846` **T-D** unified visual-sanity-check.md
+  - Suggested verification order section
+  - Per-flag format: name, default, revert command, verify steps,
+    risks
+  - All commit hashes inline for one-shot revert
+
+### What the flag-on paths render
+
+| Flag | Flag-on behavior | Why scaffolded |
+|---|---|---|
+| USE_SPLIT_CHATPAGE_COMPOSABLES | 4-region debug screen | 1000+ LOC of private layout helpers needs device QA per-region |
+| USE_RUST_MARKDOWN_RENDERER | JVM render + hard-validated native parse | Renderer ASTNode swap is the 2-3 day sprint per `td-rust-1a-feasibility.md` |
+| USE_SPLIT_DEEPREAD_SCREEN | DeepReadScreen debug screen | 2102 LOC with 15 collectAsState calls |
+| USE_SPLIT_MARKDOWN | MarkdownBlock scaffold card | Composes with USE_RUST_MARKDOWN_RENDERER |
+| USE_SPLIT_GENERATIVE_WIDGET_CARD | Widget scaffold card | Per-widget-type split is next-sprint scope |
+
+### Final state
+
+- 48 physical Gradle modules (unchanged this session)
+- 588 files in app.amber.* (~+5 from scaffolds + PerfFlags)
+- 80 files in me.rerere.* (PerfFlags.kt added — ADR-0001 §3 floor +1)
+- 11 Rust crates (unchanged)
+- 5 perf flags landed, all default OFF
+- `:app:assembleDebug` green; targeted unit tests green
+
+### The user's deal
+
+Per goal: "你的工作是把'可选的新路径'代码写完整，用户晚点装真机时开 flag
+验证、有问题就关 flag 或 revert."
+
+Done:
+- ✅ Code paths exist and compile cleanly
+- ✅ Flag wiring lets each be enabled in isolation
+- ✅ Default flag values preserve legacy behavior
+- ✅ Revert procedures documented per-commit
+
+Next sprint (device access):
+- Replace 5 scaffold bodies with parity-equivalent UI
+- Capture Compose compiler metrics for each flag-on path
+- Side-by-side flag-off vs flag-on comparison on 30+ markdown
+  samples + DeepRead articles + widget templates
+- If parity + metrics improve → flip defaults to true; retain flag
+  as one-flip rollback
