@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
 import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
@@ -20,8 +20,8 @@ import app.amber.core.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.ModelGroupSessionDefault
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.utils.JsonInstant
-import app.amber.core.utils.toMutableStateFlow
+import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.toMutableStateFlow
 import kotlin.uuid.Uuid
 
 data class ChatPrefsData(

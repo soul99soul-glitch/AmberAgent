@@ -10,16 +10,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
+import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.DEFAULT_PRESET_THEME_ID
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.PreferencesKeys
-import app.amber.feature.ui.theme.PresetThemes
-import app.amber.core.utils.JsonInstant
-import app.amber.core.utils.toMutableStateFlow
+import app.amber.core.settings.toMutableStateFlow
 
 data class UIPrefsData(
     val dynamicColor: Boolean = false,
-    val themeId: String = PresetThemes[0].id,
+    val themeId: String = DEFAULT_PRESET_THEME_ID,
     val developerMode: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
     val launchCount: Int = 0,
@@ -51,7 +51,7 @@ class UIPrefs(
 
     private fun readFrom(p: Preferences): UIPrefsData = UIPrefsData(
         dynamicColor = p[PreferencesKeys.DYNAMIC_COLOR] ?: false,
-        themeId = p[PreferencesKeys.THEME_ID] ?: PresetThemes[0].id,
+        themeId = p[PreferencesKeys.THEME_ID] ?: DEFAULT_PRESET_THEME_ID,
         developerMode = p[PreferencesKeys.DEVELOPER_MODE] == true,
         displaySetting = JsonInstant.decodeFromString(
             p[PreferencesKeys.DISPLAY_SETTING] ?: "{}"

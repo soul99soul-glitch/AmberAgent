@@ -17,7 +17,7 @@ import app.amber.core.settings.SeedOpenAIImageModelId
 import app.amber.core.settings.SeedRoutingQuickMessages
 import app.amber.core.settings.Settings
 import app.amber.core.model.QuickMessage
-import app.amber.feature.ui.theme.PresetThemes
+import app.amber.core.settings.DEFAULT_PRESET_THEME_ID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -62,7 +62,7 @@ class SettingsAggregatorHelpersTest {
         assertEquals(themeId, out.themeId)
         assertEquals(42, out.launchCount)
         // 7 PrefsData default propagation
-        assertEquals(PresetThemes[0].id, UIPrefsData().themeId)
+        assertEquals(DEFAULT_PRESET_THEME_ID, UIPrefsData().themeId)
         assertEquals(DEFAULT_ASSISTANT_ID, out.assistantId)
         assertEquals(DEFAULT_PROVIDERS, out.providers)
     }

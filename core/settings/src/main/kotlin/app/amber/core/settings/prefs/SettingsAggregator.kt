@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.map
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
 import app.amber.core.settings.DEFAULT_ASSISTANTS
 import app.amber.core.settings.DEFAULT_ASSISTANTS_IDS
 import app.amber.core.settings.DEFAULT_PROVIDERS
@@ -30,8 +30,8 @@ import app.amber.core.settings.SeedRoutingQuickMessages
 import app.amber.core.settings.Settings
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.withAmberAgentAssistantBranding
-import app.amber.core.utils.JsonInstant
-import app.amber.core.utils.toMutableStateFlow
+import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.toMutableStateFlow
 import kotlin.uuid.Uuid
 
 private const val TAG = "SettingsAggregator"

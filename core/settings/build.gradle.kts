@@ -15,6 +15,14 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+    sourceSets {
+        getByName("test") {
+            java.srcDirs("src/test/kotlin")
+        }
+    }
 }
 
 kotlin {
@@ -45,4 +53,6 @@ dependencies {
     api(libs.kotlinx.serialization.json)
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.compose.runtime:runtime")
+
+    testImplementation(libs.junit)
 }

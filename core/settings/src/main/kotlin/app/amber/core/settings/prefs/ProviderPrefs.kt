@@ -12,11 +12,11 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.utils.JsonInstant
-import app.amber.core.utils.toMutableStateFlow
+import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.toMutableStateFlow
 
 data class ProviderPrefsData(
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.settings.BackupReminderConfig
 import app.amber.core.settings.DEFAULT_SYSTEM_TTS_ID
@@ -22,8 +22,8 @@ import app.amber.core.model.PromptInjection
 import app.amber.core.model.QuickMessage
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
-import app.amber.core.utils.JsonInstant
-import app.amber.core.utils.toMutableStateFlow
+import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.toMutableStateFlow
 import me.rerere.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 
