@@ -35,8 +35,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.transport.SseClientTransport
 import me.rerere.rikkahub.data.ai.mcp.transport.StreamableHttpClientTransport
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.getCurrentAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.checkDifferent

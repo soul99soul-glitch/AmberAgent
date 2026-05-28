@@ -8,9 +8,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.SkillPaths
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.sync.s3.S3Client
 import me.rerere.rikkahub.data.sync.s3.S3Config

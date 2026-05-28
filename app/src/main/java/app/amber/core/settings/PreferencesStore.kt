@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore
+package app.amber.core.settings
 
 import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
@@ -29,8 +29,8 @@ import app.amber.feature.subagent.SubAgentRuntimeSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
 import me.rerere.rikkahub.data.ai.GenerationRetrySetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
-import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
-import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
+import app.amber.core.settings.migration.PreferenceStoreV2Migration
+import app.amber.core.settings.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.context.CompactPolicy
 import me.rerere.rikkahub.data.memory.model.MemoryRecallSetting
 import me.rerere.rikkahub.data.memory.model.MemoryWorkerSetting

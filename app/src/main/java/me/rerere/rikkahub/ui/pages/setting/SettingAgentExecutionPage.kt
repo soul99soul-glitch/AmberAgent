@@ -26,9 +26,9 @@ import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
-import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
-import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
+import app.amber.core.settings.AgentOperationPreviewMode
+import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
+import app.amber.core.settings.MIN_AGENT_TOOL_LOOP_STEPS
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar

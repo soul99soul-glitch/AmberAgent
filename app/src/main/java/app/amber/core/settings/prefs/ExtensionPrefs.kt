@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore.prefs
+package app.amber.core.settings.prefs
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.IOException
@@ -13,10 +13,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
-import me.rerere.rikkahub.data.datastore.BackupReminderConfig
-import me.rerere.rikkahub.data.datastore.DEFAULT_SYSTEM_TTS_ID
-import me.rerere.rikkahub.data.datastore.PreferencesKeys
-import me.rerere.rikkahub.data.datastore.WebDavConfig
+import app.amber.core.settings.BackupReminderConfig
+import app.amber.core.settings.DEFAULT_SYSTEM_TTS_ID
+import app.amber.core.settings.PreferencesKeys
+import app.amber.core.settings.WebDavConfig
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage

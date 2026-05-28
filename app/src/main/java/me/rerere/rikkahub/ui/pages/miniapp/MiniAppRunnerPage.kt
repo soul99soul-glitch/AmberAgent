@@ -58,7 +58,7 @@ import app.amber.feature.miniapp.MiniAppPermission
 import app.amber.feature.miniapp.MiniAppSystemBridge
 import app.amber.feature.miniapp.bridge.MiniAppBridge
 import app.amber.feature.miniapp.bridge.MiniAppTheme
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.writeClipboardText

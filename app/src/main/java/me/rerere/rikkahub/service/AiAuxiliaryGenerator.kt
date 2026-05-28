@@ -7,9 +7,9 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.resolveTaskChatModel
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.utils.applyPlaceholders

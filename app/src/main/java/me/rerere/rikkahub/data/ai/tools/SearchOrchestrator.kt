@@ -15,7 +15,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.utils.toLocalString
 import me.rerere.search.BingSearchService
 import me.rerere.search.DuckDuckGoSearchService

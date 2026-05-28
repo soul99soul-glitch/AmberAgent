@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 
 internal const val BACKUP_SECRET_MASK = "__MASKED_BY_AMBERAGENT_BACKUP__"
 

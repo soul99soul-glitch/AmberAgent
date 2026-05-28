@@ -27,7 +27,7 @@ import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.context.CompactSummaryPayloads
 import me.rerere.rikkahub.data.context.ConversationCompact
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError

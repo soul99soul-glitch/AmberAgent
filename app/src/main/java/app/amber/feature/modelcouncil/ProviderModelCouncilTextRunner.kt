@@ -6,9 +6,9 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.findProvider
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
 import kotlin.uuid.Uuid
 
 /**

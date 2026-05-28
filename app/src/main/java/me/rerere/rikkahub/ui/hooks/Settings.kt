@@ -3,8 +3,8 @@ package me.rerere.rikkahub.ui.hooks
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import org.koin.compose.koinInject
 
 @Composable

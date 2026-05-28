@@ -12,7 +12,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.prompts.ImagePromptInjectionConfig
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 
 fun createAgentPromptConfigTool(
     settingsStore: SettingsAggregator,

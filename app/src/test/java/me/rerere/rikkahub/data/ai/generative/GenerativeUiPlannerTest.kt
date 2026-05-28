@@ -3,7 +3,7 @@ package me.rerere.rikkahub.data.ai.generative
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
+import app.amber.core.settings.GenerativeUiSetting
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

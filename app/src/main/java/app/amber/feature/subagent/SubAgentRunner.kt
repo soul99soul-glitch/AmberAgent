@@ -9,10 +9,10 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import app.amber.feature.runtime.ToolInvocationContext
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Assistant
 
 interface SubAgentRunner {

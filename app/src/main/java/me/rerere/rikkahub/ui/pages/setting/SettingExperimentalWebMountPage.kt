@@ -106,7 +106,7 @@ fun SettingExperimentalWebMountPage(
     userSiteRegistry: UserSiteRegistry = koinInject(),
     cookieProvider: WebMountCookieProvider = koinInject(),
     profileRegistry: app.amber.feature.webmount.profile.ProfileRegistry = koinInject(),
-    settingsStore: me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator = koinInject(),
+    settingsStore: app.amber.core.settings.prefs.SettingsAggregator = koinInject(),
 ) {
     val states by webMountManager.states.collectAsStateWithLifecycle()
     val sites by userSiteRegistry.sites.collectAsStateWithLifecycle()
@@ -1288,7 +1288,7 @@ private fun iconForIconKey(iconKey: String?) = when (iconKey) {
  * the site.
  */
 private suspend fun installWebMountSlashCommand(
-    settingsStore: me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator,
+    settingsStore: app.amber.core.settings.prefs.SettingsAggregator,
 ): Boolean {
     val current = settingsStore.settingsFlow.value
     val existing = current.quickMessages.firstOrNull { it.title.equals("webmount", ignoreCase = true) }

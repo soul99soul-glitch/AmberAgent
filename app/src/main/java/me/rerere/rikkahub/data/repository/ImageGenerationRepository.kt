@@ -6,9 +6,9 @@ import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.ImageAspectRatio
 import app.amber.feature.prompts.AgentPromptConfigRepository
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.findProvider
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
 import me.rerere.rikkahub.data.files.FilesManager
 import java.io.File
 import kotlin.uuid.Uuid

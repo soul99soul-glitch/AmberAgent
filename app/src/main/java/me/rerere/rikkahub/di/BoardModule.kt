@@ -151,7 +151,7 @@ val boardModule = module {
 
     single {
         TimeAnchorSignalCollector {
-            get<me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator>()
+            get<app.amber.core.settings.prefs.SettingsAggregator>()
                 .settingsFlow.value.agentRuntime.todayBoard.triggerHours
         }
     }
@@ -168,7 +168,7 @@ val boardModule = module {
             boardRepository = get(),
             collectors = collectors,
             settingProvider = {
-                get<me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator>()
+                get<app.amber.core.settings.prefs.SettingsAggregator>()
                     .settingsFlow.value.agentRuntime.todayBoard
             },
             onThresholdReached = { get<BoardScheduler>().runIncremental() },

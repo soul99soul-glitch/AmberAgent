@@ -51,7 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup

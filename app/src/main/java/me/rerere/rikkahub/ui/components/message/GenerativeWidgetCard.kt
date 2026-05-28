@@ -98,7 +98,7 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizeStatus
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSanitizer
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetSegment
 import me.rerere.rikkahub.data.ai.generative.VChartSpecValidator
-import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
+import app.amber.core.settings.GenerativeUiSetting
 import me.rerere.rikkahub.data.font.SlidesFontRepository
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalSettings

@@ -1,6 +1,6 @@
 package app.amber.feature.miniapp
 
-import me.rerere.rikkahub.data.datastore.MiniAppSetting
+import app.amber.core.settings.MiniAppSetting
 
 class MiniAppSandbox(
     private val appId: String,

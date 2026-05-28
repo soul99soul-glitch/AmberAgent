@@ -10,7 +10,7 @@ import app.amber.feature.board.agent.BoardAgent
 import app.amber.feature.board.agent.BoardRunResult
 import app.amber.feature.board.agent.DailyReviewAgent
 import app.amber.feature.board.aggregator.SignalAggregator
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.time.LocalDate

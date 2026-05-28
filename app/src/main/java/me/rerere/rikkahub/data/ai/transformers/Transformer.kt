@@ -7,7 +7,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.model.Assistant
 
 class TransformerContext(

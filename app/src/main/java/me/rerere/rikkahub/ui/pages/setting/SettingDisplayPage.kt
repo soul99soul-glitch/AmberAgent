@@ -49,8 +49,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.LAUNCH_START_MODE_PREF
 import me.rerere.rikkahub.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
 import me.rerere.rikkahub.LaunchStartMode
-import me.rerere.rikkahub.data.datastore.ChatFontFamily
-import me.rerere.rikkahub.data.datastore.DisplaySetting
+import app.amber.core.settings.ChatFontFamily
+import app.amber.core.settings.DisplaySetting
 import me.rerere.rikkahub.migrateLaunchStartMode
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock

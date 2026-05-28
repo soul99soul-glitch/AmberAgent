@@ -83,8 +83,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatus
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentStatusKind
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager

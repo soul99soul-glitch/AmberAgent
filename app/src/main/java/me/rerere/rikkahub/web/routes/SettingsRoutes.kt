@@ -10,8 +10,8 @@ import io.ktor.server.sse.heartbeat
 import io.ktor.server.sse.sse
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ModelType
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.findModelById
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.findModelById
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException

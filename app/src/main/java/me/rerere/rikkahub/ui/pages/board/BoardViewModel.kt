@@ -21,7 +21,7 @@ import app.amber.feature.board.hotlist.applyInterestFilter
 import app.amber.feature.board.hotlist.filterEnabledSources
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.feature.board.worker.BoardScheduler
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.DailyReviewEntity

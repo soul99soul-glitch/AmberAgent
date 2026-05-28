@@ -5,7 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.memory.model.MemoryEventType
 import me.rerere.rikkahub.data.memory.telemetry.MemoryEventLogger
 import org.koin.core.component.KoinComponent

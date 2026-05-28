@@ -56,8 +56,8 @@ import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.memory.dream.PersistedMemoryDreamPlan
 import me.rerere.rikkahub.data.memory.model.MemoryCandidate
 import me.rerere.rikkahub.data.memory.model.MemoryEvent

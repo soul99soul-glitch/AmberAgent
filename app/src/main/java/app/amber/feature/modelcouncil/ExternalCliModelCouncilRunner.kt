@@ -6,7 +6,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 
 /**
  * External-CLI [ModelCouncilTextRunner] alternative — runs the seat's reply by

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore.prefs
+package app.amber.core.settings.prefs
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.IOException
@@ -17,9 +17,9 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
-import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
-import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
-import me.rerere.rikkahub.data.datastore.PreferencesKeys
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
+import app.amber.core.settings.ModelGroupSessionDefault
+import app.amber.core.settings.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 import kotlin.uuid.Uuid

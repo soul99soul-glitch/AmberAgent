@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.memory.recall
 
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.memory.model.MemoryKind
 import me.rerere.rikkahub.data.memory.model.MemoryRecord
 import me.rerere.rikkahub.data.memory.model.MemoryScope

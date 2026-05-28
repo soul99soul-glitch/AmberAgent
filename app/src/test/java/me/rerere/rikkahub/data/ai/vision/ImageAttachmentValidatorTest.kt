@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.ai.vision
 
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -24,7 +24,7 @@ import app.amber.feature.task.AgentTaskRetryPolicy
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.toQueueState
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap

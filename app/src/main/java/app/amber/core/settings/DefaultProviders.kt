@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore
+package app.amber.core.settings
 
 import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Modality

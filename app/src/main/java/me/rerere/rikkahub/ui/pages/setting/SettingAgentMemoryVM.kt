@@ -10,9 +10,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamApplier
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanSource
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamPlanStore

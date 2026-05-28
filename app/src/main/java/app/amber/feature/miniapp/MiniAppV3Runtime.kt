@@ -24,9 +24,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.getCurrentChatModel
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.utils.readClipboardText
 import java.time.LocalDate

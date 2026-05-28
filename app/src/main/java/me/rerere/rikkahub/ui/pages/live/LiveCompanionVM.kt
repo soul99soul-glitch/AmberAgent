@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.feature.live.LiveModeManager
 import app.amber.feature.live.LiveModeUiState
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 
 class LiveCompanionVM(
     private val settingsStore: SettingsAggregator,

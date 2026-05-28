@@ -13,8 +13,8 @@ import kotlinx.serialization.json.put
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.HotTopicSource
 import app.amber.feature.board.hotlist.presentationTitle
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchResult
 import me.rerere.search.SearchService

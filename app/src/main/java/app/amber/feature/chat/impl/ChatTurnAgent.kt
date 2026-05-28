@@ -14,8 +14,8 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.service.ConversationAccess
 import java.time.Instant
 import kotlin.uuid.Uuid
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 

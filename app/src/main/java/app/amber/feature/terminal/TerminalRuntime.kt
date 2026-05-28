@@ -23,7 +23,7 @@ import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.running
 import app.amber.feature.task.toQueueState
 import app.amber.feature.workspace.WorkspaceManager
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import java.io.BufferedWriter
 import java.io.File
 import java.io.OutputStreamWriter

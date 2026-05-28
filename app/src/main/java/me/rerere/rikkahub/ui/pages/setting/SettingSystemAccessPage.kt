@@ -49,7 +49,7 @@ import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionCapability
 import app.amber.feature.system.AgentPermissionRisk
 import app.amber.feature.system.AgentPermissionStatus
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.WorkspaceTopBar

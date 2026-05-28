@@ -19,8 +19,8 @@ import app.amber.feature.board.hotlist.providers.BuiltInHotListProviders
 import app.amber.feature.board.hotlist.providers.CustomHotListProvider
 import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.TodayBoardBackgroundStrategy
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import org.koin.core.component.KoinComponent

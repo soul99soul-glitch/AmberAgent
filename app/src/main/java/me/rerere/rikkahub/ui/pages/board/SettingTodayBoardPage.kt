@@ -58,7 +58,7 @@ import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.HotListScheduler
 import app.amber.feature.board.hotlist.normalizeHotListFocusKeywords
-import me.rerere.rikkahub.data.datastore.findModelById
+import app.amber.core.settings.findModelById
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
@@ -480,7 +480,7 @@ private fun DetailNavigationRow(
     }
 }
 
-private fun TodayBoardSetting.modelSummary(settings: me.rerere.rikkahub.data.datastore.Settings): String {
+private fun TodayBoardSetting.modelSummary(settings: app.amber.core.settings.Settings): String {
     val boardModelUuid = boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
     val boardModel = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
     return boardModel?.displayName ?: "跟随主聊天模型"
@@ -489,7 +489,7 @@ private fun TodayBoardSetting.modelSummary(settings: me.rerere.rikkahub.data.dat
 private fun hotListSummary(
     board: TodayBoardSetting,
     customSources: List<HotListSourceEntity>,
-    settings: me.rerere.rikkahub.data.datastore.Settings,
+    settings: app.amber.core.settings.Settings,
 ): String {
     val enabledSources = board.hotListEnabledSources.size + customSources.count { it.enabled }
     val searchSummary = if (settings.searchEnabledServiceIds.isNotEmpty()) {
@@ -662,7 +662,7 @@ private fun ReadingFontRow(
 @Composable
 private fun BoardModelRow(
     board: TodayBoardSetting,
-    settings: me.rerere.rikkahub.data.datastore.Settings,
+    settings: app.amber.core.settings.Settings,
     update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
 ) {
     val boardModelUuid = board.boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }

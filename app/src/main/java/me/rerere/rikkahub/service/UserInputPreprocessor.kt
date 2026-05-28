@@ -1,8 +1,8 @@
 package me.rerere.rikkahub.service
 
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
 

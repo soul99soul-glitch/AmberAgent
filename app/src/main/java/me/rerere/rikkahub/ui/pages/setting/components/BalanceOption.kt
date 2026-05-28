@@ -31,7 +31,7 @@ import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.common.http.isJsonExprValid
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
+import app.amber.core.settings.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 
 private val ApiPathRegex = Regex("""^/[^ \t\n\r]*$""")

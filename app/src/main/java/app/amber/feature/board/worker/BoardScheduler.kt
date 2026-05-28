@@ -8,8 +8,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.amber.feature.board.TodayBoardBackgroundStrategy
 import app.amber.feature.board.TodayBoardSetting
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime

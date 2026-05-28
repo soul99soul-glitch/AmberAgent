@@ -22,8 +22,8 @@ import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.rikkahub.BuildConfig
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.files.FileFolders

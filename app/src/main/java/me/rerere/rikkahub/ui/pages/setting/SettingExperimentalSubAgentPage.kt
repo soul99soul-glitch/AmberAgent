@@ -50,7 +50,7 @@ import app.amber.feature.subagent.SubAgentMode
 import app.amber.feature.subagent.SubAgentOverride
 import app.amber.feature.subagent.SubAgentRuntimeSetting
 import app.amber.feature.subagent.applyOverride
-import me.rerere.rikkahub.data.datastore.findModelById
+import app.amber.core.settings.findModelById
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.workspaceColors

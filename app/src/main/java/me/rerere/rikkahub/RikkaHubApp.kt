@@ -46,8 +46,8 @@ import me.rerere.rikkahub.di.workspaceModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import app.amber.feature.cron.AgentCronManager
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.prefs.SettingsProviderRescue
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsProviderRescue
 import me.rerere.rikkahub.data.nativepath.NativePathBootstrap
 import me.rerere.rikkahub.data.memory.dream.MemoryDreamScheduler
 import app.amber.feature.board.collector.NotificationSignalCollector

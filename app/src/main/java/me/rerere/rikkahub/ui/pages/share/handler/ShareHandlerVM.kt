@@ -1,8 +1,8 @@
 package me.rerere.rikkahub.ui.pages.share.handler
 
 import androidx.lifecycle.ViewModel
-import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.DEFAULT_ASSISTANT_ID
+import app.amber.core.settings.prefs.SettingsAggregator
 
 class ShareHandlerVM(
     text: String,

@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.ai.generative
 
-import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
+import app.amber.core.settings.GenerativeUiSetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test

@@ -55,10 +55,10 @@ import app.amber.feature.runtime.AgentLoopBudgetPrompt
 import app.amber.feature.runtime.SpeculativeToolRunner
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.tools.ToolExposureState
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.resolveSessionDefaults
 import me.rerere.rikkahub.data.context.ConversationContextEngine
 import me.rerere.rikkahub.data.context.ConversationContextPlanner
 import me.rerere.rikkahub.data.memory.recall.MemoryRecallStore

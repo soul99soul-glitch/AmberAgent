@@ -8,10 +8,10 @@ import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.aggregator.ScoredSignal
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.resolveTaskChatModel
 import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import kotlin.uuid.Uuid
 

@@ -27,9 +27,9 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.LAST_CONVERSATION_ID_PREF
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.getCurrentChatModel
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.context.ConversationCompact

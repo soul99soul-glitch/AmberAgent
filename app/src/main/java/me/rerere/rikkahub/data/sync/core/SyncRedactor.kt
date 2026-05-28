@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 
 private const val SECRET_MASK = "__MASKED_BY_AMBERAGENT_SYNC__"
 

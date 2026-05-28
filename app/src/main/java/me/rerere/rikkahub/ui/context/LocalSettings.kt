@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.ui.context
 
 import androidx.compose.runtime.staticCompositionLocalOf
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 
 val LocalSettings = staticCompositionLocalOf<Settings> {
     error("No SettingsStore provided")

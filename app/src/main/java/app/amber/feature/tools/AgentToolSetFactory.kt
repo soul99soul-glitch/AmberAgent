@@ -3,7 +3,7 @@ package app.amber.feature.tools
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.tools.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 
 class AgentToolSetFactory(
     private val localTools: LocalTools,

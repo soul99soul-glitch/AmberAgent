@@ -1,10 +1,11 @@
-package me.rerere.rikkahub.data.datastore.migration
+package app.amber.core.settings.migration
 
 import android.util.Log
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.data.datastore.migration.migrateMcpServersJson
 
 private const val TAG = "SettingsJsonMigrator"
 
@@ -12,7 +13,7 @@ private const val TAG = "SettingsJsonMigrator"
  * 对备份文件中的 settings.json 应用与 DataStore migration 相同的迁移逻辑。
  *
  * DataStore migration 作用于分散的 key-value 存储，而备份文件中的 settings.json
- * 是整个 [me.rerere.rikkahub.data.datastore.Settings] 对象的序列化结果。
+ * 是整个 [app.amber.core.settings.Settings] 对象的序列化结果。
  * 此工具类负责在反序列化前对旧格式的 JSON 执行等价的迁移操作。
  */
 object SettingsJsonMigrator {

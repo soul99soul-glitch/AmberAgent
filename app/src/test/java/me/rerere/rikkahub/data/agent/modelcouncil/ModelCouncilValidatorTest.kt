@@ -8,8 +8,8 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
-import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.Settings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

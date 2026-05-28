@@ -1,21 +1,21 @@
-package me.rerere.rikkahub.data.datastore.prefs
+package app.amber.core.settings.prefs
 
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.OpenAIBrand
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANTS
-import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
-import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
-import me.rerere.rikkahub.data.datastore.DEFAULT_SYSTEM_TTS_ID
-import me.rerere.rikkahub.data.datastore.DEFAULT_TTS_PROVIDERS
-import me.rerere.rikkahub.data.datastore.GeminiProviderIdRef
-import me.rerere.rikkahub.data.datastore.OpenAIProviderIdRef
-import me.rerere.rikkahub.data.datastore.SeedGeminiImageModel
-import me.rerere.rikkahub.data.datastore.SeedGeminiImageModelId
-import me.rerere.rikkahub.data.datastore.SeedOpenAIImageModel
-import me.rerere.rikkahub.data.datastore.SeedOpenAIImageModelId
-import me.rerere.rikkahub.data.datastore.SeedRoutingQuickMessages
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.DEFAULT_ASSISTANTS
+import app.amber.core.settings.DEFAULT_ASSISTANT_ID
+import app.amber.core.settings.DEFAULT_PROVIDERS
+import app.amber.core.settings.DEFAULT_SYSTEM_TTS_ID
+import app.amber.core.settings.DEFAULT_TTS_PROVIDERS
+import app.amber.core.settings.GeminiProviderIdRef
+import app.amber.core.settings.OpenAIProviderIdRef
+import app.amber.core.settings.SeedGeminiImageModel
+import app.amber.core.settings.SeedGeminiImageModelId
+import app.amber.core.settings.SeedOpenAIImageModel
+import app.amber.core.settings.SeedOpenAIImageModelId
+import app.amber.core.settings.SeedRoutingQuickMessages
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import org.junit.Assert.assertEquals
@@ -36,7 +36,7 @@ import kotlin.uuid.Uuid
  *
  * These are the pure functions that decide what [Settings] object
  * [SettingsAggregator.settingsFlow] emits. M1.1.8a reviewer verified them
- * byte-equivalent to [me.rerere.rikkahub.data.datastore.SettingsStore]
+ * byte-equivalent to [app.amber.core.settings.SettingsStore]
  * reader at the source level; this file locks the runtime output so any
  * future change that drifts away from current behaviour fails fast.
  */
@@ -72,7 +72,7 @@ class SettingsAggregatorHelpersTest {
     @Test
     fun `applyBackfillAndSeed — REMOVED provider filtered`() {
         val removedProvider = (DEFAULT_PROVIDERS.first() as ProviderSetting.OpenAI).copy(
-            id = me.rerere.rikkahub.data.datastore.REMOVED_DEFAULT_PROVIDER_IDS.first(),
+            id = app.amber.core.settings.REMOVED_DEFAULT_PROVIDER_IDS.first(),
         )
         val keepProvider = DEFAULT_PROVIDERS.first()
         val input = composeRawSettings(

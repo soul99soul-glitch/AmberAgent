@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore.prefs
+package app.amber.core.settings.prefs
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.IOException
@@ -12,8 +12,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
-import me.rerere.rikkahub.data.datastore.PreferencesKeys
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.toMutableStateFlow
 

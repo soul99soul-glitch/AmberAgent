@@ -18,7 +18,7 @@ import app.amber.feature.system.AgentPermissionStatus
 import app.amber.feature.system.AmberNotificationListenerService
 import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

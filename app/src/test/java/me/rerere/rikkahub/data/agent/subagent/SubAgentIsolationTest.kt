@@ -1,12 +1,12 @@
 package app.amber.feature.subagent
 
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
-import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.GenerativeUiSetting
+import app.amber.core.settings.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantRegex
-import me.rerere.rikkahub.data.datastore.SpeculativeToolExecutionSetting
+import app.amber.core.settings.SpeculativeToolExecutionSetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

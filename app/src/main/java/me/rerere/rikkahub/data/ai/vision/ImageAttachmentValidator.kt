@@ -5,10 +5,10 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.util.ImageEncodingException
 import me.rerere.ai.util.encodeBase64
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.getCurrentChatModel
 
 private const val MAX_IMAGES_PER_MESSAGE = 4
 

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore.migration
+package app.amber.core.settings.migration
 
 import androidx.datastore.core.DataMigration
 import androidx.datastore.preferences.core.Preferences
@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
-import me.rerere.rikkahub.data.datastore.PreferencesKeys
+import app.amber.core.settings.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
 

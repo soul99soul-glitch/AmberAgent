@@ -51,7 +51,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.resolveSessionDefaults
+import app.amber.core.settings.resolveSessionDefaults
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock

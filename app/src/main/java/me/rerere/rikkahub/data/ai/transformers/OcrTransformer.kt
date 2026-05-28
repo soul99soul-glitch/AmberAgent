@@ -16,9 +16,9 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.cache.LruCache
 import me.rerere.common.cache.SingleFileCacheStore
 import me.rerere.rikkahub.data.ai.prompts.resolveVisionRecognitionPrompt
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.findProvider
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.io.File

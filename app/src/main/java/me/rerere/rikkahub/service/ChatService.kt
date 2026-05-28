@@ -108,15 +108,15 @@ import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 import me.rerere.rikkahub.data.context.ActiveCompactBoundary
 import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.context.ConversationContextEngine
-import me.rerere.rikkahub.data.datastore.toCompactPolicy
-import me.rerere.rikkahub.data.datastore.MAX_AGENT_TOOL_LOOP_STEPS
-import me.rerere.rikkahub.data.datastore.MIN_AGENT_TOOL_LOOP_STEPS
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
-import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
+import app.amber.core.settings.toCompactPolicy
+import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
+import app.amber.core.settings.MIN_AGENT_TOOL_LOOP_STEPS
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.getCurrentChatModel
+import app.amber.core.settings.resolveTaskChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.memory.extraction.MemoryExtractor
 import me.rerere.rikkahub.data.model.Conversation
@@ -1643,7 +1643,7 @@ class ChatService(
         conversationId: Uuid,
         messages: List<UIMessage>,
         senderName: String,
-        settings: me.rerere.rikkahub.data.datastore.Settings,
+        settings: app.amber.core.settings.Settings,
     ) {
         if (!settings.agentRuntime.enableLiveStatusNotification) return
         liveStatusNotifier.notifyRunning(

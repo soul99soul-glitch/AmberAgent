@@ -10,8 +10,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import app.amber.core.settings.Settings
+import app.amber.core.settings.getCurrentAssistant
 
 @Composable
 fun AssistantBackground(setting: Settings) {

@@ -2,7 +2,7 @@ package me.rerere.rikkahub.data.ai.transformers
 
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.utils.toLocalDate
 import me.rerere.rikkahub.utils.toLocalTime
 import java.time.Instant

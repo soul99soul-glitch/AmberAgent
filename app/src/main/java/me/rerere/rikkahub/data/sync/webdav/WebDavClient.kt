@@ -20,7 +20,7 @@ import io.ktor.utils.io.readAvailable
 import io.ktor.util.cio.readChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.datastore.WebDavConfig
+import app.amber.core.settings.WebDavConfig
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.InputStream

@@ -2,7 +2,7 @@ package app.amber.feature.miniapp
 
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import me.rerere.rikkahub.data.datastore.MiniAppSetting
+import app.amber.core.settings.MiniAppSetting
 
 class MiniAppSandboxTest {
     @Test

@@ -11,8 +11,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.getCurrentImageGenerationModel
+import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.repository.ImageGenerationRepository
 import kotlin.uuid.Uuid
 

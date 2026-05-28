@@ -12,8 +12,8 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.getCurrentAssistant
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata

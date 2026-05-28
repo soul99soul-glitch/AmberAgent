@@ -14,7 +14,7 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionStatus
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
+import app.amber.core.settings.prefs.SettingsAggregator
 import java.io.File
 
 private const val EXTERNAL_READ_DEFAULT_MAX_CHARS = 65_536

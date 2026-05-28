@@ -1,8 +1,8 @@
 package app.amber.feature.board.hotlist.deepread
 
 import me.rerere.ai.core.ReasoningLevel
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import app.amber.core.settings.Settings
+import app.amber.core.settings.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Assistant
 import kotlin.uuid.Uuid
 

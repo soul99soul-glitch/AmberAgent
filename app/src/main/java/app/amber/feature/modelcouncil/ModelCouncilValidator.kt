@@ -12,8 +12,8 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
 import java.util.Locale
 import kotlin.uuid.Uuid
 

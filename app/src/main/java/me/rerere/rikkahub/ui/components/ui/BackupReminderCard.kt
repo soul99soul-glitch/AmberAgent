@@ -24,7 +24,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.DatabaseRestore
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.Settings
 
 @Composable
 fun BackupReminderCard(

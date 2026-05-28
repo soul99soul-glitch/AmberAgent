@@ -23,9 +23,9 @@ import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import app.amber.feature.tools.AgentToolSetFactory
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.resolveTaskChatModel
 import java.net.URI
 import java.security.MessageDigest
 import java.time.LocalDate

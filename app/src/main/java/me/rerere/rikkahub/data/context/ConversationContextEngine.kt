@@ -25,10 +25,10 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.AppScope
 import app.amber.feature.prompts.AgentPromptConfigRepository
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
-import me.rerere.rikkahub.data.datastore.toCompactPolicy
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.resolveTaskChatModel
+import app.amber.core.settings.toCompactPolicy
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.applyPlaceholders

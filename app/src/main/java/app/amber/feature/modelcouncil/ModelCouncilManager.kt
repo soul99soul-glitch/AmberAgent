@@ -40,10 +40,10 @@ import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.toQueueState
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.findProvider
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
 import java.io.File
 import java.time.Instant
 import kotlin.uuid.Uuid

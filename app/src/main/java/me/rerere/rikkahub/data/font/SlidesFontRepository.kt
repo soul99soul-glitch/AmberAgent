@@ -16,7 +16,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import me.rerere.rikkahub.data.datastore.GenerativeUiSetting
+import app.amber.core.settings.GenerativeUiSetting
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File

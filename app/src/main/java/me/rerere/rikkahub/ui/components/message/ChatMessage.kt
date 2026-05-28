@@ -42,7 +42,7 @@ import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.NotoSerifSC
 import me.rerere.rikkahub.ui.utils.amberTraceMeasure
 import me.rerere.rikkahub.utils.copyMessageToClipboard
-import me.rerere.rikkahub.data.datastore.ChatFontFamily
+import app.amber.core.settings.ChatFontFamily
 import me.rerere.rikkahub.utils.base64Encode
 import java.util.Locale
 

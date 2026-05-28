@@ -12,9 +12,9 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.context.ConversationContextEngine
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
-import me.rerere.rikkahub.data.datastore.toCompactPolicy
+import app.amber.core.settings.Settings
+import app.amber.core.settings.getCurrentChatModel
+import app.amber.core.settings.toCompactPolicy
 import me.rerere.rikkahub.data.model.Conversation
 
 class ConversationContextTools(

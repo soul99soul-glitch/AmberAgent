@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore.prefs
+package app.amber.core.settings.prefs
 
 import android.content.Context
 import android.util.Log
@@ -11,9 +11,9 @@ import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.GoogleAuthMode
 import me.rerere.ai.provider.OpenAIAuthMode
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
-import me.rerere.rikkahub.data.datastore.DisplaySetting
-import me.rerere.rikkahub.data.datastore.Settings
+import app.amber.core.settings.DEFAULT_PROVIDERS
+import app.amber.core.settings.DisplaySetting
+import app.amber.core.settings.Settings
 import java.io.File
 import java.util.zip.ZipInputStream
 import kotlin.uuid.Uuid

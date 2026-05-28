@@ -120,10 +120,10 @@ import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
 import me.rerere.rikkahub.data.context.CompactLifecycleState
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.getCurrentAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation

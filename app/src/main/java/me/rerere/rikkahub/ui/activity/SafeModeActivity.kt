@@ -33,8 +33,8 @@ import me.rerere.rikkahub.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.getCurrentAssistant
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
 import org.koin.android.ext.android.inject

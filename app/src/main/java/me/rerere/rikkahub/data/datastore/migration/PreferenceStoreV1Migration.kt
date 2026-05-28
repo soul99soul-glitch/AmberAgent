@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.rikkahub.data.datastore.PreferencesKeys
+import app.amber.core.settings.PreferencesKeys
 import me.rerere.rikkahub.utils.JsonInstant
 
 class PreferenceStoreV1Migration : DataMigration<Preferences> {
@@ -31,7 +31,7 @@ class PreferenceStoreV1Migration : DataMigration<Preferences> {
     override suspend fun cleanUp() {}
 }
 
-internal fun migrateMcpServersJson(json: String): String {
+fun migrateMcpServersJson(json: String): String {
     val element = JsonInstant.parseToJsonElement(json).jsonArray.map { element ->
         val jsonObj = element.jsonObject.toMutableMap()
         val type = jsonObj["type"]?.jsonPrimitive?.content ?: ""

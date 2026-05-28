@@ -78,11 +78,11 @@ import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.prompts.DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
 import app.amber.feature.prompts.DEFAULT_IMAGE_PROMPT_INJECTION
 import app.amber.feature.prompts.ImagePromptInjectionConfig
-import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
-import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.resolveTaskChatModel
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
+import app.amber.core.settings.ModelGroupSessionDefault
+import app.amber.core.settings.Settings
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.resolveTaskChatModel
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.ai.provider.hasUsableAuth
 import me.rerere.rikkahub.ui.components.nav.BackButton
