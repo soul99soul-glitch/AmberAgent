@@ -318,6 +318,8 @@ val cargoBuildSyncCrypto =
     registerCargoBuild("cargoBuildSyncCrypto", "../native/sync-crypto", "sync_crypto")
 val cargoBuildMarkdownPreprocess =
     registerCargoBuild("cargoBuildMarkdownPreprocess", "../native/markdown-preprocess", "markdown_preprocess")
+val cargoBuildJsonExpr =
+    registerCargoBuild("cargoBuildJsonExpr", "../native/json-expr", "json_expr")
 
 afterEvaluate {
     tasks.named("preBuild").configure {
@@ -327,6 +329,7 @@ afterEvaluate {
         dependsOn(cargoBuildReaderExtractor)
         dependsOn(cargoBuildSyncCrypto)
         dependsOn(cargoBuildMarkdownPreprocess)
+        dependsOn(cargoBuildJsonExpr)
     }
 }
 

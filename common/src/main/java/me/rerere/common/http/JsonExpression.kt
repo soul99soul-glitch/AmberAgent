@@ -1,5 +1,6 @@
 package me.rerere.common.http
 
+import app.amber.core.json.expr.JsonExprNative
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -27,7 +28,13 @@ fun parseExpression(input: String): ParseResult {
     }
 }
 
-fun isJsonExprValid(input: String): Boolean = parseExpression(input).success
+fun isJsonExprValid(input: String): Boolean {
+    // TD.Rust.2 — native fast path. Falls back to Kotlin on unavailability.
+    if (JsonExprNative.available) {
+        JsonExprNative.isValid(input)?.let { return it }
+    }
+    return parseExpression(input).success
+}
 
 /**
  * 针对给定的根JSON对象评估JSON表达式，并将结果作为字符串返回。
@@ -53,6 +60,15 @@ fun isJsonExprValid(input: String): Boolean = parseExpression(input).success
  * @return 作为字符串的评估值。
  */
 fun evaluateJsonExpr(input: String, root: JsonObject): String {
+    // TD.Rust.2 — native fast path. The Kotlin path is the canonical fallback;
+    // native returns null on parse/eval error and the Kotlin path then runs
+    // (which throws ParseException so the caller's existing contract is
+    // preserved).
+    if (JsonExprNative.available) {
+        val rootJson = root.toString()
+        val native = JsonExprNative.evaluate(rootJson, input)
+        if (native != null) return native
+    }
     val lexer = Lexer(input)
     val parser = Parser(lexer)
     val expr = parser.parse()
