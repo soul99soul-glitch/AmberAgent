@@ -3,12 +3,21 @@ package app.amber.feature.terminal
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.BuildConfig
 import java.io.File
 
-class AlpineRuntimeInstaller(private val context: Context) {
+/**
+ * @param appVersionCode used to invalidate the unpacked runtime cache when
+ *                       the app upgrades. Inject from :app's BuildConfig.VERSION_CODE
+ *                       so this class stays free of :app generated-config dependencies.
+ *                       Note: :app's BuildConfig overrides VERSION_CODE as a String
+ *                       (see app/build.gradle.kts: buildConfigField("String", "VERSION_CODE", ...)).
+ */
+class AlpineRuntimeInstaller(
+    private val context: Context,
+    private val appVersionCode: String,
+) {
     private val prefixDir: File = context.filesDir.parentFile ?: context.filesDir
-    private val runtimeVersion = BuildConfig.VERSION_CODE
+    private val runtimeVersion = appVersionCode
     private val runtimeVersionFile: File = context.filesDir.resolve("embedded-terminal-runtime.version")
     val localDir: File = prefixDir.resolve("local")
     val localBinDir: File = localDir.resolve("bin")

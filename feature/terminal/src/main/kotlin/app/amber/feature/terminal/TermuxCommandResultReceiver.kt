@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.AppScope
+import app.amber.core.infra.AppScope
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 

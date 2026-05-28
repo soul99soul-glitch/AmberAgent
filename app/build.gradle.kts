@@ -595,6 +595,7 @@ dependencies {
     implementation(project(":core:ai:api"))
     implementation(project(":feature:runtime:api"))
     implementation(project(":feature:tools:api"))
+    implementation(project(":feature:terminal"))
     implementation(project(":feature:history"))
     implementation(project(":feature:webview"))
     implementation(project(":feature:task"))
