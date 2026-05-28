@@ -60,6 +60,7 @@ val agentRuntimeModule = module {
     }
 
     single { RoomAgentEventStore(get()) }
+    single<app.amber.core.agent.runtime.AgentEventStore> { get<RoomAgentEventStore>() }
 
     single { ChatEventProjector(get<RoomAgentEventStore>(), get(), get(), get()) }
 
@@ -94,6 +95,7 @@ val agentRuntimeModule = module {
     single<app.amber.feature.chat.impl.ChatSessionResolver> { get<ChatSessionResolverImpl>() }
 
     single { GenerationSubAgentRunner(get()) }
+    single<app.amber.feature.subagent.SubAgentRunner> { get<GenerationSubAgentRunner>() }
 
     single {
         SubAgentManager(
@@ -108,6 +110,7 @@ val agentRuntimeModule = module {
     }
 
     single { ProviderModelCouncilTextRunner(get()) }
+    single<app.amber.feature.modelcouncil.ModelCouncilTextRunner> { get<ProviderModelCouncilTextRunner>() }
 
     single { ExternalCliModelCouncilRunner(get(), get<Context>(), get()) }
 
