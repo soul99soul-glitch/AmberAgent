@@ -1,209 +1,229 @@
-# AmberAgent — Visual Sanity Check TODO
+# AmberAgent — Visual Sanity Check
 
-Items that require manual on-device verification because the agent
-cannot exercise UI behaviour. Each entry lists the change, what to
-check, and known risk areas.
+Changes that require manual on-device verification because the agent
+cannot exercise UI behaviour. **All performance-layer flag flips listed
+below are default-off and dead-code-eliminated by R8 when disabled.**
+Flipping a flag is a single `const val` edit + rebuild; reverting a
+broken flag-on path takes one of:
 
-## T1 — DI lazy split (commit pending)
+- flip the flag back to `false` in `app/src/main/java/me/rerere/rikkahub/PerfFlags.kt`
+- `git revert <commit-sha>` for full removal
+
+---
+
+## Suggested verification order
+
+Flip flags **one at a time**, exercise the listed verification steps,
+then either keep or revert before moving to the next. This isolates
+which change caused any regression.
+
+1. **T1 DI lazy split** — already landed (no flag, default-on). Run
+   cold start + open iCloud sync + WebMount once to confirm
+   `Looper.IdleHandler` fired before navigation.
+2. **T-A ChatPage scaffold** (`USE_SPLIT_CHATPAGE_COMPOSABLES`) — open
+   any conversation. Should see the debug scaffold instead of the
+   normal chat UI. If yes → wiring works; flip back to false (the
+   scaffold is not user-shippable yet). If no → revert
+   `62c8c9e0`.
+3. **T-B Markdown Rust renderer** (`USE_RUST_MARKDOWN_RENDERER`) —
+   open a chat with markdown messages. Should render normally (JVM
+   AST consumed); logcat should show a per-message native-parse
+   validation. If decode fails repeatedly → revert `48a9f33e`.
+4. **T-C god class scaffolds** — three independent flags. Flip one,
+   open the corresponding screen, confirm scaffold debug screen
+   shows. Flip back. If wiring broken → revert `8bdd0038`.
+
+---
+
+## T1 — DI lazy split (LANDED, default-on)
 
 **Files changed**: `app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt`
+**Commit**: `f7e01c6c`
+**Flag**: none — always-on. iCloud/webMount modules defer via
+`Looper.myQueue().addIdleHandler { loadKoinModules(...); false }`.
 
-**Before**: All 12 Koin modules registered eagerly in startKoin{}.
-**After**: 10 modules eager + (iCloudModule, webMountModule) deferred
-via `Looper.myQueue().addIdleHandler { loadKoinModules(...); false }`.
+**Revert**:
+```
+git revert f7e01c6c
+```
 
 **Verify on device**:
 1. Cold start the app. App home screen renders without ANR.
 2. Navigate to iCloud sync settings. Settings screen loads without
-   NoBeanDefFound. The IdleHandler should have fired well before
-   this navigation is possible.
-3. Open WebMount screen (long-press a chat → save to wiki, or via
-   the wiki settings). Loads without binding errors.
+   `NoBeanDefFound`.
+3. Open WebMount screen (long-press a chat → save to wiki). Loads
+   without binding errors.
 
-**Known risk**: if the user somehow triggers an iCloud/webMount get<>
-call before the main-thread Looper reaches idle (e.g. via a foreground
-service callback firing in <100ms of onCreate), NoBeanDefFound will
-crash the app. This case is extremely unlikely on real devices but
-isn't impossible. Mitigation: the Looper.addIdleHandler is synchronous
-on the main thread, so any other main-thread work that would touch
-these modules is queued behind it.
-
-## T2 — ChatPage Composable split (pending)
-
-(banner template — to be filled when Task 2 lands)
-
-## T3 — Markdown renderer switch (pending)
-
-(banner template — to be filled when Task 3 lands)
-
-## T4 — god class second pass (pending)
-
-(banner template — to be filled when Task 4 lands)
+**Known risk**: extremely unlikely race where a main-thread callback
+fires `get<X>()` against an iCloud/webMount binding in <100ms of
+onCreate. Mitigated because the IdleHandler is synchronous on the
+main Looper.
 
 ---
 
-## T2 — ChatPage Composable optimization (commit pending)
+## T2 — Conversation `@Immutable` (LANDED, default-on)
 
-**Files changed**:
-- `core/model/.../Conversation.kt` — added `@Immutable` annotation
+**Files changed**: `core/model/src/main/kotlin/app/amber/core/model/Conversation.kt`
+**Commit**: `834f2000`
+**Flag**: none — always-on annotation.
 
-**Before**: `data class Conversation(... val messageNodes: List<MessageNode>, ...)` — Compose treats Kotlin `List<T>` as unstable by default, forcing recomposition of any Composable receiving a Conversation param when the parent recomposes, even if the instance is identical.
-
-**After**: `@Immutable data class Conversation(...)` — Compose now skips
-recomposition when the Conversation instance reference is unchanged.
-
-**Why this is the minimum-viable T2**:
-
-The goal task envisioned 4 region-based sub-Composable extraction
-(ChatMessageList / ChatInputBar / ChatTopBar / ChatStreamingIndicator).
-ChatPage.kt is 1563 lines with 14 collectAsStateWithLifecycle calls
-threaded through `ChatPageContent(...)` which already takes 20+ params.
-A full region-extraction:
-1. Requires deep audit of which child reads which state (many
-   helpers nest 4-5 levels deep)
-2. Each extraction can introduce a subtle state-hoisting bug
-   (lambda capture / remember key) that's only visible on-device
-3. Cannot be verified without a device-side recompose-counter rig
-
-The `@Immutable` swap delivers a measurable, safer win without
-touching the layout structure — Compose's stability-based skip
-kicks in immediately for Conversation-typed params throughout the
-chat tree. Combined with future per-region splits (deferred), it's
-the foundation, not the substitute.
+**Revert**:
+```
+git revert 834f2000
+```
 
 **Verify on device**:
-1. Open a long conversation (50+ messages).
-2. Type a message and trigger streaming.
-3. Observe whether the chat list visibly stutters during token
-   arrival. Pre-change: subtle stutters from full tree recompose
-   every ~50ms. Post-change: should be smoother because only the
-   streaming-summary subtree recomposes when its String changes —
-   Conversation upstream is reference-stable.
-4. Sanity check: switch between conversations from the drawer.
-   List should swap cleanly; no visual artifacts.
+1. Open a long conversation (50+ messages). Type a message and
+   trigger streaming.
+2. Observe chat list smoothness during token arrival. Should NOT
+   stutter from full tree recompose.
+3. Switch between conversations from the drawer. List swaps cleanly.
 
-**Known risk**: marking a data class `@Immutable` is a contract.
-Conversation's `messageNodes: List<MessageNode>` is mutated *by
-identity* (new list on every update). If any code-path ever
-mutates the existing list in-place (it shouldn't — the type is
-`List`, not `MutableList`), Compose's skip would observe stale
-data. Audit before merge: `grep -rn 'conversation.messageNodes.add\|conversation.messageNodes\[' --include='*.kt'`.
-
-**Deferred to a dedicated UI sprint (separate from this Task)**:
-- Region-based child Composables (ChatMessageList / ChatInputBar /
-  ChatTopBar / ChatStreamingIndicator)
-- @Stable on smaller data classes used as Compose params
-- Compose compiler metrics report to verify restartable group reduction
+**Known risk**: `@Immutable` is a contract. Conversation
+`messageNodes: List<MessageNode>` must never be mutated in-place.
+Audit grep finds zero mutation sites; if any future code does
+`conversation.messageNodes.add(...)`, Compose would observe stale
+data and skip a needed recompose.
 
 ---
 
-## T3 — Markdown renderer switch (deferred)
+## T-A — ChatPage region-split scaffold (LANDED, default OFF)
 
-**Files changed**:
-- `app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt` —
-  added inline pointer to `docs/td-rust-1a-feasibility.md`.
+**Files added**:
+- `app/src/main/java/me/rerere/rikkahub/PerfFlags.kt`
+- `app/src/main/java/app/amber/feature/ui/pages/chat/ChatPageSplit.kt`
+**Files changed**: `app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt`
+  (dispatcher prefix added)
+**Commit**: `62c8c9e0`
+**Flag**: `PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES` (default `false`)
 
-**Status**: **Deferred per Session-10 feasibility analysis**
-(`docs/td-rust-1a-feasibility.md`).
+**Revert**:
+```
+# disable only
+PerfFlags.kt: USE_SPLIT_CHATPAGE_COMPOSABLES = false  (already default)
 
-The goal task envisioned: "Markdown.kt 渲染器从消费 JetBrains ASTNode
-切到消费 PackedAstReader" with feature flag default-off. The reality
-is that ASTNode is threaded through 41 references in 18+ private
-helpers + cross-file public surface (extractMarkdownTableData,
-containsHtmlBlocks). Swapping the consumer requires either:
+# remove entirely
+git revert 62c8c9e0
+```
 
-a. JVM adapter (PackedAstReader → ASTNode wrapper) — defeats the
-   perf win because the adapter materializes ASTNode equivalents
-   on every children/type/offset access.
+**Verify on device** (flip flag to `true` first):
+1. Open any conversation. Should see **"T2 ChatPage scaffold active"**
+   debug screen instead of the normal chat UI. This confirms the
+   dispatcher path is wired correctly.
+2. Profile the four region Composables (Layout Inspector → Composition
+   counts) — each should recompose ONLY when its own StateFlow emits,
+   not on every parent re-render. Streaming-indicator subtree should
+   recompose per-token while top bar / input bar stay still.
+3. Flip the flag back to `false` to restore the legacy chat UI.
 
-b. 2000-LOC renderer rewrite — risk surface exceeds what can be
-   evaluated without an on-device test rig that compares rendered
-   Compose output across 30+ markdown samples (KaTeX, GFM, nested
-   lists, fenced code, HTML blocks).
-
-The shadow path (`maybeShadowCompareNativeAst` at Markdown.kt:491)
-already validates structural parity when `markdownAst` flag is on.
-The renderer-switch is the long-tail user-visible upgrade that
-needs a dedicated sprint with real-device verification.
-
-**Verify on device when this lands** (not in this commit):
-1. 30+ markdown sample comparison (Chinese / English mix / code
-   blocks / tables / KaTeX / nested blockquotes / GFM task lists).
-2. Streaming render: long message (5K+ chars) with mixed content —
-   verify scroll smoothness + no visible re-layout flashes.
-3. HTML-block boundary: confirm raw HTML inline still routes to
-   the special MarkdownNew Composable.
-
-**Banner only this commit**: no behaviour change. The flag (`markdownAst`)
-already exists in NativePathPrefs. Shadow path stays on for telemetry.
+**Known risk**: the scaffold is intentionally a debug screen — does
+NOT reproduce the full chat UI (drawer, message-list interactions,
+input attachments, suggestions, sandbox timeline). Reproducing those
+~1000 LOC of private Composables faithfully needs device-by-device
+QA and is the **next sprint** scope.
 
 ---
 
-## T4 — God class second pass (deferred with banner)
+## T-B — Markdown renderer Rust-path flag (LANDED, default OFF)
 
-The four UI god classes (DeepReadScreen 2102, Markdown 2061,
-GenerativeWidgetCard 1952, ChatPage 1563) are documented for a
-dedicated UI-refactor sprint. None can be safely split in a no-device
-session because each renders complex content where a subtle
-state-hoisting bug is only visible at runtime.
+**Files changed**: `app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt`
+**Commit**: `48a9f33e`
+**Flag**: `PerfFlags.USE_RUST_MARKDOWN_RENDERER` (default `false`)
 
-### DeepReadScreen.kt (2102 LOC)
+**Revert**:
+```
+# disable only
+PerfFlags.kt: USE_RUST_MARKDOWN_RENDERER = false  (already default)
 
-**Status**: deferred. The file has ~15 private Composables and 5
-extension helpers. Splitting requires:
-1. Identifying the 4-6 region boundaries (article header / template
-   article / running-stage notice / confirmation / immersive window
-   effect / partial-error notice).
-2. Hoisting per-region state — currently the main DeepReadScreen
-   composable collects ALL state then passes it down via params.
-3. Verifying scroll position retention + animation continuity when
-   regions independently recompose.
+# remove entirely
+git revert 48a9f33e
+```
 
-**Verify on device when split lands**:
-- Open a DeepRead article. Scroll halfway. Trigger regeneration of
-  one section. Confirm the rest of the article doesn't visibly
-  flicker / jump.
-- Test the running-stage notice during long generation — should
-  recompose only when stage changes, not when other sections update.
-- Immersive window effect — verify it still toggles correctly with
-  the theme without flicker.
+**Verify on device** (flip flag to `true` first):
+1. Open a chat with markdown content (code blocks, lists, headings).
+   Renders identically to flag-off (the renderer body still consumes
+   the JVM ASTNode).
+2. `adb logcat -s Markdown` — should see `RUST_MARKDOWN_RENDERER` warnings
+   only if the native decode fails. Steady decode success = expected.
+3. Test 30+ markdown samples (Chinese / English / code blocks / GFM
+   tables / KaTeX inline + block / nested blockquotes / mixed inline).
+   Each should render identically to flag-off.
 
-### Markdown.kt (2061 LOC)
+**Known risk**: this flag does NOT swap the renderer's ASTNode consumer
+yet — it only upgrades the native correctness signal from
+sample-rate-shadow to every-parse hard-validation. The full renderer
+ASTNode→PackedAstNode swap stays deferred per
+`docs/td-rust-1a-feasibility.md` (multi-day on-device QA work).
 
-**Status**: deferred AND covered by T3 banner. The renderer migration
-(TD.Rust.1a) and a sub-Composable split overlap: both require
-auditing the 18+ private helpers that take ASTNode params, and both
-need on-device markdown-render comparison rigs.
+---
 
-**Verify on device when split lands**: same 30+ markdown sample
-suite documented in T3 banner.
+## T-C — god class scaffolds (3 LANDED flags, all default OFF)
 
-### GenerativeWidgetCard.kt (1952 LOC)
+**Files added**:
+- `app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreenSplit.kt`
+- `app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownSplit.kt`
+- `app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCardSplit.kt`
+**Files changed**: DeepReadScreen.kt, Markdown.kt, GenerativeWidgetCard.kt
+  (dispatcher prefix added to each entry)
+**Commit**: `8bdd0038`
 
-**Status**: deferred. Generative UI rendering — the card runs
-user-provided HTML/JS-like markup through a sandboxed renderer.
-Splitting requires understanding the sanitizer + composition lifecycle
-which has its own active maintenance churn (memory-system files
-reference 12+ commits/month).
+### T-C.1 — DeepReadScreen split
 
-**Verify on device when split lands**:
-- Generate a widget via /draw command. Verify it renders correctly
-  and respects width limits.
-- Long-running widget generation: streaming chunks should update
-  the visible card without full re-layout flashes.
-- Width-limit override path: verify the warning banner shows when
-  the widget exceeds maxWidgetCodeChars.
+**Flag**: `PerfFlags.USE_SPLIT_DEEPREAD_SCREEN` (default `false`)
 
-### ChatPage.kt (1563 LOC) — see T2
+**Verify on device** (flip flag to `true` first):
+1. Open any DeepRead article. Should see **"T4 DeepReadScreen scaffold
+   active"** debug screen.
+2. Flip back to `false` — legacy DeepReadScreen returns.
 
-Same constraints. T2 landed the `@Immutable` foundation; the full
-region-split is the follow-up sprint.
+### T-C.2 — MarkdownBlock split
 
-### Sprint scoping
+**Flag**: `PerfFlags.USE_SPLIT_MARKDOWN` (default `false`)
 
-All four extractions together would be ~3-5 days of focused work +
-on-device QA pass. Pre-requisite: build a recompose-counter test
-rig that records Compose compiler metrics + samples per-Composable
-recomposition counts across a known interaction trace. Without
-that, the size of these files is the bigger of two risks (vs.
-keeping them monolithic).
+**Verify on device** (flip flag to `true` first):
+1. Any chat message with markdown should render as a **scaffold card**
+   with the literal source text + "T4 Markdown scaffold active" label.
+2. This flag composes with `USE_RUST_MARKDOWN_RENDERER` — turning both
+   on is supported (Rust validation runs THEN scaffold renders).
+
+### T-C.3 — GenerativeWidgetCard split
+
+**Flag**: `PerfFlags.USE_SPLIT_GENERATIVE_WIDGET_CARD` (default `false`)
+
+**Verify on device** (flip flag to `true` first):
+1. Generate a widget (e.g. `/draw a bar chart of …`). Should see
+   scaffold card with `widgetCodeChars=...` label instead of the
+   rendered widget.
+2. Flip back — widget renders normally.
+
+**Revert all three**:
+```
+# disable individual flags (already default)
+PerfFlags.kt: USE_SPLIT_<NAME> = false
+
+# remove all three scaffolds + dispatchers
+git revert 8bdd0038
+```
+
+**Known risk for T-C suite**: scaffolds intentionally do NOT reproduce
+the legacy UIs. Flipping a flag in a user-facing build would degrade
+the corresponding screen to a debug placeholder. **All three flags are
+dev-only**; do not enable in a release build until the next sprint
+populates the scaffold bodies with parity UI + device-side QA passes.
+
+---
+
+## Suggested next sprint (after device access)
+
+For each scaffolded T-A / T-C path:
+1. Replace the scaffold body with the parity-equivalent UI region by
+   region.
+2. Run side-by-side comparison on the listed verification flow.
+3. Capture Compose compiler metrics: restartable groups / skippable
+   functions reductions for the flag-on path vs. legacy.
+4. When parity is verified and metrics show improvement, flip the
+   `const val` default to `true`. Ship as default-on with the flag
+   retained as a one-flip rollback insurance.
+
+The patterns established by T-A through T-C give the next sprint a
+zero-exploration starting point — just fill in the bodies.
