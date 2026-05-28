@@ -14,29 +14,33 @@ import app.amber.feature.live.LiveUiTreeProcessor
 import app.amber.feature.live.LiveWindowCandidate
 import kotlin.coroutines.resume
 
-class AmberAccessibilityService : AccessibilityService() {
+class AmberAccessibilityService : AccessibilityService(), AccessibilityController {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
     override fun onInterrupt() = Unit
 
     override fun onServiceConnected() {
         activeService = this
+        AccessibilityActive.activeController = this
     }
 
     override fun onDestroy() {
         if (activeService === this) {
             activeService = null
         }
+        if (AccessibilityActive.activeController === this) {
+            AccessibilityActive.activeController = null
+        }
         super.onDestroy()
     }
 
-    suspend fun tap(x: Float, y: Float, durationMillis: Long = 80): Boolean =
+    override suspend fun tap(x: Float, y: Float, durationMillis: Long): Boolean =
         gesture(path = Path().apply { moveTo(x, y) }, durationMillis = durationMillis)
 
-    suspend fun longPress(x: Float, y: Float, durationMillis: Long = 600): Boolean =
+    override suspend fun longPress(x: Float, y: Float, durationMillis: Long): Boolean =
         gesture(path = Path().apply { moveTo(x, y) }, durationMillis = durationMillis)
 
-    suspend fun swipe(fromX: Float, fromY: Float, toX: Float, toY: Float, durationMillis: Long = 350): Boolean {
+    override suspend fun swipe(fromX: Float, fromY: Float, toX: Float, toY: Float, durationMillis: Long): Boolean {
         val path = Path().apply {
             moveTo(fromX, fromY)
             lineTo(toX, toY)
@@ -44,11 +48,11 @@ class AmberAccessibilityService : AccessibilityService() {
         return gesture(path = path, durationMillis = durationMillis)
     }
 
-    fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
+    override fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
 
-    fun home(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+    override fun home(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
 
-    fun setFocusedText(text: String): Boolean {
+    override fun setFocusedText(text: String): Boolean {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -114,7 +118,7 @@ class AmberAccessibilityService : AccessibilityService() {
             ?.toSnapshot()
     }
 
-    fun dumpUiTree(maxNodes: Int = 120): String {
+    override fun dumpUiTree(maxNodes: Int): String {
         val root = rootInActiveWindow ?: return ""
         val lines = mutableListOf<String>()
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
@@ -136,7 +140,7 @@ class AmberAccessibilityService : AccessibilityService() {
         return lines.joinToString("\n")
     }
 
-    fun findTextNodes(query: String, maxNodes: Int = 120): List<AccessibilityTextMatch> {
+    override fun findTextNodes(query: String, maxNodes: Int): List<AccessibilityTextMatch> {
         val root = rootInActiveWindow ?: return emptyList()
         val needle = query.trim()
         if (needle.isBlank()) return emptyList()
@@ -359,12 +363,5 @@ private data class CapturedWindow(
     ),
 )
 
-data class AccessibilityTextMatch(
-    val text: String,
-    val contentDescription: String,
-    val className: String,
-    val viewId: String?,
-    val bounds: Rect,
-    val clickable: Boolean,
-    val enabled: Boolean,
-)
+// AccessibilityTextMatch moved to :core:automation:api so feature tools can
+// consume the wire type without pulling the :app-only AmberAccessibilityService.

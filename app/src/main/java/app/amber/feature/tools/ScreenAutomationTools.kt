@@ -17,7 +17,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
-import app.amber.core.automation.AmberAccessibilityService
+import app.amber.core.automation.AccessibilityController
+import app.amber.core.automation.getActiveAccessibilityController
 import app.amber.core.automation.ScreenCaptureManager
 
 class ScreenAutomationTools(
@@ -439,8 +440,8 @@ class ScreenAutomationTools(
         }
     }
 
-    private fun requireService(): AmberAccessibilityService =
-        AmberAccessibilityService.getActiveService()
+    private fun requireService(): AccessibilityController =
+        getActiveAccessibilityController()
             ?: error("AmberAgent Accessibility is not enabled. Open ${Settings.ACTION_ACCESSIBILITY_SETTINGS} and enable AmberAgent Accessibility.")
 
     private fun requireDisplayPoint(x: Float, y: Float, label: String): ScreenPoint {
@@ -466,7 +467,7 @@ class ScreenAutomationTools(
         put("success", success)
     }
 
-    private suspend fun swipeByDirection(service: AmberAccessibilityService, direction: String): Boolean {
+    private suspend fun swipeByDirection(service: AccessibilityController, direction: String): Boolean {
         val width = context.resources.displayMetrics.widthPixels.toFloat()
         val height = context.resources.displayMetrics.heightPixels.toFloat()
         return when (direction) {
