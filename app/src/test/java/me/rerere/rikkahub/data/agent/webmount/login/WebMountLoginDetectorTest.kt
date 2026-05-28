@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.login
+package app.amber.feature.webmount.login
 
 import app.amber.feature.webmount.cookie.CookieSnapshot
 import org.junit.Assert.assertEquals

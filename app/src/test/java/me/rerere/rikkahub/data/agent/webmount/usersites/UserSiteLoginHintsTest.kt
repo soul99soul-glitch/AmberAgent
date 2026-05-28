@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.usersites
+package app.amber.feature.webmount.usersites
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.hotlist
+package app.amber.feature.board.hotlist
 
 import app.amber.feature.board.hotlist.deepread.DeepAnalysis
 import app.amber.feature.board.hotlist.deepread.CorePoint

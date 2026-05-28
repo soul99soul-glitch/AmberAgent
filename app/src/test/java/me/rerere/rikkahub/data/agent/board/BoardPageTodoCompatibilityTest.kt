@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board
+package app.amber.feature.board
 
 import me.rerere.rikkahub.data.db.entity.BoardItemEntity
 import me.rerere.rikkahub.ui.pages.board.visibleTodayReviewTodoItems

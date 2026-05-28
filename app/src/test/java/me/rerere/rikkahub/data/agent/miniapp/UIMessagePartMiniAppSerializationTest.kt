@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.miniapp
+package app.amber.feature.miniapp
 
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.utils.JsonInstant

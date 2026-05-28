@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.hotlist
+package app.amber.feature.board.hotlist
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow

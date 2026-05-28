@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.office
+package app.amber.feature.office
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject

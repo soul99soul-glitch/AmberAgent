@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.subagent
+package app.amber.feature.subagent
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

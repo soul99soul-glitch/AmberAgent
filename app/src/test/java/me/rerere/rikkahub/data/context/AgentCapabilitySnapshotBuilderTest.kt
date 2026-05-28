@@ -2,11 +2,11 @@ package me.rerere.rikkahub.data.context
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
-import me.rerere.rikkahub.data.agent.task.AgentTaskRecoveryState
-import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
-import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
-import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import app.amber.feature.task.AgentTaskOutputRef
+import app.amber.feature.task.AgentTaskRecoveryState
+import app.amber.feature.task.AgentTaskRetryPolicy
+import app.amber.feature.task.AgentTaskSnapshot
+import app.amber.feature.task.AgentTaskStatus
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

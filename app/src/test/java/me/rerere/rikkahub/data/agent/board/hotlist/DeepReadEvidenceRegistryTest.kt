@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.hotlist
+package app.amber.feature.board.hotlist
 
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.collector
+package app.amber.feature.board.collector
 
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull

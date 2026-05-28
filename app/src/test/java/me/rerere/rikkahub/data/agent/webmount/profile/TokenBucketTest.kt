@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.profile
+package app.amber.feature.webmount.profile
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

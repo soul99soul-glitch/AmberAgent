@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.icloud
+package app.amber.feature.icloud
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject

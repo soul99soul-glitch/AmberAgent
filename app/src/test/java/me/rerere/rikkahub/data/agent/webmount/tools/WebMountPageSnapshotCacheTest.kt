@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.tools
+package app.amber.feature.webmount.tools
 
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject

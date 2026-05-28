@@ -497,7 +497,7 @@ class ICloudDriveClient(
     }
 }
 
-internal object ICloudDriveResponseParser {
+object ICloudDriveResponseParser {
     fun parseSession(
         clientId: String,
         cookies: ICloudDriveCookieBundle,

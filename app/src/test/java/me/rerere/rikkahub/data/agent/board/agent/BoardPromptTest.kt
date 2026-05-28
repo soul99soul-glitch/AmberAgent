@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.agent
+package app.amber.feature.board.agent
 
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webmount.cookie
+package app.amber.feature.webmount.cookie
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

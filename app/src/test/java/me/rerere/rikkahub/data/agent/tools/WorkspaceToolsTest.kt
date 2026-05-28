@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.tools
+package app.amber.feature.tools
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean

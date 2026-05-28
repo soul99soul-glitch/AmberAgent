@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.icloud
+package app.amber.feature.icloud
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

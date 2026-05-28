@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.hotlist
+package app.amber.feature.board.hotlist
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

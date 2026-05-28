@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.subagent
+package app.amber.feature.subagent
 
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add

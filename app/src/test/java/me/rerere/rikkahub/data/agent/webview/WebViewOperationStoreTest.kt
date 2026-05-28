@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.webview
+package app.amber.feature.webview
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

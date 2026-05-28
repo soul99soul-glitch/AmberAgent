@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.tools
+package app.amber.feature.tools
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

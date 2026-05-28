@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.miniapp
+package app.amber.feature.miniapp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

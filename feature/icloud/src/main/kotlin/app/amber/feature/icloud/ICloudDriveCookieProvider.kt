@@ -25,7 +25,7 @@ class ICloudDriveCookieProvider {
     }
 
     companion object {
-        internal fun mergeCookieHeaderInto(raw: String, target: MutableMap<String, String>) {
+        fun mergeCookieHeaderInto(raw: String, target: MutableMap<String, String>) {
             raw.split(";")
                 .map { it.trim() }
                 .filter { it.contains("=") }

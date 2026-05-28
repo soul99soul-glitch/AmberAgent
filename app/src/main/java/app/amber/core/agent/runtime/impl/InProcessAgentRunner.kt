@@ -80,7 +80,7 @@ class InProcessAgentRunner(
             try {
                 eventStore.appendRun(record)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to persist run record", e)
+                runCatching { Log.w(TAG, "Failed to persist run record", e) }
             }
 
             try {
@@ -100,9 +100,9 @@ class InProcessAgentRunner(
                         finishedAt = finishedAt,
                     ))
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to update run record", e)
+                    runCatching { Log.w(TAG, "Failed to update run record", e) }
                 }
-                Log.i(TAG, "Run $runId completed (${finishedAt - now}ms)")
+                runCatching { Log.i(TAG, "Run $runId completed (${finishedAt - now}ms)") }
             } catch (e: CancellationException) {
                 val finishedAt = System.currentTimeMillis()
                 snapshot.value = snapshot.value.copy(
@@ -112,7 +112,7 @@ class InProcessAgentRunner(
                 try {
                     eventStore.markInterrupted(runId, "cancelled")
                 } catch (ex: Exception) {
-                    Log.w(TAG, "Failed to mark run interrupted", ex)
+                    runCatching { Log.w(TAG, "Failed to mark run interrupted", ex) }
                 }
                 throw e
             } catch (e: Exception) {
@@ -128,9 +128,9 @@ class InProcessAgentRunner(
                         interruptedReason = e.message?.take(500),
                     ))
                 } catch (ex: Exception) {
-                    Log.w(TAG, "Failed to update run record on failure", ex)
+                    runCatching { Log.w(TAG, "Failed to update run record on failure", ex) }
                 }
-                Log.e(TAG, "Run $runId failed", e)
+                runCatching { Log.e(TAG, "Run $runId failed", e) }
             }
         }
         jobs[runId] = job

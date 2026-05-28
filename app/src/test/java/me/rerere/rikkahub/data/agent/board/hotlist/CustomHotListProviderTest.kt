@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.hotlist
+package app.amber.feature.board.hotlist
 
 import com.sun.net.httpserver.HttpServer
 import kotlinx.serialization.encodeToString

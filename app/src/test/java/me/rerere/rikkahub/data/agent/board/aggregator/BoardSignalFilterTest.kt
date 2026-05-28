@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.aggregator
+package app.amber.feature.board.aggregator
 
 import app.amber.feature.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.db.entity.BoardSignalEntity

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.board.hotlist
+package app.amber.feature.board.hotlist
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest

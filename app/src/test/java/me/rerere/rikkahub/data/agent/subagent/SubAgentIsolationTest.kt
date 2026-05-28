@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.subagent
+package app.amber.feature.subagent
 
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.AgentRuntimeSetting
