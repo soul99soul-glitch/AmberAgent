@@ -728,8 +728,32 @@ class ChatService(
             return true
         }
 
-        launchPendingMessageLoop(conversationId, pendingMessage)
+        if (useKernelPath && agentRunner != null) {
+            launchViaKernel(conversationId, pendingMessage)
+        } else {
+            launchPendingMessageLoop(conversationId, pendingMessage)
+        }
         return true
+    }
+
+    private var useKernelPath = false
+
+    private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
+        val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
+        val input = app.amber.feature.chat.api.ChatTurnInput(
+            conversationId = app.amber.core.agent.runtime.ConversationId(conversationId.toString()),
+            messageNodeId = app.amber.core.agent.runtime.MessageNodeId(message.id),
+            assistantId = app.amber.core.agent.runtime.AssistantId("default"),
+            userMessageText = message.previewText(maxChars = 4000),
+        )
+        val result = runner.launch(
+            app.amber.feature.chat.api.ChatTurnDescriptor.ID,
+            input,
+        )
+        result.onFailure { e ->
+            addError(e, conversationId, title = "Kernel dispatch failed")
+            launchPendingMessageLoop(conversationId, message)
+        }
     }
 
     private fun launchPendingMessageLoop(
