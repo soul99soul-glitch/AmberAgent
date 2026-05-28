@@ -100,6 +100,7 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
+import app.amber.feature.ui.components.richtext.nativebridge.MarkdownPreprocessNative
 import me.rerere.rikkahub.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
 import kotlin.random.Random
@@ -136,6 +137,17 @@ private val TABLE_CELL_MARKDOWN_HINT_REGEX = Regex(
 
 // 预处理markdown内容
 private fun preProcess(content: String): String {
+    // TD.Rust.1b: native single-pass scan if available + flag on. Falls back
+    // to the original Kotlin path on null return / not loaded / flag off.
+    // The native flag is gated by NativePathPrefs.markdownHtml because
+    // preprocess is logically a sub-step of the HTML pipeline.
+    if (MarkdownNativeSwitch.isHtmlEnabled() &&
+        MarkdownPreprocessNative.available
+    ) {
+        val nativeResult = MarkdownPreprocessNative.preprocess(content)
+        if (nativeResult != null) return nativeResult
+    }
+
     // 先找出所有代码块的位置
     val codeBlocks = mutableListOf<IntRange>()
     CODE_BLOCK_REGEX.findAll(content).forEach { match ->
