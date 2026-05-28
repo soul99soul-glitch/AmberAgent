@@ -20,6 +20,7 @@ import me.rerere.rikkahub.BuildConfig
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
 import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.Generator
 import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppSearchBridge
@@ -358,6 +359,7 @@ val dataSourceModule = module {
             toolDispatcher = get(),
         )
     }
+    single<Generator> { get<GenerationHandler>() }
 
     single<OkHttpClient> {
         val acceptLang = AcceptLanguageBuilder.fromAndroid(get())
