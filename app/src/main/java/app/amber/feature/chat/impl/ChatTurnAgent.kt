@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.last
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.service.ConversationAccess
+import java.time.Instant
+import kotlin.uuid.Uuid
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.model.Assistant
@@ -19,6 +22,7 @@ import me.rerere.rikkahub.data.model.Conversation
 class ChatTurnAgent(
     private val generationHandler: GenerationHandler,
     private val sessionResolver: ChatSessionResolver,
+    private val conversationAccess: ConversationAccess,
 ) : Agent<ChatTurnInput, ChatTurnArtifact> {
 
     override val descriptor: AgentDescriptor = ChatTurnDescriptor.value
@@ -56,6 +60,17 @@ class ChatTurnAgent(
                 when (chunk) {
                     is GenerationChunk.Messages -> {
                         lastMessages = chunk.messages
+                        // Stream the latest message list to chat.db so UI updates
+                        // in real time (mirrors the legacy path's behavior).
+                        val conversationUuid = Uuid.parse(input.conversationId.value)
+                        val current = conversationAccess.getConversationFlow(conversationUuid).value
+                        val updated = mergeMessages(current, chunk.messages)
+                        conversationAccess.updateConversation(
+                            conversationUuid,
+                            updated,
+                            checkDeletedFiles = false,
+                        )
+
                         val lastMsg = lastMessages.lastOrNull()
                         if (lastMsg != null) {
                             scope.events.emit(
@@ -94,6 +109,46 @@ class ChatTurnAgent(
             toolCallsCount = toolCallCount,
         )
     }
+}
+
+/**
+ * Merge generated UIMessages into the conversation. Existing nodes are
+ * updated by matching message id; new messages are appended as new nodes.
+ * Mirrors ChatService.mergeGeneratedMessagesIntoWindow's no-startIndex branch.
+ */
+private fun mergeMessages(
+    conversation: Conversation,
+    generatedMessages: List<UIMessage>,
+): Conversation {
+    if (generatedMessages.isEmpty()) return conversation
+    val generatedById = generatedMessages.associateBy { it.id }
+    var changed = false
+    val updatedNodes = conversation.messageNodes.map { node ->
+        val selected = node.currentMessage
+        val replacement = generatedById[selected.id] ?: return@map node
+        if (replacement === selected || replacement == selected) {
+            node
+        } else {
+            changed = true
+            node.copy(
+                messages = node.messages.map { msg ->
+                    if (msg.id == selected.id) replacement else msg
+                },
+            )
+        }
+    }
+    val existingIds = updatedNodes.mapTo(mutableSetOf()) { it.currentMessage.id }
+    val appendedNodes = generatedMessages
+        .filterNot { it.id in existingIds }
+        .map { msg ->
+            changed = true
+            me.rerere.rikkahub.data.model.MessageNode(messages = listOf(msg))
+        }
+    return if (!changed) conversation
+    else conversation.copy(
+        messageNodes = updatedNodes + appendedNodes,
+        updateAt = Instant.now(),
+    )
 }
 
 interface ChatSessionResolver {

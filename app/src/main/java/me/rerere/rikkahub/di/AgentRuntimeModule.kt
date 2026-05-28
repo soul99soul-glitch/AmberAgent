@@ -47,7 +47,7 @@ val agentRuntimeModule = module {
                 inputClass = ChatTurnInput::class,
                 inputSerializer = ChatTurnInput.serializer(),
                 artifactSerializer = ChatTurnArtifact.serializer(),
-                factory = { ChatTurnAgent(get(), get()) },
+                factory = { ChatTurnAgent(get(), get(), get<me.rerere.rikkahub.service.ChatService>()) },
             )
             register(
                 descriptor = DeepReadDescriptor.value,
