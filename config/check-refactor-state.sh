@@ -14,8 +14,8 @@ cd "$REPO_ROOT"
 fail=0
 
 # Invariant 1: minimum physical Gradle module count
-modules=$(find core feature -maxdepth 4 -name "build.gradle.kts" 2>/dev/null | wc -l | tr -d ' ')
-MIN_MODULES=15
+modules=$(grep -c '^include(' settings.gradle.kts)
+MIN_MODULES=19
 if [ "$modules" -lt "$MIN_MODULES" ]; then
   echo "::error::Physical Gradle modules dropped below $MIN_MODULES (got $modules)"
   fail=1
