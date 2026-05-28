@@ -557,7 +557,7 @@ val DEFAULT_ASSISTANTS = listOf(
 fun List<Assistant>.withAmberAgentAssistantBranding(): List<Assistant> = map { assistant ->
     if (assistant.id == DEFAULT_ASSISTANT_ID) {
         assistant.copy(
-            name = if (assistant.name in setOf("", "RikkaHub", "Amberagent")) {
+            name = if (assistant.name in setOf("", "Amberagent")) {
                 "AmberAgent"
             } else {
                 assistant.name

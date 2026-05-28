@@ -787,7 +787,7 @@ private fun SearchServiceOptions.deepReadSearchPriority(): Int = when (this) {
     is SearchServiceOptions.FirecrawlOptions -> if (apiKey.isNotBlank()) 72 else 0
     is SearchServiceOptions.JinaOptions -> if (apiKey.isNotBlank()) 70 else 25
     is SearchServiceOptions.LinkUpOptions -> if (apiKey.isNotBlank()) 68 else 0
-    is SearchServiceOptions.RikkaHubOptions -> if (apiKey.isNotBlank()) 66 else 0
+    is SearchServiceOptions.AmberAgentSearchOptions -> if (apiKey.isNotBlank()) 66 else 0
     is SearchServiceOptions.GrokOptions -> if (apiKey.isNotBlank()) 64 else 0
     is SearchServiceOptions.SearXNGOptions -> if (url.isNotBlank()) 20 else 0
     is SearchServiceOptions.BingLocalOptions -> 10

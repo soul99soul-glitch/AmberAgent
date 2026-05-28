@@ -97,7 +97,7 @@ import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import com.dokar.sonner.rememberToasterState
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.RikkahubTheme
+import app.amber.feature.ui.theme.AmberAgentTheme
 import app.amber.core.utils.exportImage
 import app.amber.core.utils.getActivity
 import app.amber.core.utils.JsonInstantPretty
@@ -458,7 +458,7 @@ private fun ExportedChatImage(
     val navigator = Navigator(navBackStack)
     val highlighter = koinInject<Highlighter>()
     val toasterState = rememberToasterState()
-    RikkahubTheme {
+    AmberAgentTheme {
         CompositionLocalProvider(
             LocalNavController provides navigator,
             LocalHighlighter provides highlighter,

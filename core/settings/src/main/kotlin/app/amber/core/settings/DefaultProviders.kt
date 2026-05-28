@@ -98,7 +98,7 @@ private val ZhipuProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c01")
 private val MimoProviderId = Uuid.parse("9f3a6b2c-7d4e-4810-9a2f-3e8b5d142c02")
 
 val REMOVED_DEFAULT_PROVIDER_IDS = setOf(
-    Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"), // AmberAgent / legacy RikkaHub
+    Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"), // AmberAgent
     Uuid.parse("1b1395ed-b702-4aeb-8bc1-b681c4456953"), // AiHubMix
     Uuid.parse("56a94d29-c88b-41c5-8e09-38a7612d6cf8"), // SiliconFlow
     Uuid.parse("386e0f29-8228-4512-affe-8fd8add82d88"), // Vercel AI Gateway

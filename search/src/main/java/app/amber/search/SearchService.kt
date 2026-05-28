@@ -60,7 +60,7 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.FirecrawlOptions -> FirecrawlSearchService
                 is SearchServiceOptions.JinaOptions -> JinaSearchService
                 is SearchServiceOptions.BochaOptions -> BochaSearchService
-                is SearchServiceOptions.RikkaHubOptions -> RikkaHubSearchService
+                is SearchServiceOptions.AmberAgentSearchOptions -> AmberAgentSearchService
                 is SearchServiceOptions.GrokOptions -> GrokSearchService
             } as SearchService<T>
         }
@@ -139,7 +139,7 @@ sealed class SearchServiceOptions {
 
         val TYPES = mapOf(
             BingLocalOptions::class to "Bing HTML 兜底",
-            RikkaHubOptions::class to "AmberAgent",
+            AmberAgentSearchOptions::class to "AmberAgent",
             ZhipuOptions::class to "智谱",
             TavilyOptions::class to "Tavily",
             ExaOptions::class to "Exa",
@@ -274,8 +274,8 @@ sealed class SearchServiceOptions {
     ) : SearchServiceOptions()
 
     @Serializable
-    @SerialName("rikkahub")
-    data class RikkaHubOptions(
+    @SerialName("amber_agent")
+    data class AmberAgentSearchOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
         val depth: String = "standard",

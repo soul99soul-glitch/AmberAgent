@@ -19,7 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 private const val TAG = "AmberAgentSearchService"
 
-object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOptions> {
+object AmberAgentSearchService : SearchService<SearchServiceOptions.AmberAgentSearchOptions> {
     override val name: String = "AmberAgent"
 
     @Composable
@@ -43,7 +43,7 @@ object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOption
     override suspend fun search(
         params: JsonObject,
         commonOptions: SearchCommonOptions,
-        serviceOptions: SearchServiceOptions.RikkaHubOptions
+        serviceOptions: SearchServiceOptions.AmberAgentSearchOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
@@ -66,7 +66,7 @@ object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOption
             val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
                 val responseBody = response.body.string().let {
-                    json.decodeFromString<RikkaHubSearchResponse>(it)
+                    json.decodeFromString<AmberAgentSearchResponse>(it)
                 }
 
                 return@withContext Result.success(
@@ -90,13 +90,13 @@ object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOption
     override suspend fun scrape(
         params: JsonObject,
         commonOptions: SearchCommonOptions,
-        serviceOptions: SearchServiceOptions.RikkaHubOptions
+        serviceOptions: SearchServiceOptions.AmberAgentSearchOptions
     ): Result<ScrapedResult> {
         error("AmberAgent does not support scraping")
     }
 
     @Serializable
-    data class RikkaHubSearchResponse(
+    data class AmberAgentSearchResponse(
         val answer: String,
         val sources: List<Source>
     )

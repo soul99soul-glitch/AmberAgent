@@ -136,7 +136,7 @@ enum class ColorMode {
 }
 
 @Composable
-fun RikkahubTheme(
+fun AmberAgentTheme(
     content: @Composable () -> Unit
 ) {
     val colorMode by rememberColorMode()

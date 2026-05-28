@@ -149,7 +149,7 @@ import app.amber.feature.ui.pages.stats.StatsPage
 import app.amber.feature.ui.pages.translator.TranslatorPage
 import app.amber.feature.ui.pages.webview.WebViewPage
 import app.amber.feature.ui.theme.LocalDarkMode
-import app.amber.feature.ui.theme.RikkahubTheme
+import app.amber.feature.ui.theme.AmberAgentTheme
 import app.amber.core.utils.CrashHandler
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.inject
@@ -203,7 +203,7 @@ class RouteActivity : ComponentActivity() {
             oauthCallbackDispatcher.dispatch(uri)
         }
         setContent {
-            RikkahubTheme {
+            AmberAgentTheme {
                 setSingletonImageLoaderFactory { context ->
                     ImageLoader.Builder(context)
                         .crossfade(true)

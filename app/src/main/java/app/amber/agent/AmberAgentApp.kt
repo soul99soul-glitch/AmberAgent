@@ -64,7 +64,7 @@ import org.koin.android.ext.koin.androidLogger
 import org.koin.androidx.workmanager.koin.workManagerFactory
 import org.koin.core.context.startKoin
 
-private const val TAG = "RikkaHubApp"
+private const val TAG = "AmberAgentApp"
 
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update_v3"
@@ -75,12 +75,12 @@ const val FEISHU_DOC_CHANGE_CHANNEL_ID = "feishu_doc_change"
 const val BOARD_NOTIFICATION_CHANNEL_ID = "today_board"
 const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 
-class RikkaHubApp : Application() {
+class AmberAgentApp : Application() {
     override fun onCreate() {
         super.onCreate()
         startKoin {
             androidLogger()
-            androidContext(this@RikkaHubApp)
+            androidContext(this@AmberAgentApp)
             workManagerFactory()
             modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, viewModelModule, dataSourceModule, repositoryModule)
         }
@@ -224,14 +224,14 @@ class RikkaHubApp : Application() {
                 if (settings.webServerEnabled) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         ContextCompat.checkSelfPermission(
-                            this@RikkaHubApp,
+                            this@AmberAgentApp,
                             android.Manifest.permission.POST_NOTIFICATIONS
                         ) != PackageManager.PERMISSION_GRANTED
                     ) {
                         Log.w(TAG, "startWebServerIfEnabled: notification permission not granted, skipping")
                         return@launch
                     }
-                    val intent = Intent(this@RikkaHubApp, WebServerService::class.java).apply {
+                    val intent = Intent(this@AmberAgentApp, WebServerService::class.java).apply {
                         action = WebServerService.ACTION_START
                         putExtra(WebServerService.EXTRA_PORT, settings.webServerPort)
                         putExtra(WebServerService.EXTRA_LOCALHOST_ONLY, settings.webServerLocalhostOnly)

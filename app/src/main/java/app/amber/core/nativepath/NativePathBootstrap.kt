@@ -21,7 +21,7 @@ import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitc
  *
  * Lifecycle:
  * 1. App startup constructs this via Koin, then calls [install] from
- *    [app.amber.agent.RikkaHubApp].
+ *    [app.amber.agent.AmberAgentApp].
  * 2. [install] reads the current [NativePathPrefs] snapshot and pushes a
  *    config impl into each Switch. Subsequent user-toggle edits are picked
  *    up on the next call because each impl reads `prefs.flow.value` lazily.
@@ -83,7 +83,7 @@ class NativePathBootstrap(
 
     fun install() {
         // Seed once from whatever RC has already activated. setDefaultsAsync
-        // in RikkaHubApp.onCreate is fire-and-forget; until it activates,
+        // in AmberAgentApp.onCreate is fire-and-forget; until it activates,
         // getBoolean returns the Java default `false` (= allow native), which
         // is also the safe default. The activate listener below repaints
         // killSwitchCached when defaults / fetched values become live (review
@@ -102,7 +102,7 @@ class NativePathBootstrap(
 
     /**
      * Kick a fresh `activate()` and refresh the cached kill switch when it
-     * completes. `activate()` is idempotent — if `RikkaHubApp.onCreate`'s
+     * completes. `activate()` is idempotent — if `AmberAgentApp.onCreate`'s
      * `fetchAndActivate()` already finished, this resolves immediately;
      * otherwise it blocks until activation lands, at which point the XML
      * default and any fetched override become readable. Without this hop, an

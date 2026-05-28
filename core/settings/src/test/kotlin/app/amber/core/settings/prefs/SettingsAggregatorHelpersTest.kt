@@ -255,7 +255,7 @@ class SettingsAggregatorHelpersTest {
 
     @Test
     fun `applyBackfillAndSeed — branding applied to default assistant`() {
-        val rikkahubNamedDefault = DEFAULT_ASSISTANTS.first().copy(name = "RikkaHub")
+        val amberagentNamedDefault = DEFAULT_ASSISTANTS.first().copy(name = "Amberagent")
         val input = composeRawSettings(
             ui = UIPrefsData(),
             search = SearchPrefsData(),
@@ -264,7 +264,7 @@ class SettingsAggregatorHelpersTest {
             chat = ChatPrefsData(),
             ext = ExtensionPrefsData(),
             assistant = AssistantPrefsData(
-                assistants = listOf(rikkahubNamedDefault),
+                assistants = listOf(amberagentNamedDefault),
             ),
         )
         val out = applyBackfillAndSeed(input)

@@ -56,8 +56,8 @@ class ICloudDriveNodeRefTest {
 
     private fun locateClient(): File {
         val candidates = listOf(
-            File("src/main/java/me/rerere/rikkahub/data/agent/icloud/ICloudDriveClient.kt"),
-            File("app/src/main/java/me/rerere/rikkahub/data/agent/icloud/ICloudDriveClient.kt"),
+            File("src/main/java/app/amber/agent/data/agent/icloud/ICloudDriveClient.kt"),
+            File("app/src/main/java/app/amber/agent/data/agent/icloud/ICloudDriveClient.kt"),
         )
         return candidates.firstOrNull { it.isFile }
             ?: error("Could not locate ICloudDriveClient.kt")

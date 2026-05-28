@@ -35,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
-import app.amber.feature.ui.theme.RikkahubTheme
+import app.amber.feature.ui.theme.AmberAgentTheme
 import app.amber.core.utils.CrashHandler
 import org.koin.android.ext.android.inject
 
@@ -49,7 +49,7 @@ class SafeModeActivity : ComponentActivity() {
         CrashHandler.clearCrashed(this)
         enableEdgeToEdge()
         setContent {
-            RikkahubTheme {
+            AmberAgentTheme {
                 val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
                 val context = LocalContext.current
 

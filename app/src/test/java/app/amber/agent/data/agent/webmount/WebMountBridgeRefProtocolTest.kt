@@ -52,8 +52,8 @@ class WebMountBridgeRefProtocolTest {
 
     private fun locatePrimitiveToolsSources(): List<File> {
         val candidates = listOf(
-            File("src/main/java/me/rerere/rikkahub/data/agent/webmount/tools"),
-            File("app/src/main/java/me/rerere/rikkahub/data/agent/webmount/tools"),
+            File("src/main/java/app/amber/agent/data/agent/webmount/tools"),
+            File("app/src/main/java/app/amber/agent/data/agent/webmount/tools"),
         )
         val dir = candidates.firstOrNull { it.isDirectory }
             ?: error("Could not locate webmount/tools package directory")

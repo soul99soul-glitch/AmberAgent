@@ -18,7 +18,7 @@ import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.savedstate.compose.LocalSavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import app.amber.feature.ui.theme.RikkahubTheme
+import app.amber.feature.ui.theme.AmberAgentTheme
 
 @Composable
 fun FloatingWindow(
@@ -57,7 +57,7 @@ fun FloatingWindow(
                 viewModelStoreOwner?.let { setViewTreeViewModelStoreOwner(it) }
                 setViewTreeSavedStateRegistryOwner(savedStateRegistryOwner)
                 setContent {
-                    RikkahubTheme {
+                    AmberAgentTheme {
                         latestContent()
                     }
                 }

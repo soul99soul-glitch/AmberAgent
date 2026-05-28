@@ -215,8 +215,8 @@ private fun SearchServiceOptionsEditor(
             BochaOptions(options) { onUpdateOptions(it) }
         }
 
-        is SearchServiceOptions.RikkaHubOptions -> {
-            RikkaHubOptions(options) { onUpdateOptions(it) }
+        is SearchServiceOptions.AmberAgentSearchOptions -> {
+            AmberAgentSearchOptions(options) { onUpdateOptions(it) }
         }
 
         is SearchServiceOptions.GrokOptions -> {
@@ -807,9 +807,9 @@ private fun BochaOptions(
 }
 
 @Composable
-private fun RikkaHubOptions(
-    options: SearchServiceOptions.RikkaHubOptions,
-    onUpdateOptions: (SearchServiceOptions.RikkaHubOptions) -> Unit
+private fun AmberAgentSearchOptions(
+    options: SearchServiceOptions.AmberAgentSearchOptions,
+    onUpdateOptions: (SearchServiceOptions.AmberAgentSearchOptions) -> Unit
 ) {
     FormItem(
         label = {

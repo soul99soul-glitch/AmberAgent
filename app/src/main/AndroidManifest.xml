@@ -82,7 +82,7 @@
   </queries>
 
   <application
-    android:name="app.amber.agent.RikkaHubApp"
+    android:name="app.amber.agent.AmberAgentApp"
     android:largeHeap="true"
     android:allowBackup="false"
     android:appCategory="productivity"

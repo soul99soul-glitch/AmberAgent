@@ -73,8 +73,8 @@ class AdapterOutputShapeLintTest {
     private fun locateAdaptersDir(): File {
         // The unit test JVM working directory is the :app module root.
         val candidates = listOf(
-            File("src/main/java/me/rerere/rikkahub/data/agent/webmount/adapters"),
-            File("app/src/main/java/me/rerere/rikkahub/data/agent/webmount/adapters"),
+            File("src/main/java/app/amber/agent/data/agent/webmount/adapters"),
+            File("app/src/main/java/app/amber/agent/data/agent/webmount/adapters"),
         )
         return candidates.firstOrNull { it.isDirectory }
             ?: error(

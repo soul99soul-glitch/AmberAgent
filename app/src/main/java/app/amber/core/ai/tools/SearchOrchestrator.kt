@@ -789,7 +789,7 @@ internal object SearchOrchestrator {
             is SearchServiceOptions.MetasoOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.OllamaOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.PerplexityOptions -> options.apiKey.isNotBlank()
-            is SearchServiceOptions.RikkaHubOptions -> options.apiKey.isNotBlank()
+            is SearchServiceOptions.AmberAgentSearchOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.SerperOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.SerpApiOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.TavilyOptions -> options.apiKey.isNotBlank()

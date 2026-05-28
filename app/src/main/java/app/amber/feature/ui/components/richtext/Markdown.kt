@@ -496,7 +496,7 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
     // Phase 2 Step 5: shadow-compare against native pulldown-cmark AST when
     // `markdownAst` is enabled. The renderer still consumes `astTree` (JVM
     // tree) — we don't swap the consumer because Markdown.kt is mid-migration
-    // (see `feedback_rikkahub_rust_native_spike` memory: 12+ commits/month,
+    // (see `feedback_amber_agent_rust_native_spike` memory: 12+ commits/month,
     // touching the renderer right now risks merge conflicts with active
     // streaming-render fixes). The shadow path gives us correctness telemetry
     // ahead of the eventual full swap.
@@ -517,7 +517,7 @@ private fun parsePreprocessedMarkdownUncached(preprocessed: String): MarkdownPar
 /**
  * Top-level structural compare. **Count-only** — the JVM ASTNode exposes
  * UTF-16 char offsets, pulldown-cmark exposes UTF-8 byte offsets; on a
- * CJK / emoji corpus (rikkahub's bread-and-butter) span comparison
+ * CJK / emoji corpus (AmberAgent's bread-and-butter) span comparison
  * deterministically diverges and would swamp Crashlytics with false-positive
  * mismatches (review Step 5 P0-1). The "real" semantic-equivalence compare
  * needs an offset-normalizer + a JVM↔Rust type-name mapping table and
