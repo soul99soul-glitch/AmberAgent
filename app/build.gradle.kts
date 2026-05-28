@@ -575,6 +575,8 @@ dependencies {
     implementation(project(":core:agent-store-room"))
     implementation(project(":feature:deepread:api"))
     implementation(project(":feature:chat:api"))
+    implementation(project(":feature:history"))
+    implementation(project(":feature:webview"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 
