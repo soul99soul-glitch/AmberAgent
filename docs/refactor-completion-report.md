@@ -170,4 +170,26 @@ The refactor delivers the architectural goal: **"Chat is no longer the universe 
 
 The Kernel path is **functional end-to-end** but **not yet user-default**. Flipping `chatService.useKernelPath = true` activates it. Real-device smoke testing is required before flipping in production.
 
-Generated: 2026-05-28
+## Session 5 Updates
+
+Additional Phase D + E work:
+- **TE.1 allowlist completed**: zero unaccounted-for legacy files. All 80 me.rerere.* files explicitly justified per ADR-0001.
+- **webmount decoupling**: 14 imports swapped from internal `app.amber.feature.tools.*` to public `app.amber.core.agent.utils.*`. webmount now has only 2 cross-feature deps (OcrTransformer + AgentToolActivityStore).
+
+## Why Further Physical Module Extraction Stops Here
+
+The remaining 12 logical feature subsystems (board, tools, subagent, terminal, modelcouncil, miniapp, live, cron, system, prompts, office, webmount) are package-renamed within `:app` but not yet physical Gradle modules. Physical extraction is constrained by:
+
+1. **Transitive dep graph**: Each needs `:core:settings`, `:core:ai`, `:core:model`, `:core:repository`, `:core:context` etc as separate modules first. Those would cascade ~250 files including Settings (with 9 nested data classes), GenerationHandler, ConversationRepository, etc.
+2. **R + BuildConfig**: Cross-module string resource and BuildConfig access requires either replicated values or new resource modules.
+3. **Compile-time coupling**: Tools depend on R strings; cron depends on ChatService directly; live depends on AmberAccessibilityService — all cross-cutting.
+
+A future session could attack this with the topological order:
+1. Extract `:core:model` (Settings data classes, Assistant, Conversation, MessageNode — pure value types)
+2. Extract `:core:ai` (GenerationHandler + transformers — depends on :core:model + :core:settings)
+3. Extract `:core:settings` (SettingsAggregator + prefs/ — depends on :core:model)
+4. Then individual feature modules become physically extractable
+
+This is ~200 files of careful coordinated work. Not in scope for this refactoring round.
+
+Generated: 2026-05-28 (final: session 5)
