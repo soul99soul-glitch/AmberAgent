@@ -3,7 +3,7 @@ set -euo pipefail
 
 ADB="${ADB:-/Users/arquiel/Library/Android/sdk/platform-tools/adb}"
 SERIAL="${SERIAL:-c9a8a837}"
-PACKAGE="${PACKAGE:-me.rerere.amberagent.notion}"
+PACKAGE="${PACKAGE:-app.amber.agent.notion}"
 REPEATS="${REPEATS:-3}"
 SWIPES_PER_RUN="${SWIPES_PER_RUN:-12}"
 SWIPE_MS="${SWIPE_MS:-90}"
@@ -35,7 +35,7 @@ foreground_app() {
   run_adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
   run_adb shell cmd statusbar collapse >/dev/null 2>&1 || true
   if ! is_app_focused; then
-    run_adb shell am start -n "$PACKAGE/me.rerere.rikkahub.RouteActivity" >/dev/null
+    run_adb shell am start -n "$PACKAGE/app.amber.agent.RouteActivity" >/dev/null
   fi
   wait_for_foreground
 }

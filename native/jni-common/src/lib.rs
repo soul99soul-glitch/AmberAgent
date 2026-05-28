@@ -1,4 +1,4 @@
-//! Shared helpers used by every JNI-facing rikkahub Rust crate
+//! Shared helpers used by every JNI-facing amber-agent Rust crate
 //! (`office-parsers`, `markdown-parser`, `highlight-parser`,
 //! `regex-transformer`). Extracted in Phase 3 D-2 — previously each crate
 //! kept identical inline copies.

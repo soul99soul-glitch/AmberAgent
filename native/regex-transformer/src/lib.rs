@@ -1,5 +1,5 @@
 //! regex-transformer: Rust replacement for `String.replaceRegexes` in
-//! `app/src/main/java/me/rerere/rikkahub/data/model/Assistant.kt`.
+//! `app/src/main/java/app/amber/agent/data/model/Assistant.kt`.
 //!
 //! Hot path: called per visible message render. For users with many assistant
 //! regex rules configured (visual transforms / lore book substitutions),

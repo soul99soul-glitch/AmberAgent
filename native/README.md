@@ -1,4 +1,4 @@
-# Rust Native Components (rikkahub spike)
+# Rust Native Components (amber-agent spike)
 
 Cargo workspace housing 3 Rust crates that compile to Android `.so` libraries
 via JNI bindings, replacing CPU-heavy JVM components.
