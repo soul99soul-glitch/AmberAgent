@@ -116,8 +116,8 @@ import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.SandboxActivityUiState
-import me.rerere.rikkahub.data.agent.ToolActivityStatus
+import app.amber.feature.runtime.SandboxActivityUiState
+import app.amber.feature.runtime.ToolActivityStatus
 import me.rerere.rikkahub.data.ai.vision.ImageAttachmentValidator
 import me.rerere.rikkahub.data.context.CompactLifecycleState
 import me.rerere.rikkahub.data.datastore.Settings

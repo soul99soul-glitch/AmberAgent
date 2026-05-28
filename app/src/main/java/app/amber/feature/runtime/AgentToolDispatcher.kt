@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.runtime
+package app.amber.feature.runtime
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -17,7 +17,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.toAgentToolFailurePayload
+import app.amber.feature.runtime.toAgentToolFailurePayload
 import me.rerere.rikkahub.data.ai.GenerationFailureClassifier
 import me.rerere.rikkahub.data.ai.GenerationRetrySetting
 import app.amber.feature.tools.ToolRisk

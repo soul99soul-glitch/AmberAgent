@@ -2,7 +2,7 @@ package app.amber.feature.tools
 
 import android.content.Context
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.workspace.WorkspaceManager
 

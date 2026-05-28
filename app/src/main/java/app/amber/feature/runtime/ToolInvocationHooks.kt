@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.runtime
+package app.amber.feature.runtime
 
 import android.util.Log
 import kotlinx.serialization.json.JsonElement
@@ -8,7 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.toAgentToolFailurePayload
+import app.amber.feature.runtime.toAgentToolFailurePayload
 
 private const val HOOK_TAG = "ToolInvocationHook"
 

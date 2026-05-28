@@ -12,9 +12,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.SandboxActivityUiState
-import me.rerere.rikkahub.data.agent.ToolActivityStatus
+import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.runtime.SandboxActivityUiState
+import app.amber.feature.runtime.ToolActivityStatus
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskOutputRef
 import app.amber.feature.task.AgentTaskRetryPolicy

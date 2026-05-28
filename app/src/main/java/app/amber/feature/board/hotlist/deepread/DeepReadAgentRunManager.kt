@@ -18,7 +18,7 @@ import me.rerere.rikkahub.AppScope
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
 import app.amber.feature.board.hotlist.HotListRepository
-import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
+import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import app.amber.feature.tools.AgentToolSetFactory
 import me.rerere.rikkahub.data.ai.GenerationChunk

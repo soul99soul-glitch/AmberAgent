@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent
+package app.amber.feature.runtime
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

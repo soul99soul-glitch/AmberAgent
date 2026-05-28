@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.primitives.NetworkLog
 import app.amber.feature.webmount.primitives.WebViewPool
 

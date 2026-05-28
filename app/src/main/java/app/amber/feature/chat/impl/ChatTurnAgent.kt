@@ -167,6 +167,6 @@ data class ChatSession(
     val autoApproveTools: Boolean,
     val autoApproveHighRiskTools: Boolean,
     val autoApprovedToolNames: Set<String>,
-    val invocationContext: me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext,
+    val invocationContext: app.amber.feature.runtime.ToolInvocationContext,
     val conversation: Conversation?,
 )

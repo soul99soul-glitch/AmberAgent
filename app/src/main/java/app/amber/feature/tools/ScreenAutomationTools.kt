@@ -16,7 +16,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import app.amber.feature.runtime.AgentToolActivityStore
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
 import me.rerere.rikkahub.data.automation.ScreenCaptureManager
 

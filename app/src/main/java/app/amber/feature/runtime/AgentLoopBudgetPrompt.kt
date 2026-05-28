@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.runtime
+package app.amber.feature.runtime
 
 object AgentLoopBudgetPrompt {
     fun build(stepIndex: Int, maxSteps: Int): String {

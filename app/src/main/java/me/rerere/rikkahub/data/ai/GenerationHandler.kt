@@ -50,10 +50,10 @@ import me.rerere.rikkahub.data.ai.generative.GenerativeUiPlanner
 import me.rerere.rikkahub.data.ai.generative.GenerativeUiWidgetRequirement
 import me.rerere.rikkahub.data.ai.generative.GenerativeWidgetParser
 import me.rerere.rikkahub.data.ai.generative.GuizangHtmlDeckValidator
-import me.rerere.rikkahub.data.agent.runtime.AgentToolDispatcher
-import me.rerere.rikkahub.data.agent.runtime.AgentLoopBudgetPrompt
-import me.rerere.rikkahub.data.agent.runtime.SpeculativeToolRunner
-import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
+import app.amber.feature.runtime.AgentToolDispatcher
+import app.amber.feature.runtime.AgentLoopBudgetPrompt
+import app.amber.feature.runtime.SpeculativeToolRunner
+import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.tools.ToolExposureState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -321,7 +321,7 @@ class GenerationHandler(
                     )
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
-                        decision.action == me.rerere.rikkahub.data.agent.runtime.PermissionDecisionAction.ASK -> {
+                        decision.action == app.amber.feature.runtime.PermissionDecisionAction.ASK -> {
                             hasPendingApproval = true
                             tool.copy(
                                 approvalState = ToolApprovalState.Pending,

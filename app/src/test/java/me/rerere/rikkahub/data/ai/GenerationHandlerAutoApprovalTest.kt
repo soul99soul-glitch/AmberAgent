@@ -2,7 +2,7 @@ package me.rerere.rikkahub.data.ai
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.runtime.PermissionDecisionResolver
+import app.amber.feature.runtime.PermissionDecisionResolver
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

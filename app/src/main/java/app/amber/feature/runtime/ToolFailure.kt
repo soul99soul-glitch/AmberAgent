@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent
+package app.amber.feature.runtime
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put

@@ -96,9 +96,9 @@ import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.SandboxActivityUiState
-import me.rerere.rikkahub.data.agent.ToolActivityStatus
+import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.runtime.SandboxActivityUiState
+import app.amber.feature.runtime.ToolActivityStatus
 import me.rerere.rikkahub.data.datastore.AgentOperationPreviewMode
 import me.rerere.rikkahub.data.ai.tools.parseDeepReadSlashCommand
 import me.rerere.rikkahub.data.datastore.Settings

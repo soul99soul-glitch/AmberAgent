@@ -64,8 +64,8 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.SandboxActivityUiState
-import me.rerere.rikkahub.data.agent.ToolActivityStatus
+import app.amber.feature.runtime.SandboxActivityUiState
+import app.amber.feature.runtime.ToolActivityStatus
 import app.amber.feature.webview.WebViewLink
 import app.amber.feature.webview.WebViewLoadStatus
 import app.amber.feature.webview.WebViewOperationState

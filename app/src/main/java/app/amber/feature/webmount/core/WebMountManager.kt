@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import java.util.concurrent.ConcurrentHashMap

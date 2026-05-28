@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.di
 
-import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import app.amber.feature.runtime.AgentLiveStatusNotifier
+import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.live.LiveModeManager
 import app.amber.feature.system.AgentPermissionBroker

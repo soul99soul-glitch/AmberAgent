@@ -26,7 +26,7 @@ import me.rerere.document.DocxParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
 import me.rerere.document.nativebridge.OfficeNativeSwitch
-import me.rerere.rikkahub.data.agent.AgentToolActivityStore
+import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.workspace.WorkspacePaths
 import java.io.ByteArrayInputStream

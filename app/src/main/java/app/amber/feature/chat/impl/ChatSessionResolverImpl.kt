@@ -2,7 +2,7 @@ package app.amber.feature.chat.impl
 
 import app.amber.feature.chat.api.ChatTurnInput
 import kotlinx.coroutines.flow.first
-import me.rerere.rikkahub.data.agent.runtime.ToolInvocationContext
+import app.amber.feature.runtime.ToolInvocationContext
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.MiniAppOutputTransformer
