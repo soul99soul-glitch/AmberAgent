@@ -76,8 +76,10 @@ import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
@@ -255,6 +257,16 @@ private const val MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 128
 private const val MARKDOWN_PARSE_CACHE_MAX_CHARS = 1_200_000
 private const val MARKDOWN_PERF_TAG = "AmberChatPerf"
 private const val MARKDOWN_PARSE_HIT_LOG_MIN_CHARS = 600
+
+/**
+ * TD.Rust.1+ streaming parse throttle. Streaming tokens arrive every ~30-60ms
+ * from the AI provider; a full markdown re-parse on each tick (typically
+ * 5-30ms for long messages) burns CPU and contests the composition thread.
+ * Sampling at 200ms cuts the parse rate from ~20/sec to 5/sec without making
+ * the displayed text feel lagged — the streaming display buffer still
+ * advances every frame; only the AST refresh slows.
+ */
+private const val MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L
 
 // Tag used to mark leaf-text ranges in the static AnnotatedString that
 // are eligible for per-frame reveal alpha. The annotation's value carries
@@ -662,13 +674,31 @@ fun MarkdownBlock(
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
+    //
+    // TD.Rust.1+ streaming parse throttle (review #8): on streaming content,
+    // sample the flow at MARKDOWN_STREAMING_PARSE_THROTTLE_MS so that bursts
+    // of token arrivals only trigger a re-parse every ~200ms. The visible
+    // text already updates continuously via rememberStreamingDisplayText
+    // (renderContent vs raw content); the AST re-parse is the expensive
+    // step we're cutting.
     val updatedContent by rememberUpdatedState(renderContent)
     val updatedStreaming by rememberUpdatedState(streaming)
     LaunchedEffect(Unit) {
         var lastParsedContent = renderContent
         var lastParsedStreaming = streaming
+        @OptIn(FlowPreview::class)
         snapshotFlow { updatedContent to updatedStreaming }
             .distinctUntilChanged()
+            .let { upstream ->
+                // Sample only when streaming. When the chat-turn is settled,
+                // the user expects an immediate re-parse (e.g. they edited
+                // an old message), so don't throttle.
+                if (streaming) {
+                    upstream.sample(MARKDOWN_STREAMING_PARSE_THROTTLE_MS)
+                } else {
+                    upstream
+                }
+            }
             .collectLatest { (latestContent, latestStreaming) ->
                 if (latestContent == lastParsedContent && latestStreaming == lastParsedStreaming) {
                     return@collectLatest
