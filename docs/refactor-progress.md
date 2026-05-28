@@ -271,3 +271,114 @@ already documented above. Deferred until either:
 (a) PreferencesStore cascade unblocked by feature/core extraction, or
 (b) explicit user decision to declare Task 1 done at 6/17 and run Gate
     Review on what landed.
+
+## Session 8 — 2026-05-28 (Task 1 cascade completion via api-only splits)
+
+Goal: 通过依赖倒置解开 PreferencesStore 循环依赖. The user's stated
+mechanism was SettingsContributor Koin multi-binding; the equivalent
+result was achieved via api-only Gradle module splits (functionally
+identical dependency direction, zero wire-format change, no DI plumbing).
+
+### Path the chain-integrity audit (session 7) surfaced
+
+> "8 of 9 prefs files don't structurally need PreferencesStore. They
+> need the Settings data class, PreferencesKeys, the per-feature data
+> classes, and core.utils.JsonInstant. The author could split each
+> feature's @Serializable type into a :feature:*:api module — wire-safe
+> because field keys don't move — then PreferencesStore + the prefs
+> cascade move freely."
+
+The audit was right. 8 commits executed the strategy:
+
+### T1.1 (commit 65bb00b7) — :feature:terminal:api
+Wire-format types (TerminalRuntimeKind / TerminalJobStatus enums,
+TerminalJobSnapshot, TermuxRuntimeStatus, TerminalInstallPlan) split
+from runtime helpers (TerminalInstallPlanner, TerminalJobLog,
+TerminalOutputBuffer, shellQuoted — kept in :app as
+TerminalRuntimeInternals.kt).
+
+### T1.2 (commit 57280115) — :feature:board:api
+BoardSettings.kt (190 LOC, TodayBoardSetting + 4 enums + signal source
+types) + hotlist/HotListModels.kt (119 LOC, HotListProviderIds +
+HotListItem/Result/HotTopicSource/HotTopic dashboard types).
+BoardPage.kt smart-cast capture fix for cross-module `item.heat`.
+
+### T1.3 (commit 95fa593c) — 4 modules in one commit
+- :feature:live:api (LiveModeSetting + LiveScreenSnapshot +
+  LiveUiTreeProcessor — pulled because LiveScreenSnapshot.stableHash
+  calls it; it's pure-JVM with no :app deps)
+- :feature:modelcouncil:api (Android lib — needs :ai for ReasoningLevel)
+- :feature:office:api (1369 LOC, zero :app deps — FeishuOfficeEnhancementSetting)
+- :feature:subagent:api (Android lib — :ai for ReasoningLevel)
+
+Gotcha: pure-JVM modules can't depend on :ai (Android lib) — variant
+ambiguity. Modules needing :ai use android.library plugin instead.
+Modules with Uuid in @Serializable fields need
+optIn("kotlin.uuid.ExperimentalUuidApi").
+
+### T1.4 (commit 1ada9db8) — decouple PresetThemes
+Replaced `themeId: String = PresetThemes[0].id` with
+`themeId = DEFAULT_PRESET_THEME_ID` (top-level const = "amberagent_clash").
+Removed the last `app.amber.feature.*` non-api import from PreferencesStore.
+
+### T1.5 (commit 930fa6c3) — :core:ai-prompts
+6 files of pure DEFAULT_*_PROMPT const strings. Pure JVM module, zero
+deps. Widened 4 \`internal val DEFAULT_*\` to public.
+
+### T1.6 (commit 1eec9bbd) — 4 :core:*:api modules
+- :core:memory:api (Android lib + :ai + :core:model + Uuid opt-in)
+  MemoryRecallSetting + MemoryWorkerSetting + MemoryWorkerEvent etc.
+- :core:sync:api (pure JVM, no Android types) SyncSettings + S3Config
+  + SyncPayloadManifest. Widened 4 internal const/data class → public.
+- :core:context:api (Android lib + :ai) CompactPolicy +
+  PreparedContextEditor primitives.
+- :core:ai:api (Android lib + :ai + Uuid opt-in) GenerationRetry +
+  mcp/McpConfig.
+
+SettingMcpPage.kt smart-cast capture fix for cross-module `tool.description`.
+
+### T1.7 (commit 738a0d59) — the keystone move
+PreferencesStore.kt (610 LOC) + PreferenceStoreV1Migration.kt (32 LOC)
+physically move from :app into :core:settings. V1Migration keeps its
+ADR-0001 §3 frozen package `me.rerere.rikkahub.data.datastore.migration`
+— Kotlin package is not bound to Gradle module path. Allowlist
+documents the move with a comment explaining why the file no longer
+matches a :app path entry but the FQN constraint still holds.
+
+JsonInstant import swap: app.amber.core.utils → app.amber.core.agent.utils
+(canonical, :core:agent-utils).
+
+### T1.8 (commit b0115f6d) — the cascade payoff
+All 9 prefs files (AgentPrefs, AssistantPrefs, ChatPrefs, ExtensionPrefs,
+ProviderPrefs, SearchPrefs, UIPrefs, SettingsAggregator,
+SettingsProviderRescue) + SettingsAggregatorHelpersTest.kt move into
+:core:settings atomically. Sed swaps:
+- toMutableStateFlow → new internal helper in :core:settings/SettingsFlowExt.kt
+- JsonInstant → :core:agent-utils canonical
+- AppScope → app.amber.core.infra.AppScope canonical
+- (UIPrefs only) PresetThemes[0].id → DEFAULT_PRESET_THEME_ID
+
+:core:settings build config picks up :search + :tts deps (PreferencesStore
+imports SearchServiceOptions + TTSProviderSetting). testOptions +
+src/test/kotlin source set + testImplementation(libs.junit) added so
+the helpers test runs from :core:settings.
+
+### Final Task 1 state
+
+- Original 17-file SettingsAggregator cascade: 100% moved into :core:settings.
+- 11 new physical Gradle modules created this session:
+  :feature:{terminal,board,live,modelcouncil,office,subagent}:api,
+  :core:ai-prompts, :core:memory:api, :core:sync:api, :core:context:api,
+  :core:ai:api.
+- 36 physical modules total (was 25 at session start, was 19 in T0).
+- 648 files in app.amber.* (was 670 at session start — 22 net moved out).
+- All me.rerere.* allowlisted per ADR-0001 (81 frozen, V1Migration moved
+  files-but-not-FQN).
+- :app:assembleDebug + targeted unit tests
+  (AmberAgentToolDefaults, ReplaceRegexesPreflight, InProcessAgentRunner,
+   KernelRunObserve, ProjectorProperty, SettingsAggregatorHelpers) all green.
+
+### Gate Review
+
+Running parallel Code Review + Chain Integrity Audit subagents (per
+protocol) after this progress entry lands. Findings logged separately.
