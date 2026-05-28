@@ -5,7 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
-import app.amber.core.model.replaceRegexes
+import app.amber.core.ai.transformers.replaceRegexes
 import app.amber.feature.ui.components.richtext.MarkdownParseResult
 import app.amber.feature.ui.components.richtext.cachedMarkdownParseResult
 import app.amber.feature.ui.components.richtext.parseMarkdownContent

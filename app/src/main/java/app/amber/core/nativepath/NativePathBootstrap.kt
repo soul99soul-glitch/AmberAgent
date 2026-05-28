@@ -13,7 +13,7 @@ import me.rerere.document.nativebridge.OfficeNativeSwitch
 import me.rerere.highlight.nativebridge.HighlightNativeSwitch
 import me.rerere.rikkahub.AppScope
 import app.amber.core.settings.prefs.NativePathPrefs
-import app.amber.core.model.nativebridge.RegexNativeSwitch
+import me.rerere.rikkahub.data.model.nativebridge.RegexNativeSwitch
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 
 /**

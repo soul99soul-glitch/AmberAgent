@@ -299,9 +299,10 @@ internal fun AssistantBasicContent(
                     )
                 }
             ) {
-                if (assistant.temperature != null) {
+                val temperatureValue = assistant.temperature
+                if (temperatureValue != null) {
                     Slider(
-                        value = assistant.temperature,
+                        value = temperatureValue,
                         onValueChange = {
                             onUpdate(
                                 assistant.copy(
@@ -319,7 +320,7 @@ internal fun AssistantBasicContent(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         val currentTemperature = assistant.temperature
-                        val tagType = when (currentTemperature) {
+                        val tagType = when (currentTemperature ?: 0f) {
                             in 0.0f..0.3f -> TagType.INFO
                             in 0.3f..1.0f -> TagType.SUCCESS
                             in 1.0f..1.5f -> TagType.WARNING
@@ -337,8 +338,9 @@ internal fun AssistantBasicContent(
                         Tag(
                             type = tagType
                         ) {
+                            val temp = currentTemperature ?: 0f
                             Text(
-                                text = when (currentTemperature) {
+                                text = when (temp) {
                                     in 0.0f..0.3f -> stringResource(R.string.assistant_page_strict)
                                     in 0.3f..1.0f -> stringResource(R.string.assistant_page_balanced)
                                     in 1.0f..1.5f -> stringResource(R.string.assistant_page_creative)
@@ -500,8 +502,9 @@ internal fun AssistantBasicContent(
                         Text(stringResource(R.string.assistant_page_max_tokens_no_limit))
                     },
                     supportingText = {
-                        if (assistant.maxTokens != null) {
-                            Text(stringResource(R.string.assistant_page_max_tokens_limit, assistant.maxTokens))
+                        val maxTokensValue = assistant.maxTokens
+                        if (maxTokensValue != null) {
+                            Text(stringResource(R.string.assistant_page_max_tokens_limit, maxTokensValue))
                         } else {
                             Text(stringResource(R.string.assistant_page_max_tokens_no_token_limit))
                         }

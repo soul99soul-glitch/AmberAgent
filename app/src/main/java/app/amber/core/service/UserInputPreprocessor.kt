@@ -4,7 +4,7 @@ import me.rerere.ai.ui.UIMessagePart
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.AssistantAffectScope
-import app.amber.core.model.replaceRegexes
+import app.amber.core.ai.transformers.replaceRegexes
 
 /**
  * Pre-flight user-input transformation surface.

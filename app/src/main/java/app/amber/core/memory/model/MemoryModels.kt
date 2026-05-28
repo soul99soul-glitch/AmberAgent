@@ -5,48 +5,10 @@ import kotlinx.serialization.Serializable
 import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
-@Serializable
-enum class MemoryScope(val wireName: String) {
-    @SerialName("core")
-    CORE("core"),
-
-    @SerialName("short_term")
-    SHORT_TERM("short_term"),
-
-    @SerialName("long_term")
-    LONG_TERM("long_term");
-
-    companion object {
-        fun fromWireName(value: String?): MemoryScope =
-            entries.firstOrNull { it.wireName == value } ?: LONG_TERM
-    }
-}
-
-@Serializable
-enum class MemoryKind(val wireName: String) {
-    @SerialName("user")
-    USER("user"),
-
-    @SerialName("feedback")
-    FEEDBACK("feedback"),
-
-    @SerialName("project")
-    PROJECT("project"),
-
-    @SerialName("reference")
-    REFERENCE("reference"),
-
-    @SerialName("routine")
-    ROUTINE("routine"),
-
-    @SerialName("note")
-    NOTE("note");
-
-    companion object {
-        fun fromWireName(value: String?): MemoryKind =
-            entries.firstOrNull { it.wireName == value } ?: NOTE
-    }
-}
+// MemoryScope and MemoryKind moved to app.amber.core.model.MemoryEnums so
+// :core:model can be physically extracted without pulling memory subsystem.
+typealias MemoryScope = app.amber.core.model.MemoryScope
+typealias MemoryKind = app.amber.core.model.MemoryKind
 
 @Serializable
 enum class MemoryCandidateStatus(val wireName: String) {
