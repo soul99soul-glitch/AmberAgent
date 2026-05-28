@@ -1,6 +1,20 @@
 package me.rerere.rikkahub.di
 
 import android.content.Context
+import app.amber.core.agent.runtime.AgentRegistry
+import app.amber.core.agent.runtime.AgentRunner
+import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
+import app.amber.core.agent.runtime.impl.InProcessAgentRunner
+import app.amber.core.agent.store.RoomAgentEventStore
+import app.amber.feature.chat.api.ChatTurnInput
+import app.amber.feature.chat.api.ChatTurnArtifact
+import app.amber.feature.chat.api.ChatTurnDescriptor
+import app.amber.feature.chat.impl.ChatSessionResolverImpl
+import app.amber.feature.chat.impl.ChatTurnAgent
+import app.amber.feature.deepread.api.DeepReadInput
+import app.amber.feature.deepread.api.DeepReadArtifact
+import app.amber.feature.deepread.api.DeepReadDescriptor
+import app.amber.feature.deepread.impl.DeepReadAgentAdapter
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.feature.modelcouncil.ExternalCliModelCouncilRunner
 import app.amber.feature.modelcouncil.ModelCouncilManager
@@ -20,6 +34,34 @@ import org.koin.dsl.module
  */
 val agentRuntimeModule = module {
     single { SessionAccessGrantStore() }
+
+    // Agent Kernel
+    single<AgentRegistry> {
+        InMemoryAgentRegistry().apply {
+            register(
+                descriptor = ChatTurnDescriptor.value,
+                inputClass = ChatTurnInput::class,
+                inputSerializer = ChatTurnInput.serializer(),
+                artifactSerializer = ChatTurnArtifact.serializer(),
+                factory = { ChatTurnAgent(get(), get()) },
+            )
+            register(
+                descriptor = DeepReadDescriptor.value,
+                inputClass = DeepReadInput::class,
+                inputSerializer = DeepReadInput.serializer(),
+                artifactSerializer = DeepReadArtifact.serializer(),
+                factory = { DeepReadAgentAdapter(get()) },
+            )
+        }
+    }
+
+    single { RoomAgentEventStore(get()) }
+
+    single<AgentRunner> { InProcessAgentRunner(get(), get<RoomAgentEventStore>()) }
+
+    single { ChatSessionResolverImpl(get(), get(), get(), get(), get()) }
+
+    single<app.amber.feature.chat.impl.ChatSessionResolver> { get<ChatSessionResolverImpl>() }
 
     single { GenerationSubAgentRunner(get()) }
 

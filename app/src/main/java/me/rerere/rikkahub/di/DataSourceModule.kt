@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import android.content.Context
+import app.amber.core.agent.store.AgentRuntimeDatabase
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.http.HttpHeaders
@@ -198,6 +199,13 @@ val dataSourceModule = module {
             )))
             .build()
     }
+
+    single {
+        Room.databaseBuilder(get<Context>(), AgentRuntimeDatabase::class.java, "agent_runtime")
+            .build()
+    }
+
+    single { get<AgentRuntimeDatabase>().agentRuntimeDao() }
 
     single { TemplateTransformer(settingsStore = get()) }
 
