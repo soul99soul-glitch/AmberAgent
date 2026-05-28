@@ -17,9 +17,8 @@ Flip flags **one at a time**, exercise the listed verification steps,
 then either keep or revert before moving to the next. This isolates
 which change caused any regression.
 
-1. **T1 DI lazy split** — already landed (no flag, default-on). Run
-   cold start + open iCloud sync + WebMount once to confirm
-   `Looper.IdleHandler` fired before navigation.
+1. ~~**T1 DI lazy split**~~ — REVERTED (caused crash). See T1 section
+   below for root cause + re-attempt notes.
 2. **T-A ChatPage scaffold** (`USE_SPLIT_CHATPAGE_COMPOSABLES`) — open
    any conversation. Should see the debug scaffold instead of the
    normal chat UI. If yes → wiring works; flip back to false (the
@@ -35,29 +34,33 @@ which change caused any regression.
 
 ---
 
-## T1 — DI lazy split (LANDED, default-on)
+## T1 — DI lazy split (REVERTED — caused real-device crash)
 
-**Files changed**: `app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt`
-**Commit**: `f7e01c6c`
-**Flag**: none — always-on. iCloud/webMount modules defer via
-`Looper.myQueue().addIdleHandler { loadKoinModules(...); false }`.
+**Status**: ❌ REVERTED via `c8fc4d72`. The eager `dataSourceModule`'s
+`SyncArchiveManager` single takes a ctor-injected
+`WebMountOAuthTokenStore` (bound in `webMountModule`). Deferring the
+webMount module to a Looper.IdleHandler broke Koin's dependency
+resolution at startKoin time → `NoBeanDefFound` → app crash on first
+launch.
 
-**Revert**:
-```
-git revert f7e01c6c
-```
+**Original commit**: `f7e01c6c` (T1 lazy split)
+**Revert commit**: `c8fc4d72` (this fix)
 
-**Verify on device**:
-1. Cold start the app. App home screen renders without ANR.
-2. Navigate to iCloud sync settings. Settings screen loads without
-   `NoBeanDefFound`.
-3. Open WebMount screen (long-press a chat → save to wiki). Loads
-   without binding errors.
+**Why the original grep missed it**: scanning for `get<X>()` calls in
+onCreate found no iCloud/webMount usage, but missed indirect
+dependencies — cross-module ctor injections inside other modules'
+`single { ... }` bodies aren't visible to that grep.
 
-**Known risk**: extremely unlikely race where a main-thread callback
-fires `get<X>()` against an iCloud/webMount binding in <100ms of
-onCreate. Mitigated because the IdleHandler is synchronous on the
-main Looper.
+**Re-attempting this in a future sprint**: the safe approach is to
+walk the full transitive dependency graph of each "eager" module's
+singles via `koin.checkModules()` (Koin's dry-run dep verification)
+BEFORE deferring any module. Any `single` whose body or constructor
+references a deferred-module type means that consumer must also be
+deferred (or the dep must be moved into an eager module).
+
+**Verify the revert worked on device**:
+1. Cold start. App home screen renders without crashing.
+2. No NoBeanDefFound in logcat.
 
 ---
 
