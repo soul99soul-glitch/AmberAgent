@@ -15,7 +15,7 @@ import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
 import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
-import app.amber.core.utils.JsonInstant
+import app.amber.core.agent.utils.JsonInstant
 import java.util.Locale
 
 data class ToolMetadata(
@@ -480,7 +480,10 @@ private fun Tool.speculativeBlockReason(
 }
 
 private fun Tool.outputBudgetChars(): Int = when (name) {
-    "file_read" -> FILE_READ_HARD_MAX_CHARS + 2_048
+    // 262_144 = FILE_READ_HARD_MAX_CHARS in WorkspaceTools.kt (kept in :app
+    // as an internal const). Inlined here so :feature:tools:api can compute
+    // budgets without depending on the heavy WorkspaceTools module.
+    "file_read" -> 262_144 + 2_048
     // Screenshots inline their base64 image in the Text payload (Image parts
     // are silently dropped by every provider's tool-result serializer). A
     // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
