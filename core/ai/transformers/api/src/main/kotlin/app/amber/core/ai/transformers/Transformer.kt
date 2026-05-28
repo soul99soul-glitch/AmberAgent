@@ -6,7 +6,6 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.BuildConfig
 import app.amber.core.settings.Settings
 import app.amber.core.model.Assistant
 
@@ -139,7 +138,7 @@ suspend fun List<UIMessage>.visualTransformsStreamingTail(
     }
     if (!changed) return this
     val output = toMutableList().also { it[tailIndex] = tail }
-    if (BuildConfig.DEBUG) {
+    run {
         validateTransformerInvariants(
             before = this,
             after = output,
