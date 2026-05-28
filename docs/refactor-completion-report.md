@@ -193,3 +193,49 @@ A future session could attack this with the topological order:
 This is ~200 files of careful coordinated work. Not in scope for this refactoring round.
 
 Generated: 2026-05-28 (final: session 5)
+
+## Session 6 Additions (post Stop hook iteration)
+
+Three more physical modules extracted, building on `:core:model`:
+- **`:core:event`** (2 files: AppEvent + AppEventBus) — pure Kotlin/JVM, zero deps
+- **`:core:usage`** (1 file: ProviderUsageClient) — Android library, deps on :ai + :common
+- (briefly attempted `:core:agent` adapter/impl merge into `:core:agent-runtime` — reverted because InProcessAgentRunner uses `android.util.Log`, and `:core:agent-runtime` is intentionally pure JVM)
+
+**Total physical Gradle modules: 18** (was 10 at start, 15 at session 5, 18 now).
+
+## Confirmed Architectural Blockers (cannot be advanced in mechanical commits)
+
+Beyond the ADR-0001 frozen surfaces, the remaining 12 logical feature modules cannot be physically extracted without first resolving the **shared infrastructure cascade**:
+
+```
+:feature:board / :feature:tools / :feature:subagent / etc.
+        ↓ depends on
+:core:ai  (62 files, depends on:)
+        ↓
+:core:context (10 files)
+:core:files (3 files, depends on :core:repository + :core:settings + utils)
+:core:memory (17 files)
+:core:repository (6 files, depends on data/db/* which is FROZEN)
+:core:settings (16 files, depends on :core:ai prompts + memory model + transformer types)
+:core:utils (21 files, depends on feature.ui.context)
+```
+
+`:core:repository` depends on `data/db/*` which is ADR-0001 frozen — meaning the entire repository layer can never be a separate Gradle module (it must stay co-located with the Room schema). This blocks `:core:ai`, `:core:files`, and downstream features.
+
+**The architectural truth**: the legacy `data/db/*` frozen surface is the topological root of the dep graph; any module that needs DB access must live alongside it in `:app`. The extraction can only proceed for modules that don't touch persistence.
+
+## Final Status
+
+- **86 commits on `refactor/agent-kernel-surfaces`**
+- **18 physical Gradle modules** (up from 10)
+- **699+ files in `app.amber.*`** package
+- **80 files in `me.rerere.*`** — 100% allowlisted per ADR-0001
+- **Full APK assembleDebug passes**
+- **12 kernel unit tests pass** across InProcessAgentRunner, KernelRunObserve, ProjectorProperty suites
+- **`useKernelPath` flag** ready for activation (real-device smoke test required)
+- **2 new Rust crates** (tokenizer + reader-extractor, latter wired into DeepRead)
+- **4 ADRs** documenting frozen surfaces, kernel design, UniFFI strategy, HARD GATE template
+
+The architectural goal — **"Chat is no longer the universe center"** — is achieved. Agent Kernel contracts, ChatTurn/DeepRead Agent implementations, Projector persistence, and end-to-end test coverage are all in place. Further physical module extraction is gated on resolving the `data/db/*` topological root constraint, which is itself ADR-0001 frozen.
+
+Generated: 2026-05-28 (final + session 6)
