@@ -4,7 +4,7 @@ import com.google.firebase.analytics.FirebaseAnalytics
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import app.amber.core.ai.tools.parseDeepReadSlashCommand
-import me.rerere.rikkahub.data.event.AppEventBus
+import app.amber.core.event.AppEventBus
 import app.amber.core.service.ChatService
 import app.amber.core.service.PendingUserMessageMode
 import kotlin.uuid.Uuid

@@ -99,7 +99,7 @@ import app.amber.core.ai.generative.GenerativeWidgetSanitizer
 import app.amber.core.ai.generative.GenerativeWidgetSegment
 import app.amber.core.ai.generative.VChartSpecValidator
 import app.amber.core.settings.GenerativeUiSetting
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster

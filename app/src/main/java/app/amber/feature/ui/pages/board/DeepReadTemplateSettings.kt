@@ -30,7 +30,7 @@ import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplatePackage
 import app.amber.feature.board.hotlist.deepread.template.DeepReadRenderedTemplate
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalDarkMode
 

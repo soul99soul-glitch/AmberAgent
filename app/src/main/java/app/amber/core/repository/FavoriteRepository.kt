@@ -3,7 +3,7 @@ package app.amber.core.repository
 import kotlinx.coroutines.flow.Flow
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
-import me.rerere.rikkahub.data.favorite.NodeFavoriteAdapter
+import app.amber.core.favorite.NodeFavoriteAdapter
 import app.amber.core.model.FavoriteType
 import app.amber.core.model.NodeFavoriteTarget
 import kotlin.uuid.Uuid

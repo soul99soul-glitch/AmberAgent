@@ -1,7 +1,7 @@
 package app.amber.core.ai.tools
 
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.event.AppEvent
+import app.amber.core.event.AppEvent
 import java.net.URI
 import java.security.MessageDigest
 import java.util.Locale

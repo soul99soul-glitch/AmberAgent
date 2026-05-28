@@ -8,8 +8,8 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.event.AppEvent
-import me.rerere.rikkahub.data.event.AppEventBus
+import app.amber.core.event.AppEvent
+import app.amber.core.event.AppEventBus
 
 /**
  * Factory for the `text_to_speech` agent tool — fires an [AppEvent.Speak]

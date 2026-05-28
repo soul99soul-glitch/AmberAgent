@@ -127,7 +127,7 @@ import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Assistant
 import app.amber.core.model.Conversation
-import me.rerere.rikkahub.data.usage.ProviderUsageClient
+import app.amber.core.usage.ProviderUsageClient
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.feature.ui.components.ui.KeepScreenOn
 import app.amber.feature.ui.components.ui.WorkspaceIconButton

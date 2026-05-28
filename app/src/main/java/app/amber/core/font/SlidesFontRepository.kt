@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.font
+package app.amber.core.font
 
 import android.content.Context
 import android.webkit.WebResourceRequest

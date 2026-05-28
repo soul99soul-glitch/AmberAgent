@@ -5,7 +5,7 @@ import androidx.compose.runtime.remember
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
 import app.amber.feature.board.TodayBoardReadingFontMode
-import me.rerere.rikkahub.data.font.FontPackState
+import app.amber.core.font.FontPackState
 import java.io.File
 
 @Composable

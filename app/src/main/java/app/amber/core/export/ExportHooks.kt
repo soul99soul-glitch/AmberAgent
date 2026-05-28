@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.export
+package app.amber.core.export
 
 import android.content.Context
 import android.content.Intent

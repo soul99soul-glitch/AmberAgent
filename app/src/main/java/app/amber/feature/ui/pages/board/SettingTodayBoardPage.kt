@@ -63,9 +63,9 @@ import me.rerere.rikkahub.data.db.entity.BoardFocusRuleEntity
 import me.rerere.rikkahub.data.db.entity.BoardWeightEntity
 import me.rerere.rikkahub.data.db.entity.HotListSourceEntity
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
-import me.rerere.rikkahub.data.font.FontPackCategory
-import me.rerere.rikkahub.data.font.FontPackState
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.FontPackCategory
+import app.amber.core.font.FontPackState
+import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.Switch

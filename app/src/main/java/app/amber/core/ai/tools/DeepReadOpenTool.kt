@@ -8,7 +8,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.event.AppEventBus
+import app.amber.core.event.AppEventBus
 
 fun createDeepReadOpenTool(eventBus: AppEventBus): Tool = Tool(
     name = "deep_read_open",

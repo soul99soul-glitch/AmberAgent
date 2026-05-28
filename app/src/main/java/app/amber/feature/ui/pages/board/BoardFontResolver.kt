@@ -6,7 +6,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import app.amber.feature.board.TodayBoardReadingFontMode
-import me.rerere.rikkahub.data.font.FontPackState
+import app.amber.core.font.FontPackState
 import app.amber.feature.ui.theme.NotoSerifSC
 import java.io.File
 

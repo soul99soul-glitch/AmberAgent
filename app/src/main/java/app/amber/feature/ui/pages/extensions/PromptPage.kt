@@ -81,10 +81,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.export.LorebookSerializer
-import me.rerere.rikkahub.data.export.ModeInjectionSerializer
-import me.rerere.rikkahub.data.export.rememberExporter
-import me.rerere.rikkahub.data.export.rememberImporter
+import app.amber.core.export.LorebookSerializer
+import app.amber.core.export.ModeInjectionSerializer
+import app.amber.core.export.rememberExporter
+import app.amber.core.export.rememberImporter
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection

@@ -48,7 +48,7 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplatePackage
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.setting.SettingVM

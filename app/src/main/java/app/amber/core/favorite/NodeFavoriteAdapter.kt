@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.favorite
+package app.amber.core.favorite
 
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import app.amber.core.model.FavoriteMeta

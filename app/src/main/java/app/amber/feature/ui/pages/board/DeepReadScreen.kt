@@ -96,7 +96,7 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRendere
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
 import app.amber.core.settings.prefs.SettingsAggregator
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.theme.LocalDarkMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat

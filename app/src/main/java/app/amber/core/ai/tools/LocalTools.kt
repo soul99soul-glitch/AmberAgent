@@ -2,7 +2,7 @@ package app.amber.core.ai.tools
 
 import android.content.Context
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.event.AppEventBus
+import app.amber.core.event.AppEventBus
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.tools.AgentCronTools
 import app.amber.feature.tools.FeishuOfficeTools

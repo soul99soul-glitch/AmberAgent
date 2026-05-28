@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.SlidesFontRepository
 import java.io.ByteArrayInputStream
 import kotlin.math.roundToInt
 

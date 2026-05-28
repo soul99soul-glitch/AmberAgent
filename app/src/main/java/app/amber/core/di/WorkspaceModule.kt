@@ -9,7 +9,7 @@ import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.context.AgentCapabilitySnapshotBuilder
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.context.ConversationContextRepository
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.SlidesFontRepository
 import org.koin.dsl.module
 
 /**

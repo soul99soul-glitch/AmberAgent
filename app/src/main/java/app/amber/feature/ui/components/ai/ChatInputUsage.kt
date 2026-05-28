@@ -55,8 +55,8 @@ import app.amber.core.context.CompactLifecycleStatus
 import app.amber.core.context.ContextFootprintEstimator
 import app.amber.core.context.ConversationCompact
 import app.amber.core.model.Conversation
-import me.rerere.rikkahub.data.usage.ProviderUsageMetric
-import me.rerere.rikkahub.data.usage.ProviderUsageStatus
+import app.amber.core.usage.ProviderUsageMetric
+import app.amber.core.usage.ProviderUsageStatus
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.core.utils.formatNumber
 import java.text.SimpleDateFormat

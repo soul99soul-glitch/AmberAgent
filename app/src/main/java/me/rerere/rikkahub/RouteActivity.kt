@@ -65,8 +65,8 @@ import me.rerere.highlight.LocalHighlighter
 import app.amber.core.settings.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
-import me.rerere.rikkahub.data.event.AppEvent
-import me.rerere.rikkahub.data.event.AppEventBus
+import app.amber.core.event.AppEvent
+import app.amber.core.event.AppEventBus
 import app.amber.core.memory.dream.MemoryDreamNotifier
 import app.amber.feature.ui.activity.SafeModeActivity
 import app.amber.feature.ui.components.ui.TTSController

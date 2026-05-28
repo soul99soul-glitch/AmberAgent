@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.usage
+package app.amber.core.usage
 
 import android.util.Base64
 import android.webkit.CookieManager

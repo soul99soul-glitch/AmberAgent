@@ -42,9 +42,9 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.rikkahub.data.font.FontPackCategory
-import me.rerere.rikkahub.data.font.FontPackState
-import me.rerere.rikkahub.data.font.SlidesFontRepository
+import app.amber.core.font.FontPackCategory
+import app.amber.core.font.FontPackState
+import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
