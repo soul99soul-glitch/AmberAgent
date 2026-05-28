@@ -44,13 +44,22 @@ import app.amber.core.model.QuickMessage
 import app.amber.core.model.Tag
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
-import app.amber.feature.ui.theme.PresetThemes
+// PresetThemes lives in :app feature/ui/theme; we use only its first
+// id as default — hardcoded to "amberagent_clash" to keep PreferencesStore
+// free of UI/Compose-flavored dependencies. The themeId field stores a
+// String anyway, so no behavior change.
 import app.amber.core.utils.JsonInstant
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchServiceOptions
 import me.rerere.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 
+
+// Default theme id seeded into freshly-initialized Settings. Must match
+// AmberAgentClashThemePreset.id in :app feature/ui/theme/presets — pinned
+// as a string here so PreferencesStore stays free of the Compose-flavored
+// PresetThemes registry.
+const val DEFAULT_PRESET_THEME_ID = "amberagent_clash"
 
 internal val Context.settingsStore by preferencesDataStore(
     name = "settings",
@@ -69,7 +78,7 @@ data class Settings(
     @Transient
     val init: Boolean = false,
     val dynamicColor: Boolean = false,
-    val themeId: String = PresetThemes[0].id,
+    val themeId: String = DEFAULT_PRESET_THEME_ID,
     val developerMode: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
     val enableWebSearch: Boolean = false,
