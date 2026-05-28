@@ -78,8 +78,8 @@ android {
         applicationId = baseApplicationId
         minSdk = 26
         targetSdk = 37
-        versionCode = 390
-        versionName = "2.4.0"
+        versionCode = 391
+        versionName = "2.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId

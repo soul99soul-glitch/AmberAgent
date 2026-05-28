@@ -104,12 +104,12 @@
       android:value="${xiaomiXmsBuildTypeDebug}" />
 
     <activity
-      android:name=".ui.activity.SafeModeActivity"
+      android:name="app.amber.feature.ui.activity.SafeModeActivity"
       android:exported="false"
       android:label="@string/title_activity_safe_mode"
       android:theme="@style/Theme.amberagent" />
     <activity
-      android:name=".data.automation.ScreenCapturePermissionActivity"
+      android:name="app.amber.core.automation.ScreenCapturePermissionActivity"
       android:exported="false"
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     <activity
@@ -163,7 +163,7 @@
         android:resource="@xml/shortcuts" />
     </activity>
     <activity
-      android:name=".ui.activity.ShortcutHandlerActivity"
+      android:name="app.amber.feature.ui.activity.ShortcutHandlerActivity"
       android:exported="true"
       android:theme="@android:style/Theme.Translucent.NoTitleBar">
       <intent-filter>
@@ -182,7 +182,7 @@
 
     <!-- Phase 2 M2.3.2 — WebMount inline login (cookie-auth stations) -->
     <activity
-      android:name=".data.agent.webmount.login.InlineLoginActivity"
+      android:name="app.amber.feature.webmount.login.InlineLoginActivity"
       android:configChanges="keyboardHidden|orientation|screenSize"
       android:exported="true"
       android:label="@string/webmount_inline_login_title"
@@ -204,11 +204,11 @@
       android:name=".data.agent.AgentNotificationActionReceiver"
       android:exported="false" />
     <receiver
-      android:name=".data.agent.terminal.TermuxCommandResultReceiver"
+      android:name="app.amber.feature.terminal.TermuxCommandResultReceiver"
       android:exported="false" />
 
     <service
-      android:name=".service.WebServerService"
+      android:name="app.amber.core.service.WebServerService"
       android:exported="false"
       android:foregroundServiceType="specialUse">
       <property
@@ -216,7 +216,7 @@
         android:value="local web server for LLM chat UI" />
     </service>
     <service
-      android:name=".service.AgentGenerationForegroundService"
+      android:name="app.amber.core.service.AgentGenerationForegroundService"
       android:exported="false"
       android:foregroundServiceType="specialUse">
       <property
@@ -232,7 +232,7 @@
         android:value="mobile cron task execution" />
     </service>
     <service
-      android:name=".data.automation.AmberAccessibilityService"
+      android:name="app.amber.core.automation.AmberAccessibilityService"
       android:exported="true"
       android:label="@string/amberagent_accessibility_service_label"
       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -244,11 +244,11 @@
         android:resource="@xml/amberagent_accessibility_service" />
     </service>
     <service
-      android:name=".data.automation.ScreenCaptureService"
+      android:name="app.amber.core.automation.ScreenCaptureService"
       android:exported="false"
       android:foregroundServiceType="mediaProjection" />
     <service
-      android:name=".data.agent.system.AmberNotificationListenerService"
+      android:name="app.amber.feature.system.AmberNotificationListenerService"
       android:exported="true"
       android:label="@string/amberagent_notification_listener_label"
       android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
