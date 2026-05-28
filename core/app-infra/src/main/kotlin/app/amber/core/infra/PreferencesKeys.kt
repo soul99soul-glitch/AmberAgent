@@ -122,6 +122,8 @@ object PreferencesKeys {
     val NATIVE_PATH_REGEX = booleanPreferencesKey("native_path_regex")
     val NATIVE_PATH_MARKDOWN_HTML = booleanPreferencesKey("native_path_markdown_html")
     val NATIVE_PATH_MARKDOWN_AST = booleanPreferencesKey("native_path_markdown_ast")
+    /** TA5.9 sync-crypto: PBKDF2-HMAC-SHA256 + AES-256-GCM + SHA-256 + HMAC for backup/restore. */
+    val NATIVE_PATH_SYNC_CRYPTO = booleanPreferencesKey("native_path_sync_crypto")
     /** Fraction of native calls that also run JVM for diff comparison. 0.0..1.0. */
     val NATIVE_PATH_SAMPLING_RATE = floatPreferencesKey("native_path_sampling_rate")
 }

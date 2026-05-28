@@ -19,7 +19,7 @@ object AgentLoopBudgetPrompt {
     fun shouldHideTools(stepIndex: Int, maxSteps: Int, hasResumableTools: Boolean): Boolean =
         !hasResumableTools && stage(stepIndex, maxSteps) == AgentLoopBudgetStage.FINAL
 
-    internal fun stage(stepIndex: Int, maxSteps: Int): AgentLoopBudgetStage? {
+    fun stage(stepIndex: Int, maxSteps: Int): AgentLoopBudgetStage? {
         val remaining = remainingSteps(stepIndex, maxSteps)
         if (maxSteps <= SMALL_LOOP_MAX_STEPS) {
             return when {
@@ -45,7 +45,7 @@ object AgentLoopBudgetPrompt {
     private const val SMALL_LOOP_MAX_STEPS = 4
 }
 
-internal enum class AgentLoopBudgetStage {
+enum class AgentLoopBudgetStage {
     WARN,
     TIGHT,
     FINAL,

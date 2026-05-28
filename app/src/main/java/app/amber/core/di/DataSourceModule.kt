@@ -434,6 +434,7 @@ val dataSourceModule = module {
             webMountOAuthTokenStore = get(),
             openAICodexAuthStore = get(),
             json = get(),
+            nativePathPrefs = get(),
         )
     }
 

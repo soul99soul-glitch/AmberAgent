@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import app.amber.core.settings.prefs.NativePathPrefs
 import me.rerere.ai.provider.providers.openai.OpenAICodexAuthStore
 import me.rerere.rikkahub.BuildConfig
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
@@ -45,8 +46,13 @@ class SyncArchiveManager(
     private val webMountOAuthTokenStore: WebMountOAuthTokenStore,
     private val openAICodexAuthStore: OpenAICodexAuthStore,
     private val json: Json,
+    private val nativePathPrefs: NativePathPrefs,
 ) {
-    private val crypto = SyncCrypto()
+    // Re-read the syncCrypto flag on every archive op so DataStore writes
+    // take effect without a process restart. The flag check is sub-ms; the
+    // crypto cost dominates anyway.
+    private val crypto: SyncCrypto
+        get() = SyncCrypto(nativeEnabled = nativePathPrefs.flow.value.syncCrypto)
     private val redactor = SyncRedactor(json)
 
     suspend fun createArchive(request: SyncExportRequest): ByteArray {

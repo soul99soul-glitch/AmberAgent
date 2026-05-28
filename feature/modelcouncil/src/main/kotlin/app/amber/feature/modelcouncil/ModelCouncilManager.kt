@@ -926,7 +926,7 @@ private fun StringBuilder.appendLines(lines: List<String>) {
     }
 }
 
-internal object ModelCouncilExternalCliCommandBuilder {
+object ModelCouncilExternalCliCommandBuilder {
     private const val OUTPUT_BEGIN = "__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_BEGIN__"
     private const val OUTPUT_END = "__AMBERAGENT_MODEL_COUNCIL_CLI_OUTPUT_END__"
 

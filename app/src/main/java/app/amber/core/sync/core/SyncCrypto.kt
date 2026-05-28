@@ -15,7 +15,15 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-class SyncCrypto {
+/**
+ * Sync crypto operations (PBKDF2 / AES-256-GCM / SHA-256 / HMAC).
+ *
+ * @param nativeEnabled if true (default), routes through [SyncCryptoNative]
+ *   when the .so is loaded. On per-call native failure (null return) the
+ *   path silently falls back to javax.crypto so behaviour is identical.
+ *   Caller flips this flag based on [NativePathPrefsData.syncCrypto].
+ */
+class SyncCrypto(private val nativeEnabled: Boolean = true) {
     fun newEncryptionParams(): SyncEncryptionParams {
         val salt = ByteArray(SALT_BYTES)
         val iv = ByteArray(IV_BYTES)
@@ -33,6 +41,10 @@ class SyncCrypto {
     }
 
     fun encrypt(bytes: ByteArray, passphrase: String, params: SyncEncryptionParams): ByteArray {
+        if (nativeEnabled) {
+            val nativeResult = encryptNative(bytes, passphrase, params.kdf, params.cipher)
+            if (nativeResult != null) return nativeResult
+        }
         val cipher = cipher(Cipher.ENCRYPT_MODE, passphrase, params.kdf, params.cipher)
         return ByteArrayOutputStream().use { output ->
             CipherOutputStream(output, cipher).use { cipherOut ->
@@ -79,6 +91,10 @@ class SyncCrypto {
     }
 
     fun decrypt(bytes: ByteArray, passphrase: String, manifest: SyncManifest): ByteArray {
+        if (nativeEnabled) {
+            val nativeResult = decryptNative(bytes, passphrase, manifest.kdf, manifest.cipher)
+            if (nativeResult != null) return nativeResult
+        }
         val cipher = cipher(Cipher.DECRYPT_MODE, passphrase, manifest.kdf, manifest.cipher)
         return CipherInputStream(ByteArrayInputStream(bytes), cipher).use { input ->
             input.readBytes()
@@ -97,10 +113,17 @@ class SyncCrypto {
         }
     }
 
-    fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256")
+    fun sha256(bytes: ByteArray): String {
+        if (nativeEnabled) {
+            val nativeBytes = SyncCryptoNative.sha256(bytes)
+            if (nativeBytes != null) {
+                return nativeBytes.joinToString("") { "%02x".format(it) }
+            }
+        }
+        return MessageDigest.getInstance("SHA-256")
             .digest(bytes)
             .joinToString("") { "%02x".format(it) }
+    }
 
     fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -135,6 +158,15 @@ class SyncCrypto {
     }
 
     private fun deriveKey(passphrase: String, kdf: SyncKdfInfo): SecretKeySpec {
+        if (nativeEnabled) {
+            val nativeKey = SyncCryptoNative.pbkdf2HmacSha256(
+                passphrase = passphrase,
+                salt = kdf.saltBase64.fromBase64(),
+                iterations = kdf.iterations,
+                keySizeBytes = kdf.keySizeBits / 8,
+            )
+            if (nativeKey != null) return SecretKeySpec(nativeKey, "AES")
+        }
         val spec = PBEKeySpec(
             passphrase.toCharArray(),
             kdf.saltBase64.fromBase64(),
@@ -143,6 +175,59 @@ class SyncCrypto {
         )
         val bytes = SecretKeyFactory.getInstance(kdf.name).generateSecret(spec).encoded
         return SecretKeySpec(bytes, "AES")
+    }
+
+    /**
+     * Native fast path for in-memory encrypt. Returns null to signal the
+     * caller to fall back to javax.crypto. The two-stage layout —
+     * native PBKDF2 + native AES-GCM — produces byte-identical output to
+     * the streaming javax.crypto path; the on-disk format is unchanged.
+     */
+    private fun encryptNative(
+        bytes: ByteArray,
+        passphrase: String,
+        kdf: SyncKdfInfo,
+        cipherInfo: SyncCipherInfo,
+    ): ByteArray? {
+        if (passphrase.isBlank()) return null
+        if (kdf.name != "PBKDF2WithHmacSHA256") return null
+        if (cipherInfo.name != "AES/GCM/NoPadding") return null
+        if (cipherInfo.tagSizeBits != 128) return null
+        val key = SyncCryptoNative.pbkdf2HmacSha256(
+            passphrase = passphrase,
+            salt = kdf.saltBase64.fromBase64(),
+            iterations = kdf.iterations,
+            keySizeBytes = kdf.keySizeBits / 8,
+        ) ?: return null
+        return SyncCryptoNative.aesGcmEncrypt(
+            plaintext = bytes,
+            key = key,
+            iv = cipherInfo.ivBase64.fromBase64(),
+        )
+    }
+
+    /** Mirror of [encryptNative] for decrypt. */
+    private fun decryptNative(
+        bytes: ByteArray,
+        passphrase: String,
+        kdf: SyncKdfInfo,
+        cipherInfo: SyncCipherInfo,
+    ): ByteArray? {
+        if (passphrase.isBlank()) return null
+        if (kdf.name != "PBKDF2WithHmacSHA256") return null
+        if (cipherInfo.name != "AES/GCM/NoPadding") return null
+        if (cipherInfo.tagSizeBits != 128) return null
+        val key = SyncCryptoNative.pbkdf2HmacSha256(
+            passphrase = passphrase,
+            salt = kdf.saltBase64.fromBase64(),
+            iterations = kdf.iterations,
+            keySizeBytes = kdf.keySizeBits / 8,
+        ) ?: return null
+        return SyncCryptoNative.aesGcmDecrypt(
+            ciphertext = bytes,
+            key = key,
+            iv = cipherInfo.ivBase64.fromBase64(),
+        )
     }
 
     companion object {

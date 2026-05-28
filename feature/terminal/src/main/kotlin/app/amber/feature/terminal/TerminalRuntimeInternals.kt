@@ -2,7 +2,7 @@ package app.amber.feature.terminal
 
 import java.io.File
 
-internal object TerminalInstallPlanner {
+object TerminalInstallPlanner {
     private val packageNameRegex = Regex("[A-Za-z0-9._+:-]+")
 
     fun build(packages: List<String>, runtime: TerminalRuntimeKind = TerminalRuntimeKind.BUILTIN_ALPINE): TerminalInstallPlan {
@@ -176,7 +176,7 @@ private fun String.shellSafePackage(): String {
     return this
 }
 
-internal class TerminalJobLog(
+class TerminalJobLog(
     val file: File,
     private val maxBytes: Int,
 ) {
@@ -208,7 +208,7 @@ internal class TerminalJobLog(
     }
 }
 
-internal class TerminalOutputBuffer(
+class TerminalOutputBuffer(
     private val maxChars: Int,
 ) {
     private val buffer = StringBuilder()
@@ -245,5 +245,5 @@ internal class TerminalOutputBuffer(
     }
 }
 
-internal fun String.shellQuoted(): String =
+fun String.shellQuoted(): String =
     "'" + replace("'", "'\"'\"'") + "'"

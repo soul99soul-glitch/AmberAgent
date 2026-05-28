@@ -59,6 +59,13 @@ data class NativePathPrefsData(
     val regex: Boolean = true,         // safe — Assistant.kt preflights JVM-only syntax
     val markdownHtml: Boolean = true,
     val markdownAst: Boolean = false,  // shadow-only, no user-facing win
+    /**
+     * TA5.9 sync-crypto: PBKDF2/AES-GCM/SHA-256/HMAC for backup/restore.
+     * Default on — produces byte-identical output to javax.crypto (Test:
+     * SyncCryptoParityTest). On native crash the dispatcher falls back to
+     * javax.crypto automatically.
+     */
+    val syncCrypto: Boolean = true,
     val sampleRate: Float = 0f,
 )
 
@@ -105,6 +112,7 @@ class NativePathPrefs(
         regex = p[PreferencesKeys.NATIVE_PATH_REGEX] ?: true,
         markdownHtml = p[PreferencesKeys.NATIVE_PATH_MARKDOWN_HTML] ?: true,
         markdownAst = p[PreferencesKeys.NATIVE_PATH_MARKDOWN_AST] ?: false,
+        syncCrypto = p[PreferencesKeys.NATIVE_PATH_SYNC_CRYPTO] ?: true,
         sampleRate = (p[PreferencesKeys.NATIVE_PATH_SAMPLING_RATE] ?: 0f).coerceIn(0f, 1f),
     )
 
@@ -114,6 +122,7 @@ class NativePathPrefs(
         p[PreferencesKeys.NATIVE_PATH_REGEX] = data.regex
         p[PreferencesKeys.NATIVE_PATH_MARKDOWN_HTML] = data.markdownHtml
         p[PreferencesKeys.NATIVE_PATH_MARKDOWN_AST] = data.markdownAst
+        p[PreferencesKeys.NATIVE_PATH_SYNC_CRYPTO] = data.syncCrypto
         p[PreferencesKeys.NATIVE_PATH_SAMPLING_RATE] = data.sampleRate.coerceIn(0f, 1f)
     }
 }
