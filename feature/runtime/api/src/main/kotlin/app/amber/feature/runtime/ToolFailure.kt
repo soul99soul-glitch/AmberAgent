@@ -3,10 +3,10 @@ package app.amber.feature.runtime
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-internal fun Throwable.toAgentToolFailureJson(): String =
+fun Throwable.toAgentToolFailureJson(): String =
     toAgentToolFailurePayload().toString()
 
-internal fun Throwable.toAgentToolFailurePayload() = buildJsonObject {
+fun Throwable.toAgentToolFailurePayload() = buildJsonObject {
     put("status", "failed")
     put("message", sanitizedToolFailureMessage())
     put("recoverable", isRecoverableToolFailure())

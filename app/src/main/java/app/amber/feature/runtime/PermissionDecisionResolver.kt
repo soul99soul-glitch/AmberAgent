@@ -225,11 +225,4 @@ private val HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT = setOf(
     "session_expand",
 )
 
-enum class ToolInvocationContext {
-    Normal,
-    SubAgent,
-    Cron,
-    ModelCouncil,
-}
-
 private const val ASK_USER_TOOL_NAME = "ask_user"
