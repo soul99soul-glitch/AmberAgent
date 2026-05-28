@@ -1,6 +1,6 @@
 # AmberAgent Architecture
 
-> Last updated: 2026-05-28 (Phase A-D refactoring in progress)
+> Last updated: 2026-05-28 (Phase 0-E refactoring complete)
 
 ## Overview
 
