@@ -9,7 +9,7 @@ import me.rerere.ai.core.Tool
 import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 
-internal fun createShareTextTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
+fun createShareTextTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "share_text",
     description = "Open Android share sheet with plain text. Requires approval because it sends data outside AmberAgent.",
     parameters = {
@@ -34,7 +34,7 @@ internal fun createShareTextTool(context: Context, deps: SystemAccessDeps): Tool
     }
 )
 
-internal fun createShareFileTool(
+fun createShareFileTool(
     context: Context,
     workspaceManager: WorkspaceManager,
     deps: SystemAccessDeps,

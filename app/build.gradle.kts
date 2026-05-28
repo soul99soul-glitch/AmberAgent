@@ -617,6 +617,7 @@ dependencies {
     implementation(project(":core:ai:generation:api"))
     implementation(project(":feature:subagent"))
     implementation(project(":core:automation:api"))
+    implementation(project(":feature:tools:impl"))
     implementation(project(":feature:runtime:api"))
     implementation(project(":feature:tools:api"))
     implementation(project(":feature:terminal"))
