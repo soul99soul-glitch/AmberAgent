@@ -13,9 +13,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
-import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
+import app.amber.feature.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionStatus
+import app.amber.feature.system.AmberNotificationListenerService
 import me.rerere.rikkahub.data.agent.workspace.WorkspaceManager
 import me.rerere.rikkahub.data.automation.AmberAccessibilityService
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator

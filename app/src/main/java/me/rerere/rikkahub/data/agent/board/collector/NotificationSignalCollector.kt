@@ -7,7 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.agent.board.BoardSignalSourceType
 import me.rerere.rikkahub.data.agent.board.aggregator.SignalAggregator
-import me.rerere.rikkahub.data.agent.system.AmberNotificationListenerService
+import app.amber.feature.system.AmberNotificationListenerService
 
 /**
  * Captures system notifications with signal-to-noise filtering.

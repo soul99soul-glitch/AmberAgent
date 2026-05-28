@@ -12,8 +12,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
+import app.amber.feature.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionStatus
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import java.io.File
 

@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.prompts
+package app.amber.feature.prompts
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers

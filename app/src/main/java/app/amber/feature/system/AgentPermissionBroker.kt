@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.system
+package app.amber.feature.system
 
 import android.Manifest
 import android.app.AlarmManager

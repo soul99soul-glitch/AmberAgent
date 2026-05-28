@@ -20,8 +20,8 @@ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
-import me.rerere.rikkahub.data.agent.miniapp.MiniAppAiBridge
-import me.rerere.rikkahub.data.agent.miniapp.MiniAppSearchBridge
+import app.amber.feature.miniapp.MiniAppAiBridge
+import app.amber.feature.miniapp.MiniAppSearchBridge
 import me.rerere.rikkahub.data.datastore.prefs.AgentPrefs
 import me.rerere.rikkahub.data.datastore.prefs.AssistantPrefs
 import me.rerere.rikkahub.data.datastore.prefs.ChatPrefs

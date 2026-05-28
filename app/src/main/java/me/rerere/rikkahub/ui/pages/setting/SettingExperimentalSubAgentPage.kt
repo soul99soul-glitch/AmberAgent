@@ -39,7 +39,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import me.rerere.rikkahub.data.agent.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
 import me.rerere.rikkahub.data.agent.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS

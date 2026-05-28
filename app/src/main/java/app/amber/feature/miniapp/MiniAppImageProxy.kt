@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.miniapp
+package app.amber.feature.miniapp
 
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream

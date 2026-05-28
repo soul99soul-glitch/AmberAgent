@@ -45,10 +45,10 @@ import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.system.AgentPermissionCapability
-import me.rerere.rikkahub.data.agent.system.AgentPermissionRisk
-import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
+import app.amber.feature.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionCapability
+import app.amber.feature.system.AgentPermissionRisk
+import app.amber.feature.system.AgentPermissionStatus
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup

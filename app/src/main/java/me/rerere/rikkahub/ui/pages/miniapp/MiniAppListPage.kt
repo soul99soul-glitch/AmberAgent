@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.miniapp.MiniAppRepository
+import app.amber.feature.miniapp.MiniAppRepository
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController

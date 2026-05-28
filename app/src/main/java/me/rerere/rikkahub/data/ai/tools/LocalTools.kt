@@ -3,7 +3,7 @@ package me.rerere.rikkahub.data.ai.tools
 import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.event.AppEventBus
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.tools.AgentCronTools
 import me.rerere.rikkahub.data.agent.tools.FeishuOfficeTools
 import me.rerere.rikkahub.data.agent.tools.ICloudDriveTools
@@ -16,7 +16,7 @@ import me.rerere.rikkahub.data.agent.tools.TerminalTools
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 import me.rerere.rikkahub.data.agent.tools.WorkspaceArtifactTools
 import me.rerere.rikkahub.data.agent.tools.WorkspaceTools
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.agent.board.hotlist.deepread.DeepReadPlaybookRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.getCurrentImageGenerationModel

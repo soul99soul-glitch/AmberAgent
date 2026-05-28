@@ -48,7 +48,7 @@ import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRolePresets
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeat
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilSeatRunner
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.workspaceColors

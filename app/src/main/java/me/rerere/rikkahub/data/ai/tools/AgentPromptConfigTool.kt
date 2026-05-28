@@ -10,8 +10,8 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
-import me.rerere.rikkahub.data.agent.prompts.ImagePromptInjectionConfig
+import app.amber.feature.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.ImagePromptInjectionConfig
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 
 fun createAgentPromptConfigTool(

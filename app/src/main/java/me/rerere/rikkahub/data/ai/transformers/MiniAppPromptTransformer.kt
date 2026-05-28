@@ -3,7 +3,7 @@ package me.rerere.rikkahub.data.ai.transformers
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.miniapp.MiniAppRepository
+import app.amber.feature.miniapp.MiniAppRepository
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 

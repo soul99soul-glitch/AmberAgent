@@ -24,7 +24,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.resolveTaskChatModel

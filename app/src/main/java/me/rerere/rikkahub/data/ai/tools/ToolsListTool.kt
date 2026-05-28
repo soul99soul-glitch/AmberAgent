@@ -10,7 +10,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.tools.ToolExposureState
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 

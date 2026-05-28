@@ -9,7 +9,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionBroker
 import kotlin.math.min
 
 /**

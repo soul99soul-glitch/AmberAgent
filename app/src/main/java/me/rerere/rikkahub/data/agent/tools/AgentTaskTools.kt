@@ -9,9 +9,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
-import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
-import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
+import app.amber.feature.task.AgentTaskSnapshot
+import app.amber.feature.task.AgentTaskScheduler
+import app.amber.feature.task.AgentTaskStatus
 
 class AgentTaskTools(
     private val taskScheduler: AgentTaskScheduler,

@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.first
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.ImageAspectRatio
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.AgentPromptConfigRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider

@@ -2,7 +2,7 @@ package me.rerere.rikkahub.data.context
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import app.amber.feature.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.tools.ToolRegistry
 
 class AgentCapabilitySnapshotBuilder(
@@ -14,7 +14,7 @@ class AgentCapabilitySnapshotBuilder(
 
     internal fun build(
         tools: List<Tool>,
-        tasks: List<me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot>,
+        tasks: List<app.amber.feature.task.AgentTaskSnapshot>,
         maxChars: Int = DEFAULT_MAX_CHARS,
     ): UIMessage {
         val metadata = runCatching { ToolRegistry.from(tools).metadata }.getOrDefault(emptyList())

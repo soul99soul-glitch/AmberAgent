@@ -39,7 +39,7 @@ import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.rikkahub.data.agent.miniapp.MiniAppRepository
+import app.amber.feature.miniapp.MiniAppRepository
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 import me.rerere.rikkahub.data.db.entity.MiniAppEntity
 import me.rerere.rikkahub.ui.pages.miniapp.MiniAppSourceDialog

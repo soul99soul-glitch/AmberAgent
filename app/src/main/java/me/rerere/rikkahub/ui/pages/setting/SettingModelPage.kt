@@ -74,10 +74,10 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.resolveVisionRecognitionPrompt
-import me.rerere.rikkahub.data.agent.prompts.AgentPromptConfigRepository
-import me.rerere.rikkahub.data.agent.prompts.DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
-import me.rerere.rikkahub.data.agent.prompts.DEFAULT_IMAGE_PROMPT_INJECTION
-import me.rerere.rikkahub.data.agent.prompts.ImagePromptInjectionConfig
+import app.amber.feature.prompts.AgentPromptConfigRepository
+import app.amber.feature.prompts.DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
+import app.amber.feature.prompts.DEFAULT_IMAGE_PROMPT_INJECTION
+import app.amber.feature.prompts.ImagePromptInjectionConfig
 import me.rerere.rikkahub.data.datastore.DEFAULT_AUTO_MODEL_ID
 import me.rerere.rikkahub.data.datastore.ModelGroupSessionDefault
 import me.rerere.rikkahub.data.datastore.Settings

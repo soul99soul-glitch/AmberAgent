@@ -4,9 +4,9 @@ import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.live.LiveModeManager
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
-import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import app.amber.feature.system.AgentPermissionBroker
+import app.amber.feature.task.AgentTaskScheduler
+import app.amber.feature.task.AgentTaskStore
 import me.rerere.rikkahub.data.agent.terminal.AlpineRuntimeInstaller
 import me.rerere.rikkahub.data.agent.terminal.TerminalRuntime
 import me.rerere.rikkahub.data.agent.tools.AgentCronTools

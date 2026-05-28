@@ -14,11 +14,11 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
-import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef
-import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
-import me.rerere.rikkahub.data.agent.task.AgentTaskQueueState
-import me.rerere.rikkahub.data.agent.task.AgentTaskStatus
-import me.rerere.rikkahub.data.agent.task.AgentTaskStore
+import app.amber.feature.task.AgentTaskOutputRef
+import app.amber.feature.task.AgentTaskSnapshot
+import app.amber.feature.task.AgentTaskQueueState
+import app.amber.feature.task.AgentTaskStatus
+import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.office.FeishuOfficeAnalysisTemplate
 import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.office.FeishuOfficeEnhancementPlanner

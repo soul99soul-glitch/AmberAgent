@@ -10,8 +10,8 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
-import me.rerere.rikkahub.data.agent.system.AgentPermissionStatus
+import app.amber.feature.system.AgentPermissionBroker
+import app.amber.feature.system.AgentPermissionStatus
 
 /**
  * Factory for the `permissions_status` agent tool — exposes the per-capability
