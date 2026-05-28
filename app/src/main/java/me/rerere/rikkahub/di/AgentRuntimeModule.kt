@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.di
 
 import android.content.Context
-import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
+import app.amber.feature.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.modelcouncil.ExternalCliModelCouncilRunner
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
 import me.rerere.rikkahub.data.agent.modelcouncil.ProviderModelCouncilTextRunner

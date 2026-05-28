@@ -16,7 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
+import app.amber.feature.history.SessionAccessGrantStore
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
 import me.rerere.rikkahub.data.agent.task.AgentTaskOutputRef

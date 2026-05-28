@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.history
+package app.amber.feature.history
 
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap

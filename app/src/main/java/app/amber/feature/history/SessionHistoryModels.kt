@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.history
+package app.amber.feature.history
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

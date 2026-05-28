@@ -87,7 +87,7 @@ import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilManager
-import me.rerere.rikkahub.data.agent.history.SessionAccessGrantStore
+import app.amber.feature.history.SessionAccessGrantStore
 import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.task.AgentTaskRetryPolicy
 import me.rerere.rikkahub.data.agent.task.AgentTaskSnapshot
