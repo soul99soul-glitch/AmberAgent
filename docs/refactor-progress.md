@@ -82,21 +82,40 @@
 - All 4 pass
 - Commit: 849afaf6
 
+### Session 2 continued — 2026-05-28
+
+### TA.3a — Tokenizer Gradle pipeline + JNI bridge
+- Commit: 8381ce12
+
+### ADR-0004 — HARD GATE native crate template
+- Commit: 3e07ff4b
+
+### TC.3 — AgentRunner param added to ChatService
+- Commit: 84e6babc
+
+### TB.1 — reader-extractor Rust crate + Gradle pipeline + JNI bridge
+- readability crate for HTML extraction, section splitting
+- arm64-v8a build verified, 2 cargo tests pass
+- Commits: 6a313f6e, 6e45c13d
+
+### TB.3 — reader-extractor wired into DeepRead
+- Native dispatch in DeepReadSourcePrefetcher.extractReadableText()
+- Falls back to JVM regex stripping when native unavailable
+- Commit: db919b5b
+
+### Full APK build verified
+- `./gradlew :app:assembleDebug` BUILD SUCCESSFUL
+
 ## Remaining Work
 
-### Phase C behavior switch (not yet wired to production)
-- TC.3 sendMessage → runner.launch: ChatService still uses direct GenerationHandler path. ChatTurnAgent + InProcessAgentRunner exist but aren't connected to sendMessage yet. Feature flag dual-path needed.
-- TC.4 ChatPage UI: Still uses ChatVM → ChatService direct path. Needs observe(runId) ViewModel migration.
-
-### Phase B behavior switch
-- TB.1: reader-extractor Rust crate (readability + section splitting) — new Rust crate to write
-- TB.3: DeepReadAgentRunManager collectRun → scope.llm bridging (~40 lines)
+### Phase C behavior switch (partial)
+- TC.3: ChatService accepts AgentRunner but sendMessage() still uses direct path. Need feature flag to switch.
+- TC.4: ChatPage UI observe(runId) migration
 - TB.4: DeepReadSurface ViewModel observe(runId) migration
 
 ### Phase D module extraction (blocked on shared infra)
-- Sprint 2-4 physical module extraction blocked: agent subsystems (live, miniapp, webmount, etc.) depend on app-internal types (SettingsAggregator, AppScope, AmberAccessibilityService). Extracting to separate Gradle modules requires extracting shared infrastructure first.
-- Approach: extract SettingsAggregator/AppScope to :core:app-infra first, then modules can depend on it
+- Agent subsystems depend on app-internal types (SettingsAggregator, AppScope). Need :core:app-infra module first.
 
 ### Phase E legacy cleanup
-- TE.1: 781 files in me.rerere.* vs 8 in app.amber.* — bulk migration is Phase D's mechanical work
-- TE.2: highlight/document package renaming depends on JNI crate UniFFI migration
+- TE.1: 781 files in me.rerere.* vs 9 in app.amber.*
+- TE.2: highlight/document package renaming
