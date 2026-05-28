@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -738,6 +739,18 @@ class ChatService(
 
     var useKernelPath = false
 
+    private val activeKernelRuns =
+        MutableStateFlow<Map<Uuid, app.amber.core.agent.runtime.AgentRunId>>(emptyMap())
+
+    /** Latest active kernel-path run for a conversation, or null if none. */
+    fun getActiveKernelRunFlow(conversationId: Uuid): StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
+        activeKernelRuns
+            .map { it[conversationId] }
+            .stateIn(appScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+
+    /** Exposes the AgentRunner for UI ViewModels to call observe() directly. */
+    fun kernelRunner(): app.amber.core.agent.runtime.AgentRunner? = agentRunner
+
     private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
         val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
         val input = app.amber.feature.chat.api.ChatTurnInput(
@@ -750,10 +763,14 @@ class ChatService(
             app.amber.feature.chat.api.ChatTurnDescriptor.ID,
             input,
         )
-        result.onFailure { e ->
-            addError(e, conversationId, title = "Kernel dispatch failed")
-            launchPendingMessageLoop(conversationId, message)
-        }
+        result
+            .onSuccess { handle ->
+                activeKernelRuns.update { it + (conversationId to handle.runId) }
+            }
+            .onFailure { e ->
+                addError(e, conversationId, title = "Kernel dispatch failed")
+                launchPendingMessageLoop(conversationId, message)
+            }
     }
 
     private fun launchPendingMessageLoop(
