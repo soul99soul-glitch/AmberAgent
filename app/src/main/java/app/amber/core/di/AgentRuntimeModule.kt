@@ -64,12 +64,16 @@ val agentRuntimeModule = module {
     single { ChatEventProjector(get<RoomAgentEventStore>(), get(), get(), get()) }
 
     single<AgentRunner> {
-        val projector: ChatEventProjector = get()
+        // Resolve projector lazily inside runScopeFactory: ChatEventProjector
+        // depends on ConversationAccess (= ChatService) which itself depends on
+        // AgentRunner. Eager resolution at AgentRunner construction triggers a
+        // ChatService → AgentRunner → ChatEventProjector → ChatService cycle.
         InProcessAgentRunner(
             registry = get(),
             eventStore = get<RoomAgentEventStore>(),
             runScopeFactory = { runId, input ->
                 if (input is ChatTurnInput) {
+                    val projector: ChatEventProjector = get()
                     val conversationUuid = kotlin.uuid.Uuid.parse(input.conversationId.value)
                     val writer = ProjectingEventWriter(runId, conversationUuid, projector)
                     ProjectingRunScope(

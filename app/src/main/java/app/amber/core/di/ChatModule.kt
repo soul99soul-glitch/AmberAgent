@@ -1,6 +1,7 @@
 package app.amber.core.di
 
 import app.amber.core.service.ChatService
+import app.amber.core.service.ConversationAccess
 import app.amber.core.service.PendingMessageStore
 import app.amber.core.service.UserInputPreprocessor
 import app.amber.core.service.orchestrator.BranchMessageOrchestrator
@@ -59,6 +60,7 @@ val chatModule = module {
             agentRunner = get(),
         )
     }
+    single<ConversationAccess> { get<ChatService>() }
 
     single {
         SendMessageOrchestrator(
