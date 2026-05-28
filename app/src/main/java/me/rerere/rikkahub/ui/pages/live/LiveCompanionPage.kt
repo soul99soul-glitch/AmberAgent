@@ -72,8 +72,8 @@ import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.agent.live.LiveModeCard
-import me.rerere.rikkahub.data.agent.live.LiveModeUiState
+import app.amber.feature.live.LiveModeCard
+import app.amber.feature.live.LiveModeUiState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.navigateToChatPage

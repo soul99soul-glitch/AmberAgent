@@ -9,9 +9,9 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.suspendCancellableCoroutine
-import me.rerere.rikkahub.data.agent.live.LiveScreenSnapshot
-import me.rerere.rikkahub.data.agent.live.LiveUiTreeProcessor
-import me.rerere.rikkahub.data.agent.live.LiveWindowCandidate
+import app.amber.feature.live.LiveScreenSnapshot
+import app.amber.feature.live.LiveUiTreeProcessor
+import app.amber.feature.live.LiveWindowCandidate
 import kotlin.coroutines.resume
 
 class AmberAccessibilityService : AccessibilityService() {

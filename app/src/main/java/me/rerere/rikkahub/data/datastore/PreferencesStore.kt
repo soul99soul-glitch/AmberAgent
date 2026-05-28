@@ -21,7 +21,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.tools.LocalToolOption
-import me.rerere.rikkahub.data.agent.live.LiveModeSetting
+import app.amber.feature.live.LiveModeSetting
 import me.rerere.rikkahub.data.agent.modelcouncil.ModelCouncilRuntimeSetting
 import me.rerere.rikkahub.data.agent.office.FeishuOfficeEnhancementSetting
 import me.rerere.rikkahub.data.agent.board.TodayBoardSetting

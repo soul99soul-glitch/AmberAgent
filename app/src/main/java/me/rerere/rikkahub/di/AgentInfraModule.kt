@@ -3,7 +3,7 @@ package me.rerere.rikkahub.di
 import me.rerere.rikkahub.data.agent.AgentLiveStatusNotifier
 import me.rerere.rikkahub.data.agent.AgentToolActivityStore
 import me.rerere.rikkahub.data.agent.cron.AgentCronManager
-import me.rerere.rikkahub.data.agent.live.LiveModeManager
+import app.amber.feature.live.LiveModeManager
 import me.rerere.rikkahub.data.agent.system.AgentPermissionBroker
 import me.rerere.rikkahub.data.agent.task.AgentTaskScheduler
 import me.rerere.rikkahub.data.agent.task.AgentTaskStore

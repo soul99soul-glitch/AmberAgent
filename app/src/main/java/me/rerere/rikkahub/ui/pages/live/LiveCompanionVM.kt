@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.agent.live.LiveModeManager
-import me.rerere.rikkahub.data.agent.live.LiveModeUiState
+import app.amber.feature.live.LiveModeManager
+import app.amber.feature.live.LiveModeUiState
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.prefs.SettingsAggregator
 

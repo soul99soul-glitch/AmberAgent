@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.agent.live
+package app.amber.feature.live
 
 import java.security.MessageDigest
 import java.util.Locale
