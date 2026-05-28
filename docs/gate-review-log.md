@@ -102,3 +102,47 @@ audit trail.
 
 A future revisit makes sense IF a new caller emerges that hits this
 in a hot loop (e.g. per-token streaming inspection).
+
+## Phase D remaining cascade (tools/subagent/board impl) — DEFERRED (2026-05-28)
+
+Goal Task 4 calls for full physical extraction of `:feature:tools`
+(33 files), `:feature:subagent` (9 files), `:feature:board` (54
+files). After Session 8 ended (api-only splits landed for terminal/
+modelcouncil/system/tools:access), what remains in :app is the
+GenerationHandler-coupled tail of each feature.
+
+### The shared blocker
+
+Every remaining impl file in these three subtrees imports
+`app.amber.core.ai.GenerationHandler` (the 1242-LOC class) AND/OR
+`app.amber.core.ai.transformers.{Input,Output}MessageTransformer`.
+Both live in `:app`. Extracting subagent / board / remaining tools
+to their own Gradle modules requires:
+
+1. Lift `GenerationHandler` to an interface in a new
+   `:core:ai:generation:api` module
+2. Lift `Transformer` hierarchy to a new `:core:ai:transformers:api`
+   module (which itself needs the BuildConfig.DEBUG decoupling
+   pattern from T2.5)
+3. `:app`'s class becomes `GenerationHandlerImpl` implementing the
+   new interface
+4. Update ~12 cross-cutting callers (ChatService, ChatTranslationHandler,
+   TranslatorVM, DeepReadAgentRunManager, ChatTurnAgent, SubAgentRunner,
+   board agents, ~5 others) to consume the interface
+
+This is a 3-4 commit cascade with its own internal Gate Reviews.
+**Achievable** but outside this session's Rust-priority scope.
+
+Additionally for `:feature:board`: many files use Room DAOs and
+entities from `me.rerere.rikkahub.data.db.*` (ADR-0001 §3 frozen
+to :app). Those files **cannot** move under any extraction — they
+must stay in :app forever per the data-loss-on-upgrade contract.
+Expected `:feature:board:impl` would top out at ~15-25 files moved,
+not the full 54.
+
+### Decision
+
+Skip in this session per goal directive "主线 1 优先级硬于主线 2".
+Recorded so the next agent has a precise starting point: extract
+`:core:ai:generation:api` interface first (no behaviour change),
+then iterate from there.

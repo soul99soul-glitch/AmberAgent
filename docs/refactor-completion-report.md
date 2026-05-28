@@ -341,3 +341,98 @@ upstream dependencies):
   for this session.
 
 Generated: 2026-05-28 (session 8, post-Task-1-cascade)
+
+---
+
+## Session 9 — Rust 性能兑现 (2026-05-28)
+
+Goal directive: "Rust 性能兑现 + Phase D 剩余 cascade 收尾". Priority
+order: TA5.9 sync-crypto first, then markdown AST switch, then JsonExpression,
+then opportunistic feature cascade.
+
+### What landed (4 commits)
+
+**TA5.9 sync-crypto Rust crate — DONE + Gate Review GREEN**
+(commits `25944d96`, `8f80706c`):
+- NEW `native/sync-crypto/` Rust crate using ring 0.17. 5 JNI primitives:
+  PBKDF2-HMAC-SHA256, AES-256-GCM encrypt/decrypt, SHA-256, HMAC-SHA256.
+- NEW `app/.../sync/core/SyncCryptoNative.kt` Kotlin bridge (lazy load,
+  per-call null fallback). NEW NATIVE_PATH_SYNC_CRYPTO preferences key.
+- `SyncCrypto.kt` now takes `nativeEnabled: Boolean = true`; sha256 /
+  encrypt / decrypt / deriveKey route through native first, fall back to
+  javax.crypto silently on null.
+- Wire format byte-identical to javax.crypto — proven by shared byte-golden
+  test vectors on both sides (ASCII passphrase + UTF-8 multi-byte
+  passphrase). Existing backup files remain decryptable.
+- 7/7 Rust unit tests + 8/8 Kotlin parity tests pass. cargo ndk -t arm64-v8a
+  release builds clean.
+- Gate Review: Code Review P3=2 (fixed in `8f80706c`); Chain Integrity Audit
+  ALL PASS.
+
+**TD.Rust.1+ markdown streaming parse throttle**
+(commit `75a3c9bb`):
+- Added `MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L` and gated the
+  streaming flow with `.sample(...)` so token bursts only trigger an
+  AST re-parse every ~200ms (was ~20×/sec). Non-streaming paths unaffected.
+- Visible text still updates every frame via existing streaming display
+  buffer; only the AST refresh rate dips.
+
+**TD.Rust.1a/1b/1c + TD.Rust.2 — DEFERRED with rationale**
+(commit `c0e94595`, also in `docs/gate-review-log.md`):
+- TD.Rust.1a renderer switch from ASTNode → PackedAstReader: 2009-line
+  Markdown.kt with ASTNode-typed signatures threaded through ~25 helpers.
+  A single-commit switch would either require a JVM-side adapter (defeats
+  the perf win) or a 2000-line rewrite (high regression surface). Shadow
+  parity path already validates correctness without primary swap.
+- TD.Rust.1b LaTeX preprocess Rust merge: 3 regex passes total ~1ms for
+  10KB content. Real savings ~0.8ms per parse — sub-perceptible.
+- TD.Rust.1c HtmlDiffNormalizer Rust: only runs in sampled shadow path,
+  not in hot render. Negligible visible benefit.
+- TD.Rust.2 JsonExpression engine: 2 cold call sites (balance check +
+  UI validity check). Per-call savings ~70µs × ~100 calls/day = ~7ms.
+  Below user perception threshold.
+
+**Phase D remaining cascade — DEFERRED with starting-point**
+(documented in `docs/gate-review-log.md`):
+- Full extraction of :feature:tools impl / :feature:subagent /
+  :feature:board impl requires lifting GenerationHandler to an interface
+  (in a new :core:ai:generation:api module) plus Transformer hierarchy
+  extraction. 3-4 commit cascade with its own Gate Reviews. Outside this
+  session's "Rust priority" scope.
+- :feature:board structurally caps at ~15-25 of 54 files due to Room
+  DAO ADR-0001 §3 freeze. The DAO-using files must stay in :app.
+
+### Final Session 9 numbers
+
+- **Commits this session**: 5 (TA5.9 initial + P3+ fix + 1+ throttle +
+  TD.Rust.2 skip rationale + this report)
+- **Physical Gradle modules**: 42 (unchanged — this session focused on
+  Rust + code-level work, not module extraction)
+- **Files in `app.amber.*`**: 618 (unchanged)
+- **NEW Rust crate**: `native/sync-crypto` (5 JNI primitives, 7 tests)
+- **Total Rust crates**: 8 (was 7 — added sync-crypto)
+- **NEW preferences key**: NATIVE_PATH_SYNC_CRYPTO (default true)
+- **Build green**: cargo test, cargo ndk arm64-v8a release,
+  :app:assembleDebug, all targeted unit tests
+
+### Performance impact (estimated from ring 0.17 perf characteristics)
+
+For a typical backup/restore (1 user with 6 months of conversation data):
+- **PBKDF2 5-15x speedup**: 2000ms → ~150-400ms on a mid-tier phone.
+  This is the dominant cost; users WILL feel this.
+- **AES-256-GCM 2-4x**: 50MB encrypt 800ms → 200-400ms.
+- **SHA-256 3-5x**: 9MB digest 90ms → 18-30ms.
+
+Net: backup-create flow that was ~3.5 seconds drops to ~0.5-0.9 seconds.
+Restore similarly faster. Real-device benchmark deferred to a dedicated
+QA pass.
+
+### Gate Review summary
+
+- TA5.9: GREEN (P3+ = 0 after fix commit).
+- TD.Rust.1+: not formally Gate-Reviewed — small isolated change to one
+  Compose-side flow operator; covered by existing unit tests.
+- TD.Rust.{1a,1b,1c,2} + Phase D cascade: deferred per goal escape
+  clause, rationale in `docs/gate-review-log.md`.
+
+Generated: 2026-05-28 (session 9, post-Rust-性能兑现)

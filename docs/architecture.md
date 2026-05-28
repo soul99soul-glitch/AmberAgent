@@ -1,6 +1,15 @@
 # AmberAgent Architecture
 
-> Last updated: 2026-05-28 (Phase 0-E refactoring complete — 76 commits, see [refactor-completion-report.md](refactor-completion-report.md))
+> Last updated: 2026-05-28 (Sessions 7-9: 42 physical Gradle modules,
+> Task 1 cascade GREEN, sync-crypto Rust wired; see
+> [refactor-completion-report.md](refactor-completion-report.md))
+>
+> Rust native paths (PR #10 base + Session 9 TA5.9 additions):
+> 4 user-facing native paths default-on
+> (office / highlight / regex with preflight / markdownHtml) +
+> **sync-crypto for backup-restore** (PBKDF2-HMAC-SHA256, AES-256-GCM,
+> SHA-256, HMAC-SHA256) + markdown AST shadow-compare path. RC kill
+> switch (`native_path_kill_switch`) retained as one-flip revert.
 
 ## Overview
 

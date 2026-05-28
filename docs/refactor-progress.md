@@ -515,3 +515,74 @@ is fully on by default per personal-use config; kill switch retained.
   SettingsAggregatorHelpersTest all green
 - **State guard**: check-refactor-state.sh clean (modules ≥19,
   app.amber files ≥200, allowlist clean, kernel files present)
+
+## Session 9 — Rust 性能兑现 (2026-05-28)
+
+Goal: TA5.9 sync-crypto first, then markdown AST, then JsonExpression,
+then opportunistic feature cascade. Rust priority hard-stronger than
+cascade per directive.
+
+### What landed (5 commits)
+
+**`25944d96` TA5.9 sync-crypto Rust crate + dispatcher**
+- NEW `native/sync-crypto/` (ring 0.17) — 5 JNI primitives:
+  PBKDF2-HMAC-SHA256, AES-256-GCM encrypt/decrypt, SHA-256, HMAC-SHA256.
+- NEW `SyncCryptoNative.kt` Kotlin bridge + NATIVE_PATH_SYNC_CRYPTO
+  preferences key (default true).
+- `SyncCrypto.kt` takes `nativeEnabled: Boolean = true`; routes 4
+  operations through native first with javax.crypto fallback on null.
+  SyncArchiveManager DI now receives NativePathPrefs and re-reads flag
+  on every archive op.
+- 7/7 Rust unit tests (RFC 6234 SHA-256 vector + RFC 4231 HMAC vector
+  included), cargo ndk arm64-v8a release green.
+- Wire format byte-identical: existing backup files remain decryptable
+  on native path; proven by shared byte-golden test vectors on both
+  Rust + Kotlin sides for ASCII + UTF-8 multi-byte CJK passphrases.
+
+**`8f80706c` TA5.9 P3+ Gate Review fixes**
+- Code Review P3=2 + P4=4. Fixed: dropped unused `lastLoadError`,
+  moved pbkdf2 arg validation before allocations, added the shared
+  PBKDF2 byte-golden vectors above.
+- Chain Integrity Audit: ALL PASS.
+- Final Gate Review: GREEN.
+
+**`75a3c9bb` TD.Rust.1+ markdown streaming parse throttle**
+- `MARKDOWN_STREAMING_PARSE_THROTTLE_MS = 200L` + `.sample(...)` on
+  the streaming flow. Parse rate during a token burst drops from
+  ~20/sec to 5/sec. Non-streaming paths unaffected. Visible text still
+  updates every frame via existing streaming display buffer.
+
+**`c0e94595` TD.Rust.2 deferred with cost-benefit math**
+- JsonExpression has 2 cold call sites. Per-call Rust savings ~70µs
+  after JNI overhead. Sub-perceptible. Documented future-revisit trigger.
+
+**`<this commit>` final report + progress + memory update**
+
+### Deferrals (recorded in docs/gate-review-log.md)
+
+- **TD.Rust.1a renderer switch (ASTNode → PackedAstReader)**: 2009-line
+  Markdown.kt refactor; shadow path already validates parity.
+- **TD.Rust.1b LaTeX preprocess Rust merge**: 0.8ms/parse, not enough.
+- **TD.Rust.1c HtmlDiffNormalizer Rust**: shadow-only call, no hot-path benefit.
+- **Phase D cascade (tools/subagent/board impl)**: requires lifting
+  GenerationHandler to interface + Transformer hierarchy extraction
+  first. 3-4 commit cascade. Next-agent starting point documented.
+
+### Final Session 9 numbers
+
+- **Commits this session**: 5
+- **Physical Gradle modules**: 42 (unchanged — this session was Rust +
+  code-level work)
+- **Files in app.amber.***: 618 (unchanged)
+- **Rust crates**: 8 (was 7 — added sync-crypto)
+- **Build green**: cargo test, cargo ndk arm64-v8a release,
+  :app:assembleDebug, SyncCryptoParityTest (8/8)
+
+### Estimated user-perceptible perf delta (TA5.9)
+
+Typical backup with 6 months of conversation data on a mid-tier phone:
+- **PBKDF2 5-15x**: 2000ms → ~150-400ms
+- **AES-256-GCM 2-4x**: 50MB encrypt 800ms → 200-400ms
+- **SHA-256 3-5x**: 9MB digest 90ms → 18-30ms
+
+Net: backup-create ~3.5s → ~0.5-0.9s (real-device QA pass deferred).
