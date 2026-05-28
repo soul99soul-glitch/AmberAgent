@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai
+package app.amber.core.ai
 
 import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals

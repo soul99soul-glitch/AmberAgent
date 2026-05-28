@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai
+package app.amber.core.ai
 
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart

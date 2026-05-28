@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.memory
+package app.amber.core.memory
 
 import app.amber.core.memory.export.MemoryFrontmatterCodec
 import app.amber.core.memory.model.MemoryKind

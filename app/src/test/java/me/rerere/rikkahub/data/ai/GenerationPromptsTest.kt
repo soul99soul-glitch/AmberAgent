@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.ai
+package app.amber.core.ai
 
 import me.rerere.ai.provider.Model
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator

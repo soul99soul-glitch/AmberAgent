@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.memory
+package app.amber.core.memory
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow

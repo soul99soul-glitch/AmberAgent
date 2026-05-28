@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.utils
+package app.amber.core.utils
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

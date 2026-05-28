@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.memory
+package app.amber.core.memory
 
 import app.amber.core.memory.dream.MemoryDreamPlanner
 import app.amber.core.memory.model.MemoryCandidate

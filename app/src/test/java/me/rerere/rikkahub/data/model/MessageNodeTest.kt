@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.model
+package app.amber.core.model
 
 import me.rerere.ai.ui.UIMessage
 import org.junit.Assert.assertTrue

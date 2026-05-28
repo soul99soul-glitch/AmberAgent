@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.model
+package app.amber.core.model
 
 import app.amber.core.model.AssistantAffectScope.USER
 import org.junit.Assert.assertEquals

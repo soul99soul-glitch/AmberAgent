@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.datastore
+package app.amber.core.settings
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

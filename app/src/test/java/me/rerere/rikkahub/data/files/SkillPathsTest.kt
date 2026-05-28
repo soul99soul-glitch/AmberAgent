@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.files
+package app.amber.core.files
 
 import java.io.File
 import java.nio.file.Files

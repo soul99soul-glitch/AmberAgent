@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.context
+package app.amber.core.context
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject

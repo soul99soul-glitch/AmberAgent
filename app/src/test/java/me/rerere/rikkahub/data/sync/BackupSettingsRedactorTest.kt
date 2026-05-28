@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.sync
+package app.amber.core.sync
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive

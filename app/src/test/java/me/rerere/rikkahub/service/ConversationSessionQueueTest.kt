@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.service
+package app.amber.core.service
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

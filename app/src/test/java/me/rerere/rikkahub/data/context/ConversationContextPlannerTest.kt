@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.context
+package app.amber.core.context
 
 import me.rerere.ai.ui.UIMessage
 import app.amber.core.model.MessageNode

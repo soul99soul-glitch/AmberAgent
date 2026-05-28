@@ -1,4 +1,4 @@
-package me.rerere.rikkahub.data.sync
+package app.amber.core.sync
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
