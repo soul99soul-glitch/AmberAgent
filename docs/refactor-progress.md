@@ -106,16 +106,30 @@
 ### Full APK build verified
 - `./gradlew :app:assembleDebug` BUILD SUCCESSFUL
 
+### Phase D — Package migration (Sprint 2-4)
+- Sprint 2: Moved history(2), webview(1), live(3) — Commits: 9d21058d, e8c9fde3, 03308e90
+- Sprint 3: Moved cron(4), icloud(6), office(5+radar) — Commits: f96ec95f, f56b616c
+- Sprint 2+: Moved system(2), task(4), prompts(1), miniapp(12) — Commit: 25f0cb19
+- Sprint 4: Moved terminal(4), modelcouncil(6), workspace(2), subagent(9) — Commit: f60f96ba
+- Sprint 4: Moved board(54), tools(33), webmount(70) — Commit: 234f04dc
+
+**Result: 227 files in app.amber.* (within :app) + 26 in new modules = 253 total migrated**
+**Remaining in legacy: 563 files (UI pages, data models, DI, services — not agent subsystems)**
+**All 13 agent subsystems fully relocated to app.amber.feature.***
+
+### Full APK verified
+- `./gradlew :app:assembleDebug` BUILD SUCCESSFUL
+
 ## Remaining Work
 
 ### Phase C behavior switch (partial)
-- TC.3: ChatService accepts AgentRunner but sendMessage() still uses direct path. Need feature flag to switch.
+- TC.3: ChatService has AgentRunner param but sendMessage() still uses direct path
 - TC.4: ChatPage UI observe(runId) migration
-- TB.4: DeepReadSurface ViewModel observe(runId) migration
 
-### Phase D module extraction (blocked on shared infra)
-- Agent subsystems depend on app-internal types (SettingsAggregator, AppScope). Need :core:app-infra module first.
+### Phase D remaining
+- runtime/ sub-package (5 files: AgentToolDispatcher, PermissionDecisionResolver, etc.) — too many cross-references to move atomically
+- Root agent files (5: notifier, receiver, models, activity store, ToolFailure)
 
 ### Phase E legacy cleanup
-- TE.1: 781 files in me.rerere.* vs 9 in app.amber.*
-- TE.2: highlight/document package renaming
+- TE.1: 563 files remain in me.rerere.* (non-agent: UI, data models, DI, services)
+- TE.2: highlight/document package renaming (depends on JNI crate migration)
