@@ -378,7 +378,140 @@ the helpers test runs from :core:settings.
   (AmberAgentToolDefaults, ReplaceRegexesPreflight, InProcessAgentRunner,
    KernelRunObserve, ProjectorProperty, SettingsAggregatorHelpers) all green.
 
-### Gate Review
+### Gate Review — Task 1: GREEN
 
-Running parallel Code Review + Chain Integrity Audit subagents (per
-protocol) after this progress entry lands. Findings logged separately.
+Both parallel subagents returned with **P3+ = 0**:
+
+- **Code Review** (P4 only — commit-message understatement; ~12 internals
+  widened vs the message's "6 DEFAULT_*_PROMPT" wording. P5 — log tag
+  hardcoded vs constant, duplicate toMutableStateFlow definitions across
+  :app & :core:settings both internal so no clash). Verified ADR-0001 §3
+  FQN preserved, wire format intact, smart-cast captures minimum-necessary.
+- **Chain Integrity Audit** verified: cycle truly broken (zero
+  `app.amber.feature.*` non-`:*:api` imports in PreferencesStore), all
+  callers of moved Settings.* extensions resolve, Context.settingsStore
+  visibility correct, V1Migration FQN preserved at new physical location,
+  DataStore wiring intact (DataSourceModule.kt imports unchanged),
+  no stranded internals, allowlist + guard script clean.
+
+Task 1 complete. Verdict: GREEN.
+
+## Session 8 (continued) — Task 2: 高耦合 feature 模块物理拆分
+
+Following Task 1 same audit-driven pattern. Five commits:
+
+### T2.1 (commit b87ea6bc) — :feature:runtime:api
+5 leaf files from `app.amber.feature.runtime` (AgentLoopBudgetPrompt,
+AgentRuntimeModels, AgentToolActivityStore, ToolFailure,
+ToolInvocationHooks) + extracted `enum class ToolInvocationContext` from
+PermissionDecisionResolver.kt as its own file. ToolFailure.toAgentToolFailurePayload
+widened to public for :app callers. ToolInvocationHooks rolled back to
+:app because it referenced PermissionDecision (still :app).
+
+### T2.2 (commit ec4ff1b6) — :feature:tools:api
+3 core types: ToolRegistry (593 LOC: ToolMetadata, ToolInvocationPolicy,
+ToolRegistry, ToolRisk, invocationPolicy extensions) + ToolSearch
+(384 LOC: createToolSearchTool + TOOL_SEARCH_TOOL_NAME) +
+ToolProfileFilter (needed to keep `Tool.category()` internal — same
+module). Inlined `FILE_READ_HARD_MAX_CHARS = 262_144` at one call site
+to avoid pulling WorkspaceTools.
+
+### T2.3 (commit b7f7e2bc) — :feature:terminal (full, 4 files)
+First full feature module extraction. AlpineRuntimeInstaller +
+TerminalRuntime + TerminalRuntimeInternals + TermuxCommandResultReceiver.
+BuildConfig.VERSION_CODE decoupled via ctor injection (typed as String
+because :app overrides VERSION_CODE as String via custom buildConfigField).
+Build config: Android lib, deps on api + runtime:api + task + workspace
++ settings + koin-android. AppScope FQN swap.
+
+### T2.4 (commit 3cccffc1) — :feature:modelcouncil (full, 5 files)
+ModelCouncilManager + Validator + Provider/ExternalCli runners +
+ExternalCliToolRegistry. 5 internal symbols widened in
+ExternalCliToolRegistry.kt for :app's ModelCouncilTools + SubAgentTools.
+
+### T2.5 (commit f2d10e8a) — :feature:system + :feature:tools:access (14 files)
+- :feature:system (2 files): AgentPermissionBroker (BuildConfig.DEBUG
+  via ctor) + AmberNotificationListenerService.
+- :feature:tools:access (13 files): 12 Tool-factory leaves + SystemAccessShared.
+  All `internal fun create*Tool` widened to public so :app's SystemAccessTools
+  registry can still call them.
+
+### Task 2 state
+
+7 new modules (runtime:api, tools:api, terminal, modelcouncil, system,
+tools:access, + earlier inception of subagent:api/modelcouncil:api/
+office:api as Task 1 byproducts). 42 physical modules total. 617 files
+in `app.amber.*` (down from 670 at session 7 start; 53 net moved out).
+
+### Task 2 structural ceiling
+
+Remaining feature/* files still in :app that can't extract today:
+- **board (~52 files)** — uses GenerationHandler/McpManager (:app
+  unextracted) + Room DAOs/entities (ADR-0001 frozen — must stay in :app)
+- **subagent (~8 files left)** — uses GenerationHandler (would need
+  Transformer.kt extracted first, which needs BuildConfig.DEBUG decoupled
+  and has its own cascade)
+- **tools (~17 files left)** — Many use BuildConfig.DEBUG +
+  me.rerere.rikkahub.R (resource files cannot move out of :app), plus
+  GenerationHandler for AgentToolSetFactory etc.
+
+The remaining work needs `:core:ai:generation` extracted (interface +
+data types for GenerationHandler/Chunk), which in turn needs
+Transformer hierarchy out. Multi-commit cascade. Documented as
+follow-up sprint.
+
+### Task 2 Gate Review
+
+Pending — recommend running after Task 4 (Rust check) so the partial
+state stays current.
+
+## Session 8 (continued) — Task 4: Rust environment check
+
+Per directive: detect cargo + cargo-ndk, decide whether to wire
+UniFFI / sync-crypto crate.
+
+**Environment**: cargo 1.95.0 + cargo-ndk 4.1.2 + Android NDK
+27.0.12077973 — all present. 7 existing native crates compile clean
+(highlight-parser, markdown-parser, regex-transformer, office-parsers,
+reader-extractor, jni-common, tokenizer).
+
+**Phase A.5 markdown/regex wiring**: already done in prior PR #10
+(commit 894bf553). NativePathBootstrap exists at
+app/.../core/nativepath/NativePathBootstrap.kt; NativePathPrefs in
+:core:settings handles user-facing flags + RC kill switch.
+
+**TA5.9 sync-crypto crate**: NOT done. Scope is multi-hour (write Rust
+AES-GCM or age encryption + JNI bridge + Gradle wiring + replace
+existing Kotlin SyncCrypto.kt). Deferred — documented as remaining
+work needing dedicated implementation pass.
+
+**Task 4 conclusion**: toolchain GREEN, no action needed in this
+sprint beyond the documented sync-crypto follow-up. Existing 4-path
+Rust wiring (office/highlight/regex/markdownHtml) per RUST_REFACTOR_HANDOFF.md
+is fully on by default per personal-use config; kill switch retained.
+
+## Tasks 5 & 6 — status
+
+- **Task 5 (TC.4 ChatPage Compose split)**: multi-day UI surgery
+  (16 collectAsState → 4 sub-Composables). Documented as separate sprint.
+  Not blocking the structural refactor goals.
+- **Task 6 (TE.1 ≤1 whitelist, TE.2 highlight/document migration)**:
+  - TE.1: structurally impossible per ADR-0001 §3 (81 frozen FQN files
+    in `me.rerere.*` — Room schema + JNI symbols + manifest namespace +
+    broadcast actions + V1Migration). Per the new goal: 标注"已达理论下限
+    81 文件"，不强求 ≤5. Done.
+  - TE.2: blocked on Task 4 UniFFI migration of legacy JNI crates
+    (highlight-parser + markdown-parser use raw JNI symbols
+    `Java_me_rerere_*`). Documented as remaining work.
+
+## Final session 8 numbers
+
+- **Commits this session**: 11 (T1.1-T1.8 + 3 Task 2 batches + 1 progress)
+- **Physical Gradle modules**: 42 (was 25 at session start — +17 new)
+- **Files in app.amber.*** : 617 (was 670 — 53 net moved out)
+- **Files in me.rerere.*** : 80 (V1Migration moved out of :app but FQN
+  preserved in :core:settings; was 81)
+- **Build green**: :app:assembleDebug + kernel unit tests +
+  SettingsAggregatorHelpersTest all green
+- **State guard**: check-refactor-state.sh clean (modules ≥19,
+  app.amber files ≥200, allowlist clean, kernel files present)
