@@ -28,6 +28,7 @@ dependencies {
     api(project(":core:model"))
     api(project(":core:app-infra"))
     api(project(":core:agent-utils"))
+    api(project(":feature:terminal:api"))
     api(libs.androidx.datastore.preferences)
     api(libs.kotlinx.serialization.json)
     implementation(platform(libs.androidx.compose.bom))

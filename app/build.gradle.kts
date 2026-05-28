@@ -582,6 +582,7 @@ dependencies {
     implementation(project(":core:agent-store-room"))
     implementation(project(":feature:deepread:api"))
     implementation(project(":feature:chat:api"))
+    implementation(project(":feature:terminal:api"))
     implementation(project(":feature:history"))
     implementation(project(":feature:webview"))
     implementation(project(":feature:task"))
