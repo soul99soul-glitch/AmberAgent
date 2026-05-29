@@ -3,10 +3,13 @@ package app.amber.core.ai.generative
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 sealed interface GenerativeWidgetSegment {
     data class Text(val content: String) : GenerativeWidgetSegment
@@ -69,6 +72,9 @@ object GenerativeWidgetParser {
         partialFenceEndRegex.find(text)?.let { text.substring(it.range.first) }
 
     fun containsWidgetFence(content: String): Boolean = markerRegex.containsMatchIn(content)
+
+    fun containsFullHtmlDeckPayload(content: String): Boolean =
+        parseStandaloneFullHtmlWidget(content) != null
 
     fun hasRenderableWidget(content: String): Boolean =
         parse(content, streaming = false).any { it is GenerativeWidgetSegment.Widget }
@@ -140,7 +146,9 @@ object GenerativeWidgetParser {
             return segments
         }
         appendTextSegment(segments, trailing)
-        return if (foundWidgetMarker) segments else listOf(GenerativeWidgetSegment.Text(content))
+        if (foundWidgetMarker) return segments
+        parseStandaloneFullHtmlWidget(content)?.let { return listOf(it) }
+        return listOf(GenerativeWidgetSegment.Text(content))
     }
 
     private fun appendTextSegment(segments: MutableList<GenerativeWidgetSegment>, content: String) {
@@ -151,10 +159,8 @@ object GenerativeWidgetParser {
 
     private fun parseWidgetJson(jsonText: String): GenerativeWidgetSegment.Widget? {
         val parsed = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
-        val rendererRaw = parsed?.stringOrNull("renderer")
-        val renderer = rendererRaw?.lowercase()?.takeIf {
-            it in setOf("html", "chart", "diagram", "vchart", "slides", GuizangHtmlDeckValidator.RENDERER)
-        }
+        val renderer = normalizeRenderer(parsed?.stringOrNull("renderer"))
+        recoverFullHtmlWidget(parsed, jsonText)?.let { return it }
         // If renderer field is present but unrecognized (e.g. model emits "svg" / "structure" /
         // "flowchart"), fall back to rendering widget_code as plain html instead of rejecting the
         // whole widget. The sanitizer still strips unsafe content; rejecting outright leaves the
@@ -208,7 +214,8 @@ object GenerativeWidgetParser {
         // For renderer-based widgets (slides, vchart) that have no widget_code during streaming,
         // generate a placeholder card so the user sees progress instead of a generic loading spinner.
         val renderer = extractJsonStringValue(jsonText, "renderer", allowUnclosed = true)
-            ?.lowercase()?.takeIf { it in setOf("vchart", "slides", GuizangHtmlDeckValidator.RENDERER) }
+            ?.let(::normalizeRenderer)
+            ?.takeIf { it in setOf("vchart", "slides", GuizangHtmlDeckValidator.RENDERER) }
         if (renderer != null) {
             val title = normalizeWidgetTitle(extractJsonStringValue(jsonText, "title", allowUnclosed = true))
             // For slides, try to extract completed slide objects from the partial JSON array
@@ -259,6 +266,147 @@ object GenerativeWidgetParser {
         return null
     }
 
+    private fun normalizeRenderer(rendererRaw: String?): String? {
+        val lower = rendererRaw?.lowercase() ?: return null
+        return when {
+            GuizangHtmlDeckValidator.isRenderer(lower) -> GuizangHtmlDeckValidator.RENDERER
+            lower in setOf("html", "chart", "diagram", "vchart", "slides") -> lower
+            else -> null
+        }
+    }
+
+    private fun parseStandaloneFullHtmlWidget(content: String): GenerativeWidgetSegment.Widget? {
+        val body = content.trim().singleFenceBodyOrSelf()
+        if (body.isBlank()) return null
+        if (body.startsWith("{")) {
+            val jsonEnd = findJsonEnd(body, 0)
+            if (jsonEnd >= 0) {
+                parseWidgetJson(body.substring(0, jsonEnd + 1))?.let { widget ->
+                    if (widget.renderer == GuizangHtmlDeckValidator.RENDERER) return widget
+                }
+            }
+        }
+        return body
+            .takeIf(::looksLikeStandaloneHtml)
+            ?.let { html ->
+                buildFullHtmlWidget(
+                    parsed = null,
+                    title = null,
+                    html = html,
+                    coverHtml = null,
+                    complete = true,
+                )
+            }
+    }
+
+    private fun recoverFullHtmlWidget(
+        parsed: JsonObject?,
+        jsonText: String,
+    ): GenerativeWidgetSegment.Widget? {
+        if (parsed == null) return null
+        val title = parsed.stringOrNull("title")
+            ?: extractJsonStringValue(jsonText, "title", allowUnclosed = false)
+        val rawWidgetCode = parsed.stringOrNull("widget_code")
+            ?: extractJsonStringValue(jsonText, "widget_code", allowUnclosed = false)
+        val html = fullHtmlCandidates(parsed, jsonText, rawWidgetCode)
+            .firstOrNull { candidate -> GuizangHtmlDeckValidator.validateHtml(candidate).valid }
+            ?: return null
+        val cover = rawWidgetCode?.takeIf(::isStaticWidgetCover)
+
+        return buildFullHtmlWidget(
+            parsed = parsed,
+            title = title,
+            html = html,
+            coverHtml = cover,
+            complete = true,
+        )
+    }
+
+    private fun fullHtmlCandidates(
+        parsed: JsonObject,
+        jsonText: String,
+        rawWidgetCode: String?,
+    ): List<String> = buildList {
+        (parsed["spec"] as? JsonObject)
+            ?.stringOrNull("html")
+            ?.let(::add)
+        parsed.stringOrNull("html")?.let(::add)
+        extractJsonStringValue(jsonText, "html", allowUnclosed = false)?.let(::add)
+        rawWidgetCode
+            ?.takeIf(::looksLikeStandaloneHtml)
+            ?.let(::add)
+    }
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+
+    private fun buildFullHtmlWidget(
+        parsed: JsonObject?,
+        title: String?,
+        html: String,
+        coverHtml: String?,
+        complete: Boolean,
+    ): GenerativeWidgetSegment.Widget {
+        val normalizedTitle = normalizeWidgetTitle(title)
+        val specObject = buildJsonObject {
+            normalizedTitle?.let { put("title", it) }
+            put("html", html)
+            put("source", parsed?.jsonObjectOrNull("spec")?.stringOrNull("source")
+                ?: parsed?.stringOrNull("source")
+                ?: "full-html-adapter")
+            put("allowRemoteImages", parsed.booleanOrDefaultFromSpec("allowRemoteImages", true))
+            put("allowRemoteFonts", parsed.booleanOrDefaultFromSpec("allowRemoteFonts", true))
+        }
+        val preview = coverHtml ?: GenerativeWidgetRenderer.render(GuizangHtmlDeckValidator.RENDERER, specObject).orEmpty()
+        return GenerativeWidgetSegment.Widget(
+            title = normalizedTitle,
+            widgetCode = preview,
+            complete = complete,
+            renderer = GuizangHtmlDeckValidator.RENDERER,
+            actions = parseActions(parsed),
+            specJson = specObject.toString(),
+        )
+    }
+
+    private fun JsonObject?.booleanOrDefaultFromSpec(key: String, default: Boolean): Boolean =
+        this?.jsonObjectOrNull("spec")?.booleanOrNull(key)
+            ?: this?.booleanOrNull(key)
+            ?: default
+
+    private fun JsonObject.jsonObjectOrNull(key: String): JsonObject? =
+        runCatching { this[key]?.jsonObject }.getOrNull()
+
+    private fun JsonObject.booleanOrNull(key: String): Boolean? =
+        runCatching { this[key]?.jsonPrimitive?.booleanOrNull }.getOrNull()
+
+    private fun isStaticWidgetCover(code: String): Boolean {
+        val compact = code.trimStart()
+        return compact.startsWith("<svg", ignoreCase = true) &&
+            compact.length <= 32_000 &&
+            isRenderableWidgetCode(compact, complete = true)
+    }
+
+    private fun looksLikeStandaloneHtml(value: String): Boolean {
+        val lower = value.take(2_000).lowercase()
+        return "<!doctype html" in lower ||
+            "<html" in lower ||
+            "<div id=\"deck\"" in lower ||
+            "<div id='deck'" in lower ||
+            "class=\"slides\"" in lower ||
+            "class='slides'" in lower ||
+            "class=\"deck\"" in lower ||
+            "class='deck'" in lower
+    }
+
+    private fun String.singleFenceBodyOrSelf(): String {
+        if (!startsWith("```")) return this
+        val firstLineEnd = indexOf('\n')
+        if (firstLineEnd < 0) return removePrefix("```").trimStart()
+        val body = substring(firstLineEnd + 1)
+        val endFence = body.lastIndexOf("```")
+        return if (endFence >= 0) body.substring(0, endFence).trim() else body.trim()
+    }
+
     private fun normalizeWidgetTitle(title: String?): String? =
         title
             ?.compactSpaces()
@@ -287,13 +435,13 @@ object GenerativeWidgetParser {
         requirement: GenerativeUiWidgetRequirement,
     ): String? {
         val renderer = widget.renderer.lowercase()
-        if (requirement.expectGuizangHtml) {
+        if (requirement.expectFullHtmlDeck) {
             if (renderer != GuizangHtmlDeckValidator.RENDERER) {
-                return "expected renderer \"${GuizangHtmlDeckValidator.RENDERER}\" for guizang deck, got \"$renderer\""
+                return "expected renderer \"${GuizangHtmlDeckValidator.RENDERER}\" for HTML deck, got \"$renderer\""
             }
-            val specJson = widget.specJson ?: return "guizang_html requires spec.html"
+            val specJson = widget.specJson ?: return "${GuizangHtmlDeckValidator.RENDERER} requires spec.html"
             val validation = GuizangHtmlDeckValidator.validateSpecJson(specJson)
-            return if (validation.valid) null else validation.reason ?: "invalid guizang_html spec"
+            return if (validation.valid) null else validation.reason ?: "invalid ${GuizangHtmlDeckValidator.RENDERER} spec"
         }
         if (requirement.expectSlides) {
             return when (renderer) {
@@ -304,9 +452,9 @@ object GenerativeWidgetParser {
                 }
 
                 GuizangHtmlDeckValidator.RENDERER -> {
-                    val specJson = widget.specJson ?: return "guizang_html requires spec.html"
+                    val specJson = widget.specJson ?: return "${GuizangHtmlDeckValidator.RENDERER} requires spec.html"
                     val validation = GuizangHtmlDeckValidator.validateSpecJson(specJson)
-                    if (validation.valid) null else validation.reason ?: "invalid guizang_html spec"
+                    if (validation.valid) null else validation.reason ?: "invalid ${GuizangHtmlDeckValidator.RENDERER} spec"
                 }
 
                 else -> "expected renderer \"slides\" or \"${GuizangHtmlDeckValidator.RENDERER}\", got \"$renderer\""

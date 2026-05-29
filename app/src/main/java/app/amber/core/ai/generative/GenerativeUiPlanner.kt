@@ -53,7 +53,7 @@ enum class VisualRoute {
 data class GenerativeUiWidgetRequirement(
     val required: Boolean,
     val expectSlides: Boolean = false,
-    val expectGuizangHtml: Boolean = false,
+    val expectFullHtmlDeck: Boolean = false,
 ) {
     companion object {
         val None = GenerativeUiWidgetRequirement(required = false)
@@ -106,13 +106,13 @@ object GenerativeUiPlanner {
                     if (toolMediated) {
                         appendLine("The user asked for a presentation/deck but also requested tools, skills, subagents, files, or external context.")
                         appendLine("Use the requested tool/skill/subagent first. Do NOT create a widget for routing, progress, plan, or status summaries.")
-                        appendLine("After the real tool/skill/subagent result exists, the final artifact must be a show-widget deck preview in the chat. Do NOT turn the deck into a MiniApp, a standalone webpage, or a generic HTML app.")
+                        appendLine("After the real tool/skill/subagent result exists, the final artifact must be one full_html show-widget deck preview in the chat. Do NOT turn the deck into a MiniApp, a standalone webpage, or an ordinary HTML widget.")
                     } else {
-                        appendLine("The user asked for a multi-slide presentation / deck. Emit a show-widget RENDERER (slides spec) — NOT an inline SVG.")
+                        appendLine("The user asked for a multi-slide presentation / deck. Emit one show-widget with renderer \"${GuizangHtmlDeckValidator.RENDERER}\" and a complete HTML deck in spec.html, NOT an inline SVG.")
                     }
-                    appendLine("If the request mentions guizang, guizang-ppt-skill, Swiss International style from that skill, Motion/WebGL/live deck, or guizang-like PPT, use renderer \"guizang_html\" by default. This is the normal guizang PPT path, not an optional exception.")
-                    appendLine("For guizang_html, spec.html must use `<div id=\"deck\">` with `<section class=\"slide ...\">` pages and AmberAgent local Motion/Lucide runtime URLs, not CDN scripts.")
-                    appendLine("Pick a sensible deck length (4-8 slides) unless the user specified a count. Use the slide spec format the renderer expects.")
+                    appendLine("All PPT/deck HTML previews use renderer \"${GuizangHtmlDeckValidator.RENDERER}\". This is the single full-featured HTML path for normal decks and guizang-style dynamic PPTs.")
+                    appendLine("For full_html, spec.html must use `<div id=\"deck\">` with `<section class=\"slide ...\">` pages and AmberAgent local Motion/Lucide runtime URLs when those libraries are needed, not CDN scripts.")
+                    appendLine("Pick a sensible deck length (4-8 slides) unless the user specified a count. Use a complete HTML document with CSS and any needed inline JS.")
                     appendLine("Keep slide content concise; each slide is one idea.")
                 }
 
@@ -183,7 +183,7 @@ object GenerativeUiPlanner {
             VisualRoute.SLIDES -> GenerativeUiWidgetRequirement(
                 required = true,
                 expectSlides = true,
-                expectGuizangHtml = isGuizangDeckRequest(text),
+                expectFullHtmlDeck = true,
             )
 
             VisualRoute.DIAGRAM_WIDGET -> {

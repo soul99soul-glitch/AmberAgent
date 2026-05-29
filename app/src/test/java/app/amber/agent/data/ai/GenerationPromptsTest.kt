@@ -52,18 +52,15 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains("renderer/spec"))
         assertTrue(prompt.contains("Do not call eval_javascript"))
         assertTrue(prompt.contains("Do NOT create widgets for tool routing"))
-        assertTrue(prompt.contains("guizang-ppt-skill"))
-        assertTrue(prompt.contains("guizang-ppt-skill DEFAULT"))
         assertFalse(prompt.contains("high-fidelity exception"))
-        assertTrue(prompt.contains("guizang_html"))
+        assertTrue(prompt.contains("full_html"))
+        assertTrue(prompt.contains("single full-featured HTML deck path"))
         assertTrue(prompt.contains("Do NOT generate or save an AmberAgent MiniApp for PPT requests."))
         assertTrue(prompt.contains("""<div id="deck">"""))
         assertTrue(prompt.contains(GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL))
         assertTrue(prompt.contains(GuizangHtmlDeckValidator.LOCAL_MOTION_URL))
-        assertTrue(prompt.contains("Slides Spec V2"))
-        assertTrue(prompt.contains("cover, section, quote, split, metrics, timeline"))
-        assertTrue(prompt.contains("fontPack"))
-        assertTrue(prompt.contains("magazine|swiss"))
+        assertTrue(prompt.contains("Reveal-style"))
+        assertTrue(prompt.contains("canvas, WebGL, SVG, Motion animations"))
     }
 
     @Test

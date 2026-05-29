@@ -890,7 +890,7 @@ private suspend fun shareGuizangDeckArchive(
     coverHtml: String,
     toaster: ToasterState,
 ) {
-    toaster.show("正在打包 Live HTML…")
+    toaster.show("正在打包全功能 HTML…")
     val archive = runCatching {
         withContext(Dispatchers.IO) {
             createGuizangDeckArchive(context, title, specJson, coverHtml)
@@ -905,11 +905,11 @@ private suspend fun shareGuizangDeckArchive(
             type = "application/zip"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_TITLE, archive.name)
-            putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "Guizang Live HTML")
+            putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "Full HTML Deck")
             clipData = ClipData.newUri(context.contentResolver, archive.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        val chooser = Intent.createChooser(intent, "分享 Live HTML ZIP")
+        val chooser = Intent.createChooser(intent, "分享全功能 HTML ZIP")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(chooser)
     }.onSuccess {
@@ -927,25 +927,25 @@ private fun createGuizangDeckArchive(
 ): File {
     val now = System.currentTimeMillis()
     val safeTitle = safeArchiveName(title)
-    val dir = File(context.cacheDir, "guizang-html-shares").apply { mkdirs() }
+    val dir = File(context.cacheDir, "full-html-shares").apply { mkdirs() }
     dir.listFiles()
         ?.filter { it.isFile && now - it.lastModified() > 2 * 24 * 60 * 60 * 1000L }
         ?.forEach { it.delete() }
-    val archive = File(dir, "AmberAgent_${safeTitle}_guizang_$now.zip")
+    val archive = File(dir, "AmberAgent_${safeTitle}_full_html_$now.zip")
     val deck = GuizangHtmlDeckValidator.normalizeSpecJson(specJson)
-        ?: error("Guizang HTML 数据格式不正确，无法分享")
+        ?: error("全功能 HTML 数据格式不正确，无法分享")
     val validation = GuizangHtmlDeckValidator.validateDeck(deck)
     if (!validation.valid) {
-        error("Guizang HTML 不安全或过大，无法分享: ${validation.reason.orEmpty()}")
+        error("全功能 HTML 不安全或过大，无法分享: ${validation.reason.orEmpty()}")
     }
     val exportHtml = GuizangHtmlDeckValidator.rewriteRuntimeUrlsForArchive(deck.html)
     ZipOutputStream(FileOutputStream(archive)).use { zip ->
         zip.writeTextEntry(
             name = "manifest.json",
             text = JSONObject()
-                .put("type", "amberagent-guizang-html")
-                .put("title", title?.takeIf { it.isNotBlank() } ?: "Guizang Live HTML")
-                .put("source", deck.source ?: "guizang_html")
+                .put("type", "amberagent-full-html")
+                .put("title", title?.takeIf { it.isNotBlank() } ?: "Full HTML Deck")
+                .put("source", deck.source ?: GuizangHtmlDeckValidator.RENDERER)
                 .put("allow_remote_images", deck.allowRemoteImages)
                 .put("allow_remote_fonts", deck.allowRemoteFonts)
                 .put("created_at_ms", now)
@@ -957,9 +957,9 @@ private fun createGuizangDeckArchive(
         zip.writeTextEntry(
             "README.md",
             """
-            # ${title?.takeIf { it.isNotBlank() } ?: "Guizang Live HTML"}
+            # ${title?.takeIf { it.isNotBlank() } ?: "Full HTML Deck"}
 
-            - `index.html`: Guizang live HTML deck, with Motion One and Lucide URLs rewritten to local files.
+            - `index.html`: Full HTML deck, with Motion One and Lucide URLs rewritten to local files.
             - `assets/motion.min.js`: bundled Motion One runtime.
             - `assets/lucide.min.js`: bundled Lucide runtime.
             - `cover.svg`: optional chat preview cover.
@@ -1253,7 +1253,7 @@ private fun GuizangHtmlDeckWebView(
 
     if (!validated.valid || deck == null) {
         Text(
-            text = "Guizang HTML 校验失败: ${validated.reason.orEmpty()}",
+            text = "全功能 HTML 校验失败: ${validated.reason.orEmpty()}",
             modifier = modifier.padding(16.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
@@ -1387,7 +1387,7 @@ private fun GuizangHtmlDeckWebView(
                     val runtimeHtml = GuizangHtmlDeckValidator.prepareRuntimeHtml(deck.html)
                     post {
                         loadDataWithBaseURL(
-                            "https://amberagent.local/guizang-deck/",
+                            "https://amberagent.local/full-html-deck/",
                             runtimeHtml,
                             "text/html",
                             "utf-8",

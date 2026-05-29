@@ -130,5 +130,9 @@ class GuizangHtmlDeckValidatorTest {
 
         val deckClass = """<main class="deck"><section class="slide">One</section></main>"""
         assertTrue(GuizangHtmlDeckValidator.prepareRuntimeHtml(deckClass).contains("id=\"deck\""))
+
+        val revealStyle = """<div class="slides"><section>One</section><section>Two</section></div>"""
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(revealStyle).valid)
+        assertTrue(GuizangHtmlDeckValidator.prepareRuntimeHtml(revealStyle).contains("id=\"deck\""))
     }
 }

@@ -16,12 +16,12 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object GenerativeWidgetRenderer {
     fun render(renderer: String?, spec: JsonElement?): String? {
-        if (renderer?.lowercase() == GuizangHtmlDeckValidator.RENDERER) {
-            val specObject = spec as? JsonObject ?: return renderErrorSvg("guizang_html: no spec")
+        if (GuizangHtmlDeckValidator.isRenderer(renderer)) {
+            val specObject = spec as? JsonObject ?: return renderErrorSvg("full_html: no spec")
             val title = specObject.string("title")
                 ?: specObject.string("source")
-                ?: "Guizang Live Deck"
-            return renderGuizangPreview(title)
+                ?: "Full HTML Deck"
+            return renderFullHtmlPreview(title)
         }
         if (renderer?.lowercase() == "slides") {
             val specArray = when (spec) {
@@ -60,7 +60,7 @@ object GenerativeWidgetRenderer {
         """.trimIndent()
     }
 
-    private fun renderGuizangPreview(title: String): String {
+    private fun renderFullHtmlPreview(title: String): String {
         val safeTitle = escape(title).take(56)
         return """
             <svg width="100%" viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">
@@ -73,9 +73,9 @@ object GenerativeWidgetRenderer {
               </defs>
               <rect width="680" height="220" rx="16" fill="url(#g)"/>
               <rect x="26" y="24" width="628" height="172" rx="12" fill="rgba(255,255,255,.13)" stroke="rgba(255,255,255,.35)"/>
-              <text x="52" y="68" font-size="13" letter-spacing="3" fill="rgba(255,255,255,.76)">GUIZANG LIVE HTML</text>
+              <text x="52" y="68" font-size="13" letter-spacing="3" fill="rgba(255,255,255,.76)">FULL HTML DECK</text>
               <text x="52" y="116" font-size="28" font-weight="700" fill="#ffffff">$safeTitle</text>
-              <text x="52" y="154" font-size="14" fill="rgba(255,255,255,.78)">WebGL · Motion One · fullscreen deck</text>
+              <text x="52" y="154" font-size="14" fill="rgba(255,255,255,.78)">Canvas · Motion · fullscreen deck</text>
               <circle cx="594" cy="64" r="20" fill="rgba(255,255,255,.18)"/>
               <circle cx="594" cy="64" r="8" fill="#fff"/>
             </svg>

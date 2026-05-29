@@ -7,19 +7,23 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * Validator and runtime URL normalizer for the guizang HTML deck path.
+ * Validator and runtime URL normalizer for the full-featured HTML deck path.
  *
- * This deliberately does not share the normal widget sanitizer: guizang decks need their
+ * This deliberately does not share the normal widget sanitizer: rich HTML decks need their
  * original scripts, canvas, WebGL, and Motion One runtime to stay visually faithful. The
  * boundary here is instead a dedicated fullscreen WebView with no native JS bridge, a small
  * known runtime allowlist, and network filtering in the WebViewClient.
  */
 object GuizangHtmlDeckValidator {
-    const val RENDERER = "guizang_html"
+    const val RENDERER = "full_html"
+    const val LEGACY_RENDERER = "guizang_html"
     const val MAX_HTML_BYTES = 1_500_000
-    const val LOCAL_RUNTIME_BASE = "https://amberagent.local/guizang/"
+    const val LOCAL_RUNTIME_BASE = "https://amberagent.local/full-html/"
+    const val LEGACY_LOCAL_RUNTIME_BASE = "https://amberagent.local/guizang/"
     const val LOCAL_MOTION_URL = "${LOCAL_RUNTIME_BASE}motion.min.js"
     const val LOCAL_LUCIDE_URL = "${LOCAL_RUNTIME_BASE}lucide.min.js"
+    const val LEGACY_LOCAL_MOTION_URL = "${LEGACY_LOCAL_RUNTIME_BASE}motion.min.js"
+    const val LEGACY_LOCAL_LUCIDE_URL = "${LEGACY_LOCAL_RUNTIME_BASE}lucide.min.js"
     const val MOTION_ASSET_PATH = "generative-libs/guizang/motion.min.js"
     const val LUCIDE_ASSET_PATH = "generative-libs/guizang/lucide.min.js"
 
@@ -45,6 +49,11 @@ object GuizangHtmlDeckValidator {
         LUCIDE(LUCIDE_ASSET_PATH, "application/javascript"),
     }
 
+    fun isRenderer(renderer: String?): Boolean {
+        val lower = renderer?.lowercase() ?: return false
+        return lower == RENDERER || lower == LEGACY_RENDERER
+    }
+
     private val slideElementRegex = Regex(
         """<(?:section|article|div)\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bslide\b[^"]*"|'[^']*\bslide\b[^']*'|[^\s>]*\bslide\b[^\s>]*)|\bdata-slide(?:\s|=|>)))[^>]*>""",
         RegexOption.IGNORE_CASE,
@@ -54,9 +63,11 @@ object GuizangHtmlDeckValidator {
         RegexOption.IGNORE_CASE,
     )
     private val deckContainerWithoutIdRegex = Regex(
-        """<(?:(?:div)|(?:main))\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bdeck\b[^"]*"|'[^']*\bdeck\b[^']*'|[^\s>]*\bdeck\b[^\s>]*)|\bdata-(?:guizang-)?deck(?:\s|=|>)))(?![^>]*\bid\s*=)[^>]*>""",
+        """<(?:(?:div)|(?:main))\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\b(?:deck|slides)\b[^"]*"|'[^']*\b(?:deck|slides)\b[^']*'|[^\s>]*\b(?:deck|slides)\b[^\s>]*)|\bdata-(?:guizang-)?deck(?:\s|=|>)))(?![^>]*\bid\s*=)[^>]*>""",
         RegexOption.IGNORE_CASE,
     )
+    private val deckIdRegex = Regex("""\bid\s*=\s*(['"])deck\1""", RegexOption.IGNORE_CASE)
+    private val plainSectionRegex = Regex("""<\s*(?:section|article)\b""", RegexOption.IGNORE_CASE)
     private val blockedPatterns = listOf(
         BlockedPattern(Regex("""file://""", RegexOption.IGNORE_CASE), "file:// is not allowed"),
         BlockedPattern(Regex("""content://""", RegexOption.IGNORE_CASE), "content:// is not allowed"),
@@ -124,7 +135,7 @@ object GuizangHtmlDeckValidator {
             return ValidationResult(false, "html too large: max ${MAX_HTML_BYTES / 1000}KB")
         }
         val runtimeHtml = prepareRuntimeHtml(html)
-        if (!slideElementRegex.containsMatchIn(runtimeHtml)) {
+        if (!hasSlideLikeContent(runtimeHtml)) {
             return ValidationResult(false, "expected at least one slide element: <section class=\"slide ...\">")
         }
         blockedPatterns.firstOrNull { it.regex.containsMatchIn(runtimeHtml) }?.let {
@@ -208,9 +219,11 @@ object GuizangHtmlDeckValidator {
                 Regex("""(?<=['"])(?:\./)?assets/lucide\.min\.js(?=['"])""", RegexOption.IGNORE_CASE),
                 lucideUrl,
             )
+            .replace(LEGACY_LOCAL_MOTION_URL, motionUrl, ignoreCase = true)
+            .replace(LEGACY_LOCAL_LUCIDE_URL, lucideUrl, ignoreCase = true)
 
     private fun normalizeDeckStructure(html: String): String {
-        if (Regex("""\bid\s*=\s*(['"])deck\1""", RegexOption.IGNORE_CASE).containsMatchIn(html)) return html
+        if (deckIdRegex.containsMatchIn(html)) return html
         deckContainerWithoutIdRegex.find(html)?.let { match ->
             val openTag = match.value
             return html.replaceRange(match.range, openTag.dropLast(1) + """ id="deck">""")
@@ -229,23 +242,27 @@ object GuizangHtmlDeckValidator {
         }
     }
 
+    private fun hasSlideLikeContent(html: String): Boolean =
+        slideElementRegex.containsMatchIn(html) ||
+            (deckIdRegex.containsMatchIn(html) && plainSectionRegex.containsMatchIn(html))
+
     private fun validateExternalScripts(html: String): ValidationResult {
         scriptSrcRegex.findAll(html).forEach { match ->
             val url = match.groupValues[2]
             if (runtimeAssetForUrl(url) == null) {
-                return ValidationResult(false, "external script is not a guizang runtime asset: ${url.take(80)}")
+                return ValidationResult(false, "external script is not an allowed full_html runtime asset: ${url.take(80)}")
             }
         }
         dynamicImportRegex.findAll(html).forEach { match ->
             val url = match.groupValues[2]
             if (looksLikeExternalScriptReference(url) && runtimeAssetForUrl(url) == null) {
-                return ValidationResult(false, "dynamic import is not a guizang runtime asset: ${url.take(80)}")
+                return ValidationResult(false, "dynamic import is not an allowed full_html runtime asset: ${url.take(80)}")
             }
         }
         moduleFromRegex.findAll(html).forEach { match ->
             val url = match.groupValues[2]
             if (looksLikeExternalScriptReference(url) && runtimeAssetForUrl(url) == null) {
-                return ValidationResult(false, "module import is not a guizang runtime asset: ${url.take(80)}")
+                return ValidationResult(false, "module import is not an allowed full_html runtime asset: ${url.take(80)}")
             }
         }
         return ValidationResult(true)
@@ -263,6 +280,7 @@ object GuizangHtmlDeckValidator {
     private fun isKnownMotionUrl(url: String): Boolean {
         val lower = url.lowercase()
         return lower == LOCAL_MOTION_URL ||
+            lower == LEGACY_LOCAL_MOTION_URL ||
             lower.endsWith("/assets/motion.min.js") ||
             lower == "./assets/motion.min.js" ||
             lower == "assets/motion.min.js"
@@ -271,6 +289,7 @@ object GuizangHtmlDeckValidator {
     private fun isKnownLucideUrl(url: String): Boolean {
         val lower = url.lowercase()
         return lower == LOCAL_LUCIDE_URL ||
+            lower == LEGACY_LOCAL_LUCIDE_URL ||
             lower.endsWith("/assets/lucide.min.js") ||
             lower == "./assets/lucide.min.js" ||
             lower == "assets/lucide.min.js"

@@ -117,7 +117,14 @@ internal fun AssistantMarkdownBlockOrWidgets(
     onGenerativeWidgetAction: (String) -> Unit,
     onStreamingVisibleFrame: (() -> Unit)? = null,
 ) {
-    if (content.looksLikeMiniAppJsonPayload()) {
+    val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
+    val canRenderWidget = remember(generativeUiEnabled, content) {
+        generativeUiEnabled &&
+            (GenerativeWidgetParser.containsWidgetFence(content) ||
+                GenerativeWidgetParser.containsFullHtmlDeckPayload(content))
+    }
+
+    if (!canRenderWidget && content.looksLikeMiniAppJsonPayload()) {
         MiniAppJsonPreview(
             content = content,
             streaming = streaming,
@@ -126,8 +133,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
         return
     }
 
-    val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
-    if (!generativeUiEnabled || !GenerativeWidgetParser.containsWidgetFence(content)) {
+    if (!canRenderWidget) {
         MarkdownBlock(
             content = content,
             modifier = modifier,

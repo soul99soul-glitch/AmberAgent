@@ -222,46 +222,81 @@ class GenerativeWidgetParserTest {
     }
 
     @Test
-    fun parsesGuizangHtmlRendererAndPreservesSpecHtml() {
+    fun parsesFullHtmlRendererAndPreservesSpecHtml() {
         val html = """
             <!DOCTYPE html>
             <html><body><div id="deck"><section class="slide dark">A</section></div></body></html>
         """.trimIndent()
         val content = """
             ```show-widget
-            {"title":"Live Deck","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text x=\"2\" y=\"12\">G</text></svg>","spec":{"html":${jsonString(html)},"source":"guizang-ppt-skill","allowRemoteImages":true,"allowRemoteFonts":false}}
+            {"title":"Live Deck","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text x=\"2\" y=\"12\">G</text></svg>","spec":{"html":${jsonString(html)},"source":"guizang-ppt-skill","allowRemoteImages":true,"allowRemoteFonts":false}}
             ```
         """.trimIndent()
 
         val widget = GenerativeWidgetParser.parse(content, streaming = false).single() as GenerativeWidgetSegment.Widget
 
-        assertEquals("guizang_html", widget.renderer)
+        assertEquals("full_html", widget.renderer)
         assertTrue(widget.specJson!!.contains("<section class=\\\"slide dark\\\">A</section>"))
         assertTrue(widget.specJson.contains("guizang-ppt-skill"))
         assertTrue(widget.widgetCode.contains("<svg"))
     }
 
     @Test
-    fun qualityGateRequiresGuizangRendererAndValidSpecForGuizangDecks() {
+    fun parsesLegacyGuizangRendererAsFullHtmlAlias() {
+        val html = """<!DOCTYPE html><html><body><div id="deck"><section class="slide">A</section></div></body></html>"""
+        val content = """
+            ```show-widget
+            {"title":"Live Deck","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>G</text></svg>","spec":{"html":${jsonString(html)}}}
+            ```
+        """.trimIndent()
+
+        val widget = GenerativeWidgetParser.parse(content, streaming = false).single() as GenerativeWidgetSegment.Widget
+
+        assertEquals("full_html", widget.renderer)
+        assertTrue(widget.specJson!!.contains("<div id=\\\"deck\\\">"))
+    }
+
+    @Test
+    fun recoversDeckHtmlFromWrongRendererAndStandaloneJson() {
+        val html = """<!DOCTYPE html><html><body><div class="slides"><section>Cover</section></div></body></html>"""
+        val wrongRenderer = """
+            ```show-widget
+            {"title":"Wrong","renderer":"html","widget_code":${jsonString(html)}}
+            ```
+        """.trimIndent()
+        val standaloneMiniAppLike = """
+            {"title":"Deck","description":"x","category":"tool","permissions":[],"html":${jsonString(html)}}
+        """.trimIndent()
+
+        val widget = GenerativeWidgetParser.parse(wrongRenderer, streaming = false).single() as GenerativeWidgetSegment.Widget
+        val standalone = GenerativeWidgetParser.parse(standaloneMiniAppLike, streaming = false).single() as GenerativeWidgetSegment.Widget
+
+        assertEquals("full_html", widget.renderer)
+        assertEquals("full_html", standalone.renderer)
+        assertTrue(GenerativeWidgetParser.containsFullHtmlDeckPayload(standaloneMiniAppLike))
+    }
+
+    @Test
+    fun qualityGateRequiresFullHtmlRendererAndValidSpecForDecks() {
         val requirement = GenerativeUiWidgetRequirement(
             required = true,
             expectSlides = true,
-            expectGuizangHtml = true,
+            expectFullHtmlDeck = true,
         )
         val htmlRenderer = """
             ```show-widget
-            {"title":"Wrong","renderer":"html","widget_code":"<section class=\"slide\">A</section>"}
+            {"title":"Wrong","renderer":"html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>A</text></svg>"}
             ```
         """.trimIndent()
 
         assertTrue(
             GenerativeWidgetParser.widgetQualityIssue(htmlRenderer, requirement)!!
-                .contains("expected renderer \"guizang_html\"")
+                .contains("expected renderer \"full_html\"")
         )
 
         val invalidDeck = """
             ```show-widget
-            {"title":"Bad","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>A</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><main>No slides</main></body></html>"}}
+            {"title":"Bad","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>A</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><main>No slides</main></body></html>"}}
             ```
         """.trimIndent()
 
@@ -272,7 +307,7 @@ class GenerativeWidgetParserTest {
 
         val validDeck = """
             ```show-widget
-            {"title":"Live Deck","renderer":"guizang_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>G</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><div id=\"deck\"><section class=\"slide\">A</section></div></body></html>","source":"guizang-ppt-skill"}}
+            {"title":"Live Deck","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>G</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><div id=\"deck\"><section class=\"slide\">A</section></div></body></html>","source":"guizang-ppt-skill"}}
             ```
         """.trimIndent()
 

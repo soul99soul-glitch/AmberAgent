@@ -881,10 +881,10 @@ class GenerationHandler(
         previousIssue: String?,
     ): String {
         val issue = previousIssue?.takeIf { it.isNotBlank() } ?: "missing required show-widget"
-        if (requirement.expectGuizangHtml) {
+        if (requirement.expectFullHtmlDeck) {
             return """
-                **Visible Guizang Deck Repair**
-                The previous output did not produce a valid guizang_html deck: $issue
+                **Visible Full HTML Deck Repair**
+                The previous output did not produce a valid full_html deck: $issue
                 Reply in visible content immediately with exactly one fenced `show-widget` JSON block. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
                 Required JSON shape:
                 - `renderer` must be `"${GuizangHtmlDeckValidator.RENDERER}"`.
@@ -900,9 +900,9 @@ class GenerationHandler(
                 **Visible Slide Deck Repair**
                 The previous output did not produce a valid deck card: $issue
                 Reply in visible content immediately with exactly one fenced `show-widget` JSON block. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
-                Use renderer `"slides"` unless the user explicitly asked for guizang/Guizang, in which case use `"${GuizangHtmlDeckValidator.RENDERER}"`.
-                For `"slides"`, `spec` must be Slides Spec V2: `{"schemaVersion":2,"style":"magazine|swiss","slides":[{"layout":"cover","title":"...","content":["..."]}]}`.
-                Keep the deck concise, mobile-readable, and valid JSON.
+                Use renderer `"${GuizangHtmlDeckValidator.RENDERER}"`.
+                Put a complete mobile-readable HTML deck in `spec.html` with `<div id="deck">` and `<section class="slide ...">` pages.
+                Keep the deck concise and the JSON valid.
             """.trimIndent()
         }
         return """
@@ -929,8 +929,7 @@ class GenerationHandler(
     ): List<UIMessage> {
         val labels = fallbackWidgetLabels(baseMessages)
         val fallbackText = when {
-            requirement.expectGuizangHtml -> buildLocalGuizangDeckFallbackWidget(labels)
-            requirement.expectSlides -> buildLocalSlidesFallbackWidget(labels)
+            requirement.expectFullHtmlDeck || requirement.expectSlides -> buildLocalFullHtmlDeckFallbackWidget(labels)
             else -> buildLocalGenerativeUiFallbackWidget(labels)
         }
         val lastAssistantIndex = indexOfLast { it.role == MessageRole.ASSISTANT }
@@ -1059,7 +1058,7 @@ class GenerationHandler(
         """.trimIndent()
     }
 
-    private fun buildLocalGuizangDeckFallbackWidget(labels: List<String>): String {
+    private fun buildLocalFullHtmlDeckFallbackWidget(labels: List<String>): String {
         val safeLabels = labels.ifEmpty { listOf("演示预览", "结构", "要点", "结论") }.take(4)
         val title = safeLabels.first().take(24).ifBlank { "演示预览" }
         val html = buildString {
@@ -1074,7 +1073,7 @@ class GenerationHandler(
             safeLabels.forEachIndexed { index, label ->
                 val safe = escapeHtml(label)
                 appendLine("<section class=\"slide ${if (index == 0) "dark" else "light"}\" data-slide=\"${index + 1}\">")
-                appendLine("<div class=\"kicker\">GUIZANG DECK</div><div class=\"rule\"></div>")
+                appendLine("<div class=\"kicker\">FULL HTML DECK</div><div class=\"rule\"></div>")
                 appendLine("<div class=\"title\">$safe</div>")
                 appendLine("<div class=\"body\">${if (index == 0) "移动端可左右滑动浏览。" else safe}</div>")
                 appendLine("</section>")
@@ -1085,7 +1084,7 @@ class GenerationHandler(
             <svg width="100%" viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">
               <rect width="680" height="220" rx="16" fill="#0f172a"/>
               <rect x="32" y="30" width="616" height="160" rx="10" fill="none" stroke="#38bdf8" stroke-width="2"/>
-              <text x="54" y="72" font-size="13" letter-spacing="3" fill="#7dd3fc">GUIZANG DECK</text>
+              <text x="54" y="72" font-size="13" letter-spacing="3" fill="#7dd3fc">FULL HTML DECK</text>
               <text x="54" y="126" font-size="30" font-weight="800" fill="#f8fafc">${escapeHtml(title)}</text>
               <text x="54" y="164" font-size="15" fill="#cbd5e1">fallback live deck preview</text>
             </svg>
