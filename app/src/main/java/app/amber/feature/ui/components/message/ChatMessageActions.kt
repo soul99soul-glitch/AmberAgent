@@ -56,7 +56,6 @@ import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Share04
 import me.rerere.hugeicons.stroke.StopCircle
 import me.rerere.hugeicons.stroke.TextSelection
-import me.rerere.hugeicons.stroke.Translate
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.WebDesign01
 import app.amber.agent.R
@@ -69,7 +68,6 @@ import app.amber.feature.ui.context.LocalTTSState
 import app.amber.core.utils.copyMessageToClipboard
 import app.amber.core.utils.extractQuotedContentAsText
 import app.amber.core.utils.toLocalString
-import java.util.Locale
 
 @Composable
 fun ColumnScope.ChatMessageActionButtons(
@@ -78,12 +76,9 @@ fun ColumnScope.ChatMessageActionButtons(
     onUpdate: (MessageNode) -> Unit,
     onRegenerate: () -> Unit,
     onOpenActionSheet: () -> Unit,
-    onTranslate: ((UIMessage, Locale) -> Unit)? = null,
-    onClearTranslation: (UIMessage) -> Unit = {},
 ) {
     val context = LocalContext.current
     var isPendingDelete by remember { mutableStateOf(false) }
-    var showTranslateDialog by remember { mutableStateOf(false) }
     var showRegenerateConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(isPendingDelete) {
@@ -150,19 +145,6 @@ fun ColumnScope.ChatMessageActionButtons(
                     }
                 },
             )
-
-            // V3: 隐藏翻译按钮 (用户暂不需要). 改 SHOW_TRANSLATE = true 即可恢复.
-            @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-            val SHOW_TRANSLATE = false
-            if (SHOW_TRANSLATE && onTranslate != null) {
-                MessageActionIconButton(
-                    imageVector = HugeIcons.Translate,
-                    contentDescription = stringResource(R.string.translate),
-                    onClick = {
-                        showTranslateDialog = true
-                    },
-                )
-            }
         }
 
         MessageActionIconButton(
@@ -176,23 +158,6 @@ fun ColumnScope.ChatMessageActionButtons(
         ChatMessageBranchSelector(
             node = node,
             onUpdate = onUpdate,
-        )
-    }
-
-    // Translation dialog
-    if (showTranslateDialog && onTranslate != null) {
-        LanguageSelectionDialog(
-            onLanguageSelected = { language ->
-                showTranslateDialog = false
-                onTranslate(message, language)
-            },
-            onClearTranslation = {
-                showTranslateDialog = false
-                onClearTranslation(message)
-            },
-            onDismissRequest = {
-                showTranslateDialog = false
-            },
         )
     }
 

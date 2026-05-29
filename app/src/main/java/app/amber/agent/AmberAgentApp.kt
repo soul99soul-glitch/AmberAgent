@@ -2,16 +2,9 @@ package app.amber.agent
 import app.amber.agent.R
 
 import android.app.Application
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.util.Log
-import androidx.compose.foundation.ComposeFoundationFlags
-import androidx.compose.runtime.Composer
-import androidx.compose.runtime.tooling.ComposeStackTraceMode
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -19,13 +12,8 @@ import com.google.firebase.Firebase
 import com.google.firebase.crashlytics.crashlytics
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.CoroutineName
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNot
@@ -55,7 +43,6 @@ import app.amber.feature.board.collector.NotificationSignalCollector
 import app.amber.feature.board.hotlist.HotListScheduler
 import app.amber.feature.board.worker.BoardScheduler
 import app.amber.core.service.ChatService
-import app.amber.core.service.WebServerService
 import app.amber.core.utils.CrashHandler
 import app.amber.core.utils.DatabaseUtil
 import org.koin.android.ext.android.get
@@ -68,7 +55,6 @@ private const val TAG = "AmberAgentApp"
 
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update_v3"
-const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
 const val FEISHU_DOC_CHANGE_CHANNEL_ID = "feishu_doc_change"
@@ -121,9 +107,6 @@ class AmberAgentApp : Application() {
                 Log.e(TAG, "NativePathBootstrap.install failed; native path stays disabled", it)
                 runCatching { Firebase.crashlytics.recordException(it) }
             }
-
-        // Start WebServer if enabled in settings
-        startWebServerIfEnabled()
 
         // Reschedule persisted mobile cron tasks after app startup.
         rescheduleCronTasks()
@@ -212,34 +195,6 @@ class AmberAgentApp : Application() {
                 get<SkillManager>().installBuiltinSkillsIfMissing()
             }.onFailure {
                 Log.e(TAG, "installBuiltinSkills failed", it)
-            }
-        }
-    }
-
-    private fun startWebServerIfEnabled() {
-        get<AppScope>().launch {
-            runCatching {
-                delay(500)
-                val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
-                if (settings.webServerEnabled) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(
-                            this@AmberAgentApp,
-                            android.Manifest.permission.POST_NOTIFICATIONS
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        Log.w(TAG, "startWebServerIfEnabled: notification permission not granted, skipping")
-                        return@launch
-                    }
-                    val intent = Intent(this@AmberAgentApp, WebServerService::class.java).apply {
-                        action = WebServerService.ACTION_START
-                        putExtra(WebServerService.EXTRA_PORT, settings.webServerPort)
-                        putExtra(WebServerService.EXTRA_LOCALHOST_ONLY, settings.webServerLocalhostOnly)
-                    }
-                    startForegroundService(intent)
-                }
-            }.onFailure {
-                Log.e(TAG, "startWebServerIfEnabled failed", it)
             }
         }
     }
@@ -374,14 +329,6 @@ class AmberAgentApp : Application() {
             .build()
         notificationManager.createNotificationChannel(chatLiveUpdateChannel)
 
-        val webServerChannel = NotificationChannelCompat
-            .Builder(WEB_SERVER_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
-            .setName(getString(R.string.notification_channel_web_server))
-            .setVibrationEnabled(false)
-            .setShowBadge(false)
-            .build()
-        notificationManager.createNotificationChannel(webServerChannel)
-
         val screenCaptureChannel = NotificationChannelCompat
             .Builder(SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
             .setName(getString(R.string.notification_channel_screen_capture))
@@ -426,7 +373,6 @@ class AmberAgentApp : Application() {
         cleanupChatService()
         super.onTerminate()
         get<AppScope>().cancel()
-        stopService(Intent(this, WebServerService::class.java))
     }
 }
 

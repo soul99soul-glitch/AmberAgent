@@ -208,14 +208,6 @@
       android:exported="false" />
 
     <service
-      android:name="app.amber.core.service.WebServerService"
-      android:exported="false"
-      android:foregroundServiceType="specialUse">
-      <property
-        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-        android:value="local web server for LLM chat UI" />
-    </service>
-    <service
       android:name="app.amber.core.service.AgentGenerationForegroundService"
       android:exported="false"
       android:foregroundServiceType="specialUse">

@@ -115,7 +115,6 @@ val webMountModule = module {
             context = get(),
             adapters = adapters,
             cookieProvider = get(),
-            oauthStore = get(),
             activityStore = get(),
             appScope = get(),
         )

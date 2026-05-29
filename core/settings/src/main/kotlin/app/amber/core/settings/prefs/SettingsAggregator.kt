@@ -110,12 +110,9 @@ class SettingsAggregator(
             p[PreferencesKeys.FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
             p[PreferencesKeys.SELECT_MODEL] = settings.chatModelId.toString()
             p[PreferencesKeys.TITLE_MODEL] = settings.titleModelId.toString()
-            p[PreferencesKeys.TRANSLATE_MODEL] = settings.translateModeId.toString()
             p[PreferencesKeys.SUGGESTION_MODEL] = settings.suggestionModelId.toString()
             p[PreferencesKeys.IMAGE_GENERATION_MODEL] = settings.imageGenerationModelId.toString()
             p[PreferencesKeys.TITLE_PROMPT] = settings.titlePrompt
-            p[PreferencesKeys.TRANSLATION_PROMPT] = settings.translatePrompt
-            p[PreferencesKeys.TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
             p[PreferencesKeys.SUGGESTION_PROMPT] = settings.suggestionPrompt
             p[PreferencesKeys.OCR_MODEL] = settings.ocrModelId.toString()
             p[PreferencesKeys.OCR_PROMPT] = settings.ocrPrompt
@@ -163,11 +160,6 @@ class SettingsAggregator(
             p[PreferencesKeys.LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             p[PreferencesKeys.QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
             p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(settings.agentRuntime)
-            p[PreferencesKeys.WEB_SERVER_ENABLED] = settings.webServerEnabled
-            p[PreferencesKeys.WEB_SERVER_PORT] = settings.webServerPort
-            p[PreferencesKeys.WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
-            p[PreferencesKeys.WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
-            p[PreferencesKeys.WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
             p[PreferencesKeys.BACKUP_REMINDER_CONFIG] =
                 JsonInstant.encodeToString(settings.backupReminderConfig)
             p[PreferencesKeys.SYNC_SETTINGS] = JsonInstant.encodeToString(settings.syncSettings)
@@ -299,12 +291,9 @@ internal fun composeRawSettings(
     favoriteModels = chat.favoriteModels,
     chatModelId = chat.chatModelId,
     titleModelId = chat.titleModelId,
-    translateModeId = chat.translateModeId,
     suggestionModelId = chat.suggestionModelId,
     imageGenerationModelId = chat.imageGenerationModelId,
     titlePrompt = chat.titlePrompt,
-    translatePrompt = chat.translatePrompt,
-    translateThinkingBudget = chat.translateThinkingBudget,
     suggestionPrompt = chat.suggestionPrompt,
     ocrModelId = chat.ocrModelId,
     ocrPrompt = chat.ocrPrompt,
@@ -340,11 +329,6 @@ internal fun composeRawSettings(
     modeInjections = ext.modeInjections,
     lorebooks = ext.lorebooks,
     quickMessages = ext.quickMessages,
-    webServerEnabled = ext.webServerEnabled,
-    webServerPort = ext.webServerPort,
-    webServerJwtEnabled = ext.webServerJwtEnabled,
-    webServerAccessPassword = ext.webServerAccessPassword,
-    webServerLocalhostOnly = ext.webServerLocalhostOnly,
     backupReminderConfig = ext.backupReminderConfig,
     syncSettings = ext.syncSettings,
     routingQuickMessagesSeededVersion = ext.routingQuickMessagesSeededVersion,

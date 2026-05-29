@@ -51,7 +51,6 @@ import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.Megaphone01
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.Rocket01
-import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.WavingHand01
@@ -246,18 +245,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_tts_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
                     )
-                    // V3: 隐藏 "Web 服务器 / 外部服务器" 入口 (用户暂不需要).
-                    // 改 SHOW_WEB_SERVER = true 即可恢复.
-                    @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-                    val SHOW_WEB_SERVER = false
-                    if (SHOW_WEB_SERVER) {
-                        item(
-                            onClick = { navController.navigate(Screen.SettingWeb) },
-                            leadingContent = { SettingLeadingIcon(HugeIcons.ServerStack01) },
-                            supportingContent = { Text(stringResource(R.string.setting_page_web_server_desc)) },
-                            headlineContent = { Text(stringResource(R.string.setting_page_web_server)) },
-                        )
-                    }
                 }
             }
 

@@ -36,11 +36,6 @@ data class ExtensionPrefsData(
     val modeInjections: List<PromptInjection.ModeInjection> = emptyList(),
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
-    val webServerEnabled: Boolean = false,
-    val webServerPort: Int = 8080,
-    val webServerJwtEnabled: Boolean = false,
-    val webServerAccessPassword: String = "",
-    val webServerLocalhostOnly: Boolean = false,
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val syncSettings: SyncSettings = SyncSettings(),
     val routingQuickMessagesSeededVersion: Int = 0,
@@ -93,11 +88,6 @@ class ExtensionPrefs(
         quickMessages = p[PreferencesKeys.QUICK_MESSAGES]?.let {
             JsonInstant.decodeFromString<List<QuickMessage>>(it)
         } ?: emptyList(),
-        webServerEnabled = p[PreferencesKeys.WEB_SERVER_ENABLED] == true,
-        webServerPort = p[PreferencesKeys.WEB_SERVER_PORT] ?: 8080,
-        webServerJwtEnabled = p[PreferencesKeys.WEB_SERVER_JWT_ENABLED] == true,
-        webServerAccessPassword = p[PreferencesKeys.WEB_SERVER_ACCESS_PASSWORD] ?: "",
-        webServerLocalhostOnly = p[PreferencesKeys.WEB_SERVER_LOCALHOST_ONLY] == true,
         backupReminderConfig = p[PreferencesKeys.BACKUP_REMINDER_CONFIG]?.let {
             JsonInstant.decodeFromString<BackupReminderConfig>(it)
         } ?: BackupReminderConfig(),
@@ -117,11 +107,6 @@ class ExtensionPrefs(
         p[PreferencesKeys.MODE_INJECTIONS] = JsonInstant.encodeToString(data.modeInjections)
         p[PreferencesKeys.LOREBOOKS] = JsonInstant.encodeToString(data.lorebooks)
         p[PreferencesKeys.QUICK_MESSAGES] = JsonInstant.encodeToString(data.quickMessages)
-        p[PreferencesKeys.WEB_SERVER_ENABLED] = data.webServerEnabled
-        p[PreferencesKeys.WEB_SERVER_PORT] = data.webServerPort
-        p[PreferencesKeys.WEB_SERVER_JWT_ENABLED] = data.webServerJwtEnabled
-        p[PreferencesKeys.WEB_SERVER_ACCESS_PASSWORD] = data.webServerAccessPassword
-        p[PreferencesKeys.WEB_SERVER_LOCALHOST_ONLY] = data.webServerLocalhostOnly
         p[PreferencesKeys.BACKUP_REMINDER_CONFIG] =
             JsonInstant.encodeToString(data.backupReminderConfig)
         p[PreferencesKeys.SYNC_SETTINGS] = JsonInstant.encodeToString(data.syncSettings)

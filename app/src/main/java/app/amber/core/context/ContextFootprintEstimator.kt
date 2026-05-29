@@ -119,8 +119,6 @@ object ContextFootprintEstimator {
             }
             input.weightedTokenChars() + outputChars
         }
-        is UIMessagePart.ToolCall -> arguments.weightedTokenChars()
-        is UIMessagePart.ToolResult -> content.toString().weightedTokenChars()
         // Multimodal: per-image token cost is provider-specific (OpenAI vision
         // ~800-1500, Claude (w*h)/750 ≈ 1200 for typical photos, Gemini ~1300).
         // 4500 weighted-chars ÷ 4 = 1125 token estimate — mid-range. ASCII-
@@ -130,7 +128,6 @@ object ContextFootprintEstimator {
         is UIMessagePart.Audio -> 4_500
         is UIMessagePart.Document -> fileName.weightedTokenChars() + 80
         is UIMessagePart.MiniApp -> title.weightedTokenChars() + description.weightedTokenChars() + 120
-        UIMessagePart.Search -> 20
     }
 
     /**
@@ -155,14 +152,11 @@ object ContextFootprintEstimator {
             output.forEach { acc = acc * 31 + it.inputFootprintFingerprint() }
             acc
         }
-        is UIMessagePart.ToolCall -> 4_000L + arguments.length
-        is UIMessagePart.ToolResult -> 5_000L + content.toString().length
         is UIMessagePart.Image -> 6_000L + url.length
         is UIMessagePart.Video -> 7_000L + url.length
         is UIMessagePart.Audio -> 8_000L + url.length + fileName.length
         is UIMessagePart.Document -> 9_000L + fileName.length + url.length
         is UIMessagePart.MiniApp -> 9_500L + appId.length + title.length + version
-        UIMessagePart.Search -> 10_000L
     }
 
 }

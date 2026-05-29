@@ -131,20 +131,6 @@ class WebMountOAuthTokenStore(context: Context) {
     fun credentialProviders(): Set<String> =
         creds?.all?.keys?.toSet() ?: memCreds.keys.toSet()
 
-    // ---- M1.1 compatibility shims (called by WebMountManager ctor) ---------
-
-    @Deprecated("Use putToken")
-    fun put(provider: String, token: WebMountOAuthToken) = putToken(provider, token)
-
-    @Deprecated("Use getToken")
-    fun get(provider: String): WebMountOAuthToken? = getToken(provider)
-
-    @Deprecated("Use clearToken")
-    fun clear(provider: String) = clearToken(provider)
-
-    @Deprecated("Use tokenProviders")
-    fun providers(): Set<String> = tokenProviders()
-
     // ---- serialization helpers --------------------------------------------
 
     private fun WebMountOAuthToken.toJson(): JsonObject = buildJsonObject {

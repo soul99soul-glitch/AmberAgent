@@ -124,8 +124,6 @@ import app.amber.core.model.MessageNode
 import app.amber.core.model.toMessageNode
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
-import app.amber.core.web.BadRequestException
-import app.amber.core.web.NotFoundException
 import app.amber.core.utils.applyPlaceholders
 import app.amber.core.utils.ChatSendTransitionTracker
 import app.amber.core.utils.sendNotification
@@ -243,14 +241,6 @@ class ChatService(
     private val pendingMessageStoreOps = Channel<PendingMessageStoreOp>(Channel.UNLIMITED)
     private val pendingMessagePersistRevisions = ConcurrentHashMap<Uuid, AtomicLong>()
     private val pendingMessagePersistLocks = ConcurrentHashMap<Uuid, Mutex>()
-
-    private val translationHandler = ChatTranslationHandler(
-        context = context,
-        appScope = appScope,
-        settingsStore = settingsStore,
-        generationHandler = generationHandler,
-        conversationAccess = this,
-    )
 
     private val aiAuxiliaryGenerator = AiAuxiliaryGenerator(
         context = context,
@@ -2036,14 +2026,6 @@ class ChatService(
         return if (changed) copy(messageNodes = updatedNodes) else this
     }
 
-    // ---- 翻译消息（delegated to ChatTranslationHandler）----
-
-    fun translateMessage(
-        conversationId: Uuid,
-        message: UIMessage,
-        targetLanguage: Locale,
-    ) = translationHandler.translateMessage(conversationId, message, targetLanguage)
-
     // ---- 消息操作 ----
 
     suspend fun editMessage(
@@ -2087,7 +2069,7 @@ class ChatService(
             node.messages.any { it.id == messageId }
         }
         if (targetNodeIndex == -1) {
-            throw NotFoundException("Message not found")
+            throw NoSuchElementException("Message not found")
         }
 
         val copiedNodes = currentConversation.messageNodes
@@ -2126,10 +2108,10 @@ class ChatService(
     ) {
         val currentConversation = ensureFullConversationLoaded(conversationId)
         val targetNode = currentConversation.messageNodes.firstOrNull { it.id == nodeId }
-            ?: throw NotFoundException("Message node not found")
+            ?: throw NoSuchElementException("Message node not found")
 
         if (selectIndex !in targetNode.messages.indices) {
-            throw BadRequestException("Invalid selectIndex")
+            throw IllegalArgumentException("Invalid selectIndex")
         }
 
         if (targetNode.selectIndex == selectIndex) {
@@ -2158,7 +2140,7 @@ class ChatService(
 
         if (updatedConversation == null) {
             if (failIfMissing) {
-                throw NotFoundException("Message not found")
+                throw NoSuchElementException("Message not found")
             }
             return
         }
@@ -2220,9 +2202,6 @@ class ChatService(
             else -> this
         }
     }
-
-    fun clearTranslationField(conversationId: Uuid, messageId: Uuid) =
-        translationHandler.clearTranslationField(conversationId, messageId)
 
     internal fun createDebugRunTools(settings: Settings): List<Tool> = createRunTools(settings, null)
 

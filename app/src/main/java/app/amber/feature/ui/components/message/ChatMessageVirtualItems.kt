@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
-import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.Screen
@@ -40,7 +39,6 @@ import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.base64Encode
 import app.amber.core.utils.copyMessageToClipboard
-import java.util.Locale
 
 internal const val ChatMessageVirtualMarkdownMinChars = 600
 private const val ChatMessageVirtualMarkdownMinTableLines = 3
@@ -243,8 +241,6 @@ internal fun ChatMessageVirtualItemContent(
     onUpdate: (MessageNode) -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
-    onTranslate: ((UIMessage, Locale) -> Unit)? = null,
-    onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
@@ -397,8 +393,6 @@ internal fun ChatMessageVirtualItemContent(
                 onUpdate = onUpdate,
                 isFavorite = isFavorite,
                 onToggleFavorite = onToggleFavorite,
-                onTranslate = onTranslate,
-                onClearTranslation = onClearTranslation,
                 textStyle = textStyle,
             )
         }
@@ -420,8 +414,6 @@ private fun ChatMessageVirtualFooter(
     onUpdate: (MessageNode) -> Unit,
     isFavorite: Boolean,
     onToggleFavorite: (() -> Unit)?,
-    onTranslate: ((UIMessage, Locale) -> Unit)?,
-    onClearTranslation: (UIMessage) -> Unit,
     textStyle: androidx.compose.ui.text.TextStyle,
 ) {
     val message = node.currentMessage
@@ -445,13 +437,6 @@ private fun ChatMessageVirtualFooter(
     ) {
         ProvideTextStyle(textStyle) {
             MessageAnnotations(annotations = message.annotations, loading = loading)
-
-            message.translation?.let { translation ->
-                CollapsibleTranslationText(
-                    content = translation,
-                    onClickCitation = {}
-                )
-            }
         }
 
         AnimatedVisibility(
@@ -470,18 +455,7 @@ private fun ChatMessageVirtualFooter(
                     onOpenActionSheet = {
                         showActionsSheet = true
                     },
-                    onTranslate = onTranslate,
-                    onClearTranslation = onClearTranslation
                 )
-            }
-        }
-
-        // V3: 隐藏 Nerd Line (跟 ChatMessage.kt 同步). ContextRing popover 有相同数据.
-        @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-        val SHOW_NERD_LINE = false
-        if (SHOW_NERD_LINE) {
-            ProvideTextStyle(textStyle) {
-                ChatMessageNerdLine(message = message)
             }
         }
     }

@@ -69,9 +69,6 @@ import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.pages.miniapp.components.MiniAppChatCard
 import kotlin.time.Duration.Companion.milliseconds
 
-@Suppress("UNUSED_PARAMETER")
-private fun Modifier.streamingContentSize(enabled: Boolean): Modifier = this
-
 @OptIn(FlowPreview::class)
 @Composable
 internal fun MessagePartsBlock(
@@ -285,8 +282,7 @@ internal fun MessagePartsBlock(
                                         // a restarted spring/tween on every accumulator flush.
                                         Surface(
                                             modifier = Modifier
-                                                .widthIn(max = 640.dp)
-                                                .streamingContentSize(isStreamingText),
+                                                .widthIn(max = 640.dp),
                                             shape = RoundedCornerShape(8.dp),
                                             color = workspace.paper,
                                             contentColor = workspace.ink,
@@ -312,7 +308,7 @@ internal fun MessagePartsBlock(
                                         // Keep the no-bubble streaming path animation-free as well.
                                         AssistantMarkdownBlockOrWidgets(
                                             content = assistantDisplayText,
-                                            modifier = Modifier.streamingContentSize(isStreamingText),
+                                            modifier = Modifier,
                                             onClickCitation = handleClickCitation,
                                             streaming = isStreamingText,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
@@ -499,9 +495,8 @@ internal fun MessagePartsBlock(
                         )
                     }
 
-                    else -> {
-                        // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
-                    }
+                    is UIMessagePart.Reasoning,
+                    is UIMessagePart.Tool -> Unit
                 }
             }
 

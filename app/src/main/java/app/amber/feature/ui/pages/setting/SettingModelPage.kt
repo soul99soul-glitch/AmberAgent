@@ -58,7 +58,6 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.registry.ModelRegistry
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Brain02
-import me.rerere.hugeicons.stroke.Earth
 import me.rerere.hugeicons.stroke.FileZip
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Message01
@@ -72,7 +71,6 @@ import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_TITLE_PROMPT
-import app.amber.core.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import app.amber.core.ai.prompts.resolveVisionRecognitionPrompt
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.prompts.DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
@@ -138,8 +136,6 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                     DefaultTitleModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
                     DefaultSuggestionModelSetting(settings = settings, vm = vm)
-                    ModelSectionDivider()
-                    DefaultTranslationModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
                     DefaultImageGenerationModelSetting(settings = settings, vm = vm)
                     ModelSectionDivider()
@@ -504,43 +500,6 @@ private fun DefaultSuggestionModelSetting(
             },
             onReset = {
                 vm.updateSettings(settings.copy(suggestionPrompt = DEFAULT_SUGGESTION_PROMPT))
-            },
-            onDismissRequest = { showModal = false },
-        )
-    }
-}
-
-@Composable
-private fun DefaultTranslationModelSetting(
-    settings: Settings,
-    vm: SettingVM,
-) {
-    var showModal by remember { mutableStateOf(false) }
-    ModelTaskSetting(
-        title = stringResource(R.string.setting_model_page_translate_model),
-        description = stringResource(R.string.setting_model_page_translate_model_desc),
-        icon = HugeIcons.Earth,
-        modelId = settings.translateModeId,
-        providers = settings.providers,
-        onSelect = {
-            vm.updateSettings(settings.copy(translateModeId = it.id))
-        },
-        onOpenParams = { showModal = true },
-    )
-    if (showModal) {
-        ModelPromptSheet(
-            title = stringResource(R.string.setting_model_page_translate_model),
-            variableHint = stringResource(R.string.setting_model_page_translate_prompt_vars),
-            prompt = settings.translatePrompt,
-            reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
-            onReasoningChange = {
-                vm.updateSettings(settings.copy(translateThinkingBudget = it.budgetTokens))
-            },
-            onPromptChange = {
-                vm.updateSettings(settings.copy(translatePrompt = it))
-            },
-            onReset = {
-                vm.updateSettings(settings.copy(translatePrompt = DEFAULT_TRANSLATION_PROMPT))
             },
             onDismissRequest = { showModal = false },
         )

@@ -18,7 +18,6 @@ import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_TITLE_PROMPT
-import app.amber.core.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import app.amber.core.ai.prompts.LEARNING_MODE_PROMPT
 import app.amber.core.model.LocalToolOption
 import app.amber.feature.live.LiveModeSetting
@@ -78,9 +77,6 @@ data class Settings(
     val titleModelId: Uuid = Uuid.random(),
     val imageGenerationModelId: Uuid = Uuid.random(),
     val titlePrompt: String = DEFAULT_TITLE_PROMPT,
-    val translateModeId: Uuid = Uuid.random(),
-    val translatePrompt: String = DEFAULT_TRANSLATION_PROMPT,
-    val translateThinkingBudget: Int = 0,
     val suggestionModelId: Uuid = Uuid.random(),
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,
     val ocrModelId: Uuid = Uuid.random(),
@@ -111,11 +107,6 @@ data class Settings(
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
     val agentRuntime: AgentRuntimeSetting = AgentRuntimeSetting(),
-    val webServerEnabled: Boolean = false,
-    val webServerPort: Int = 8080,
-    val webServerJwtEnabled: Boolean = false,
-    val webServerAccessPassword: String = "",
-    val webServerLocalhostOnly: Boolean = false,
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val syncSettings: SyncSettings = SyncSettings(),
     val launchCount: Int = 0,
@@ -215,9 +206,6 @@ data class MiniAppSetting(
 @Serializable
 data class GenerativeUiSetting(
     val enabled: Boolean = true,
-    @kotlinx.serialization.SerialName("allowModelJavaScript")
-    @Deprecated("Dead code — sanitizer always strips scripts regardless")
-    val allowModelJavaScript: Boolean = false,
     val maxWidgetCodeChars: Int = 12_000,
     val maxWidgetHeightDp: Int = 720,
     val enableActions: Boolean = true,
@@ -328,7 +316,6 @@ data class DisplaySetting(
     val showModelIcon: Boolean = true,
     val showModelName: Boolean = true,
     val showDateBelowName: Boolean = false,
-    val showTokenUsage: Boolean = true,
     val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
     val showUpdates: Boolean = true,

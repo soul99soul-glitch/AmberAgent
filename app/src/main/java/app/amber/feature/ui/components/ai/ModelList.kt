@@ -719,8 +719,7 @@ private fun ColumnScope.ModelList(
                                 )
                                 // V3: thinking-level segment 已搬到 SlashCommandPanel footer,
                                 // 这里不再渲染. 保留 currentAssistant / onUpdateAssistant 入参以兼容
-                                // 旧 callsite (避免 ripple). hasReasoning 也保留 (将来 picker tail 可能再用).
-                                @Suppress("UNUSED_VARIABLE") val _hasReasoning = hasReasoning
+                                // 旧 callsite (避免 ripple).
                             }
                         }
                     }

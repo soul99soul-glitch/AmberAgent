@@ -198,21 +198,6 @@ private fun List<UIMessage>.toolSignatures(): List<ToolSignature> =
                     input = part.input,
                     executed = part.isExecuted,
                 )
-
-                is UIMessagePart.ToolCall -> ToolSignature(
-                    id = part.toolCallId,
-                    name = part.toolName,
-                    input = part.arguments,
-                    executed = false,
-                )
-
-                is UIMessagePart.ToolResult -> ToolSignature(
-                    id = part.toolCallId,
-                    name = part.toolName,
-                    input = part.arguments.toString(),
-                    executed = true,
-                )
-
                 else -> null
             }
         }

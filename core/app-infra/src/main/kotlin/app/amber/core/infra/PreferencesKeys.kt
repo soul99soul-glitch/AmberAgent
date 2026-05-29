@@ -27,12 +27,9 @@ object PreferencesKeys {
     val FAVORITE_MODELS = stringPreferencesKey("favorite_models")
     val SELECT_MODEL = stringPreferencesKey("chat_model")
     val TITLE_MODEL = stringPreferencesKey("title_model")
-    val TRANSLATE_MODEL = stringPreferencesKey("translate_model")
     val SUGGESTION_MODEL = stringPreferencesKey("suggestion_model")
     val IMAGE_GENERATION_MODEL = stringPreferencesKey("image_generation_model")
     val TITLE_PROMPT = stringPreferencesKey("title_prompt")
-    val TRANSLATION_PROMPT = stringPreferencesKey("translation_prompt")
-    val TRANSLATE_THINKING_BUDGET = intPreferencesKey("translate_thinking_budget")
     val SUGGESTION_PROMPT = stringPreferencesKey("suggestion_prompt")
     val OCR_MODEL = stringPreferencesKey("ocr_model")
     val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
@@ -72,13 +69,6 @@ object PreferencesKeys {
     // TTS
     val TTS_PROVIDERS = stringPreferencesKey("tts_providers")
     val SELECTED_TTS_PROVIDER = stringPreferencesKey("selected_tts_provider")
-
-    // Web Server
-    val WEB_SERVER_ENABLED = booleanPreferencesKey("web_server_enabled")
-    val WEB_SERVER_PORT = intPreferencesKey("web_server_port")
-    val WEB_SERVER_JWT_ENABLED = booleanPreferencesKey("web_server_jwt_enabled")
-    val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
-    val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
 
     // 提示词注入
     val MODE_INJECTIONS = stringPreferencesKey("mode_injections")

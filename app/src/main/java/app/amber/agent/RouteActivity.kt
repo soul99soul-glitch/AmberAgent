@@ -143,10 +143,8 @@ import app.amber.feature.ui.pages.setting.SettingSearchPage
 import app.amber.feature.ui.pages.setting.SettingSlidesFontPage
 import app.amber.feature.ui.pages.setting.SettingSystemAccessPage
 import app.amber.feature.ui.pages.setting.SettingTTSPage
-import app.amber.feature.ui.pages.setting.SettingWebPage
 import app.amber.feature.ui.pages.share.handler.ShareHandlerPage
 import app.amber.feature.ui.pages.stats.StatsPage
-import app.amber.feature.ui.pages.translator.TranslatorPage
 import app.amber.feature.ui.pages.webview.WebViewPage
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
@@ -484,10 +482,6 @@ class RouteActivity : ComponentActivity() {
                                 AssistantExtensionsPage(key.id)
                             }
 
-                            entry<Screen.Translator> {
-                                TranslatorPage()
-                            }
-
                             entry<Screen.LiveCompanion> {
                                 LiveCompanionPage()
                             }
@@ -667,10 +661,6 @@ class RouteActivity : ComponentActivity() {
                                 SettingSystemAccessPage()
                             }
 
-                            entry<Screen.SettingWeb> {
-                                SettingWebPage()
-                            }
-
                             entry<Screen.Developer> {
                                 DeveloperPage()
                             }
@@ -793,9 +783,6 @@ sealed interface Screen : NavKey {
     data class AssistantInjections(val id: String) : Screen
 
     @Serializable
-    data object Translator : Screen
-
-    @Serializable
     data object LiveCompanion : Screen
 
     @Serializable
@@ -893,9 +880,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingSystemAccess : Screen
-
-    @Serializable
-    data object SettingWeb : Screen
 
     @Serializable
     data object Developer : Screen

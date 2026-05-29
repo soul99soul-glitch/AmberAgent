@@ -69,7 +69,6 @@ import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.agent.R
 import app.amber.agent.BuildConfig
-import app.amber.core.utils.applyPlaceholders
 import java.util.Locale
 import kotlin.uuid.Uuid
 import kotlin.time.Clock
@@ -99,7 +98,9 @@ private const val PERF_TAG = "AmberChatPerf"
 //     scroll animation interpolation and gesture handling.
 //
 // If a future profile shows this is still too aggressive, the next stop
-// is 50ms; below 16ms is pointless (sub-frame).
+// is 50ms. Do not tie this producer-side flush to 120Hz: high-refresh
+// smoothness should come from the lightweight display/reveal layer, while
+// Markdown parse/layout stays on a lower-frequency budget.
 private const val STREAM_UI_FLUSH_INTERVAL_MS = 33L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS = 5_000L
 private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS = 800
@@ -1137,81 +1138,4 @@ class GenerationHandler(
         ).any { it in message }
     }
 
-    override fun translateText(
-        settings: Settings,
-        sourceText: String,
-        targetLanguage: Locale,
-        onStreamUpdate: ((String) -> Unit)?,
-    ): Flow<String> = flow {
-        val model = settings.providers.findModelById(settings.translateModeId)
-            ?: error("Translation model not found")
-        val provider = model.findProvider(settings.providers)
-            ?: error("Translation provider not found")
-
-        val providerHandler = providerManager.getProviderByType(provider)
-
-        if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
-            // Use regular translation with prompt
-            val prompt = settings.translatePrompt.applyPlaceholders(
-                "source_text" to sourceText,
-                "target_lang" to targetLanguage.toString(),
-            )
-
-            var messages = listOf(UIMessage.user(prompt))
-            var translatedText = ""
-
-            providerHandler.streamText(
-                providerSetting = provider,
-                messages = messages,
-                params = TextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies,
-                ),
-            ).collect { chunk ->
-                messages = messages.handleMessageChunk(chunk)
-                translatedText = messages.lastOrNull()?.toText() ?: ""
-
-                if (translatedText.isNotBlank()) {
-                    onStreamUpdate?.invoke(translatedText)
-                    emit(translatedText)
-                }
-            }
-        } else {
-            // Use Qwen MT model with special translation options
-            val messages = listOf(UIMessage.user(sourceText))
-            val chunk = providerHandler.generateText(
-                providerSetting = provider,
-                messages = messages,
-                params = TextGenerationParams(
-                    model = model,
-                    temperature = 0.3f,
-                    topP = 0.95f,
-                    customHeaders = model.customHeaders,
-                    customBody = buildList {
-                        addAll(model.customBodies)
-                        add(
-                            CustomBody(
-                                key = "translation_options",
-                                value = buildJsonObject {
-                                    put("source_lang", JsonPrimitive("auto"))
-                                    put(
-                                        "target_lang",
-                                        JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
-                                    )
-                                }
-                            )
-                        )
-                    }
-                ),
-            )
-            val translatedText = chunk.choices.firstOrNull()?.message?.toText() ?: ""
-
-            if (translatedText.isNotBlank()) {
-                onStreamUpdate?.invoke(translatedText)
-                emit(translatedText)
-            }
-        }
-    }.flowOn(Dispatchers.IO)
 }

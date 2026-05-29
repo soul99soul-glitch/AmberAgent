@@ -7,13 +7,11 @@ import app.amber.core.service.UserInputPreprocessor
 import app.amber.core.service.orchestrator.BranchMessageOrchestrator
 import app.amber.core.service.orchestrator.RegenerateMessageOrchestrator
 import app.amber.core.service.orchestrator.SendMessageOrchestrator
-import app.amber.core.web.WebServerManager
 import org.koin.dsl.module
 
 /**
- * Chat-domain Koin module — DI for ChatService, its on-disk store, its three
- * Orchestrator entry points, and the embedded web server that exposes the
- * conversation surface over HTTP.
+ * Chat-domain Koin module — DI for ChatService, its on-disk store, and
+ * Orchestrator entry points.
  *
  * Extracted from `AppModule` in M1.5 (per blueprint §E "5 module split"). The
  * remaining domains (aiModule / agentModule / webMountModule) are deferred as
@@ -83,14 +81,4 @@ val chatModule = module {
         )
     }
 
-    single {
-        WebServerManager(
-            context = get(),
-            appScope = get(),
-            chatService = get(),
-            conversationRepo = get(),
-            settingsStore = get(),
-            filesManager = get(),
-        )
-    }
 }

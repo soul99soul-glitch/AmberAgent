@@ -130,8 +130,6 @@ internal fun ChatListNormal(
     onUpdateMessage: (MessageNode) -> Unit,
     onClickSuggestion: (String) -> Unit,
     onLongClickSuggestion: (String) -> Unit,
-    onTranslate: ((UIMessage, java.util.Locale) -> Unit)?,
-    onClearTranslation: (UIMessage) -> Unit,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
@@ -906,8 +904,6 @@ internal fun ChatListNormal(
                                         onToggleFavorite = {
                                             onToggleFavorite?.invoke(node)
                                         },
-                                        onTranslate = onTranslate,
-                                        onClearTranslation = onClearTranslation,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
@@ -1024,8 +1020,6 @@ internal fun ChatListNormal(
                                         onToggleFavorite = {
                                             onToggleFavorite?.invoke(node)
                                         },
-                                        onTranslate = onTranslate,
-                                        onClearTranslation = onClearTranslation,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,

@@ -392,6 +392,18 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
                         item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_title)) },
+                            supportingContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = displaySetting.showUserAvatar,
+                                    onCheckedChange = {
+                                        updateDisplaySetting(displaySetting.copy(showUserAvatar = it))
+                                    }
+                                )
+                            },
+                        )
+                        item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_assistant_bubble_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_assistant_bubble_desc)) },
                             trailingContent = {

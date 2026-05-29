@@ -94,7 +94,6 @@ internal fun Conversation.latestRenderToken(): String {
     }
 }
 
-@Suppress("DEPRECATION")
 private fun UIMessagePart.compactRenderToken(): String = when (this) {
     is UIMessagePart.Text -> "text:${text.length}:${text.takeLast(16)}"
     is UIMessagePart.Reasoning -> "reasoning:${reasoning.length}:${finishedAt != null}"
@@ -108,9 +107,6 @@ private fun UIMessagePart.compactRenderToken(): String = when (this) {
     is UIMessagePart.Audio -> "audio:${url.length}:${metadata.hashCode()}"
     is UIMessagePart.Document -> "document:$fileName:${url.length}:${metadata.hashCode()}"
     is UIMessagePart.MiniApp -> "mini_app:$appId:$version:${htmlHash.orEmpty()}:${metadata.hashCode()}"
-    is UIMessagePart.Search -> "search"
-    is UIMessagePart.ToolCall -> "tool_call:$toolCallId:${arguments.length}:${approvalState.compactRenderToken()}"
-    is UIMessagePart.ToolResult -> "tool_result:$toolCallId:${content.hashCode()}"
 }
 
 private fun ToolApprovalState.compactRenderToken(): String = when (this) {

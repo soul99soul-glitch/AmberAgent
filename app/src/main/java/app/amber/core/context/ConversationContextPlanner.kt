@@ -276,8 +276,6 @@ object ConversationContextPlanner {
         is UIMessagePart.Text -> text.weightedTokenChars()
         is UIMessagePart.Reasoning -> reasoning.weightedTokenChars()
         is UIMessagePart.Tool -> input.weightedTokenChars() + output.sumOf { it.estimatedChars() }
-        is UIMessagePart.ToolCall -> arguments.toString().weightedTokenChars()
-        is UIMessagePart.ToolResult -> content.toString().weightedTokenChars()
         // Multimodal inputs: rough provider-agnostic token costs for the input
         // representation that gets sent to the model. OpenAI vision: ~800-1500
         // tokens/image depending on tile resolution. Claude vision: tokens =
@@ -293,7 +291,6 @@ object ConversationContextPlanner {
         // only count the inline metadata here.
         is UIMessagePart.Document -> fileName.length + 80
         is UIMessagePart.MiniApp -> title.weightedTokenChars() + description.weightedTokenChars() + 120
-        UIMessagePart.Search -> 20
     }
 
     private fun UIMessagePart.summaryLine(): String = when (this) {
@@ -303,14 +300,11 @@ object ConversationContextPlanner {
             val outputText = ToolResultCompactor.summarize(output)
             "tool: $toolName id=$toolCallId executed=$isExecuted input=${input.takeMiddle(2_000)} output=$outputText"
         }
-        is UIMessagePart.ToolCall -> "tool_call: $toolName id=$toolCallId input=${arguments.takeMiddle(2_000)}"
-        is UIMessagePart.ToolResult -> "tool_result: $toolName id=$toolCallId content=${content.toString().takeMiddle(8_000)}"
         is UIMessagePart.Image -> "image: ${url.takeLast(80)}"
         is UIMessagePart.Video -> "video: ${url.takeLast(80)}"
         is UIMessagePart.Audio -> "audio: ${url.takeLast(80)}"
         is UIMessagePart.Document -> "document: $fileName mime=$mime"
         is UIMessagePart.MiniApp -> "mini_app: $title id=$appId"
-        UIMessagePart.Search -> "search_marker"
     }
 }
 

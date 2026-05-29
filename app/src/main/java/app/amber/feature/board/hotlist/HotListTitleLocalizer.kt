@@ -129,8 +129,7 @@ class HotListTitleLocalizer(
         val boardModel = settings.agentRuntime.todayBoard.boardModelId
             ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
             ?.let { settings.resolveTaskChatModel(it) }
-        return settings.findModelById(settings.translateModeId)
-            ?: boardModel
+        return boardModel
             ?: settings.resolveTaskChatModel(settings.chatModelId)
     }
 

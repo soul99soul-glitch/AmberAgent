@@ -20,7 +20,6 @@ import app.amber.feature.ui.pages.live.LiveCompanionVM
 import app.amber.feature.ui.pages.setting.SettingAgentMemoryVM
 import app.amber.feature.ui.pages.setting.SettingVM
 import app.amber.feature.ui.pages.share.handler.ShareHandlerVM
-import app.amber.feature.ui.pages.translator.TranslatorVM
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -57,7 +56,6 @@ val viewModelModule = module {
             skillManager = get(),
         )
     }
-    viewModelOf(::TranslatorVM)
     viewModelOf(::LiveCompanionVM)
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(

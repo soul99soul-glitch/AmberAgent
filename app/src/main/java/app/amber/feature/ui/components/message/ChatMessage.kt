@@ -44,7 +44,6 @@ import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.copyMessageToClipboard
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.utils.base64Encode
-import java.util.Locale
 
 internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
     return any { part ->
@@ -57,7 +56,6 @@ internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
             is UIMessagePart.MiniApp -> part.appId.isNotBlank()
             is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
             is UIMessagePart.Tool -> true
-            else -> false
         }
     }
 }
@@ -78,8 +76,6 @@ fun ChatMessage(
     onUpdate: (MessageNode) -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
-    onTranslate: ((UIMessage, Locale) -> Unit)? = null,
-    onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
@@ -115,11 +111,7 @@ fun ChatMessage(
                 }
 
                 MessageRole.USER -> {
-                    // V3: 隐藏 user 头像 / 昵称——用户跟自己的 AI 聊天不需要展示"我是谁".
-                    // 不删代码: 如果以后想恢复, 把 SHOW_USER_AVATAR 改 true 即可.
-                    @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-                    val SHOW_USER_AVATAR = false
-                    if (SHOW_USER_AVATAR) {
+                    if (settings.showUserAvatar) {
                         ChatMessageUserAvatar(
                             message = message,
                             avatar = settings.userAvatar,
@@ -151,40 +143,14 @@ fun ChatMessage(
                 onMiniAppModify = onMiniAppModify,
                 onStreamingVisibleFrame = onStreamingVisibleFrame,
             )
-
-            message.translation?.let { translation ->
-                CollapsibleTranslationText(
-                    content = translation,
-                    onClickCitation = {}
-                )
-            }
         }
 
-        val showActions = when {
-            message.role == MessageRole.USER -> message.parts.isEmptyUIMessage().not()
-            lastMessage -> !loading
-            else -> message.parts.isEmptyUIMessage().not()
-        }
-
-        if (message.role == MessageRole.USER) {
-            // V3: user 消息下方不显示 复制/重试/菜单 按钮行——这些操作改为长按消息胶囊弹 menu sheet.
-            // 不删代码: 如果以后想恢复, 把 SHOW_USER_ACTION_BUTTONS 改 true 即可.
-            @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-            val SHOW_USER_ACTION_BUTTONS = false
-            if (SHOW_USER_ACTION_BUTTONS && showActions) {
-                ChatMessageActionButtons(
-                    message = message,
-                    onRegenerate = onRegenerate,
-                    node = node,
-                    onUpdate = onUpdate,
-                    onOpenActionSheet = {
-                        showActionsSheet = true
-                    },
-                    onTranslate = onTranslate,
-                    onClearTranslation = onClearTranslation
-                )
+        if (message.role != MessageRole.USER) {
+            val showActions = if (lastMessage) {
+                !loading
+            } else {
+                message.parts.isEmptyUIMessage().not()
             }
-        } else {
             AnimatedVisibility(
                 visible = showActions,
                 enter = slideInVertically { it / 2 } + fadeIn(),
@@ -201,20 +167,8 @@ fun ChatMessage(
                         onOpenActionSheet = {
                             showActionsSheet = true
                         },
-                        onTranslate = onTranslate,
-                        onClearTranslation = onClearTranslation
                     )
                 }
-            }
-        }
-
-        // V3: 隐藏 "7.3K tokens / 3.3K cached / 196 tokens / 87.1 tok/s / 2.3s" Nerd Line.
-        // 这些数据顶栏 ContextRing popover 已有, 消息下方再展示一行有点冗余. 改 SHOW_NERD_LINE = true 恢复.
-        @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-        val SHOW_NERD_LINE = false
-        if (SHOW_NERD_LINE) {
-            ProvideTextStyle(textStyle) {
-                ChatMessageNerdLine(message = message)
             }
         }
     }

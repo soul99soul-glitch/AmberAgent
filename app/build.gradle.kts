@@ -7,6 +7,7 @@ import java.math.BigInteger
 import java.net.URI
 import java.security.MessageDigest
 import java.util.Properties
+import java.util.zip.ZipFile
 
 val buildLocalProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
@@ -44,25 +45,29 @@ val googleServicesPackageByVariant = linkedMapOf(
     "baseline" to "$baseApplicationId.debug",
 )
 
-fun googleOAuthConfigured(packageName: String): Boolean = runCatching {
+fun googleServicesClient(packageName: String): Map<*, *>? = runCatching {
     val configFile = file("google-services.json")
-    if (!configFile.exists()) return@runCatching false
-    val root = JsonSlurper().parse(configFile) as? Map<*, *> ?: return@runCatching false
-    val clients = root["client"] as? List<*> ?: return@runCatching false
-    val client = clients
+    if (!configFile.exists()) return@runCatching null
+    val root = JsonSlurper().parse(configFile) as? Map<*, *> ?: return@runCatching null
+    val clients = root["client"] as? List<*> ?: return@runCatching null
+    clients
         .mapNotNull { it as? Map<*, *> }
         .firstOrNull {
             val clientInfo = it["client_info"] as? Map<*, *>
             val androidClientInfo = clientInfo?.get("android_client_info") as? Map<*, *>
             androidClientInfo?.get("package_name") == packageName
-        } ?: return@runCatching false
-    val oauthClients = client["oauth_client"] as? List<*> ?: return@runCatching false
+        }
+}.getOrNull()
+
+fun googleOAuthConfigured(packageName: String): Boolean {
+    val client = googleServicesClient(packageName) ?: return false
+    val oauthClients = client["oauth_client"] as? List<*> ?: return false
     val clientTypes = oauthClients
         .mapNotNull { it as? Map<*, *> }
         .mapNotNull { it["client_type"]?.toString() }
         .toSet()
-    "1" in clientTypes && "3" in clientTypes
-}.getOrDefault(false)
+    return "1" in clientTypes && "3" in clientTypes
+}
 
 plugins {
     alias(libs.plugins.android.application)
@@ -88,7 +93,7 @@ android {
         versionCode = 391
         versionName = "2.5.1"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "app.amber.agent.AmberAgentAndroidTestRunner"
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId
         manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
 
@@ -229,6 +234,8 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // TokenCounter is not wired into production; do not ship stale local builds.
+            excludes += "**/libtokenizer.so"
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
@@ -244,9 +251,9 @@ android {
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
     }
 
-    // Bring the cargo-built .so files (libmarkdown_parser.so, libregex_transformer.so)
-    // into the APK's jniLibs. The Rust JNI block below registers the cargo-ndk
-    // Exec tasks that populate this dir. See docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
+    // Bring the cargo-built .so files into the APK's jniLibs. The Rust JNI
+    // block below registers the cargo-ndk Exec tasks that populate this dir.
+    // See docs/RUST_NATIVE_SPIKE_PLAN.md §2.3.
     sourceSets {
         getByName("main") {
             jniLibs.srcDirs("${layout.buildDirectory.get()}/rustJniLibs/android")
@@ -257,8 +264,8 @@ android {
 googleServicesPackageByVariant.forEach { (variant, packageName) ->
     tasks.matching { it.name == "process${variant.replaceFirstChar { it.uppercase() }}GoogleServices" }
         .configureEach {
-            onlyIf("google-services.json contains an OAuth client for $packageName") {
-                googleOAuthConfigured(packageName)
+            onlyIf("google-services.json contains a Firebase client for $packageName") {
+                googleServicesClient(packageName) != null
             }
         }
 }
@@ -267,9 +274,9 @@ googleServicesPackageByVariant.forEach { (variant, packageName) ->
 // Rust JNI build — hand-rolled cargo-ndk invocations.
 //
 // Replaces the Mozilla rust-android-gradle plugin (incompatible with AGP 9 —
-// see Codex Round 2 review). Two crates land .so files into `app/`'s jniLibs:
-//   - markdown-parser → libmarkdown_parser.so
-//   - regex-transformer → libregex_transformer.so
+// see Codex Round 2 review). App-owned crates land .so files into
+// `app/`'s jniLibs; document/highlight modules contribute their own native
+// libraries via AAR merge.
 // Output ABI: arm64-v8a only (matches `android.defaultConfig.ndk.abiFilters`
 // + `splits.abi.include`). When a future Mozilla-plugin release supports
 // AGP 9 + multiple crates per module, this block can be revisited.
@@ -311,8 +318,6 @@ val cargoBuildMarkdownParser =
     registerCargoBuild("cargoBuildMarkdownParser", "../native/markdown-parser", "markdown_parser")
 val cargoBuildRegexTransformer =
     registerCargoBuild("cargoBuildRegexTransformer", "../native/regex-transformer", "regex_transformer")
-val cargoBuildTokenizer =
-    registerCargoBuild("cargoBuildTokenizer", "../native/tokenizer", "tokenizer")
 val cargoBuildReaderExtractor =
     registerCargoBuild("cargoBuildReaderExtractor", "../native/reader-extractor", "reader_extractor")
 val cargoBuildSyncCrypto =
@@ -328,12 +333,81 @@ afterEvaluate {
     tasks.named("preBuild").configure {
         dependsOn(cargoBuildMarkdownParser)
         dependsOn(cargoBuildRegexTransformer)
-        dependsOn(cargoBuildTokenizer)
         dependsOn(cargoBuildReaderExtractor)
         dependsOn(cargoBuildSyncCrypto)
         dependsOn(cargoBuildMarkdownPreprocess)
         dependsOn(cargoBuildJsonExpr)
         dependsOn(cargoBuildHtmlDiffNormalizer)
+    }
+}
+
+val requiredRustSharedLibraries = listOf(
+    "highlight_parser",
+    "html_diff_normalizer",
+    "json_expr",
+    "markdown_parser",
+    "markdown_preprocess",
+    "office_parsers",
+    "reader_extractor",
+    "regex_transformer",
+    "sync_crypto",
+)
+
+val forbiddenRustSharedLibraries = listOf(
+    "tokenizer",
+)
+
+val rustNativeCheckedBuildTypes = setOf("release", "notion", "baseline")
+
+afterEvaluate {
+    rustNativeCheckedBuildTypes.forEach { buildTypeName ->
+        val capitalized = buildTypeName.replaceFirstChar { it.uppercase() }
+        val verifyTask = tasks.register("verify${capitalized}RustNativeLibs") {
+            group = "verification"
+            description = "Fail $buildTypeName APK builds when required Rust .so files are missing"
+            dependsOn("package$capitalized")
+            doLast {
+                val apkDir = layout.buildDirectory.dir("outputs/apk/$buildTypeName").get().asFile
+                val apks = apkDir.listFiles { file ->
+                    file.isFile && file.extension.equals("apk", ignoreCase = true)
+                }?.toList().orEmpty()
+                if (apks.isEmpty()) {
+                    throw GradleException("No APKs found in ${apkDir.absolutePath}; cannot verify Rust native libs")
+                }
+                val requiredEntries = requiredRustSharedLibraries.map { name ->
+                    "lib/arm64-v8a/lib$name.so"
+                }
+                val forbiddenEntries = forbiddenRustSharedLibraries.map { name ->
+                    "lib/arm64-v8a/lib$name.so"
+                }
+                val failures = buildList {
+                    apks.forEach { apk ->
+                        ZipFile(apk).use { zip ->
+                            val missing = requiredEntries.filter { entry -> zip.getEntry(entry) == null }
+                            if (missing.isNotEmpty()) {
+                                add("${apk.name} missing ${missing.joinToString()}")
+                            }
+                            val forbidden = forbiddenEntries.filter { entry -> zip.getEntry(entry) != null }
+                            if (forbidden.isNotEmpty()) {
+                                add("${apk.name} contains removed native libs ${forbidden.joinToString()}")
+                            }
+                        }
+                    }
+                }
+                if (failures.isNotEmpty()) {
+                    throw GradleException(
+                        buildString {
+                            appendLine("Required Rust native libraries are missing from $buildTypeName APK output.")
+                            failures.forEach { appendLine("- $it") }
+                            append("Install cargo-ndk or fix the Rust JNI build before shipping this variant.")
+                        }
+                    )
+                }
+            }
+        }
+        tasks.named("assemble$capitalized").configure {
+            dependsOn(verifyTask)
+        }
     }
 }
 
@@ -568,7 +642,6 @@ dependencies {
 
     // modules
     implementation(project(":ai"))
-    implementation(project(":web"))
     implementation(project(":document"))
     implementation(project(":highlight"))
     implementation(project(":search"))

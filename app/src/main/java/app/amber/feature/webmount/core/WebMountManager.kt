@@ -12,7 +12,6 @@ import app.amber.ai.core.Tool
 import app.amber.agent.AppScope
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
-import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -40,8 +39,6 @@ class WebMountManager(
     // cookie-auth adapters can call `hooks.cookies()` instead of threading
     // (endpoints, cookieProvider) through every tool function.
     private val cookieProvider: WebMountCookieProvider,
-    // wired in M1.5 (OAuth Intent bridge) — currently a no-op in-memory stub
-    @Suppress("unused") private val oauthStore: WebMountOAuthTokenStore,
     private val activityStore: AgentToolActivityStore,
     // Use the concrete AppScope class instead of the CoroutineScope interface
     // — the Koin module binds only the concrete type. AppScope already

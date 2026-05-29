@@ -1,7 +1,6 @@
 package app.amber.feature.ui.components.ai
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.content.MediaType
 import androidx.compose.foundation.content.ReceiveContentListener
 import androidx.compose.foundation.content.consume
@@ -50,7 +49,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.FullScreen
 import app.amber.agent.R
 import app.amber.feature.subagent.SubAgentMode
@@ -137,35 +135,6 @@ internal fun TextInputRow(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // V3: 删除"编辑中"小框 — 之前用 workspace.blueContainer/blue 硬编码蓝色 + 直接挤在 TextField
-        // 上方看着像"顶在输入框里". 用户编辑路径已经清晰 (长按 user 消息 → 编辑), 这个框冗余.
-        // 如果以后想恢复, 改 SHOW_EDITING_BANNER = true 即可.
-        @Suppress("ConstantConditionIf", "KotlinConstantConditions")
-        val SHOW_EDITING_BANNER = false
-        if (SHOW_EDITING_BANNER && state.isEditing()) {
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = workspace.blueContainer,
-                contentColor = workspace.blue,
-                border = BorderStroke(1.dp, workspace.blue.copy(alpha = 0.16f)),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = stringResource(R.string.editing))
-                    Spacer(Modifier.weight(1f))
-                    Icon(
-                        imageVector = HugeIcons.Cancel01,
-                        contentDescription = stringResource(R.string.cancel_edit),
-                        modifier = Modifier.clickable { state.clearInput() }
-                    )
-                }
-            }
-        }
-
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
         val slashQuery = state.textContent.text.toString().slashCommandQuery()
