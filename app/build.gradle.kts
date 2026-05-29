@@ -37,6 +37,12 @@ val parallelInstallBuildTypes = setOf("notion")
 // Populated by `applyNotionLikeUi(...)` invocations; compared against
 // `parallelInstallBuildTypes` after configuration.
 val parallelInstallApplied = mutableSetOf<String>()
+val googleServicesPackageByVariant = linkedMapOf(
+    "release" to baseApplicationId,
+    "debug" to "$baseApplicationId.debug",
+    "notion" to "$baseApplicationId.notion",
+    "baseline" to "$baseApplicationId.debug",
+)
 
 fun googleOAuthConfigured(packageName: String): Boolean = runCatching {
     val configFile = file("google-services.json")
@@ -246,6 +252,15 @@ android {
             jniLibs.srcDirs("${layout.buildDirectory.get()}/rustJniLibs/android")
         }
     }
+}
+
+googleServicesPackageByVariant.forEach { (variant, packageName) ->
+    tasks.matching { it.name == "process${variant.replaceFirstChar { it.uppercase() }}GoogleServices" }
+        .configureEach {
+            onlyIf("google-services.json contains an OAuth client for $packageName") {
+                googleOAuthConfigured(packageName)
+            }
+        }
 }
 
 // ---------------------------------------------------------------------------

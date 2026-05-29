@@ -277,6 +277,20 @@ class GenerativeWidgetParserTest {
     }
 
     @Test
+    fun doesNotTreatPlainHtmlAsFullHtmlDeck() {
+        val plainHtml = """
+            ```html
+            <!DOCTYPE html><html><body><h1>Not a deck</h1></body></html>
+            ```
+        """.trimIndent()
+
+        assertFalse(GenerativeWidgetParser.containsFullHtmlDeckPayload(plainHtml))
+        val segment = GenerativeWidgetParser.parse(plainHtml, streaming = false).single()
+
+        assertTrue(segment is GenerativeWidgetSegment.Text)
+    }
+
+    @Test
     fun qualityGateRequiresFullHtmlRendererAndValidSpecForDecks() {
         val requirement = GenerativeUiWidgetRequirement(
             required = true,

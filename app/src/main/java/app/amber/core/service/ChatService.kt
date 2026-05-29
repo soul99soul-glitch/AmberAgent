@@ -120,6 +120,7 @@ import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.files.FilesManager
 import app.amber.core.memory.extraction.MemoryExtractor
 import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
 import app.amber.core.model.toMessageNode
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
@@ -753,24 +754,58 @@ class ChatService(
 
     private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
         val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
-        val input = app.amber.feature.chat.api.ChatTurnInput(
-            conversationId = app.amber.core.agent.runtime.ConversationId(conversationId.toString()),
-            messageNodeId = app.amber.core.agent.runtime.MessageNodeId(message.id),
-            assistantId = app.amber.core.agent.runtime.AssistantId("default"),
-            userMessageText = message.previewText(maxChars = 4000),
-        )
-        val result = runner.launch(
-            app.amber.feature.chat.api.ChatTurnDescriptor.ID,
-            input,
-        )
-        result
-            .onSuccess { handle ->
+        val session = getOrCreateSession(conversationId)
+        val job = appScope.launch {
+            try {
+                val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, message)
+                recordPendingMessageEvent(
+                    conversationId = conversationId,
+                    event = "dequeue",
+                    messageId = dispatchMessage.id,
+                    detail = dispatchMessage.mode.name.lowercase(),
+                )
+                if (resolveIdleToolBlockerBeforeDispatch(conversationId, dispatchMessage)) {
+                    _generationDoneFlow.emit(conversationId)
+                    return@launch
+                }
+
+                val userNode = appendUserMessage(conversationId, dispatchMessage)
+                if (!dispatchMessage.answer) {
+                    _generationDoneFlow.emit(conversationId)
+                    return@launch
+                }
+
+                val input = app.amber.feature.chat.api.ChatTurnInput(
+                    conversationId = app.amber.core.agent.runtime.ConversationId(conversationId.toString()),
+                    messageNodeId = app.amber.core.agent.runtime.MessageNodeId(userNode.id.toString()),
+                    assistantId = app.amber.core.agent.runtime.AssistantId("default"),
+                    userMessageText = dispatchMessage.previewText(maxChars = 4000),
+                )
+                val handle = runner.launch(
+                    app.amber.feature.chat.api.ChatTurnDescriptor.ID,
+                    input,
+                ).getOrElse { e ->
+                    addError(e, conversationId, title = "Kernel dispatch failed")
+                    handleMessageComplete(conversationId)
+                    return@launch
+                }
                 activeKernelRuns.update { it + (conversationId to handle.runId) }
-            }
-            .onFailure { e ->
+                runner.observe(handle.runId).first { snapshot ->
+                    snapshot.status !in setOf(
+                        app.amber.core.agent.runtime.AgentRunStatus.RUNNING,
+                        app.amber.core.agent.runtime.AgentRunStatus.AWAITING_PERMISSION,
+                    )
+                }
+                _generationDoneFlow.emit(conversationId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 addError(e, conversationId, title = "Kernel dispatch failed")
-                launchPendingMessageLoop(conversationId, message)
+            } finally {
+                activeKernelRuns.update { it - conversationId }
             }
+        }
+        session.setJob(job)
     }
 
     private fun launchPendingMessageLoop(
@@ -947,7 +982,7 @@ class ChatService(
     private suspend fun appendUserMessage(
         conversationId: Uuid,
         message: PendingUserMessage,
-    ) {
+    ): MessageNode {
         val session = getOrCreateSession(conversationId)
         if (!session.timelineLoadState.value.initialized) {
             initializeConversation(conversationId)
@@ -966,6 +1001,7 @@ class ChatService(
         )
         updateConversation(conversationId, newConversation)
         persistConversationWindow(conversationId, newConversation, indexFts = true)
+        return userNode
     }
 
     private suspend fun drainPendingUserMessagesInline(conversationId: Uuid) {

@@ -47,6 +47,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "amberagent"
 include(":app")
+include(":app:baselineprofile")
 include(":highlight")
 include(":ai")
 include(":search")

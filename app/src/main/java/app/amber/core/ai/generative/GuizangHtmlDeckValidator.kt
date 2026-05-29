@@ -92,7 +92,7 @@ object GuizangHtmlDeckValidator {
     )
 
     private val scriptSrcRegex = Regex(
-        """<script\b[^>]*\bsrc\s*=\s*(['"])(.*?)\1""",
+        """<script\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))""",
         RegexOption.IGNORE_CASE,
     )
     private val dynamicImportRegex = Regex(
@@ -248,7 +248,7 @@ object GuizangHtmlDeckValidator {
 
     private fun validateExternalScripts(html: String): ValidationResult {
         scriptSrcRegex.findAll(html).forEach { match ->
-            val url = match.groupValues[2]
+            val url = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty()
             if (runtimeAssetForUrl(url) == null) {
                 return ValidationResult(false, "external script is not an allowed full_html runtime asset: ${url.take(80)}")
             }
@@ -281,7 +281,6 @@ object GuizangHtmlDeckValidator {
         val lower = url.lowercase()
         return lower == LOCAL_MOTION_URL ||
             lower == LEGACY_LOCAL_MOTION_URL ||
-            lower.endsWith("/assets/motion.min.js") ||
             lower == "./assets/motion.min.js" ||
             lower == "assets/motion.min.js"
     }
@@ -290,7 +289,6 @@ object GuizangHtmlDeckValidator {
         val lower = url.lowercase()
         return lower == LOCAL_LUCIDE_URL ||
             lower == LEGACY_LOCAL_LUCIDE_URL ||
-            lower.endsWith("/assets/lucide.min.js") ||
             lower == "./assets/lucide.min.js" ||
             lower == "assets/lucide.min.js"
     }

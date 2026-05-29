@@ -10,11 +10,6 @@ import app.amber.feature.chat.api.ChatEventPayload
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
-import app.amber.ai.core.MessageRole
-import app.amber.ai.ui.UIMessage
-import app.amber.ai.ui.UIMessagePart
-import app.amber.core.model.Conversation
-import app.amber.core.model.MessageNode
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ConversationAccess
 import java.time.Instant
@@ -46,49 +41,15 @@ class ChatEventProjector(
         val messageId = Uuid.parse(event.messageId)
         val conversation = conversationAccess.getConversationFlow(conversationId).value
 
-        val assistantMessage = UIMessage(
-            id = messageId,
-            role = MessageRole.ASSISTANT,
-            parts = listOf(UIMessagePart.Text("")),
-        )
-
         val existingNodeIndex = conversation.messageNodes.indexOfFirst { node ->
             node.messages.any { it.id == messageId }
         }
 
         val updatedConversation = if (existingNodeIndex >= 0) {
-            val node = conversation.messageNodes[existingNodeIndex]
-            val updatedMessages = node.messages.map { msg ->
-                if (msg.id == messageId) assistantMessage else msg
-            }
-            conversation.copy(
-                messageNodes = conversation.messageNodes.toMutableList().apply {
-                    set(existingNodeIndex, node.copy(messages = updatedMessages))
-                },
-                updateAt = Instant.now(),
-            )
+            conversation.copy(updateAt = Instant.now())
         } else {
-            val isRegenerate = event.regenerateOf != null
-            if (isRegenerate) {
-                val targetNodeIndex = conversation.messageNodes.indexOfLast { node ->
-                    node.messages.any { it.role == MessageRole.ASSISTANT }
-                }
-                if (targetNodeIndex >= 0) {
-                    val node = conversation.messageNodes[targetNodeIndex]
-                    conversation.copy(
-                        messageNodes = conversation.messageNodes.toMutableList().apply {
-                            set(targetNodeIndex, node.copy(
-                                messages = node.messages + assistantMessage,
-                            ))
-                        },
-                        updateAt = Instant.now(),
-                    )
-                } else {
-                    appendNewNode(conversation, assistantMessage)
-                }
-            } else {
-                appendNewNode(conversation, assistantMessage)
-            }
+            Log.w(TAG, "Finalized assistant message $messageId before any message body was projected")
+            return
         }
 
         conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
@@ -142,14 +103,6 @@ class ChatEventProjector(
         }
     }
 
-    private fun appendNewNode(conversation: Conversation, message: UIMessage): Conversation {
-        return conversation.copy(
-            messageNodes = conversation.messageNodes + MessageNode(
-                messages = listOf(message),
-            ),
-            updateAt = Instant.now(),
-        )
-    }
 }
 
 data class ProjectionState(

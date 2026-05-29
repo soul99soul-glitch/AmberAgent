@@ -285,9 +285,11 @@ object GenerativeWidgetParser {
                     if (widget.renderer == GuizangHtmlDeckValidator.RENDERER) return widget
                 }
             }
+            return null
         }
         return body
             .takeIf(::looksLikeStandaloneHtml)
+            ?.takeIf { GuizangHtmlDeckValidator.validateHtml(it).valid }
             ?.let { html ->
                 buildFullHtmlWidget(
                     parsed = null,

@@ -61,6 +61,22 @@ class SpeculativeToolRunnerTest {
     }
 
     @Test
+    fun pendingMatchingToolIsCancelledInsteadOfRunningTwice() = runBlocking {
+        val runner = SpeculativeToolRunner(this, dispatcher)
+        val call = toolCall("file_read", id = "call-1", input = """{"path":"slow.md"}""")
+
+        runner.observe(listOf(call), mapOf("file_read" to delayedTool("file_read", "late", 500)))
+        val reusable = runner.reusableResults(listOf(call))
+        delay(20)
+
+        assertTrue(reusable.isEmpty())
+        assertTrue(runner.snapshot().single().status in setOf(
+            SpeculativeToolStatus.DISCARDED,
+            SpeculativeToolStatus.CANCELLED,
+        ))
+    }
+
+    @Test
     fun unsafeToolIsNotStartedSpeculatively() = runBlocking {
         val runner = SpeculativeToolRunner(this, dispatcher)
 

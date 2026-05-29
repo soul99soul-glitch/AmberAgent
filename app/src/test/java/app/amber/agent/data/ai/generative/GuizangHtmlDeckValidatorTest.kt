@@ -82,6 +82,18 @@ class GuizangHtmlDeckValidatorTest {
             <script src="https://example.com/deck-runtime.js"></script>
         """.trimIndent()
         assertFalse(GuizangHtmlDeckValidator.validateHtml(remoteScript).valid)
+
+        val unquotedRemoteScript = """
+            <section class="slide">A</section>
+            <script src=https://example.com/deck-runtime.js></script>
+        """.trimIndent()
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(unquotedRemoteScript).valid)
+
+        val suffixSpoofedRuntime = """
+            <section class="slide">A</section>
+            <script src="https://example.com/assets/lucide.min.js"></script>
+        """.trimIndent()
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(suffixSpoofedRuntime).valid)
     }
 
     @Test

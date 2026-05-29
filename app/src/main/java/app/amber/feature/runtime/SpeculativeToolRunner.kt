@@ -110,8 +110,14 @@ class SpeculativeToolRunner(
         return finalTools.mapNotNull { final ->
             val state = states[final.toolCallId] ?: return@mapNotNull null
             if (state.toolName != final.toolName || state.input != final.input) return@mapNotNull null
-            val result = jobs[final.toolCallId]
-                ?.takeIf { it.isCompleted && !it.isCancelled }
+            val job = jobs[final.toolCallId]
+            if (job != null && !job.isCompleted) {
+                job.cancel()
+                states[final.toolCallId] = state.copy(status = SpeculativeToolStatus.DISCARDED)
+                return@mapNotNull null
+            }
+            val result = job
+                ?.takeIf { !it.isCancelled }
                 ?.await()
                 ?: state.result.takeIf { state.status == SpeculativeToolStatus.COMPLETED }
             result?.let { final.toolCallId to it }
