@@ -14,7 +14,6 @@ import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
 import app.amber.core.settings.Settings
-import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel

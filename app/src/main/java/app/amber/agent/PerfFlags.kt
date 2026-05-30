@@ -58,4 +58,12 @@ object PerfFlags {
      * instead of the monolithic GenerativeWidgetCard.
      */
     const val USE_SPLIT_GENERATIVE_WIDGET_CARD = false
+
+    /**
+     * Streaming rich text A/B — feed new model output into layout immediately
+     * and let CharReveal animate only the bounded tail. Default paced display
+     * buffer remains the production path until real-device verification says
+     * the immediate path is better.
+     */
+    const val STREAMING_IMMEDIATE_CONTENT_REVEAL = false
 }

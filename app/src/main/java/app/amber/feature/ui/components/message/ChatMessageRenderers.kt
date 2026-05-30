@@ -113,6 +113,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
     content: String,
     modifier: Modifier = Modifier,
     streaming: Boolean,
+    deferStreamingParse: Boolean = false,
     onClickCitation: (String) -> Unit,
     onGenerativeWidgetAction: (String) -> Unit,
     onStreamingVisibleFrame: (() -> Unit)? = null,
@@ -140,6 +141,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
             // Forward streaming so the tail block of the assistant response fades in
             // smoothly on each 200ms flush instead of popping. See MarkdownBlock kdoc.
             streaming = streaming,
+            deferStreamingParse = deferStreamingParse,
             onStreamingVisibleFrame = onStreamingVisibleFrame,
             onClickCitation = onClickCitation,
         )
@@ -168,6 +170,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
                     is GenerativeWidgetSegment.Text -> MarkdownBlock(
                         content = segment.content,
                         streaming = segmentStreaming,
+                        deferStreamingParse = deferStreamingParse && segmentStreaming,
                         onStreamingVisibleFrame = if (segmentStreaming) {
                             onStreamingVisibleFrame
                         } else {

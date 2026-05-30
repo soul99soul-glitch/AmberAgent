@@ -634,7 +634,7 @@ class DeepReadSourcePrefetcher(
     private fun String.extractReadableText(sourceUrl: String? = null): String {
         val nativeResult = sourceUrl?.let { url ->
             runCatching {
-                app.amber.feature.deepread.nativebridge.ReaderExtractorNative.extract(this, url)
+                app.amber.feature.deepread.nativebridge.ReaderExtractorNative.extractOrNull(this, url)
             }.getOrNull()
         }
         if (nativeResult != null && nativeResult.contentText.length >= 18) {

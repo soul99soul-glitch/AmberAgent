@@ -19,21 +19,44 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Per ADR-0004 HARD GATE: catch_unwind on Rust side; null return signals
  * the caller to fall back to the Kotlin path.
  */
-internal object JsonExprNative {
+object JsonExprNative {
 
     private const val TAG = "JsonExprNative"
     private const val LIB_NAME = "json_expr"
+    const val COMPONENT_NAME: String = "json_expr"
+
+    interface Config {
+        fun enabled(): Boolean
+        fun onLoadFailure(error: Throwable)
+        fun onNativePanic(stage: String, error: Throwable?)
+    }
+
+    object DisabledConfig : Config {
+        override fun enabled(): Boolean = false
+        override fun onLoadFailure(error: Throwable) {}
+        override fun onNativePanic(stage: String, error: Throwable?) {}
+    }
+
+    @Volatile
+    var config: Config = DisabledConfig
 
     private val loaded = AtomicBoolean(false)
+    private val loadFailureReported = AtomicBoolean(false)
     @Volatile private var loadAttempted = false
 
     val available: Boolean
         get() {
-            ensureLoaded()
-            return loaded.get()
+            val cfg = config
+            if (!cfg.enabled()) return false
+            return checkAvailability(cfg)
         }
 
-    private fun ensureLoaded() {
+    private fun checkAvailability(cfg: Config): Boolean {
+        ensureLoaded(cfg)
+        return loaded.get()
+    }
+
+    private fun ensureLoaded(cfg: Config) {
         if (loaded.get() || loadAttempted) return
         synchronized(this) {
             if (loaded.get() || loadAttempted) return
@@ -44,21 +67,36 @@ internal object JsonExprNative {
                 Log.i(TAG, "loaded native library: $LIB_NAME")
             } catch (t: Throwable) {
                 Log.w(TAG, "failed to load native library $LIB_NAME — will fall back to JVM", t)
+                if (loadFailureReported.compareAndSet(false, true)) {
+                    cfg.onLoadFailure(t)
+                }
             }
         }
     }
 
     /** Returns the evaluated value as String, or null on parse/eval/JNI error. */
     fun evaluate(rootJson: String, expr: String): String? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return evaluateNative(rootJson, expr)
+        val cfg = config
+        if (!cfg.enabled() || !checkAvailability(cfg)) return null
+        return try {
+            evaluateNative(rootJson, expr)
+        } catch (t: Throwable) {
+            Log.w(TAG, "native evaluate threw — falling back to JVM", t)
+            cfg.onNativePanic("evaluate", t)
+            null
+        }
     }
 
     fun isValid(expr: String): Boolean? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return isValidNative(expr)
+        val cfg = config
+        if (!cfg.enabled() || !checkAvailability(cfg)) return null
+        return try {
+            isValidNative(expr)
+        } catch (t: Throwable) {
+            Log.w(TAG, "native isValid threw — falling back to JVM", t)
+            cfg.onNativePanic("is_valid", t)
+            null
+        }
     }
 
     @JvmStatic

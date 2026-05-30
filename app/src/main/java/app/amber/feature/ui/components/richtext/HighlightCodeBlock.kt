@@ -5,7 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,7 +82,16 @@ import app.amber.core.utils.toDp
 import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
-private const val STREAMING_CODE_BLOCK_LINES = 6
+private const val CODE_HIGHLIGHT_CROSSFADE_MS = 120
+
+internal fun displayCodeBlockContent(
+    code: String,
+    isExpanded: Boolean,
+    activeStreamingBlock: Boolean,
+): String {
+    if (activeStreamingBlock || isExpanded) return code
+    return code.lines().take(COLLAPSE_LINES).joinToString("\n")
+}
 
 @Composable
 fun HighlightCodeBlock(
@@ -162,11 +173,13 @@ fun HighlightCodeBlock(
                 else -> {
                     val textStyle = codeTextStyle
                     val codeLines = remember(code) { code.lines() }
-                    val collapsedLineLimit = if (activeStreamingBlock) STREAMING_CODE_BLOCK_LINES else COLLAPSE_LINES
-                    val collapsedCode = remember(codeLines, collapsedLineLimit) {
-                        codeLines.take(collapsedLineLimit).joinToString("\n")
+                    val displayCode = remember(code, isExpanded, activeStreamingBlock) {
+                        displayCodeBlockContent(
+                            code = code,
+                            isExpanded = isExpanded,
+                            activeStreamingBlock = activeStreamingBlock,
+                        )
                     }
-                    val displayCode = if (activeStreamingBlock || !isExpanded) collapsedCode else code
                     val displayLines = remember(displayCode) { displayCode.lines() }
 
                     // 如果显示行号且自动换行，需要逐行渲染以保持对齐
@@ -197,7 +210,7 @@ fun HighlightCodeBlock(
 
                     Spacer(Modifier.height(4.dp))
                     // 代码折叠按钮
-                    if (settings.displaySetting.codeBlockAutoCollapse && codeLines.size > collapsedLineLimit) {
+                    if (settings.displaySetting.codeBlockAutoCollapse && codeLines.size > COLLAPSE_LINES) {
                         Box(
                             modifier = Modifier
                                 .onClick {
@@ -262,34 +275,16 @@ private fun CodeBlockWithLineNumbersWrapped(
                         softWrap = false,
                         modifier = Modifier.padding(end = 8.dp)
                     )
-                    if (completeCodeBlock) {
-                        HighlightText(
-                            code = line,
-                            language = language,
-                            fontSize = textStyle.fontSize,
-                            lineHeight = textStyle.lineHeight,
-                            colors = colorPalette,
-                            overflow = TextOverflow.Visible,
-                            softWrap = true,
-                            fontFamily = JetbrainsMono,
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        // M1.3: streaming 阶段跳过 prism 高亮（QuickJS expensive
-                        // per-line, fires on every 33ms chunk flush). Render plain
-                        // monospace text; the closing ``` will trigger a recompose
-                        // with completeCodeBlock=true that switches back to
-                        // HighlightText for the final colored render.
-                        Text(
-                            text = line,
-                            fontSize = textStyle.fontSize,
-                            lineHeight = textStyle.lineHeight,
-                            fontFamily = JetbrainsMono,
-                            overflow = TextOverflow.Visible,
-                            softWrap = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    SmoothHighlightText(
+                        highlighted = completeCodeBlock,
+                        code = line,
+                        language = language,
+                        textStyle = textStyle,
+                        colorPalette = colorPalette,
+                        overflow = TextOverflow.Visible,
+                        softWrap = true,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -341,33 +336,57 @@ private fun CodeBlockDefault(
         SelectionContainer(
             modifier = if (autoWrap) Modifier.weight(1f) else Modifier
         ) {
-            if (completeCodeBlock) {
-                HighlightText(
-                    code = displayCode,
-                    language = language,
-                    modifier = Modifier.animateContentSize(),
-                    fontSize = textStyle.fontSize,
-                    lineHeight = textStyle.lineHeight,
-                    colors = colorPalette,
-                    overflow = TextOverflow.Visible,
-                    softWrap = autoWrap,
-                    fontFamily = JetbrainsMono
-                )
-            } else {
-                // M1.3: streaming 阶段跳过 prism 高亮（QuickJS, fires on every
-                // 33ms chunk flush). 看到 ``` closing fence 之后 recompose 会
-                // 把 completeCodeBlock 翻 true，那一帧才付一次完整高亮的成本。
-                // 视觉上等同纯 monospace text；finalize 时会 fade 进高亮颜色。
-                Text(
-                    text = displayCode,
-                    modifier = Modifier.animateContentSize(),
-                    fontSize = textStyle.fontSize,
-                    lineHeight = textStyle.lineHeight,
-                    overflow = TextOverflow.Visible,
-                    softWrap = autoWrap,
-                    fontFamily = JetbrainsMono,
-                )
-            }
+            SmoothHighlightText(
+                highlighted = completeCodeBlock,
+                code = displayCode,
+                language = language,
+                textStyle = textStyle,
+                colorPalette = colorPalette,
+                overflow = TextOverflow.Visible,
+                softWrap = autoWrap,
+                modifier = Modifier.animateContentSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmoothHighlightText(
+    highlighted: Boolean,
+    code: String,
+    language: String,
+    textStyle: TextStyle,
+    colorPalette: HighlightTextColorPalette,
+    overflow: TextOverflow,
+    softWrap: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Crossfade(
+        targetState = highlighted,
+        animationSpec = tween(CODE_HIGHLIGHT_CROSSFADE_MS),
+        label = "code-highlight",
+        modifier = modifier,
+    ) { showHighlight ->
+        if (showHighlight) {
+            HighlightText(
+                code = code,
+                language = language,
+                fontSize = textStyle.fontSize,
+                lineHeight = textStyle.lineHeight,
+                colors = colorPalette,
+                overflow = overflow,
+                softWrap = softWrap,
+                fontFamily = JetbrainsMono,
+            )
+        } else {
+            Text(
+                text = code,
+                fontSize = textStyle.fontSize,
+                lineHeight = textStyle.lineHeight,
+                overflow = overflow,
+                softWrap = softWrap,
+                fontFamily = JetbrainsMono,
+            )
         }
     }
 }

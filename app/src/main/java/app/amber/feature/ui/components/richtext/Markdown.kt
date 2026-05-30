@@ -110,6 +110,8 @@ import kotlin.random.Random
  * Used by user message bubbles to allow adaptive width.
  */
 internal val LocalMarkdownFillWidth = compositionLocalOf { true }
+private val LocalMarkdownSourceOffsetBase = compositionLocalOf { 0 }
+private val LocalMarkdownSyntheticSuffixStart = compositionLocalOf { Int.MAX_VALUE }
 
 private fun Modifier.fillWidthIf(fill: Boolean): Modifier = if (fill) fillMaxWidth() else this
 
@@ -256,6 +258,8 @@ internal data class MarkdownParseResult(
     val astTree: ASTNode,
     val hasHtmlBlocks: Boolean,
     val stableTopLevelBlocks: List<MarkdownTopLevelBlockSnapshot> = emptyList(),
+    val activeBaseOffset: Int = 0,
+    val syntheticSuffixStart: Int = Int.MAX_VALUE,
 )
 
 internal data class MarkdownTopLevelBlockSnapshot(
@@ -263,6 +267,94 @@ internal data class MarkdownTopLevelBlockSnapshot(
     val parseResult: MarkdownParseResult,
     val preserveParagraphBottomPadding: Boolean,
 )
+
+internal data class StreamingRepairResult(
+    val text: String,
+    val syntheticSuffixStart: Int,
+)
+
+internal data class StreamingLiveSuffix(
+    val text: String,
+    val sourceOffset: Int,
+)
+
+private val FENCE_LINE_REGEX = Regex("""(?m)^[ \t]*```""")
+private val TRAILING_FENCE_TERMINATOR_REGEX = Regex("""[ \t]*```[ \t]*""")
+private val EMPTY_STREAMING_LIVE_SUFFIX = StreamingLiveSuffix("", 0)
+
+private fun String.countNonOverlapping(token: String): Int {
+    if (token.isEmpty()) return 0
+    var count = 0
+    var searchFrom = 0
+    while (searchFrom < length) {
+        val next = indexOf(token, startIndex = searchFrom)
+        if (next < 0) break
+        count++
+        searchFrom = next + token.length
+    }
+    return count
+}
+
+internal fun repairStreamingMarkdownTail(tail: String): StreamingRepairResult {
+    if (tail.isEmpty()) return StreamingRepairResult(tail, tail.length)
+    val suffix = StringBuilder()
+    val syntheticStart = tail.length
+
+    if (FENCE_LINE_REGEX.findAll(tail).count() % 2 == 1) {
+        if (!tail.endsWith('\n')) suffix.append('\n')
+        suffix.append("```")
+        return StreamingRepairResult(tail + suffix, syntheticStart)
+    }
+
+    if (tail.count { it == '`' } % 2 == 1) {
+        suffix.append('`')
+    }
+    if (tail.countNonOverlapping("**") % 2 == 1) {
+        suffix.append("**")
+    }
+    if (tail.countNonOverlapping("$$") % 2 == 1) {
+        suffix.append("$$")
+    } else if (tail.count { it == '$' } % 2 == 1) {
+        suffix.append('$')
+    }
+
+    return StreamingRepairResult(tail + suffix, syntheticStart)
+}
+
+internal fun streamingLiveSuffixFor(
+    renderContent: String,
+    activeBaseOffset: Int,
+    parsedPreprocessed: String,
+    syntheticSuffixStart: Int,
+    streaming: Boolean,
+): StreamingLiveSuffix {
+    if (!streaming) return EMPTY_STREAMING_LIVE_SUFFIX
+    if (activeBaseOffset < 0 || activeBaseOffset > renderContent.length) {
+        return EMPTY_STREAMING_LIVE_SUFFIX
+    }
+    val parsedSourceEnd = if (syntheticSuffixStart == Int.MAX_VALUE) {
+        parsedPreprocessed.length
+    } else {
+        (syntheticSuffixStart - activeBaseOffset).coerceIn(0, parsedPreprocessed.length)
+    }
+    val liveActiveLength = renderContent.length - activeBaseOffset
+    if (
+        liveActiveLength <= parsedSourceEnd ||
+        !renderContent.regionMatches(
+            thisOffset = activeBaseOffset,
+            other = parsedPreprocessed,
+            otherOffset = 0,
+            length = parsedSourceEnd,
+            ignoreCase = false,
+        )
+    ) {
+        return EMPTY_STREAMING_LIVE_SUFFIX
+    }
+    return StreamingLiveSuffix(
+        text = renderContent.substring(activeBaseOffset + parsedSourceEnd),
+        sourceOffset = activeBaseOffset + parsedSourceEnd,
+    )
+}
 
 private const val MARKDOWN_PARSE_CACHE_VERSION = 1
 private const val MARKDOWN_PARSE_CACHE_MAX_ENTRIES = 128
@@ -586,7 +678,24 @@ private class StreamingMarkdownParseCache {
         stableBlocks = emptyList()
     }
 
-    fun parse(content: String): MarkdownParseResult = traceMarkdown("Amber Markdown parse streaming") {
+    private fun parseRepairedTail(
+        tail: String,
+        activeBaseOffset: Int,
+        blocks: List<MarkdownTopLevelBlockSnapshot>,
+    ): MarkdownParseResult {
+        val repairedTail = repairStreamingMarkdownTail(tail)
+        return parsePreprocessedMarkdownUncached(repairedTail.text)
+            .copy(
+                stableTopLevelBlocks = blocks,
+                activeBaseOffset = activeBaseOffset,
+                syntheticSuffixStart = activeBaseOffset + repairedTail.syntheticSuffixStart,
+            )
+    }
+
+    fun parse(
+        content: String,
+        revealStableEnd: Int? = null,
+    ): MarkdownParseResult = traceMarkdown("Amber Markdown parse streaming") {
         val baseline = synchronized(lock) {
             if (stableRawPrefix.isNotEmpty() && content.startsWith(stableRawPrefix)) {
                 stableRawPrefix to stableBlocks
@@ -612,10 +721,29 @@ private class StreamingMarkdownParseCache {
 
         val activeChildren = activeParse.astTree.children
         if (activeChildren.size <= 1) {
-            return@traceMarkdown activeParse.copy(stableTopLevelBlocks = blocks)
+            return@traceMarkdown parseRepairedTail(
+                tail = activePreprocessed,
+                activeBaseOffset = prefix.length,
+                blocks = blocks,
+            )
         }
 
-        val newlyStableChildren = activeChildren.dropLast(1)
+        val parserStableChildren = activeChildren.dropLast(1)
+        val revealLimitInActive = revealStableEnd
+            ?.minus(prefix.length)
+            ?.coerceAtLeast(0)
+            ?: Int.MAX_VALUE
+        val newlyStableChildren = parserStableChildren.takeWhile { child ->
+            child.endOffset <= revealLimitInActive
+        }
+        if (newlyStableChildren.isEmpty()) {
+            return@traceMarkdown parseRepairedTail(
+                tail = activePreprocessed,
+                activeBaseOffset = prefix.length,
+                blocks = blocks,
+            )
+        }
+
         val nextStableBlocks = blocks + newlyStableChildren.map { child ->
             val blockContent = activePreprocessed.substring(child.startOffset, child.endOffset)
             MarkdownTopLevelBlockSnapshot(
@@ -632,8 +760,12 @@ private class StreamingMarkdownParseCache {
             stableRawPrefix = content.substring(0, nextPrefixEnd)
             stableBlocks = nextStableBlocks
         }
-        parsePreprocessedMarkdownUncached(activePreprocessed.substring(activeTailStart))
-            .copy(stableTopLevelBlocks = nextStableBlocks)
+        val tail = activePreprocessed.substring(activeTailStart)
+        parseRepairedTail(
+            tail = tail,
+            activeBaseOffset = nextPrefixEnd,
+            blocks = nextStableBlocks,
+        )
     }
 }
 
@@ -700,6 +832,7 @@ fun MarkdownBlock(
      * arrived text can fade in while finalized blocks stay on the fast path.
      */
     streaming: Boolean = false,
+    deferStreamingParse: Boolean = false,
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onClickCitation: (String) -> Unit = {}
 ) {
@@ -711,6 +844,7 @@ fun MarkdownBlock(
             style = style,
             fillWidth = fillWidth,
             streaming = streaming,
+            deferStreamingParse = deferStreamingParse,
             onStreamingVisibleFrame = onStreamingVisibleFrame,
             onClickCitation = onClickCitation,
         )
@@ -722,13 +856,16 @@ fun MarkdownBlock(
         streaming = bufferStreaming,
         onVisibleFrame = onStreamingVisibleFrame,
     )
+    val displayDrainingAfterStream = !streaming &&
+        renderContent != content &&
+        content.startsWith(renderContent)
     val streamingParseCache = remember {
         StreamingMarkdownParseCache()
     }
     var (data, setData) = remember {
         mutableStateOf(
             if (streaming) {
-                streamingParseCache.parse(renderContent)
+                streamingParseCache.parse(renderContent, revealStableEnd = 0)
             } else {
                 streamingParseCache.reset()
                 MarkdownParseCache.getOrParse(renderContent)
@@ -747,11 +884,30 @@ fun MarkdownBlock(
     // step we're cutting.
     val updatedContent by rememberUpdatedState(renderContent)
     val updatedStreaming by rememberUpdatedState(streaming)
+    val updatedDeferStreamingParse by rememberUpdatedState(deferStreamingParse)
+    val revealController = rememberCharRevealController(
+        streaming = streaming || displayDrainingAfterStream,
+        content = renderContent,
+        immediateMode = app.amber.agent.PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL,
+    )
+    val updatedRevealStableEnd by rememberUpdatedState(
+        revealController?.stableOffsetExclusive()
+    )
+    val streamingLiveSuffix = streamingLiveSuffixFor(
+        renderContent = renderContent,
+        activeBaseOffset = data.activeBaseOffset,
+        parsedPreprocessed = data.preprocessed,
+        syntheticSuffixStart = data.syntheticSuffixStart,
+        streaming = streaming,
+    )
     LaunchedEffect(Unit) {
         var lastParsedContent = renderContent
         var lastParsedStreaming = streaming
+        var lastDeferred = deferStreamingParse
         @OptIn(FlowPreview::class)
-        snapshotFlow { updatedContent to updatedStreaming }
+        snapshotFlow {
+            Triple(updatedContent, updatedStreaming, updatedDeferStreamingParse)
+        }
             .distinctUntilChanged()
             .let { upstream ->
                 // Sample only when streaming. When the chat-turn is settled,
@@ -763,14 +919,29 @@ fun MarkdownBlock(
                     upstream
                 }
             }
-            .collectLatest { (latestContent, latestStreaming) ->
-                if (latestContent == lastParsedContent && latestStreaming == lastParsedStreaming) {
+            .collectLatest { (latestContent, latestStreaming, latestDeferStreamingParse) ->
+                if (
+                    latestContent == lastParsedContent &&
+                    latestStreaming == lastParsedStreaming &&
+                    latestDeferStreamingParse == lastDeferred
+                ) {
+                    return@collectLatest
+                }
+                if (latestStreaming && latestDeferStreamingParse) {
+                    lastDeferred = latestDeferStreamingParse
+                    StreamingRenderProbe.record {
+                        "parse_deferred len=${latestContent.length}"
+                    }
                     return@collectLatest
                 }
                 try {
+                    val revealStableEnd = updatedRevealStableEnd
                     val parsed = withContext(Dispatchers.Default) {
                         if (latestStreaming) {
-                            streamingParseCache.parse(latestContent)
+                            streamingParseCache.parse(
+                                content = latestContent,
+                                revealStableEnd = revealStableEnd,
+                            )
                         } else {
                             streamingParseCache.reset()
                             MarkdownParseCache.getOrParse(latestContent)
@@ -778,6 +949,7 @@ fun MarkdownBlock(
                     }
                     lastParsedContent = latestContent
                     lastParsedStreaming = latestStreaming
+                    lastDeferred = latestDeferStreamingParse
                     setData(parsed)
                 } catch (exception: CancellationException) {
                     throw exception
@@ -786,11 +958,6 @@ fun MarkdownBlock(
                 }
             }
     }
-
-    val revealController = rememberCharRevealController(
-        streaming = streaming,
-        content = data.preprocessed,
-    )
 
     TraceMarkdownComposable("Amber MarkdownBlock render") {
       CompositionLocalProvider(
@@ -834,35 +1001,55 @@ fun MarkdownBlock(
                                 }
                             }
                         }
-                        children.lastOrNull()?.let { activeChild ->
-                            key("active:${activeChild.type}:${activeChild.startOffset}") {
+                        val activeLastIndex = children.lastIndex
+                        children.fastForEachIndexed { index, activeChild ->
+                            key("active:${activeChild.type}:${data.activeBaseOffset + activeChild.startOffset}:$index") {
+                                val childLiveSuffix = if (index == activeLastIndex) {
+                                    streamingLiveSuffix
+                                } else {
+                                    EMPTY_STREAMING_LIVE_SUFFIX
+                                }
                                 CompositionLocalProvider(
                                     LocalCharRevealController provides revealController,
+                                    LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
+                                    LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
                                 ) {
                                     MarkdownNode(
                                         node = activeChild,
                                         content = data.preprocessed,
                                         modifier = nodeModifier,
                                         onClickCitation = onClickCitation,
+                                        liveSuffix = childLiveSuffix.text,
+                                        liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                                     )
                                 }
                             }
                         }
                     } else {
+                        val activeLastIndex = children.lastIndex
                         children.fastForEachIndexed { index, child ->
                             val childRevealController = if (index == children.lastIndex) {
                                 revealController
                             } else {
                                 null
                             }
+                            val childLiveSuffix = if (index == activeLastIndex) {
+                                streamingLiveSuffix
+                            } else {
+                                EMPTY_STREAMING_LIVE_SUFFIX
+                            }
                             CompositionLocalProvider(
                                 LocalCharRevealController provides childRevealController,
+                                LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
+                                LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
                             ) {
                                 MarkdownNode(
                                     node = child,
                                     content = data.preprocessed,
                                     modifier = nodeModifier,
                                     onClickCitation = onClickCitation,
+                                    liveSuffix = childLiveSuffix.text,
+                                    liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
                                 )
                             }
                         }
@@ -925,6 +1112,8 @@ private fun MarkdownNode(
     modifier: Modifier = Modifier,
     onClickCitation: (String) -> Unit = {},
     listLevel: Int = 0,
+    liveSuffix: String = "",
+    liveSuffixSourceOffset: Int = 0,
 ) {
     when (node.type) {
         // 文件根节点
@@ -943,6 +1132,8 @@ private fun MarkdownNode(
                 content = content,
                 modifier = modifier,
                 onClickCitation = onClickCitation,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
             )
         }
 
@@ -1199,13 +1390,23 @@ private fun MarkdownNode(
             val codeContentStartOffset = eolElement.endOffset
             val codeContentEndOffset =
                 node.children.findLast { it.type == MarkdownTokenTypes.CODE_FENCE_CONTENT }?.endOffset ?: return
-            val code = content.substring(
-                codeContentStartOffset, codeContentEndOffset
-            ).trimIndent()
+            val rawCode = content.substring(codeContentStartOffset, codeContentEndOffset)
 
             val language =
                 node.findChildOfTypeRecursive(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content) ?: "plaintext"
-            val hasEnd = node.findChildOfTypeRecursive(MarkdownTokenTypes.CODE_FENCE_END) != null
+            val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
+            val syntheticSuffixStart = LocalMarkdownSyntheticSuffixStart.current
+            val endFence = node.findChildOfTypeRecursive(MarkdownTokenTypes.CODE_FENCE_END)
+            val hasEnd = endFence != null && sourceOffsetBase + endFence.endOffset <= syntheticSuffixStart
+            val liveCodeSuffix = streamingCodeFenceLiveSuffixFor(
+                sourceOffsetBase = sourceOffsetBase,
+                codeContentStartOffset = codeContentStartOffset,
+                codeContentEndOffset = codeContentEndOffset,
+                syntheticSuffixStart = syntheticSuffixStart,
+                liveSuffix = liveSuffix,
+                liveSuffixSourceOffset = liveSuffixSourceOffset,
+            )
+            val code = (rawCode + liveCodeSuffix).trimIndent()
 
             // `search-images` is a virtual code language emitted by
             // SearchImageInjectorTransformer — each line inside the fence is an image
@@ -1257,6 +1458,32 @@ private fun MarkdownNode(
             }
         }
     }
+}
+
+internal fun streamingCodeFenceLiveSuffixFor(
+    sourceOffsetBase: Int,
+    codeContentStartOffset: Int,
+    codeContentEndOffset: Int,
+    syntheticSuffixStart: Int,
+    liveSuffix: String,
+    liveSuffixSourceOffset: Int,
+): String {
+    if (liveSuffix.isEmpty()) return ""
+    if (syntheticSuffixStart == Int.MAX_VALUE) return ""
+    val absoluteCodeStart = sourceOffsetBase + codeContentStartOffset
+    val absoluteCodeEnd = sourceOffsetBase + codeContentEndOffset
+    if (liveSuffixSourceOffset < absoluteCodeStart) return ""
+    if (liveSuffixSourceOffset < absoluteCodeEnd) return ""
+    if (liveSuffixSourceOffset != syntheticSuffixStart) return ""
+    return liveSuffix.withoutTrailingFenceTerminator()
+}
+
+private fun String.withoutTrailingFenceTerminator(): String {
+    val trimmedEnd = trimEnd()
+    val start = trimmedEnd.lastIndexOf('\n').let { if (it == -1) 0 else it + 1 }
+    val lastLine = trimmedEnd.substring(start)
+    if (!lastLine.matches(TRAILING_FENCE_TERMINATOR_REGEX)) return this
+    return trimmedEnd.substring(0, start).removeSuffix("\n")
 }
 
 @Composable
@@ -1393,6 +1620,8 @@ private fun Paragraph(
     trim: Boolean = false,
     onClickCitation: (String) -> Unit = {},
     modifier: Modifier,
+    liveSuffix: String = "",
+    liveSuffixSourceOffset: Int = 0,
 ) {
     // dumpAst(node, content)
     // Cache the AST-walk result so a per-frame recomposition (triggered by
@@ -1452,6 +1681,7 @@ private fun Paragraph(
     val revealController = LocalCharRevealController.current
     val baseColor = LocalContentColor.current
     val revealClock = revealController?.nowNanos ?: 0L
+    val sourceOffsetBase = LocalMarkdownSourceOffsetBase.current
 
     FlowRow(
         modifier = modifier
@@ -1491,7 +1721,30 @@ private fun Paragraph(
                         enableLatexRendering = enableLatexRendering,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
+                        sourceOffsetBase = sourceOffsetBase,
                     )
+                }
+            }
+        }
+        val displayAnnotated = remember(
+            staticAnnotated,
+            liveSuffix,
+            liveSuffixSourceOffset,
+            baseColor,
+        ) {
+            if (liveSuffix.isEmpty()) {
+                staticAnnotated
+            } else {
+                buildAnnotatedString {
+                    append(staticAnnotated)
+                    val displaySuffix = liveSuffix.replace(BREAK_LINE_REGEX, "\n")
+                    if (baseColor == Color.Unspecified) {
+                        append(displaySuffix)
+                    } else {
+                        pushStringAnnotation(REVEAL_LEAF_TAG, liveSuffixSourceOffset.toString())
+                        append(displaySuffix)
+                        pop()
+                    }
                 }
             }
         }
@@ -1502,8 +1755,8 @@ private fun Paragraph(
         // pushed by INLINE_LINK / INLINE_MATH. For a paragraph with dozens of
         // citations + formulas that's O(N) per frame — exactly the kind of
         // per-frame regression this refactor exists to prevent.
-        val revealRanges = remember(staticAnnotated) {
-            staticAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, staticAnnotated.length)
+        val revealRanges = remember(displayAnnotated) {
+            displayAnnotated.getStringAnnotations(REVEAL_LEAF_TAG, 0, displayAnnotated.length)
         }
 
         // revealClock = controller?.nowNanos ?: 0L already covers the
@@ -1513,7 +1766,7 @@ private fun Paragraph(
         // would just add identity churn during the brief streaming-end
         // window without functional benefit.
         val annotatedString = remember(
-            staticAnnotated,
+            displayAnnotated,
             revealRanges,
             revealClock,
             baseColor,
@@ -1523,9 +1776,9 @@ private fun Paragraph(
                 revealController.hasActiveReveals() &&
                 revealRanges.isNotEmpty()
             ) {
-                applyRevealOverlay(staticAnnotated, revealRanges, revealController, baseColor)
+                applyRevealOverlay(displayAnnotated, revealRanges, revealController, baseColor)
             } else {
-                staticAnnotated
+                displayAnnotated
             }
         }
 
@@ -1657,6 +1910,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     onClickCitation: (String) -> Unit = {},
     onClickUrl: (String) -> Unit = {},
     baseColor: Color = Color.Unspecified,
+    sourceOffsetBase: Int = 0,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1690,7 +1944,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 trim = trim,
             )
             if (canFade) {
-                pushStringAnnotation(REVEAL_LEAF_TAG, node.startOffset.toString())
+                pushStringAnnotation(REVEAL_LEAF_TAG, (sourceOffsetBase + node.startOffset).toString())
                 append(text)
                 pop()
             } else {
@@ -1712,6 +1966,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
+                        sourceOffsetBase = sourceOffsetBase,
                     )
                 }
             }
@@ -1731,6 +1986,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
+                        sourceOffsetBase = sourceOffsetBase,
                     )
                 }
             }
@@ -1750,6 +2006,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onClickCitation = onClickCitation,
                         onClickUrl = onClickUrl,
                         baseColor = baseColor,
+                        sourceOffsetBase = sourceOffsetBase,
                     )
                 }
             }
@@ -1883,6 +2140,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     onClickCitation = onClickCitation,
                     onClickUrl = onClickUrl,
                     baseColor = baseColor,
+                    sourceOffsetBase = sourceOffsetBase,
                 )
             }
         }
@@ -1942,13 +2200,13 @@ internal fun shouldMarkLeafAsFadeEligible(
  */
 /**
  * V3: 给 fade 中的字符加 baselineShift 模拟"从下方浮上来"(Codex 同款).
- * alpha=0 → shift = -0.08 (字在 baseline 下方约 1-2px)
+ * alpha=0 → shift = -0.14 (字在 baseline 下方约 2-3px)
  * alpha=1 → shift = 0 (归位)
  * BaselineShift 是 SpanStyle 字段, 不影响 line height (Compose 已 clamp).
  */
 private fun fadingSpanStyle(baseColor: Color, alpha: Float): SpanStyle = SpanStyle(
     color = baseColor.copy(alpha = alpha),
-    baselineShift = BaselineShift(-(1f - alpha) * 0.08f),
+    baselineShift = BaselineShift(-(1f - alpha) * 0.14f),
 )
 
 internal fun applyRevealOverlay(

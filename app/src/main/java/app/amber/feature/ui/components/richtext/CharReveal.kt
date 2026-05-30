@@ -1,11 +1,13 @@
 package app.amber.feature.ui.components.richtext
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -13,6 +15,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import app.amber.agent.PerfFlags
+import kotlin.math.pow
 
 // Phase B / B1 + B2 — word-level reveal controller for streaming text.
 //
@@ -27,8 +31,8 @@ import androidx.compose.runtime.withFrameNanos
 //   onFrame(frameNanos)
 //          • EWMA the inter-frame delta to track current FPS
 //          • if FPS < 45 OR backlog > BACKLOG_DEGRADE → degraded mode:
-//            promote every queued entry to revealedHead immediately
-//            (alpha jumps to 1f without fade) — guide §15 step 1-2
+//            compress queued entries into a short fade window so they
+//            catch up without a one-frame alpha jump
 //          • else: promote any entry whose age crossed the fade window
 //          • idle short-circuit: if the queue is empty, freeze nowNanos
 //            so Paragraph's remember-key stops invalidating
@@ -97,14 +101,34 @@ private const val MIN_ENTRY_STAGGER_NANOS = 4_000_000L
 private const val MAX_ENTRY_STAGGER_NANOS = 10_000_000L
 private const val MAX_BATCH_STAGGER_NANOS = 64_000_000L
 
+private const val REVEAL_TAIL_WINDOW_NANOS = 350_000_000L
+private const val REVEAL_TAIL_MAX_ENTRIES = 150
+private const val REVEAL_TAIL_MAX_CHARS = 400
+
 private const val STREAM_DISPLAY_BASE_CHARS_PER_SEC = 54f
-private const val STREAM_DISPLAY_BACKLOG_GAIN = 2.2f
-private const val STREAM_DISPLAY_MAX_CHARS_PER_SEC = 720f
-private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC = 1_800f
-private const val STREAM_DISPLAY_SPEED_ALPHA = 0.18f
-private const val STREAM_DISPLAY_MIN_EMIT_INTERVAL_NANOS = 16_000_000L
-private const val STREAM_DISPLAY_MAX_CHARS_PER_EMIT = 24
-private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT = 48
+// MUST be >= STREAM_DISPLAY_MAX_BACKLOG_CHARS / STREAM_DISPLAY_TARGET_DRAIN_SECONDS
+// (420 / 0.28 = 1500). Below that, the deadline-drain can never reach the speed
+// needed to hold lag at the backlog cap, so the hard catch-up (snap) fires on
+// every fast model instead of acting as a rare backstop — that premature snap is
+// the "20-char wave" stutter. Do NOT chase faster models by bumping this; raise
+// STREAM_DISPLAY_MAX_BACKLOG_CHARS or lower STREAM_DISPLAY_TARGET_DRAIN_SECONDS.
+// (StreamingDisplayBufferTest pins this relationship.)
+private const val STREAM_DISPLAY_MAX_CHARS_PER_SEC = 1_500f
+private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC = 2_400f
+private const val STREAM_DISPLAY_SPEED_ALPHA = 0.12f
+private const val STREAM_DISPLAY_TARGET_DRAIN_SECONDS = 0.28f
+private const val STREAM_DISPLAY_FINAL_TARGET_DRAIN_SECONDS = 0.10f
+// Fixed speed caps are a soft comfort target, not a correctness guarantee.
+// When a model bursts faster than the display buffer can comfortably reveal,
+// keep lag bounded so completion never has a whole answer left to dump.
+private const val STREAM_DISPLAY_MAX_BACKLOG_CHARS = 420
+// The display buffer runs from Compose's frame clock, so one loop iteration is
+// already bounded by the device vsync. Keep a small guard for very high refresh
+// panels, but do not cap 120Hz devices at the old 16ms / ~60Hz cadence.
+private const val STREAM_DISPLAY_MIN_EMIT_INTERVAL_NANOS = 8_000_000L
+private const val STREAM_DISPLAY_MAX_CHARS_PER_EMIT = 18
+private const val STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT = 32
+private const val HARD_DEGRADE_REVEAL_DURATION_NANOS = 72_000_000L
 
 /**
  * EWMA-smoothed FPS below which we drop the fade animation entirely.
@@ -125,7 +149,13 @@ private const val FPS_EWMA_DENOMINATOR = 8
 @Stable
 class CharRevealController internal constructor(
     private val revealDurationNanos: Long,
+    private val trimRevealTail: Boolean,
 ) {
+    internal constructor(revealDurationNanos: Long) : this(
+        revealDurationNanos = revealDurationNanos,
+        trimRevealTail = false,
+    )
+
     /**
      * Linearly shortens the fade window when the queue is backed up,
      * borrowed from LobeHub `useStreamQueue`'s `1 + queueLength × 0.3`
@@ -176,6 +206,8 @@ class CharRevealController internal constructor(
     private var avgFrameDeltaNanos: Long = 16_666_666L  // 60Hz default
     private var degraded: Boolean = false
 
+    private var activeRevealCount: Int by mutableIntStateOf(0)
+
     /** Smoothed FPS. Used by [shouldDegrade] and exposed for profiler use. */
     val currentFps: Float
         get() = if (avgFrameDeltaNanos <= 0L) 60f
@@ -223,15 +255,25 @@ class CharRevealController internal constructor(
         // the frame go.
         if (revealing.isEmpty()) return
 
-        // Degrade: catch-up mode. Fast-promote everything queued; the
-        // next paint will see all chars at alpha=1 with no fade. Cleaner
-        // than dropping frames or tearing.
+        if (trimRevealTail) {
+            trimRevealWindow(frameNanos)
+            if (revealing.isEmpty()) {
+                nowNanos = frameNanos
+                return
+            }
+        }
+
+        // Degrade: catch-up mode. Keep the reveal curve continuous instead
+        // of clearing the queue to alpha=1 in one frame. The old clear()
+        // path was efficient, but it read as a black flash exactly when the
+        // UI was already under pressure.
         if (shouldDegrade()) {
-            val tail = revealing.last()
-            revealedHead = maxOf(revealedHead, tail.endOffset)
-            revealing.clear()
-            // Bump nowNanos so the next paint sees the change.
             nowNanos = frameNanos
+            compressRevealQueue(frameNanos)
+            drainCompletedEntries(frameNanos)
+            StreamingRenderProbe.record {
+                "reveal_degrade fps=${"%.1f".format(currentFps)} queue=${revealing.size}"
+            }
             return
         }
 
@@ -242,15 +284,7 @@ class CharRevealController internal constructor(
         // the loop is consistent: each entry uses the duration we
         // promised it, not whatever the queue depth happens to make
         // effective at this frame.
-        while (revealing.isNotEmpty()) {
-            val head = revealing.first()
-            if (frameNanos - head.appearNanos >= head.revealDurationNanos) {
-                revealedHead = maxOf(revealedHead, head.endOffset)
-                revealing.removeFirst()
-            } else {
-                break
-            }
-        }
+        drainCompletedEntries(frameNanos)
     }
 
     /**
@@ -267,6 +301,7 @@ class CharRevealController internal constructor(
             revealing.clear()
             revealedHead = 0
             contentLength = 0
+            syncRevealCount()
         }
         if (newLength <= contentLength) return
         val stamp = System.nanoTime()
@@ -339,6 +374,13 @@ class CharRevealController internal constructor(
             )
         }
         contentLength = newLength
+        if (trimRevealTail) {
+            trimRevealWindow(stamp)
+        }
+        syncRevealCount()
+        StreamingRenderProbe.record {
+            "reveal_content len=$newLength added=${newLength - sliceFrom} queue=${revealing.size}"
+        }
         // Bump nowNanos so the next frame's alphaAt sees a sane (≈0)
         // delta — prevents the "first chunk after a pause renders fully
         // revealed" glitch when the idle-short-circuit had paused us.
@@ -366,14 +408,7 @@ class CharRevealController internal constructor(
         revealing.fastForEach { entry ->
             if (entry.startOffset > absoluteOffset) return 1f
             if (absoluteOffset in entry.startOffset until entry.endOffset) {
-                val effective = entry.revealDurationNanos
-                if (effective <= 0L) return 1f
-                val age = nowNanos - entry.appearNanos
-                if (age <= 0L) return 0f
-                if (age >= effective) return 1f
-                val t = age.toFloat() / effective.toFloat()
-                val inv = 1f - t
-                return 1f - inv * inv * inv
+                return entry.alphaAt(nowNanos)
             }
         }
         // Fall-through: shouldn't happen if onContentChanged was called
@@ -383,10 +418,10 @@ class CharRevealController internal constructor(
     }
 
     /** Public for profilers / instrumentation. Cheap. */
-    fun hasActiveReveals(): Boolean = revealing.isNotEmpty()
+    fun hasActiveReveals(): Boolean = activeRevealCount > 0
 
     /** Public for profilers. */
-    fun queueDepth(): Int = revealing.size
+    fun queueDepth(): Int = activeRevealCount
 
     /**
      * Highest absolute text offset that no longer needs per-codepoint
@@ -394,6 +429,76 @@ class CharRevealController internal constructor(
      * instead of walking the whole streaming answer every frame.
      */
     internal fun stableOffsetExclusive(): Int = revealedHead
+
+    private fun drainCompletedEntries(frameNanos: Long) {
+        var changed = false
+        while (revealing.isNotEmpty()) {
+            val head = revealing.first()
+            if (head.alphaAt(frameNanos) >= 1f) {
+                promoteFirstRevealEntry()
+                changed = true
+            } else {
+                break
+            }
+        }
+        if (changed) syncRevealCount()
+    }
+
+    internal fun trimRevealWindow(frameNanos: Long) {
+        if (revealing.isEmpty()) return
+        val oldestAllowedAppear = frameNanos - REVEAL_TAIL_WINDOW_NANOS
+        var promoted = 0
+        while (
+            revealing.isNotEmpty() &&
+            revealing.first().appearNanos < oldestAllowedAppear
+        ) {
+            promoteFirstRevealEntry()
+            promoted++
+        }
+        while (revealing.size > REVEAL_TAIL_MAX_ENTRIES) {
+            promoteFirstRevealEntry()
+            promoted++
+        }
+        while (revealing.isNotEmpty() && activeRevealCharSpan() > REVEAL_TAIL_MAX_CHARS) {
+            promoteFirstRevealEntry()
+            promoted++
+        }
+        if (promoted > 0) {
+            syncRevealCount()
+            StreamingRenderProbe.record {
+                "reveal_tail_trim promoted=$promoted queue=${revealing.size}"
+            }
+        }
+    }
+
+    private fun compressRevealQueue(frameNanos: Long) {
+        if (revealing.isEmpty()) return
+        val compressedDuration = minOf(revealDurationNanos, HARD_DEGRADE_REVEAL_DURATION_NANOS)
+        val next = ArrayDeque<RevealEntry>(revealing.size)
+        while (revealing.isNotEmpty()) {
+            val entry = revealing.removeFirst()
+            val alpha = entry.alphaAt(frameNanos).coerceIn(0f, 1f)
+            if (alpha >= 1f) {
+                next.addLast(entry.copy(appearNanos = frameNanos - compressedDuration, revealDurationNanos = compressedDuration))
+            } else {
+                val age = ageForEaseOutAlpha(alpha, compressedDuration)
+                next.addLast(entry.copy(appearNanos = frameNanos - age, revealDurationNanos = compressedDuration))
+            }
+        }
+        revealing.addAll(next)
+    }
+
+    private fun activeRevealCharSpan(): Int =
+        revealing.last().endOffset - revealing.first().startOffset
+
+    private fun promoteFirstRevealEntry() {
+        val head = revealing.removeFirst()
+        revealedHead = maxOf(revealedHead, head.endOffset)
+    }
+
+    private fun syncRevealCount() {
+        activeRevealCount = revealing.size
+    }
 
     private data class RevealEntry(
         val startOffset: Int,  // inclusive
@@ -409,7 +514,17 @@ class CharRevealController internal constructor(
         // (visible alpha regression). Stamping at entry time ties
         // the fade rate to "what we promised when this char arrived".
         val revealDurationNanos: Long,
-    )
+    ) {
+        fun alphaAt(nowNanos: Long): Float {
+            if (revealDurationNanos <= 0L) return 1f
+            val age = nowNanos - appearNanos
+            if (age <= 0L) return 0f
+            if (age >= revealDurationNanos) return 1f
+            val t = age.toFloat() / revealDurationNanos.toFloat()
+            val inv = 1f - t
+            return 1f - inv * inv * inv
+        }
+    }
 
     private companion object {
         /**
@@ -499,6 +614,13 @@ class CharRevealController internal constructor(
                 || cp in 0x30A0..0x30FF // Katakana
                 || cp in 0xAC00..0xD7AF // Hangul syllables
                 || cp in 0xFF00..0xFFEF // Halfwidth/Fullwidth forms
+
+        private fun ageForEaseOutAlpha(alpha: Float, durationNanos: Long): Long {
+            if (alpha <= 0f || durationNanos <= 0L) return 0L
+            if (alpha >= 1f) return durationNanos
+            val t = 1.0 - (1.0 - alpha.toDouble()).pow(1.0 / 3.0)
+            return (durationNanos * t).toLong().coerceIn(0L, durationNanos)
+        }
     }
 }
 
@@ -510,9 +632,9 @@ class CharRevealController internal constructor(
 val LocalCharRevealController = compositionLocalOf<CharRevealController?> { null }
 
 /**
- * Returns a remembered [CharRevealController] when [streaming] is true,
- * advancing its frame clock automatically. Returns null when not
- * streaming so finalized content takes the fast path.
+ * Returns a remembered [CharRevealController] after streaming starts,
+ * advancing its frame clock automatically. Once upstream streaming ends,
+ * the controller stays installed only until its tail fade finishes.
  *
  * The returned controller is keyed on the consumer Composable's
  * identity, so re-keying the consumer (e.g. switching MessageNode)
@@ -523,10 +645,27 @@ fun rememberCharRevealController(
     streaming: Boolean,
     content: String,
     preset: StreamRevealPreset = LocalStreamRevealPreset.current,
+    immediateMode: Boolean = false,
 ): CharRevealController? {
-    if (!streaming) return null
-    val controller = remember(preset) {
-        CharRevealController(revealDurationNanos = preset.baseRevealDurationMs * 1_000_000L)
+    if (!immediateMode && !streaming) return null
+    var hasSeenStreaming by remember(preset, immediateMode) { mutableStateOf(streaming) }
+    if (immediateMode && !streaming && !hasSeenStreaming) return null
+    val controller = remember(preset, immediateMode) {
+        CharRevealController(
+            revealDurationNanos = preset.baseRevealDurationMs * 1_000_000L,
+            trimRevealTail = immediateMode,
+        )
+    }
+    if (immediateMode && streaming && !hasSeenStreaming) {
+        SideEffect {
+            hasSeenStreaming = true
+        }
+    }
+    if (immediateMode && !streaming && !controller.hasActiveReveals()) {
+        SideEffect {
+            hasSeenStreaming = false
+        }
+        return null
     }
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(controller) {
@@ -553,11 +692,38 @@ fun rememberStreamingDisplayText(
     streaming: Boolean,
     onVisibleFrame: (() -> Unit)? = null,
 ): String {
+    if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL && streaming) {
+        val visible = streamingImmediateDisplayText(content)
+        val updatedOnVisibleFrame by rememberUpdatedState(onVisibleFrame)
+        var previousVisible by remember { mutableStateOf<String?>(null) }
+        SideEffect {
+            if (previousVisible != visible) {
+                previousVisible = visible
+                updatedOnVisibleFrame?.invoke()
+            }
+        }
+        return visible
+    }
+
     var visible by remember { mutableStateOf(content) }
     val updatedContent by rememberUpdatedState(content)
     val updatedStreaming by rememberUpdatedState(streaming)
     val updatedOnVisibleFrame by rememberUpdatedState(onVisibleFrame)
     val drainingAfterStream = !streaming && visible != content && content.startsWith(visible)
+    var previousStreaming by remember { mutableStateOf(streaming) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            StreamingRenderProbe.dump("streaming_display_disposed")
+        }
+    }
+
+    SideEffect {
+        if (previousStreaming && !streaming) {
+            StreamingRenderProbe.dump("streaming_display_completed")
+        }
+        previousStreaming = streaming
+    }
 
     if (!streaming && visible != content && !content.startsWith(visible)) {
         SideEffect {
@@ -600,6 +766,24 @@ fun rememberStreamingDisplayText(
                 lastFrameNanos = frameNanos
                 continue
             }
+            val catchUpEnd = streamingDisplayBacklogCatchUpEnd(
+                visibleLength = visible.length,
+                targetLength = target.length,
+            )
+            if (catchUpEnd > visible.length) {
+                val safeEnd = target.safeStreamingDisplayEnd(catchUpEnd)
+                if (safeEnd > visible.length) {
+                    val skipped = safeEnd - visible.length
+                    visible = target.substring(0, safeEnd.coerceAtMost(target.length))
+                    budget = 0f
+                    lastEmitNanos = frameNanos
+                    StreamingRenderProbe.record {
+                        "display_backlog_cap backlog=$backlog skipped=$skipped visible=${visible.length} target=${target.length}"
+                    }
+                    updatedOnVisibleFrame?.invoke()
+                    continue
+                }
+            }
             val deltaSeconds = if (lastFrameNanos == 0L) {
                 1f / 60f
             } else {
@@ -611,15 +795,14 @@ fun rememberStreamingDisplayText(
             } else {
                 STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC
             }
-            val targetSpeed = (STREAM_DISPLAY_BASE_CHARS_PER_SEC + backlog * STREAM_DISPLAY_BACKLOG_GAIN)
-                .coerceAtMost(maxCharsPerSecond)
+            val targetSpeed = streamingDisplayTargetSpeed(
+                backlog = backlog,
+                streaming = updatedStreaming,
+                maxCharsPerSecond = maxCharsPerSecond,
+            )
             speed += (targetSpeed - speed) * STREAM_DISPLAY_SPEED_ALPHA
             budget += speed * deltaSeconds
-            val maxCharsPerEmit = if (updatedStreaming) {
-                STREAM_DISPLAY_MAX_CHARS_PER_EMIT
-            } else {
-                STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT
-            }
+            val maxCharsPerEmit = streamingDisplayMaxCharsPerEmit(updatedStreaming)
             val releaseCount = budget.toInt().coerceAtMost(maxCharsPerEmit)
             if (releaseCount <= 0) continue
             if (
@@ -637,11 +820,60 @@ fun rememberStreamingDisplayText(
             visible = target.substring(0, safeEnd.coerceAtMost(target.length))
             budget -= releaseCount
             lastEmitNanos = frameNanos
+            StreamingRenderProbe.record {
+                "display_emit backlog=$backlog release=$releaseCount visible=${visible.length} target=${target.length} speed=${"%.1f".format(speed)}"
+            }
             updatedOnVisibleFrame?.invoke()
         }
     }
 
     return if (streaming || drainingAfterStream) visible else content
+}
+
+internal fun streamingDisplayTargetSpeed(
+    backlog: Int,
+    streaming: Boolean,
+    maxCharsPerSecond: Float = if (streaming) {
+        STREAM_DISPLAY_MAX_CHARS_PER_SEC
+    } else {
+        STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC
+    },
+): Float {
+    val drainSeconds = if (streaming) {
+        STREAM_DISPLAY_TARGET_DRAIN_SECONDS
+    } else {
+        STREAM_DISPLAY_FINAL_TARGET_DRAIN_SECONDS
+    }
+    return (backlog / drainSeconds)
+        .coerceAtLeast(STREAM_DISPLAY_BASE_CHARS_PER_SEC)
+        .coerceAtMost(maxCharsPerSecond)
+}
+
+internal fun streamingDisplayMaxCharsPerEmit(streaming: Boolean): Int =
+    if (streaming) {
+        STREAM_DISPLAY_MAX_CHARS_PER_EMIT
+    } else {
+        STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT
+    }
+
+internal fun streamingDisplayMaxBacklogChars(): Int = STREAM_DISPLAY_MAX_BACKLOG_CHARS
+
+internal fun streamingDisplayBacklogCatchUpEnd(
+    visibleLength: Int,
+    targetLength: Int,
+): Int {
+    if (targetLength <= visibleLength) return targetLength.coerceAtLeast(0)
+    val oldestAllowedVisibleEnd = targetLength - STREAM_DISPLAY_MAX_BACKLOG_CHARS
+    return maxOf(visibleLength, oldestAllowedVisibleEnd).coerceIn(0, targetLength)
+}
+
+internal fun streamingImmediateDisplayText(content: String): String {
+    val safeEnd = content.safeStreamingTerminalEnd()
+    return if (safeEnd == content.length) {
+        content
+    } else {
+        content.substring(0, safeEnd)
+    }
 }
 
 // Local clone of androidx.compose.ui.util.fastForEach to avoid the
@@ -672,6 +904,48 @@ private fun String.safeStreamingDisplayEnd(candidate: Int): Int {
         end += Character.charCount(nextCodePoint)
     }
     return end.coerceAtMost(length)
+}
+
+private fun String.safeStreamingTerminalEnd(): Int {
+    var end = length
+    while (end > 0) {
+        val last = this[end - 1]
+        if (Character.isHighSurrogate(last)) {
+            end--
+            continue
+        }
+        if (
+            Character.isLowSurrogate(last) &&
+            (end == 1 || !Character.isHighSurrogate(this[end - 2]))
+        ) {
+            end--
+            continue
+        }
+        if (codePointBefore(end) == ZERO_WIDTH_JOINER) {
+            end--
+            continue
+        }
+        val attachedRunStart = terminalAttachedMarkRunStart(end)
+        if (
+            attachedRunStart < end &&
+            (attachedRunStart == 0 || codePointBefore(attachedRunStart) == ZERO_WIDTH_JOINER)
+        ) {
+            end = attachedRunStart
+            continue
+        }
+        break
+    }
+    return end
+}
+
+private fun String.terminalAttachedMarkRunStart(endExclusive: Int): Int {
+    var start = endExclusive
+    while (start > 0) {
+        val cp = codePointBefore(start)
+        if (!cp.isAttachedMark()) break
+        start -= Character.charCount(cp)
+    }
+    return start
 }
 
 private fun String.nextCodePointEnd(offset: Int): Int {

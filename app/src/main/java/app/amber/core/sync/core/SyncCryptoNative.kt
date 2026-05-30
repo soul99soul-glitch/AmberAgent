@@ -44,17 +44,40 @@ internal object SyncCryptoNative {
 
     private const val TAG = "SyncCryptoNative"
     private const val LIB_NAME = "sync_crypto"
+    const val COMPONENT_NAME: String = "sync_crypto"
+
+    interface Config {
+        fun enabled(): Boolean
+        fun onLoadFailure(error: Throwable)
+        fun onNativePanic(stage: String, error: Throwable?)
+    }
+
+    object DisabledConfig : Config {
+        override fun enabled(): Boolean = false
+        override fun onLoadFailure(error: Throwable) {}
+        override fun onNativePanic(stage: String, error: Throwable?) {}
+    }
+
+    @Volatile
+    var config: Config = DisabledConfig
 
     private val loaded = AtomicBoolean(false)
+    private val loadFailureReported = AtomicBoolean(false)
     @Volatile private var loadAttempted = false
 
     val available: Boolean
         get() {
-            ensureLoaded()
-            return loaded.get()
+            val cfg = config
+            if (!cfg.enabled()) return false
+            return checkAvailability(cfg)
         }
 
-    private fun ensureLoaded() {
+    private fun checkAvailability(cfg: Config): Boolean {
+        ensureLoaded(cfg)
+        return loaded.get()
+    }
+
+    private fun ensureLoaded(cfg: Config) {
         if (loaded.get() || loadAttempted) return
         synchronized(this) {
             if (loaded.get() || loadAttempted) return
@@ -65,6 +88,9 @@ internal object SyncCryptoNative {
                 Log.i(TAG, "loaded native library: $LIB_NAME")
             } catch (t: Throwable) {
                 Log.w(TAG, "failed to load native library $LIB_NAME — will fall back to JVM", t)
+                if (loadFailureReported.compareAndSet(false, true)) {
+                    cfg.onLoadFailure(t)
+                }
             }
         }
     }
@@ -76,37 +102,49 @@ internal object SyncCryptoNative {
         iterations: Int,
         keySizeBytes: Int,
     ): ByteArray? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return pbkdf2HmacSha256Native(passphrase, salt, iterations, keySizeBytes)
+        return callNative("pbkdf2") {
+            pbkdf2HmacSha256Native(passphrase, salt, iterations, keySizeBytes)
+        }
     }
 
     /** AES-256-GCM encrypt. Returns ciphertext || 16B tag, or null on failure. */
     fun aesGcmEncrypt(plaintext: ByteArray, key: ByteArray, iv: ByteArray): ByteArray? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return aesGcmEncryptNative(plaintext, key, iv)
+        return callNative("aes_gcm_encrypt") {
+            aesGcmEncryptNative(plaintext, key, iv)
+        }
     }
 
     /** AES-256-GCM decrypt + verify. Returns plaintext, or null on auth fail / panic. */
     fun aesGcmDecrypt(ciphertext: ByteArray, key: ByteArray, iv: ByteArray): ByteArray? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return aesGcmDecryptNative(ciphertext, key, iv)
+        return callNative("aes_gcm_decrypt") {
+            aesGcmDecryptNative(ciphertext, key, iv)
+        }
     }
 
     /** SHA-256 → 32 raw bytes (caller hex-encodes if needed). */
     fun sha256(bytes: ByteArray): ByteArray? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return sha256Native(bytes)
+        return callNative("sha256") {
+            sha256Native(bytes)
+        }
     }
 
     /** HMAC-SHA256 → 32 raw bytes. */
     fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray? {
-        ensureLoaded()
-        if (!loaded.get()) return null
-        return hmacSha256Native(key, message)
+        return callNative("hmac_sha256") {
+            hmacSha256Native(key, message)
+        }
+    }
+
+    private inline fun callNative(stage: String, block: () -> ByteArray?): ByteArray? {
+        val cfg = config
+        if (!cfg.enabled() || !checkAvailability(cfg)) return null
+        return try {
+            block()
+        } catch (t: Throwable) {
+            Log.w(TAG, "native $stage threw — falling back to JVM", t)
+            cfg.onNativePanic(stage, t)
+            null
+        }
     }
 
     @JvmStatic

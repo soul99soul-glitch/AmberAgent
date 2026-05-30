@@ -15,7 +15,9 @@ import app.amber.core.service.PendingUserMessage
 import kotlin.math.abs
 
 private const val ChatPerfTag = "AmberChatPerf"
-private const val LongFrameMs = 48.0
+private const val HighRefreshCutoffMs = 12.5
+private const val HighRefreshLongFrameMs = 16.8
+private const val StandardLongFrameMs = 32.0
 private const val CriticalFrameMs = 96.0
 private val TableHintRegex = Regex("""(?m)^\s*\|.+\|\s*$""")
 private val CodeHintRegex = Regex("""```|`[^`\n]+`""")
@@ -46,13 +48,22 @@ internal fun ChatJankProbe(
         var lastIndex = 0
         var lastOffset = 0
         var frameCount = 0
+        var bestFrameMs = Double.POSITIVE_INFINITY
 
         val callback = object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 frameCount += 1
                 if (lastFrameNanos != 0L) {
                     val deltaMs = (frameTimeNanos - lastFrameNanos) / 1_000_000.0
-                    if (deltaMs >= LongFrameMs && Log.isLoggable(ChatPerfTag, Log.DEBUG)) {
+                    if (deltaMs in 4.0..40.0) {
+                        bestFrameMs = minOf(bestFrameMs, deltaMs)
+                    }
+                    val longFrameMs = if (bestFrameMs <= HighRefreshCutoffMs) {
+                        HighRefreshLongFrameMs
+                    } else {
+                        StandardLongFrameMs
+                    }
+                    if (deltaMs >= longFrameMs && Log.isLoggable(ChatPerfTag, Log.DEBUG)) {
                         val lazyState = stateRef.value
                         val nodes = nodesRef.value
                         if (nodes.isEmpty()) {
@@ -95,6 +106,8 @@ internal fun ChatJankProbe(
                                 append(severity)
                                 append(" frameMs=")
                                 append("%.1f".format(deltaMs))
+                                append(" budgetMs=")
+                                append("%.1f".format(longFrameMs))
                                 append(" frame=")
                                 append(frameCount)
                                 append(" dir=")

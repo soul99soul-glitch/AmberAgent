@@ -157,29 +157,20 @@ fun MarkdownNew(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
 ) {
-    // The initial `generateMarkdownHtml(content)` runs on the composition
-    // thread (main). With native HTML enabled this includes a JNI call —
-    // bounded but visible on long lists scrolling into view. Pre-existing
-    // behaviour with the JVM path; native adds JNI overhead. Revisit if
-    // first-paint metrics regress after rollout.
-    var html by remember {
-        mutableStateOf(
-            value = generateMarkdownHtml(content),
-        )
+    var document by remember {
+        mutableStateOf(parseMarkdownHtmlDocument(content))
     }
 
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .mapLatest { generateMarkdownHtml(it) }
+            .mapLatest {
+                parseMarkdownHtmlDocument(it)
+            }
             .catch { it.printStackTrace() }
             .flowOn(Dispatchers.Default)
-            .collect { html = it }
-    }
-
-    val document = remember(html) {
-        runCatching { Jsoup.parse(html) }.getOrElse { Jsoup.parse("") }
+            .collect { document = it }
     }
 
     ProvideTextStyle(style) {
@@ -189,6 +180,12 @@ fun MarkdownNew(
             }
         }
     }
+}
+
+private fun parseMarkdownHtmlDocument(content: String) = runCatching {
+    Jsoup.parse(generateMarkdownHtml(content))
+}.getOrElse {
+    Jsoup.parse("")
 }
 
 // ---- Node dispatching ----

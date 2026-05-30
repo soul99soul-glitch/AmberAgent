@@ -64,6 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,6 +77,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Tick01
 import app.amber.agent.BuildConfig
+import app.amber.agent.PerfFlags
 import app.amber.agent.R
 import app.amber.core.context.ActiveCompactBoundary
 import app.amber.core.context.CompactLifecycleState
@@ -277,6 +279,15 @@ internal fun ChatListNormal(
                         if (!smoothLargeMove) {
                             state.scrollToItem(totalItems - 1)
                             logScroll("scrollToTimelineBottom.snap", "reason=$reason token=$token")
+                            withFrameNanos { }
+                            val settleDistancePx = state.distanceToTimelineBottomPx()
+                            if (settleDistancePx != null && settleDistancePx > 0) {
+                                state.scrollBy(settleDistancePx.toFloat())
+                                logScroll(
+                                    "scrollToTimelineBottom.snapSettle",
+                                    "reason=$reason token=$token distancePx=$settleDistancePx",
+                                )
+                            }
                             break
                         }
                         if (!state.canScrollForward) break
@@ -312,6 +323,15 @@ internal fun ChatListNormal(
             logScroll("scrollToTimelineBottom.exit", "reason=$reason token=$token")
             endProgrammaticScroll(token)
         }
+    }
+
+    fun requestTimelineBottom(reason: String) {
+        val totalItems = state.layoutInfo.totalItemsCount
+        if (totalItems <= 0) return
+        val token = beginProgrammaticScroll()
+        logScroll("requestTimelineBottom", "reason=$reason token=$token totalItems=$totalItems")
+        state.requestScrollToItem(totalItems - 1)
+        endProgrammaticScroll(token)
     }
 
     DisposableEffect(Unit) {
@@ -404,6 +424,14 @@ internal fun ChatListNormal(
             ?.let { timelineAnchorForCompactEvent(it.anchorAt.takeIf { anchor -> anchor > 0L } ?: it.updatedAt) }
     }
     val activeCompactStreamingSummary = compactLifecycleState.streamingSummary.ifBlank { streamingSummary }
+    val deferStreamingMarkdownParse by remember(activeGeneration, userScrollInTimeline, programmaticScrollInProgress, followMode) {
+        derivedStateOf {
+            activeGeneration &&
+                userScrollInTimeline &&
+                followMode == TimelineFollowMode.PausedForUser &&
+                !programmaticScrollInProgress
+        }
+    }
     val tailTimelineEndIndex = conversation.messageNodes.lastIndex
     val tailCompactItemKey = remember(conversation.id, tailTimelineEndIndex) {
         "compact-timeline-tail-${conversation.id}-$tailTimelineEndIndex"
@@ -478,9 +506,9 @@ internal fun ChatListNormal(
                 !state.isScrollInProgress
             ) {
                 withFrameNanos { }
-                scrollToTimelineBottom("generationEnded", smoothLargeMove = true)
+                scrollToTimelineBottom("generationEnded", smoothLargeMove = false)
                 withFrameNanos { }
-                scrollToTimelineBottom("generationEnded-settle", smoothLargeMove = true)
+                scrollToTimelineBottom("generationEnded-settle", smoothLargeMove = false)
             }
             logScroll("LE_init.branch", "→ enterIdleFollowMode (generationOff)")
             enterIdleFollowMode()
@@ -676,28 +704,17 @@ internal fun ChatListNormal(
     val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
     val latestRenderToken = conversation.latestRenderToken()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
-    val pinRequiresViewportFillSlackPx = with(density) { 24.dp.roundToPx() }
-    val timelineVisibleContentFillsViewport by remember(state, pinRequiresViewportFillSlackPx) {
-        derivedStateOf {
-            val visibleItems = state.layoutInfo.visibleItemsInfo
-            if (visibleItems.isEmpty()) {
-                false
-            } else {
-                val visibleContentTop = visibleItems.minOf { it.offset }
-                val visibleContentBottom = visibleItems.maxOf { it.offset + it.size }
-                val visibleContentSpan = visibleContentBottom - visibleContentTop
-                val viewportSpan = state.layoutInfo.viewportEndOffset - state.layoutInfo.viewportStartOffset
-                visibleContentSpan >= viewportSpan - pinRequiresViewportFillSlackPx
-            }
-        }
-    }
-    val showPinnedAgentWorkingIndicator =
-        timelineLoading &&
-            showBottomFollowAnimation &&
-            followMode == TimelineFollowMode.FollowingBottom &&
-            timelineVisibleContentFillsViewport
+    // Keep the working indicator inside the LazyColumn during streaming. The
+    // old pinned overlay looked detached from the generated content: it hid
+    // abruptly when the user scrolled history and reappeared abruptly when
+    // returning. As a timeline item it moves with the real content bottom,
+    // matching RikkaHub's simpler bottom-follow feel.
+    val showPinnedAgentWorkingIndicator = false
     val streamingVisibleEvents = remember(conversation.id) {
-        MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        MutableSharedFlow<String>(extraBufferCapacity = 1)
+    }
+    fun requestStreamingBottomFollow(reason: String) {
+        streamingVisibleEvents.tryEmit(reason)
     }
     Box(
         modifier = Modifier
@@ -706,7 +723,12 @@ internal fun ChatListNormal(
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(streamingVisibleEvents, conversation.id) {
-                streamingVisibleEvents.collect {
+                val bottomFollowEvents = if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL) {
+                    streamingVisibleEvents.conflate()
+                } else {
+                    streamingVisibleEvents
+                }
+                bottomFollowEvents.collect { reason ->
                     val willFollow = activeGenerationState &&
                         followMode == TimelineFollowMode.FollowingBottom &&
                         !userScrollInTimeline
@@ -716,7 +738,11 @@ internal fun ChatListNormal(
                         followMode == TimelineFollowMode.FollowingBottom &&
                         !userScrollInTimeline
                     if (stillFollowing) {
-                        scrollToTimelineBottom("stream-visible", smoothLargeMove = true)
+                        if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL) {
+                            scrollToTimelineBottom("stream-$reason", smoothLargeMove = false)
+                        } else {
+                            requestTimelineBottom("stream-$reason")
+                        }
                     }
                 }
             }
@@ -737,7 +763,11 @@ internal fun ChatListNormal(
                         "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willFollow) "SCROLL" else "SKIP"}"
                 )
                 if (willFollow) {
-                    scrollToTimelineBottom("chunk", smoothLargeMove = true)
+                    if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL) {
+                        requestStreamingBottomFollow("chunk")
+                    } else {
+                        requestTimelineBottom("chunk")
+                    }
                 }
             }
         }
@@ -910,10 +940,11 @@ internal fun ChatListNormal(
                                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                                         onMiniAppModify = onMiniAppModify,
                                         onStreamingVisibleFrame = if (isLoadingMessage) {
-                                            { streamingVisibleEvents.tryEmit(Unit) }
+                                            { requestStreamingBottomFollow("visible") }
                                         } else {
                                             null
                                         },
+                                        deferStreamingParse = isLoadingMessage && deferStreamingMarkdownParse,
                                         lastMessage = isLastMessage,
                                     )
                                 }

@@ -33,6 +33,7 @@ fun MarkdownBlockSplit(
     style: TextStyle = LocalTextStyle.current,
     fillWidth: Boolean = true,
     streaming: Boolean = false,
+    deferStreamingParse: Boolean = false,
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onClickCitation: (String) -> Unit = {},
 ) {

@@ -87,6 +87,7 @@ internal fun MessagePartsBlock(
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     onStreamingVisibleFrame: (() -> Unit)? = null,
+    deferStreamingParse: Boolean = false,
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
@@ -294,6 +295,7 @@ internal fun MessagePartsBlock(
                                                 AssistantMarkdownBlockOrWidgets(
                                                     content = assistantDisplayText,
                                                     streaming = isStreamingText,
+                                                    deferStreamingParse = deferStreamingParse && isStreamingText,
                                                     onClickCitation = handleClickCitation,
                                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                                                     onStreamingVisibleFrame = if (isStreamingText) {
@@ -311,6 +313,7 @@ internal fun MessagePartsBlock(
                                             modifier = Modifier,
                                             onClickCitation = handleClickCitation,
                                             streaming = isStreamingText,
+                                            deferStreamingParse = deferStreamingParse && isStreamingText,
                                             onGenerativeWidgetAction = onGenerativeWidgetAction,
                                             onStreamingVisibleFrame = if (isStreamingText) {
                                                 onStreamingVisibleFrame

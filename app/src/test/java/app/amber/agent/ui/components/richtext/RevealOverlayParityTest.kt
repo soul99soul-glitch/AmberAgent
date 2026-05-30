@@ -535,4 +535,44 @@ class RevealOverlayParityTest {
         assertEquals(0, span.start)
         assertEquals(5, span.end)
     }
+
+    @Test
+    fun hard_degrade_keeps_reveal_entries_in_flight() {
+        val content = List(90) { "字" }.joinToString("")
+        val c = controllerFor(content)
+        val frame = System.nanoTime() + 1_000_000L
+
+        c.onFrame(frame)
+
+        assertTrue("degrade must not clear the whole queue", c.queueDepth() > 0)
+        assertTrue(
+            "degrade must not promote the whole content in one frame",
+            c.stableOffsetExclusive() < content.length,
+        )
+        assertTrue(
+            "first glyph should still be mid-fade after degrade",
+            c.alphaAt(0) < 1f,
+        )
+    }
+
+    @Test
+    fun hard_degrade_alpha_is_monotonic() {
+        val content = List(90) { "字" }.joinToString("")
+        val c = controllerFor(content)
+        val frame = System.nanoTime() + 1_000_000L
+
+        c.onFrame(frame)
+        val firstAlpha = c.alphaAt(0)
+        c.onFrame(frame + 8_000_000L)
+        val secondAlpha = c.alphaAt(0)
+
+        assertTrue(
+            "compressed reveal must continue forward, not regress alpha",
+            secondAlpha >= firstAlpha,
+        )
+        assertTrue(
+            "compressed reveal should still avoid a one-frame jump to black",
+            firstAlpha < 1f,
+        )
+    }
 }
