@@ -81,7 +81,7 @@ internal fun LazyListState.isAtTimelineBottom(bufferPx: Int = 0): Boolean {
 }
 
 internal fun Conversation.latestRenderToken(): String {
-    val message = currentMessages.lastOrNull() ?: return "${messageNodes.size}:empty"
+    val message = messageNodes.lastOrNull()?.currentMessage ?: return "${messageNodes.size}:empty"
     val part = message.parts.lastOrNull()
     return buildString {
         append(messageNodes.size)

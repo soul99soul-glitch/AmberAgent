@@ -1484,11 +1484,14 @@ private fun TopBar(
                 // 的"上下文占用"语义不符 (短问题 totalTokens 小 → ring 缩水, 反而误导). 改用
                 // promptTokens (下一轮 LLM 实际加载的上下文长度), 也是用户最直观的"已占用".
                 if (conversation.messageNodes.isNotEmpty()) {
-                    val lastAssistant = conversation.currentMessages
+                    val currentMessages = remember(conversation.messageNodes) {
+                        conversation.currentMessages
+                    }
+                    val lastAssistant = currentMessages
                         .lastOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
                     val lastUsage = lastAssistant?.usage
-                    val messagesFingerprint = remember(conversation.currentMessages) {
-                        ContextFootprintEstimator.inputFingerprint(conversation.currentMessages)
+                    val messagesFingerprint = remember(currentMessages) {
+                        ContextFootprintEstimator.inputFingerprint(currentMessages)
                     }
                     val compactsFingerprint = remember(contextCompacts) {
                         contextCompacts.fold(0L) { acc, compact ->
