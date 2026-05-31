@@ -87,6 +87,36 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_3_4_adds_artifact_json_and_preserves_board_task_rows() {
+        val createdAt = 2_000L
+        val version3 = helper.createDatabase(TEST_DB, 3)
+        version3.execSQL(
+            """
+            INSERT INTO board_task (
+                id, source_type, source_ref, title, summary, state, risk_level,
+                chip_text, display_board_date, created_at, updated_at
+            ) VALUES (
+                'task-keep', 'opportunity', 'opp-1', 'Prepare', 'summary', 'waiting_user', 'low',
+                '等待确认', '2026-05-31', $createdAt, $createdAt
+            )
+            """.trimIndent()
+        )
+        version3.close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            4,
+            true,
+            AppDatabase.MIGRATION_3_4,
+        )
+
+        // Existing row survives the column add, and the new column defaults to NULL.
+        assertEquals(1, db.countRows("board_task", "id = 'task-keep'"))
+        assertEquals(1, db.countRows("board_task", "id = 'task-keep' AND artifact_json IS NULL"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.hasTable(table: String): Boolean {
         query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",

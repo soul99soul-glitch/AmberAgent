@@ -80,8 +80,10 @@ import app.amber.feature.board.hotlist.HotListProviderSnapshot
 import app.amber.feature.board.hotlist.HotTopic
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.agent.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.BoardTaskArtifact
 import app.amber.agent.data.db.entity.BoardTaskEntity
 import app.amber.agent.data.db.entity.BoardTaskState
+import app.amber.core.utils.JsonInstant
 import app.amber.agent.data.db.entity.DailyReviewEntity
 import app.amber.agent.data.db.entity.OpportunityEntity
 import app.amber.agent.data.db.entity.OpportunityType
@@ -930,6 +932,12 @@ private fun TaskRow(
                     }
                 }
             }
+            // Surface the finished structured material so the user has something concrete to
+            // confirm. Only shown once a round has settled (waiting_user / done); while running
+            // the artifact slot is cleared by the repository, so this stays null.
+            if (task.state == BoardTaskState.WAITING_USER || task.state == BoardTaskState.DONE) {
+                rememberBoardTaskArtifact(task.artifactJson)?.let { TaskArtifactBlock(it) }
+            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -967,6 +975,64 @@ private fun TaskRow(
                             WorkspaceTextButton(text = "派发", onClick = onDispatch, tone = WorkspaceTone.Success)
                         }
                         WorkspaceTextButton(text = "查看详情", onClick = onOpenSession, tone = WorkspaceTone.Neutral)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberBoardTaskArtifact(artifactJson: String?): BoardTaskArtifact? =
+    remember(artifactJson) {
+        artifactJson
+            ?.let { json -> runCatching { JsonInstant.decodeFromString(BoardTaskArtifact.serializer(), json) }.getOrNull() }
+            ?.takeIf { it.title.isNotBlank() || it.sections.isNotEmpty() }
+    }
+
+@Composable
+private fun TaskArtifactBlock(artifact: BoardTaskArtifact) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (artifact.title.isNotBlank()) {
+                Text(
+                    artifact.title,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                )
+            }
+            artifact.sections.forEach { section ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (section.heading.isNotBlank()) {
+                        Text(
+                            section.heading,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                        )
+                    }
+                    section.oldValue?.takeIf { it.isNotBlank() }?.let {
+                        Text("原值：$it", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                    }
+                    section.newValue?.takeIf { it.isNotBlank() }?.let {
+                        Text("新值：$it", style = MaterialTheme.typography.bodySmall)
+                    }
+                    section.suggestedRewrite?.takeIf { it.isNotBlank() }?.let {
+                        Text("建议改写：$it", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (section.body.isNotBlank()) {
+                        Text(section.body, style = MaterialTheme.typography.bodySmall)
+                    }
+                    val sources = (section.sources + listOfNotNull(section.upstreamSource?.takeIf { it.isNotBlank() }))
+                        .filter { it.isNotBlank() }
+                    if (sources.isNotEmpty()) {
+                        Text(
+                            "来源：${sources.joinToString("、")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = workspaceColors().muted,
+                        )
                     }
                 }
             }

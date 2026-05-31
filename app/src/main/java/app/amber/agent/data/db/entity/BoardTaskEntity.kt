@@ -5,6 +5,8 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.security.MessageDigest
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 object BoardTaskState {
     const val IN_PROGRESS = "in_progress"
@@ -28,6 +30,7 @@ object BoardTaskEventType {
     const val DISMISSED = "dismissed"
     const val WAITING_USER = "waiting_user"
     const val BLOCKED = "blocked"
+    const val ARTIFACT_READY = "artifact_ready"
 }
 
 @Entity(
@@ -62,6 +65,40 @@ data class BoardTaskEntity(
     val createdAt: Long,
     @ColumnInfo("updated_at")
     val updatedAt: Long = createdAt,
+    /**
+     * Latest finished artifact for this task (serialized [BoardTaskArtifact]), or null while the
+     * task is still running / has not produced one. Single-slot: a new run round overwrites it,
+     * and resetting the task to in_progress clears it so the card never shows a stale artifact.
+     */
+    @ColumnInfo("artifact_json")
+    val artifactJson: String? = null,
+)
+
+/**
+ * Structured final output produced by [BoardTaskRunner] via the `board_task_finish` tool.
+ * Deserialized defensively (all fields default) so malformed model arguments degrade to an
+ * empty/partial artifact rather than throwing.
+ */
+@Serializable
+data class BoardTaskArtifact(
+    val kind: String = "",
+    val title: String = "",
+    val sections: List<BoardTaskArtifactSection> = emptyList(),
+)
+
+@Serializable
+data class BoardTaskArtifactSection(
+    val heading: String = "",
+    val body: String = "",
+    val sources: List<String> = emptyList(),
+    @SerialName("old_value")
+    val oldValue: String? = null,
+    @SerialName("new_value")
+    val newValue: String? = null,
+    @SerialName("upstream_source")
+    val upstreamSource: String? = null,
+    @SerialName("suggested_rewrite")
+    val suggestedRewrite: String? = null,
 )
 
 @Entity(

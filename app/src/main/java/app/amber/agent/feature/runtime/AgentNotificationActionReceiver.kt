@@ -92,9 +92,11 @@ class AgentNotificationActionReceiver : BroadcastReceiver(), KoinComponent {
                             ?.trim()
                             .orEmpty()
                         if (reply.isNotBlank()) {
-                            val task = repository.recordUserReply(taskId, reply) ?: return@launch
-                            notifyActiveBoardTasks(repository, notifier, task, "已收到新的下一步指令")
-                            runner.start(taskId, BoardTaskRunReason.USER_REPLY)
+                            // Single entry point: routes to in-band steering if a run is active,
+                            // else persists USER_REPLIED + starts a new round. Exclusive — the
+                            // same reply is never both steered and persisted.
+                            runner.submitUserReply(taskId, reply)
+                            notifyActiveBoardTasks(repository, notifier)
                         }
                     }
                 }

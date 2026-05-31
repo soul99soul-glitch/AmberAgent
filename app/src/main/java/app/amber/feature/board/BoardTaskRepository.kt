@@ -59,6 +59,9 @@ class BoardTaskRepository(
             chipText = boardTaskChipForState(BoardTaskState.IN_PROGRESS),
             displayBoardDate = displayBoardDate,
             updatedAt = now,
+            // Re-dispatching an existing task starts a fresh round; drop any prior artifact so the
+            // card never shows last round's finished material while the new round runs.
+            artifactJson = null,
         )
         taskDao.upsert(task)
         if (existing?.state != BoardTaskState.IN_PROGRESS) {
@@ -79,11 +82,31 @@ class BoardTaskRepository(
     suspend fun dispatch(taskId: String): BoardTaskEntity? {
         val existing = taskDao.getById(taskId) ?: return null
         if (existing.state == BoardTaskState.IN_PROGRESS) return existing
-        return updateState(taskId, BoardTaskState.IN_PROGRESS, BoardTaskEventType.DISPATCHED, "任务已派发，等待任务会话继续推进")
+        return resetToInProgress(taskId, BoardTaskEventType.DISPATCHED, "任务已派发，等待任务会话继续推进")
     }
 
     suspend fun continueTask(taskId: String, message: String = "用户确认继续推进"): BoardTaskEntity? =
-        updateState(taskId, BoardTaskState.IN_PROGRESS, BoardTaskEventType.USER_REPLIED, message)
+        resetToInProgress(taskId, BoardTaskEventType.USER_REPLIED, message)
+
+    /**
+     * Atomic finish: store the structured artifact and move to waiting_user in a single write,
+     * plus an ARTIFACT_READY event whose message feeds the live notification. Returns null when
+     * the task no longer exists or has already reached a terminal state.
+     */
+    suspend fun finishWithArtifact(taskId: String, artifactJson: String, summary: String): BoardTaskEntity? {
+        val existing = taskDao.getById(taskId) ?: return null
+        if (existing.state in BoardTaskState.terminal) return null
+        val now = System.currentTimeMillis()
+        val chip = boardTaskChipForState(BoardTaskState.WAITING_USER)
+        taskDao.updateStateWithArtifact(taskId, BoardTaskState.WAITING_USER, chip, artifactJson, now)
+        addEvent(
+            taskId = taskId,
+            type = BoardTaskEventType.ARTIFACT_READY,
+            message = summary.take(MAX_EVENT_MESSAGE_CHARS),
+            now = now,
+        )
+        return taskDao.getById(taskId)
+    }
 
     suspend fun pauseForUser(taskId: String, message: String = "任务已暂停，等待用户继续"): BoardTaskEntity? =
         updateState(taskId, BoardTaskState.WAITING_USER, BoardTaskEventType.WAITING_USER, message)
@@ -95,9 +118,8 @@ class BoardTaskRepository(
     }
 
     suspend fun recordUserReply(taskId: String, reply: String): BoardTaskEntity? =
-        updateState(
+        resetToInProgress(
             taskId = taskId,
-            state = BoardTaskState.IN_PROGRESS,
             eventType = BoardTaskEventType.USER_REPLIED,
             message = "用户补充指令：${reply.trim()}",
         )
@@ -138,6 +160,24 @@ class BoardTaskRepository(
         val now = System.currentTimeMillis()
         val chip = boardTaskChipForState(state)
         taskDao.updateState(taskId, state, chip, now)
+        addEvent(taskId = taskId, type = eventType, message = message, now = now)
+        return taskDao.getById(taskId)
+    }
+
+    /**
+     * Reset a task to in_progress for a new run round, clearing any prior artifact (single-slot
+     * freshness). Used by dispatch / continue / user-reply paths — NOT by markWaitingUser or
+     * markDone, which must preserve the just-finished artifact.
+     */
+    private suspend fun resetToInProgress(
+        taskId: String,
+        eventType: String,
+        message: String,
+    ): BoardTaskEntity? {
+        taskDao.getById(taskId) ?: return null
+        val now = System.currentTimeMillis()
+        val chip = boardTaskChipForState(BoardTaskState.IN_PROGRESS)
+        taskDao.resetForNewRound(taskId, BoardTaskState.IN_PROGRESS, chip, now)
         addEvent(taskId = taskId, type = eventType, message = message, now = now)
         return taskDao.getById(taskId)
     }

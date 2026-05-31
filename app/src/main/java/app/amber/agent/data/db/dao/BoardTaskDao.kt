@@ -42,6 +42,32 @@ interface BoardTaskDao {
     @Query("UPDATE board_task SET state = :state, chip_text = :chipText, updated_at = :updatedAt WHERE id = :id")
     suspend fun updateState(id: String, state: String, chipText: String, updatedAt: Long)
 
+    /**
+     * Atomic finish: set the task to its terminal-of-round state AND store the artifact in one
+     * write, so the card never observes "waiting_user with no material" or vice versa.
+     */
+    @Query(
+        "UPDATE board_task SET state = :state, chip_text = :chipText, artifact_json = :artifactJson, " +
+            "updated_at = :updatedAt WHERE id = :id"
+    )
+    suspend fun updateStateWithArtifact(
+        id: String,
+        state: String,
+        chipText: String,
+        artifactJson: String?,
+        updatedAt: Long,
+    )
+
+    /**
+     * Reset to in_progress for a new run round, clearing any prior artifact so a stale finished
+     * result is never shown while the next round is running.
+     */
+    @Query(
+        "UPDATE board_task SET state = :state, chip_text = :chipText, artifact_json = NULL, " +
+            "updated_at = :updatedAt WHERE id = :id"
+    )
+    suspend fun resetForNewRound(id: String, state: String, chipText: String, updatedAt: Long)
+
     @Query(
         """
         SELECT * FROM board_task
