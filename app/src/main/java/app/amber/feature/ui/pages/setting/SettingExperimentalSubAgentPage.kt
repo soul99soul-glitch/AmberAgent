@@ -53,6 +53,7 @@ import app.amber.feature.subagent.applyOverride
 import app.amber.core.settings.findModelById
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ui.Select
+import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.plus
@@ -390,6 +391,11 @@ private fun SubAgentBuiltInRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                SubAgentAvatar(
+                    id = def.id,
+                    name = def.name,
+                    avatarSize = 24.dp,
+                )
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -555,6 +561,11 @@ private fun SubAgentCustomRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                SubAgentAvatar(
+                    id = def.id,
+                    name = def.name,
+                    avatarSize = 24.dp,
+                )
                 Text(
                     text = def.name,
                     style = MaterialTheme.typography.labelLarge,

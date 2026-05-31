@@ -12,14 +12,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -54,6 +51,7 @@ import app.amber.feature.subagent.SubAgentDefinitions
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.SubAgentRunStatus
 import app.amber.feature.ui.components.richtext.MarkdownBlock
+import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceColors
 import org.koin.compose.koinInject
 import java.io.File
@@ -132,6 +130,14 @@ fun SubAgentTaskStepView(
         loading = loading && isRunning,
         onClick = { showSheet = true },
         approvalActions = null,
+        leadingContent = {
+            SubAgentAvatar(
+                id = subagentId,
+                name = displayName,
+                avatarSize = 16.dp,
+                status = parsedStatus,
+            )
+        },
     )
 
     if (showSheet) {
@@ -205,6 +211,7 @@ private fun SubAgentRunSheet(
 
     val anchor = step.anchor
     val arguments = remember(anchor.input) { MessageRenderCache.toolInputJson(anchor.input) }
+    val subagentId = arguments.getStringContent("subagent_id") ?: "subagent"
     val taskObjective = remember(arguments) {
         runCatching {
             arguments.jsonObject["task"]?.jsonObject?.get("objective")?.jsonPrimitive?.contentOrNull
@@ -298,11 +305,11 @@ private fun SubAgentRunSheet(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(
-                    imageVector = HugeIcons.MagicWand01,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = workspace.muted,
+                SubAgentAvatar(
+                    id = subagentId,
+                    name = displayName,
+                    avatarSize = 22.dp,
+                    status = parsedStatus,
                 )
                 Text(
                     text = "@$displayName",

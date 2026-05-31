@@ -367,6 +367,7 @@ internal fun AgentToolCallCapsule(
     approvalActions: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    leadingContent: (@Composable () -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
@@ -411,10 +412,14 @@ internal fun AgentToolCallCapsule(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    V3ToolTypeIcon(
-                        icon = icon,
-                        kind = kind,
-                    )
+                    if (leadingContent != null) {
+                        leadingContent()
+                    } else {
+                        V3ToolTypeIcon(
+                            icon = icon,
+                            kind = kind,
+                        )
+                    }
 
                     val displayText = if (subtitle.isNullOrBlank()) title else "$title $subtitle"
                     Text(
