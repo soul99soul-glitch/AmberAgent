@@ -49,8 +49,32 @@ interface BoardItemDAO {
     @Query("UPDATE board_item SET status = 'completed', completed_at = :completedAt WHERE id = :id")
     suspend fun markCompleted(id: String, completedAt: Long)
 
+    @Query(
+        """
+        UPDATE board_item
+        SET status = 'completed', completed_at = :completedAt
+        WHERE source_type = :sourceType
+            AND source_ref = :sourceRef
+            AND board_date = :boardDate
+            AND status = 'active'
+        """
+    )
+    suspend fun markCompletedBySource(sourceType: String, sourceRef: String, boardDate: String, completedAt: Long)
+
     @Query("UPDATE board_item SET status = 'dismissed', dismissed_at = :dismissedAt WHERE id = :id")
     suspend fun markDismissed(id: String, dismissedAt: Long)
+
+    @Query(
+        """
+        UPDATE board_item
+        SET status = 'dismissed', dismissed_at = :dismissedAt
+        WHERE source_type = :sourceType
+            AND source_ref = :sourceRef
+            AND board_date = :boardDate
+            AND status = 'active'
+        """
+    )
+    suspend fun markDismissedBySource(sourceType: String, sourceRef: String, boardDate: String, dismissedAt: Long)
 
     /**
      * Archive stale items from previous days. Runs at the 04:00 cutoff so the board always

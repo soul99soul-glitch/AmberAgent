@@ -9,6 +9,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.hasExplicitReasoningContentField
@@ -16,6 +22,7 @@ import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -39,15 +46,22 @@ class ChatCompletionsAPIMessageTest {
     // Helper to invoke private buildMessages method via reflection
     private fun invokeBuildMessages(
         messages: List<UIMessage>,
-        preserveHistoricalReasoningContent: Boolean = false
+        preserveHistoricalReasoningContent: Boolean = false,
+        forceReasoningContentForToolCalls: Boolean = false,
     ): JsonArray {
         val method = ChatCompletionsAPI::class.java.getDeclaredMethod(
             "buildMessages",
             List::class.java,
+            Boolean::class.javaPrimitiveType,
             Boolean::class.javaPrimitiveType
         )
         method.isAccessible = true
-        return method.invoke(api, messages, preserveHistoricalReasoningContent) as JsonArray
+        return method.invoke(
+            api,
+            messages,
+            preserveHistoricalReasoningContent,
+            forceReasoningContentForToolCalls,
+        ) as JsonArray
     }
 
     private fun invokeParseMessage(message: JsonObject): UIMessage {
@@ -57,6 +71,22 @@ class ChatCompletionsAPIMessageTest {
         )
         method.isAccessible = true
         return method.invoke(api, message) as UIMessage
+    }
+
+    private fun invokeBuildChatCompletionRequest(
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        providerSetting: ProviderSetting.OpenAI,
+    ): JsonObject {
+        val method = ChatCompletionsAPI::class.java.getDeclaredMethod(
+            "buildChatCompletionRequest",
+            List::class.java,
+            TextGenerationParams::class.java,
+            ProviderSetting.OpenAI::class.java,
+            Boolean::class.javaPrimitiveType,
+        )
+        method.isAccessible = true
+        return method.invoke(api, messages, params, providerSetting, false) as JsonObject
     }
 
     @Test
@@ -78,6 +108,71 @@ class ChatCompletionsAPIMessageTest {
         assertTrue(assistant.containsKey("reasoning_content"))
         assertEquals("", assistant["reasoning_content"]?.jsonPrimitive?.content)
         assertEquals("ok", assistant["content"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `forced reasoning content keeps deepseek thinking tool history valid`() {
+        val messages = listOf(
+            UIMessage.user("Use a tool"),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Text("I will check that."),
+                    createExecutedTool("call_1", "skills_list", "{}", "[]"),
+                )
+            )
+        )
+
+        val result = invokeBuildMessages(
+            messages,
+            forceReasoningContentForToolCalls = true,
+        )
+
+        val assistant = result[1].jsonObject
+        assertEquals("assistant", assistant["role"]?.jsonPrimitive?.content)
+        assertEquals("", assistant["reasoning_content"]?.jsonPrimitive?.content)
+        assertTrue(assistant.containsKey("tool_calls"))
+    }
+
+    @Test
+    fun `deepseek tool history only forces reasoning content for reasoning capable requests`() {
+        val messages = listOf(
+            UIMessage.user("Use a tool"),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Text("I will check that."),
+                    createExecutedTool("call_1", "skills_list", "{}", "[]"),
+                )
+            )
+        )
+        val provider = ProviderSetting.OpenAI(
+            brand = OpenAIBrand.DEEPSEEK,
+            baseUrl = "https://api.deepseek.com/v1",
+        )
+        val chatOnlyParams = TextGenerationParams(
+            model = Model(
+                modelId = "deepseek-chat",
+                abilities = listOf(ModelAbility.TOOL),
+            ),
+            reasoningLevel = ReasoningLevel.AUTO,
+        )
+
+        val chatOnlyRequest = invokeBuildChatCompletionRequest(messages, chatOnlyParams, provider)
+        val chatOnlyAssistant = chatOnlyRequest["messages"]!!.jsonArray[1].jsonObject
+        assertFalse(chatOnlyAssistant.containsKey("reasoning_content"))
+
+        val reasoningRequest = invokeBuildChatCompletionRequest(
+            messages = messages,
+            params = chatOnlyParams.copy(
+                model = chatOnlyParams.model.copy(
+                    abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                )
+            ),
+            providerSetting = provider,
+        )
+        val reasoningAssistant = reasoningRequest["messages"]!!.jsonArray[1].jsonObject
+        assertEquals("", reasoningAssistant["reasoning_content"]?.jsonPrimitive?.content)
     }
 
     @Test

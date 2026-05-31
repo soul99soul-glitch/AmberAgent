@@ -138,13 +138,63 @@ class GuizangHtmlDeckValidatorTest {
         assertTrue(GuizangHtmlDeckValidator.validateHtml(orphanSlides).valid)
         val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(orphanSlides)
         assertTrue(normalized.contains("""<div id="deck">"""))
-        assertTrue(normalized.contains("""<section class=slide"""))
+        assertTrue(normalized, normalized.contains("""<section class=slide"""))
 
         val deckClass = """<main class="deck"><section class="slide">One</section></main>"""
         assertTrue(GuizangHtmlDeckValidator.prepareRuntimeHtml(deckClass).contains("id=\"deck\""))
 
         val revealStyle = """<div class="slides"><section>One</section><section>Two</section></div>"""
         assertTrue(GuizangHtmlDeckValidator.validateHtml(revealStyle).valid)
-        assertTrue(GuizangHtmlDeckValidator.prepareRuntimeHtml(revealStyle).contains("id=\"deck\""))
+        val normalizedReveal = GuizangHtmlDeckValidator.prepareRuntimeHtml(revealStyle)
+        assertTrue(normalizedReveal.contains("id=\"deck\""))
+        assertTrue(normalizedReveal.contains("""<section class="slide">One</section>"""))
+        assertTrue(normalizedReveal.contains("""<section class="slide">Two</section>"""))
+    }
+
+    @Test
+    fun repairsDeckWithPlainSectionsIntoRuntimeVisibleSlides() {
+        val html = """<div id="deck"><section>One</section><article class="dark">Two</article></div>"""
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(html)
+
+        assertTrue(normalized.contains("""<section class="slide">One</section>"""))
+        assertTrue(normalized.contains("""<article class="dark slide">Two</article>"""))
+    }
+
+    @Test
+    fun repairsSocialCardSetWithoutRenamingItsCssAnchor() {
+        val html = """
+            <div id="card-set">
+              <section class="poster xhs">Card</section>
+            </div>
+        """.trimIndent()
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(html)
+
+        assertTrue(normalized.contains("""<div id="card-set" data-guizang-deck>"""))
+        assertTrue(normalized.contains("""<section class="poster xhs slide social-card">Card</section>"""))
+    }
+
+    @Test
+    fun doesNotPromotePlainArticleHtmlToDeck() {
+        val html = """<main><section>Article</section></main>"""
+
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(html).valid)
+    }
+
+    @Test
+    fun keepsSecurityBlocksAfterRepairingDeckShape() {
+        val unsafeFrame = """<div id="card-set"><section class="poster xhs"><iframe src="x"></iframe></section></div>"""
+        val unsafeFetch = """<div id="deck"><section>One<script>fetch('/x')</script></section></div>"""
+        val unsafeScript = """
+            <div class="slides"><section>One</section></div>
+            <script src="https://example.com/deck-runtime.js"></script>
+        """.trimIndent()
+
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(unsafeFrame).valid)
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(unsafeFetch).valid)
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(unsafeScript).valid)
     }
 }

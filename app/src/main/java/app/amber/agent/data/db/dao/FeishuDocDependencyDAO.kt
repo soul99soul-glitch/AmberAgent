@@ -14,6 +14,9 @@ interface FeishuDocDependencyDAO {
     @Query("SELECT * FROM feishu_doc_dependency ORDER BY created_at DESC")
     suspend fun getAll(): List<FeishuDocDependencyEntity>
 
+    @Query("SELECT * FROM feishu_doc_dependency WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): FeishuDocDependencyEntity?
+
     @Query("SELECT * FROM feishu_doc_dependency WHERE upstream_url = :url AND enabled = 1")
     suspend fun getDownstreamsOf(url: String): List<FeishuDocDependencyEntity>
 

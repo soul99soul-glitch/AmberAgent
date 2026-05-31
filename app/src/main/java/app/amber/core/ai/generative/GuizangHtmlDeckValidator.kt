@@ -62,12 +62,27 @@ object GuizangHtmlDeckValidator {
         """(?is)<(?:section|article)\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bslide\b[^"]*"|'[^']*\bslide\b[^']*'|[^\s>]*\bslide\b[^\s>]*)|\bdata-slide(?:\s|=|>)))[^>]*>.*?</(?:section|article)>""",
         RegexOption.IGNORE_CASE,
     )
-    private val deckContainerWithoutIdRegex = Regex(
-        """<(?:(?:div)|(?:main))\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\b(?:deck|slides)\b[^"]*"|'[^']*\b(?:deck|slides)\b[^']*'|[^\s>]*\b(?:deck|slides)\b[^\s>]*)|\bdata-(?:guizang-)?deck(?:\s|=|>)))(?![^>]*\bid\s*=)[^>]*>""",
+    private val deckContainerOpenTagRegex = Regex(
+        """<(div|main)\b(?=[^>]*(?:\bid\s*=\s*(?:"deck"|'deck')|\bclass\s*=\s*(?:"[^"]*\b(?:deck|slides)\b[^"]*"|'[^']*\b(?:deck|slides)\b[^']*'|[^\s>]*\b(?:deck|slides)\b[^\s>]*)|\bdata-(?:guizang-)?deck(?:\s|=|>)))[^>]*>""",
         RegexOption.IGNORE_CASE,
     )
-    private val deckIdRegex = Regex("""\bid\s*=\s*(['"])deck\1""", RegexOption.IGNORE_CASE)
-    private val plainSectionRegex = Regex("""<\s*(?:section|article)\b""", RegexOption.IGNORE_CASE)
+    private val socialDeckContainerOpenTagRegex = Regex(
+        """<(div|main)\b(?=[^>]*(?:\bid\s*=\s*(?:"card-set"|'card-set')|\bclass\s*=\s*(?:"[^"]*\b(?:card-set|poster-set|social-card-set)\b[^"]*"|'[^']*\b(?:card-set|poster-set|social-card-set)\b[^']*'|[^\s>]*\b(?:card-set|poster-set|social-card-set)\b[^\s>]*)))[^>]*>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val anyIdAttributeRegex = Regex("""\bid\s*=""", RegexOption.IGNORE_CASE)
+    private val classAttributeRegex = Regex(
+        """\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val dataGuizangDeckRegex = Regex("""\bdata-guizang-deck(?:\s|=|>)""", RegexOption.IGNORE_CASE)
+    private val pageOpenTagRegex = Regex("""<(section|article)\b[^>]*>""", RegexOption.IGNORE_CASE)
+    private val socialPageOpenTagRegex = Regex("""<(section|article|div)\b[^>]*>""", RegexOption.IGNORE_CASE)
+    private val socialPageIntentRegex = Regex("""\b(?:poster|xhs|wide|square|social-card)\b""", RegexOption.IGNORE_CASE)
+    private val socialCardBlockRegex = Regex(
+        """(?is)<(?:section|article)\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\b(?:poster|xhs|wide|square|social-card)\b[^"]*"|'[^']*\b(?:poster|xhs|wide|square|social-card)\b[^']*'|[^\s>]*\b(?:poster|xhs|wide|square|social-card)\b[^\s>]*))[^>]*>.*?</(?:section|article)>""",
+        RegexOption.IGNORE_CASE,
+    )
     private val blockedPatterns = listOf(
         BlockedPattern(Regex("""file://""", RegexOption.IGNORE_CASE), "file:// is not allowed"),
         BlockedPattern(Regex("""content://""", RegexOption.IGNORE_CASE), "content:// is not allowed"),
@@ -223,16 +238,24 @@ object GuizangHtmlDeckValidator {
             .replace(LEGACY_LOCAL_LUCIDE_URL, lucideUrl, ignoreCase = true)
 
     private fun normalizeDeckStructure(html: String): String {
-        if (deckIdRegex.containsMatchIn(html)) return html
-        deckContainerWithoutIdRegex.find(html)?.let { match ->
-            val openTag = match.value
-            return html.replaceRange(match.range, openTag.dropLast(1) + """ id="deck">""")
-        }
+        val normalizedContainers = normalizeDeckContainerSlides(normalizeSocialCardDeck(html))
+        if (normalizedContainers != html) return normalizedContainers
         val slideBlocks = slideBlockRegex.findAll(html).toList()
-        if (slideBlocks.isEmpty()) return html
-        val first = slideBlocks.first().range.first
-        val last = slideBlocks.last().range.last
-        val slides = slideBlocks.joinToString(separator = "\n") { it.value }
+        val orphanBlocks = if (slideBlocks.isNotEmpty()) {
+            slideBlocks
+        } else {
+            socialCardBlockRegex.findAll(html).toList()
+        }
+        if (orphanBlocks.isEmpty()) return html
+        val first = orphanBlocks.first().range.first
+        val last = orphanBlocks.last().range.last
+        val slides = orphanBlocks.joinToString(separator = "\n") { match ->
+            if (slideBlocks.isNotEmpty()) {
+                match.value
+            } else {
+                normalizeSocialCardPageBlock(match.value)
+            }
+        }
         return buildString {
             append(html.substring(0, first))
             append("<div id=\"deck\">\n")
@@ -243,8 +266,141 @@ object GuizangHtmlDeckValidator {
     }
 
     private fun hasSlideLikeContent(html: String): Boolean =
-        slideElementRegex.containsMatchIn(html) ||
-            (deckIdRegex.containsMatchIn(html) && plainSectionRegex.containsMatchIn(html))
+        slideElementRegex.containsMatchIn(html)
+
+    private fun normalizeDeckContainerSlides(html: String): String =
+        replaceElementBlocks(html, deckContainerOpenTagRegex) { openTag, body, closeTag ->
+            val opening = addDeckIdIfMissing(openTag)
+            val normalizedBody = if (slideElementRegex.containsMatchIn(body)) {
+                body
+            } else {
+                body.replace(pageOpenTagRegex) { match ->
+                    addClassTokenToOpeningTag(match.value, "slide")
+                }
+            }
+            opening + normalizedBody + closeTag
+        }
+
+    private fun normalizeSocialCardDeck(html: String): String =
+        replaceElementBlocks(html, socialDeckContainerOpenTagRegex) { openTag, body, closeTag ->
+            val opening = addDataGuizangDeck(openTag)
+            val normalizedBody = body.replace(socialPageOpenTagRegex) { match ->
+                val tagName = match.groupValues[1].lowercase()
+                val pageOpenTag = match.value
+                val shouldNormalize = tagName != "div" || hasSocialPageIntent(pageOpenTag)
+                if (shouldNormalize) {
+                    addClassTokenToOpeningTag(pageOpenTag, "slide", "social-card")
+                } else {
+                    pageOpenTag
+                }
+            }
+            opening + normalizedBody + closeTag
+        }
+
+    private fun replaceElementBlocks(
+        html: String,
+        openTagRegex: Regex,
+        transform: (openTag: String, body: String, closeTag: String) -> String,
+    ): String {
+        val output = StringBuilder()
+        var emitCursor = 0
+        var searchCursor = 0
+        while (searchCursor < html.length) {
+            val match = openTagRegex.find(html, searchCursor) ?: break
+            val tagName = match.groupValues[1]
+            val closeRange = findMatchingCloseTag(html, tagName, match.range.last + 1)
+            if (closeRange == null) {
+                searchCursor = match.range.last + 1
+                continue
+            }
+            output.append(html.substring(emitCursor, match.range.first))
+            output.append(
+                transform(
+                    match.value,
+                    html.substring(match.range.last + 1, closeRange.first),
+                    html.substring(closeRange.first, closeRange.last + 1),
+                )
+            )
+            emitCursor = closeRange.last + 1
+            searchCursor = emitCursor
+        }
+        if (output.isEmpty()) return html
+        output.append(html.substring(emitCursor))
+        return output.toString()
+    }
+
+    private fun findMatchingCloseTag(
+        html: String,
+        tagName: String,
+        startIndex: Int,
+    ): IntRange? {
+        val tagRegex = Regex("""</?\s*${Regex.escape(tagName)}\b[^>]*>""", RegexOption.IGNORE_CASE)
+        var depth = 1
+        var cursor = startIndex
+        while (cursor < html.length) {
+            val match = tagRegex.find(html, cursor) ?: return null
+            val value = match.value.trimStart()
+            if (value.startsWith("</")) {
+                depth -= 1
+                if (depth == 0) return match.range
+            } else if (!value.endsWith("/>")) {
+                depth += 1
+            }
+            cursor = match.range.last + 1
+        }
+        return null
+    }
+
+    private fun addClassTokenToOpeningTag(openTag: String, vararg classTokens: String): String {
+        val tokens = classTokens.filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return openTag
+        val classMatch = classAttributeRegex.find(openTag) ?: return appendAttribute(
+            openTag,
+            "class=\"${tokens.joinToString(" ")}\"",
+        )
+        val existingClass = classMatch.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty()
+        val existingTokens = existingClass.split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val missingTokens = tokens.filter { token ->
+            existingTokens.none { it.equals(token, ignoreCase = true) }
+        }
+        if (missingTokens.isEmpty()) return openTag
+        val updatedClass = (existingTokens + missingTokens).joinToString(" ")
+        return openTag.replaceRange(classMatch.range, "class=\"$updatedClass\"")
+    }
+
+    private fun addDeckIdIfMissing(openTag: String): String =
+        if (anyIdAttributeRegex.containsMatchIn(openTag)) {
+            openTag
+        } else {
+            appendAttribute(openTag, "id=\"deck\"")
+        }
+
+    private fun addDataGuizangDeck(openTag: String): String =
+        if (dataGuizangDeckRegex.containsMatchIn(openTag)) {
+            openTag
+        } else {
+            appendAttribute(openTag, "data-guizang-deck")
+        }
+
+    private fun appendAttribute(openTag: String, attribute: String): String {
+        val end = openTag.lastIndexOf('>')
+        if (end < 0) return openTag
+        val insertAt = if (end > 0 && openTag[end - 1] == '/') end - 1 else end
+        return openTag.substring(0, insertAt) + " " + attribute + openTag.substring(insertAt)
+    }
+
+    private fun hasSocialPageIntent(openTag: String): Boolean =
+        classAttributeRegex.find(openTag)
+            ?.groupValues
+            ?.drop(1)
+            ?.firstOrNull { it.isNotBlank() }
+            ?.let { socialPageIntentRegex.containsMatchIn(it) }
+            ?: false
+
+    private fun normalizeSocialCardPageBlock(block: String): String =
+        socialPageOpenTagRegex.find(block)?.let { match ->
+            block.replaceRange(match.range, addClassTokenToOpeningTag(match.value, "slide", "social-card"))
+        } ?: block
 
     private fun validateExternalScripts(html: String): ValidationResult {
         scriptSrcRegex.findAll(html).forEach { match ->

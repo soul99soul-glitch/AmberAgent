@@ -6,6 +6,7 @@ import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.BoardRepository
+import app.amber.feature.board.BoardTaskRepository
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
 import app.amber.feature.board.collector.AppUsageCollector
@@ -15,8 +16,12 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.agent.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.BoardTaskEventReview
 import app.amber.agent.data.db.entity.DailyReviewEntity
 import app.amber.core.repository.ConversationRepository
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.uuid.Uuid
 
 /**
@@ -36,6 +41,7 @@ class DailyReviewAgent(
     private val settingsStore: SettingsAggregator,
     private val providerManager: ProviderManager,
     private val boardRepository: BoardRepository,
+    private val boardTaskRepository: BoardTaskRepository,
     private val conversationRepository: ConversationRepository,
     private val appUsageCollector: AppUsageCollector,
 ) {
@@ -47,14 +53,15 @@ class DailyReviewAgent(
         val appUsage = appUsageCollector.collectToday(now)
         val completedItems = boardRepository.getCompletedItems(boardDate)
         val recentChats = collectRecentChatSummaries()
+        val taskEvents = collectTaskEvents(boardDate)
 
-        if (appUsage.isEmpty() && completedItems.isEmpty() && recentChats.isEmpty()) {
+        if (appUsage.isEmpty() && completedItems.isEmpty() && recentChats.isEmpty() && taskEvents.isEmpty()) {
             return DailyReviewRunResult.Empty
         }
 
         // 2. Build prompt
         val existing = boardRepository.getDailyReview(boardDate)
-        val prompt = buildPrompt(phase, appUsage, completedItems, recentChats, existing?.content)
+        val prompt = buildPrompt(phase, appUsage, completedItems, recentChats, taskEvents, existing?.content)
 
         // 3. Call LLM
         val rawMarkdown = callModel(settings, prompt)
@@ -90,37 +97,69 @@ class DailyReviewAgent(
         appUsage: List<AppUsageEntry>,
         completedItems: List<BoardItemEntity>,
         recentChats: List<String>,
+        taskEvents: List<BoardTaskEventReview>,
         existingContent: String?,
     ): String = buildString {
-        appendLine("你是 AmberAgent 的「今日回顾」助理。根据下面的数据生成一份**中文 Markdown** 格式的日报。")
+        appendLine("你是 AmberAgent 的「今日复盘」助理。根据下面的数据生成一份**中文 Markdown** 格式的任务复盘。")
         appendLine()
         appendLine("## 输出要求")
         appendLine("- 直接输出 Markdown，不要代码围栏、不要 JSON。")
         appendLine("- 语气：简洁、务实、像给自己写的日记，不要客套话。")
         appendLine("- 用具体数字和事实，不要空洞总结。")
+        appendLine("- 任务流事件只按数据中出现的事实写；不要编造不存在的完成项、确认项或阻塞。")
         appendLine("- 如果某个数据源为空，跳过该部分，不要写「无数据」。")
         appendLine()
 
         if (phase == PHASE_NOON) {
             appendLine("## 当前阶段：上午回顾（13:00）")
             appendLine("覆盖今天从早上到现在的活动。生成以下部分（按需）：")
-            appendLine("1. **📱 应用使用** — 今天用了哪些 app，各用了多久，结合 app 用途推测在做什么")
-            appendLine("2. **✅ 已完成事项** — 从看板完成的待办")
-            appendLine("3. **💬 对话摘要** — 今天跟 AI 聊了什么重要话题")
-            appendLine("4. **📋 上午小结** — 一两句话总结上午状态")
+            appendLine("1. **任务推进** — 任务流中今天创建、完成、忽略、等待确认或受阻的事项")
+            appendLine("2. **待确认/受阻** — 仍需要用户动作或后续处理的任务")
+            appendLine("3. **已完成事项** — 从任务流和看板完成的事项")
+            appendLine("4. **📱 应用使用** — 今天用了哪些 app，各用了多久，结合 app 用途推测在做什么")
+            appendLine("5. **💬 对话摘要** — 今天跟 AI 聊了什么重要话题")
+            appendLine("6. **上午小结** — 一两句话总结上午状态")
         } else {
             appendLine("## 当前阶段：下午/晚间补充（19:00）")
             if (existingContent != null) {
-                appendLine("在已有的上午回顾基础上，**只生成下午新增部分**，格式同上但标题用「下午」。")
+                appendLine("在已有的上午复盘基础上，**只生成下午新增部分**，格式同上但标题用「下午」。")
             } else {
-                appendLine("上午回顾未生成，请生成完整的今日回顾（覆盖全天）。")
+                appendLine("上午复盘未生成，请生成完整的今日复盘（覆盖全天）。")
             }
             appendLine("不要重复上午的内容。")
             if (existingContent != null) {
                 appendLine()
-                appendLine("## 已有的上午回顾内容（参考，不要重复）")
+                appendLine("## 已有的上午复盘内容（参考，不要重复）")
                 appendLine(existingContent.take(2000))
             }
+        }
+
+        appendLine()
+        if (taskEvents.isNotEmpty()) {
+            appendLine("## 数据：今日任务流事件")
+            for (event in taskEvents) {
+                appendLine(
+                    "- ${event.formattedTime()} [${event.type}] ${event.taskTitle}（状态：${event.taskState}）：${event.message}"
+                )
+            }
+            appendLine()
+        }
+
+        if (phase == PHASE_NOON) {
+            appendLine("## 旧版回顾兼容提示")
+            appendLine("如果任务流事件不足，可以继续参考应用使用、已完成看板事项和对话主题。")
+        } else {
+            appendLine("## 旧版回顾兼容提示")
+            appendLine("如果下午任务流事件不足，可以继续参考应用使用、已完成看板事项和对话主题。")
+        }
+
+        appendLine()
+        if (phase == PHASE_NOON) {
+            appendLine("## 可参考的旧版结构")
+            appendLine("1. **📱 应用使用** — 今天用了哪些 app，各用了多久，结合 app 用途推测在做什么")
+            appendLine("2. **✅ 已完成事项** — 从看板完成的待办")
+            appendLine("3. **💬 对话摘要** — 今天跟 AI 聊了什么重要话题")
+            appendLine("4. **📋 上午小结** — 一两句话总结上午状态")
         }
 
         appendLine()
@@ -174,6 +213,24 @@ class DailyReviewAgent(
             }
     }.getOrElse { emptyList() }
 
+    private suspend fun collectTaskEvents(boardDate: String): List<BoardTaskEventReview> = runCatching {
+        val start = LocalDate.parse(boardDate)
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        val end = LocalDate.parse(boardDate)
+            .plusDays(1)
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        boardTaskRepository.reviewEvents(start, end)
+    }.getOrElse { emptyList() }
+
+    private fun BoardTaskEventReview.formattedTime(): String =
+        java.time.Instant.ofEpochMilli(ts)
+            .atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("HH:mm"))
+
     private suspend fun callModel(settings: Settings, prompt: String): String? {
         val model = resolveModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
@@ -182,7 +239,7 @@ class DailyReviewAgent(
                 val response = providerManager.getProviderByType(provider).generateText(
                     providerSetting = provider,
                     messages = listOf(
-                        UIMessage.system("你是 AmberAgent 的「今日回顾」助理。根据用户提供的数据生成中文 Markdown 日报。直接输出 Markdown，不要代码围栏。"),
+                        UIMessage.system("你是 AmberAgent 的「今日复盘」助理。根据用户提供的数据生成中文 Markdown 任务复盘。直接输出 Markdown，不要代码围栏。"),
                         UIMessage.user(prompt),
                     ),
                     params = TextGenerationParams(

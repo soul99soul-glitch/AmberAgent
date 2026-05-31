@@ -61,6 +61,9 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains(GuizangHtmlDeckValidator.LOCAL_MOTION_URL))
         assertTrue(prompt.contains("Reveal-style"))
         assertTrue(prompt.contains("canvas, WebGL, SVG, Motion animations"))
+        assertTrue(prompt.contains("tiny widget_code cover/status"))
+        assertTrue(prompt.contains("never emit a partial or truncated spec.html"))
+        assertFalse(prompt.contains("stream the show-widget block"))
     }
 
     @Test
@@ -73,6 +76,7 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains("DeepSeek"))
         assertTrue(prompt.contains("keep hidden reasoning extremely brief"))
         assertTrue(prompt.contains("start visible content"))
+        assertTrue(prompt.contains("emit full_html only when the payload is complete"))
     }
 
     @Test

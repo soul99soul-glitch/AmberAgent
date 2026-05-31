@@ -1264,7 +1264,7 @@ private fun GuizangHtmlDeckWebView(
     fun setLowPowerMode(on: Boolean) {
         lowPower = on
         activeWebView?.evaluateJavascript(
-            "window.__setLowPowerMode && window.__setLowPowerMode($on);",
+            guizangSetLowPowerModeJs(on),
             null,
         )
     }
@@ -1293,7 +1293,7 @@ private fun GuizangHtmlDeckWebView(
             when (event) {
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     activeWebView?.evaluateJavascript(
-                        "window.__setLowPowerMode && window.__setLowPowerMode(true);",
+                        guizangSetLowPowerModeJs(true),
                         null,
                     )
                     activeWebView?.onPause()
@@ -1302,7 +1302,7 @@ private fun GuizangHtmlDeckWebView(
                 Lifecycle.Event.ON_RESUME -> {
                     activeWebView?.onResume()
                     activeWebView?.evaluateJavascript(
-                        "window.__setLowPowerMode && window.__setLowPowerMode($lowPowerState);",
+                        guizangSetLowPowerModeJs(lowPowerState),
                         null,
                     )
                 }
@@ -1381,7 +1381,9 @@ private fun GuizangHtmlDeckWebView(
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
-                            view?.evaluateJavascript(buildGuizangDeckBootstrapJs(), null)
+                            view?.evaluateJavascript(buildGuizangDeckBootstrapJs()) {
+                                view.evaluateJavascript(guizangSetLowPowerModeJs(lowPowerState), null)
+                            }
                         }
                     }
                     val runtimeHtml = GuizangHtmlDeckValidator.prepareRuntimeHtml(deck.html)
@@ -1450,7 +1452,7 @@ private fun GuizangHtmlDeckWebView(
     DisposableEffect(Unit) {
         onDispose {
             activeWebView?.apply {
-                evaluateJavascript("window.__setLowPowerMode && window.__setLowPowerMode(true);", null)
+                evaluateJavascript(guizangSetLowPowerModeJs(true), null)
                 onPause()
                 stopLoading()
                 loadUrl("about:blank")
@@ -1461,6 +1463,9 @@ private fun GuizangHtmlDeckWebView(
         }
     }
 }
+
+private fun guizangSetLowPowerModeJs(on: Boolean): String =
+    "window.__setLowPowerMode && window.__setLowPowerMode($on, {persist:false});"
 
 private fun WebView.guizangAssetResponse(
     asset: GuizangHtmlDeckValidator.RuntimeAsset,
@@ -1483,6 +1488,20 @@ private fun buildGuizangDeckBootstrapJs(): String = """
 (function(){
   if (window.__amberGuizangReady) return true;
   window.__amberGuizangReady = true;
+
+  function installViewportHeightFallback(){
+    var style = document.getElementById('amber-full-html-viewport-fallback');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'amber-full-html-viewport-fallback';
+      document.head.appendChild(style);
+    }
+    style.textContent = [
+      'html,body{height:100%!important;min-height:100%!important;}',
+      'canvas.bg,#deck{height:100%!important;min-height:100%!important;}',
+      '#deck .slide{height:100%!important;min-height:100%!important;}'
+    ].join('\n');
+  }
 
   function slideSelector(){ return '.slide, section[data-slide], article[data-slide], div[data-slide]'; }
   function ensureSlideClass(el){
@@ -1598,6 +1617,7 @@ private fun buildGuizangDeckBootstrapJs(): String = """
     var style = document.getElementById('amber-capture-style');
     if (style) style.remove();
   };
+  installViewportHeightFallback();
   setIndex(getIndex(), false);
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
   return true;

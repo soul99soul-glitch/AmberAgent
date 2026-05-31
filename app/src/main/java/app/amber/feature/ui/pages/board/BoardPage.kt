@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -79,7 +80,11 @@ import app.amber.feature.board.hotlist.HotListProviderSnapshot
 import app.amber.feature.board.hotlist.HotTopic
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.agent.data.db.entity.BoardItemEntity
+import app.amber.agent.data.db.entity.BoardTaskEntity
+import app.amber.agent.data.db.entity.BoardTaskState
 import app.amber.agent.data.db.entity.DailyReviewEntity
+import app.amber.agent.data.db.entity.OpportunityEntity
+import app.amber.agent.data.db.entity.OpportunityType
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
@@ -103,6 +108,8 @@ fun TodayBoardPage() {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val boardEnabled = settings.agentRuntime.todayBoard.enabled
     val items by vm.items.collectAsStateWithLifecycle(initialValue = emptyList())
+    val tasks by vm.tasks.collectAsStateWithLifecycle(initialValue = emptyList())
+    val opportunities by vm.opportunities.collectAsStateWithLifecycle(initialValue = emptyList())
     val dailyReview by vm.dailyReview.collectAsStateWithLifecycle(initialValue = null)
     val dashboard by vm.hotListDashboard.collectAsStateWithLifecycle(
         initialValue = HotListDashboard(emptyList(), emptyList(), 0L),
@@ -113,6 +120,7 @@ fun TodayBoardPage() {
     val uriHandler = LocalUriHandler.current
     var pendingDeepRead by remember { mutableStateOf<PendingDeepReadRequest?>(null) }
     var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
+    var selectedOpportunity by remember { mutableStateOf<OpportunityEntity?>(null) }
 
     fun requestDeepRead(topic: HotTopic, forceRegenerate: Boolean = false) {
         if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
@@ -176,7 +184,7 @@ fun TodayBoardPage() {
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
-                listOf("大看板", "今日回顾").forEachIndexed { index, label ->
+                listOf("大看板", "任务流").forEachIndexed { index, label ->
                     Tab(
                         selected = pagerState.currentPage == index,
                         onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
@@ -208,14 +216,39 @@ fun TodayBoardPage() {
                         },
                     )
 
-                    1 -> TodayReviewTab(
-                        todoItems = visibleTodayReviewTodoItems(items),
+                    1 -> TaskFlowTab(
+                        opportunities = opportunities,
+                        tasks = tasks,
                         review = dailyReview,
                         onRefresh = vm::refresh,
-                        onComplete = vm::markCompleted,
-                        onChat = { item ->
-                            vm.startChat(item.id)
-                            navigateToChatPage(navController, initText = chatContext(item))
+                        onDispatchOpportunity = { opportunity ->
+                            vm.dispatchOpportunity(opportunity.id)
+                            Toast.makeText(context, "已派发任务", Toast.LENGTH_SHORT).show()
+                        },
+                        onShowOpportunityEvidence = { opportunity ->
+                            selectedOpportunity = opportunity
+                        },
+                        onDismissOpportunity = { opportunity ->
+                            vm.dismissOpportunity(opportunity.id)
+                            Toast.makeText(context, "已忽略机会", Toast.LENGTH_SHORT).show()
+                        },
+                        onMuteOpportunityType = { opportunity ->
+                            vm.muteOpportunityType(opportunity.id)
+                            Toast.makeText(context, "已不再提醒这类", Toast.LENGTH_SHORT).show()
+                        },
+                        onDispatch = { task ->
+                            vm.dispatchTask(task.id)
+                            Toast.makeText(context, "已派发任务", Toast.LENGTH_SHORT).show()
+                        },
+                        onDone = vm::markTaskDone,
+                        onIgnore = vm::markTaskDismissed,
+                        onCancel = vm::cancelTask,
+                        onSnooze = vm::snoozeTask,
+                        onOpenSession = { task ->
+                            scope.launch {
+                                vm.startTaskChat(task.id)
+                                navigateToChatPage(navController, initText = vm.taskSessionPrompt(task.id))
+                            }
                         },
                     )
                 }
@@ -248,6 +281,33 @@ fun TodayBoardPage() {
             dismissButton = {
                 TextButton(onClick = { pendingDeepRead = null }) {
                     Text("取消")
+                }
+            },
+        )
+    }
+
+    selectedOpportunity?.let { opportunity ->
+        AlertDialog(
+            onDismissRequest = { selectedOpportunity = null },
+            title = { Text(opportunity.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(opportunity.summary, style = MaterialTheme.typography.bodyMedium)
+                    HorizontalDivider()
+                    Text("依据", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                    Text(
+                        opportunity.evidenceJson,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspaceColors().muted,
+                        maxLines = 12,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text("置信度 ${(opportunity.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedOpportunity = null }) {
+                    Text("知道了")
                 }
             },
         )
@@ -603,6 +663,317 @@ private fun TodayReviewTab(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskFlowTab(
+    opportunities: List<OpportunityEntity>,
+    tasks: List<BoardTaskEntity>,
+    review: DailyReviewEntity?,
+    onRefresh: () -> Unit,
+    onDispatchOpportunity: (OpportunityEntity) -> Unit,
+    onShowOpportunityEvidence: (OpportunityEntity) -> Unit,
+    onDismissOpportunity: (OpportunityEntity) -> Unit,
+    onMuteOpportunityType: (OpportunityEntity) -> Unit,
+    onDispatch: (BoardTaskEntity) -> Unit,
+    onDone: (String) -> Unit,
+    onIgnore: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onSnooze: (String) -> Unit,
+    onOpenSession: (BoardTaskEntity) -> Unit,
+) {
+    val pullState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(
+        opportunities.map { Triple(it.id, it.status, it.updatedAt) },
+        tasks.map { Triple(it.id, it.state, it.updatedAt) },
+        review?.updatedAt,
+    ) {
+        if (isRefreshing) isRefreshing = false
+    }
+    val inProgress = tasks.filter { it.state == BoardTaskState.IN_PROGRESS }
+    val waiting = tasks.filter { it.state == BoardTaskState.WAITING_USER }
+    val terminal = tasks.filter {
+        it.state == BoardTaskState.DONE ||
+            it.state == BoardTaskState.DISMISSED ||
+            it.state == BoardTaskState.BLOCKED
+    }
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            isRefreshing = true
+            onRefresh()
+            scope.launch {
+                delay(15_000L)
+                isRefreshing = false
+            }
+        },
+        state = pullState,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            opportunitySection(
+                title = "建议准备 / 可能事项",
+                opportunities = opportunities,
+                emptyText = "没有新的主动机会。",
+                onDispatch = onDispatchOpportunity,
+                onShowEvidence = onShowOpportunityEvidence,
+                onDismiss = onDismissOpportunity,
+                onMuteType = onMuteOpportunityType,
+            )
+            taskSection(
+                title = "正在进行",
+                tasks = inProgress,
+                emptyText = "没有正在推进的任务。",
+                onDispatch = onDispatch,
+                onDone = onDone,
+                onIgnore = onIgnore,
+                onCancel = onCancel,
+                onSnooze = onSnooze,
+                onOpenSession = onOpenSession,
+            )
+            taskSection(
+                title = "等我确认",
+                tasks = waiting,
+                emptyText = "没有等待确认的任务。",
+                onDispatch = onDispatch,
+                onDone = onDone,
+                onIgnore = onIgnore,
+                onCancel = onCancel,
+                onSnooze = onSnooze,
+                onOpenSession = onOpenSession,
+            )
+            taskSection(
+                title = "已完成/受阻",
+                tasks = terminal.take(8),
+                emptyText = "暂无完成、忽略或受阻记录。",
+                onDispatch = onDispatch,
+                onDone = onDone,
+                onIgnore = onIgnore,
+                onCancel = onCancel,
+                onSnooze = onSnooze,
+                onOpenSession = onOpenSession,
+            )
+            item { SectionTitle("今日复盘", review?.let { reviewPhaseLabel(it) }) }
+            item {
+                if (review == null) {
+                    ReviewEmptyState()
+                } else {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = workspaceColors().paper,
+                        border = workspaceBorder(),
+                    ) {
+                        MarkdownBlock(content = review.content, modifier = Modifier.padding(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.taskSection(
+    title: String,
+    tasks: List<BoardTaskEntity>,
+    emptyText: String,
+    onDispatch: (BoardTaskEntity) -> Unit,
+    onDone: (String) -> Unit,
+    onIgnore: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onSnooze: (String) -> Unit,
+    onOpenSession: (BoardTaskEntity) -> Unit,
+) {
+    item { SectionTitle(title, if (tasks.isEmpty()) "暂无" else "${tasks.size} 条") }
+    if (tasks.isEmpty()) {
+        item { EmptyLine(emptyText) }
+    } else {
+        items(tasks, key = { it.id }) { task ->
+            TaskRow(
+                task = task,
+                onDispatch = { onDispatch(task) },
+                onDone = { onDone(task.id) },
+                onIgnore = { onIgnore(task.id) },
+                onCancel = { onCancel(task.id) },
+                onSnooze = { onSnooze(task.id) },
+                onOpenSession = { onOpenSession(task) },
+            )
+        }
+    }
+}
+
+private fun LazyListScope.opportunitySection(
+    title: String,
+    opportunities: List<OpportunityEntity>,
+    emptyText: String,
+    onDispatch: (OpportunityEntity) -> Unit,
+    onShowEvidence: (OpportunityEntity) -> Unit,
+    onDismiss: (OpportunityEntity) -> Unit,
+    onMuteType: (OpportunityEntity) -> Unit,
+) {
+    item { SectionTitle(title, if (opportunities.isEmpty()) "暂无" else "${opportunities.size} 条") }
+    if (opportunities.isEmpty()) {
+        item { EmptyLine(emptyText) }
+    } else {
+        items(opportunities, key = { it.id }) { opportunity ->
+            OpportunityRow(
+                opportunity = opportunity,
+                onDispatch = { onDispatch(opportunity) },
+                onShowEvidence = { onShowEvidence(opportunity) },
+                onDismiss = { onDismiss(opportunity) },
+                onMuteType = { onMuteType(opportunity) },
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun OpportunityRow(
+    opportunity: OpportunityEntity,
+    onDispatch: () -> Unit,
+    onShowEvidence: () -> Unit,
+    onDismiss: () -> Unit,
+    onMuteType: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                WorkspaceStatusPill(
+                    text = opportunity.typeLabel(),
+                    tone = WorkspaceTone.Neutral,
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        opportunity.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        "${sourceLabel(opportunity.sourceType)} · ${(opportunity.confidence * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspaceColors().muted,
+                    )
+                    if (opportunity.summary.isNotBlank()) {
+                        Text(opportunity.summary, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                    }
+                }
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                WorkspaceTextButton(text = "派发", onClick = onDispatch, tone = WorkspaceTone.Success)
+                WorkspaceTextButton(text = "查看依据", onClick = onShowEvidence, tone = WorkspaceTone.Neutral)
+                WorkspaceTextButton(text = "忽略", onClick = onDismiss, tone = WorkspaceTone.Neutral)
+                WorkspaceTextButton(text = "不再提醒这类", onClick = onMuteType, tone = WorkspaceTone.Neutral)
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun TaskRow(
+    task: BoardTaskEntity,
+    onDispatch: () -> Unit,
+    onDone: () -> Unit,
+    onIgnore: () -> Unit,
+    onCancel: () -> Unit,
+    onSnooze: () -> Unit,
+    onOpenSession: () -> Unit,
+) {
+    val terminal = task.state == BoardTaskState.DONE || task.state == BoardTaskState.DISMISSED
+    val dispatchable = task.state == BoardTaskState.DISMISSED ||
+        task.state == BoardTaskState.BLOCKED
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                WorkspaceStatusPill(
+                    text = task.stateLabel(),
+                    tone = if (task.state == BoardTaskState.BLOCKED) WorkspaceTone.Danger else WorkspaceTone.Neutral,
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        task.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        color = if (terminal) workspaceColors().muted else MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        "${sourceLabel(task.sourceType)} · ${timeAgo(task.updatedAt)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspaceColors().muted,
+                    )
+                    if (task.summary.isNotBlank()) {
+                        Text(task.summary, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                    }
+                }
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (task.state) {
+                    BoardTaskState.IN_PROGRESS -> {
+                        WorkspaceTextButton(text = "查看进展", onClick = onOpenSession, tone = WorkspaceTone.Success)
+                        WorkspaceTextButton(text = "完成", onClick = onDone, tone = WorkspaceTone.Success)
+                        WorkspaceTextButton(text = "取消", onClick = onCancel, tone = WorkspaceTone.Neutral)
+                    }
+
+                    BoardTaskState.WAITING_USER -> {
+                        WorkspaceTextButton(text = "去确认", onClick = onOpenSession, tone = WorkspaceTone.Success)
+                        WorkspaceTextButton(text = "稍后", onClick = onSnooze, tone = WorkspaceTone.Neutral)
+                        WorkspaceTextButton(text = "取消", onClick = onCancel, tone = WorkspaceTone.Neutral)
+                    }
+
+                    BoardTaskState.BLOCKED -> {
+                        WorkspaceTextButton(text = "重新派发", onClick = onDispatch, tone = WorkspaceTone.Success)
+                        WorkspaceTextButton(text = "查看问题", onClick = onOpenSession, tone = WorkspaceTone.Neutral)
+                        WorkspaceTextButton(text = "取消", onClick = onCancel, tone = WorkspaceTone.Neutral)
+                    }
+
+                    BoardTaskState.DONE -> {
+                        WorkspaceTextButton(text = "查看记录", onClick = onOpenSession, tone = WorkspaceTone.Neutral)
+                    }
+
+                    BoardTaskState.DISMISSED -> {
+                        WorkspaceTextButton(text = "查看记录", onClick = onOpenSession, tone = WorkspaceTone.Neutral)
+                        WorkspaceTextButton(text = "重新派发", onClick = onDispatch, tone = WorkspaceTone.Success)
+                    }
+
+                    else -> {
+                        if (dispatchable) {
+                            WorkspaceTextButton(text = "派发", onClick = onDispatch, tone = WorkspaceTone.Success)
+                        }
+                        WorkspaceTextButton(text = "查看详情", onClick = onOpenSession, tone = WorkspaceTone.Neutral)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () -> Unit) {
     val completed = item.status == "completed"
@@ -699,7 +1070,7 @@ private fun ReviewEmptyState() {
                 modifier = Modifier.size(34.dp),
                 tint = MaterialTheme.colorScheme.secondary,
             )
-            Text("今日回顾尚未生成", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+            Text("今日复盘尚未生成", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
             Text("将在午间和晚间自动补全", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
         }
     }
@@ -719,6 +1090,21 @@ private fun sourceLabel(sourceType: String): String = when (sourceType) {
     "feishu_doc" -> "飞书文档"
     "chat_history" -> "聊天记录"
     else -> sourceType
+}
+
+private fun BoardTaskEntity.stateLabel(): String = when (state) {
+    BoardTaskState.IN_PROGRESS -> "已经派发"
+    BoardTaskState.WAITING_USER -> "等待确认"
+    BoardTaskState.BLOCKED -> "遇到阻碍"
+    BoardTaskState.DONE -> "任务完成"
+    BoardTaskState.DISMISSED -> "已忽略"
+    else -> "已经派发"
+}
+
+private fun OpportunityEntity.typeLabel(): String = when (opportunityType) {
+    OpportunityType.MEETING_PREP -> "会议准备"
+    OpportunityType.DEPENDENCY_STALE -> "文档过期"
+    else -> "可能事项"
 }
 
 private fun timeAgo(timestamp: Long): String {

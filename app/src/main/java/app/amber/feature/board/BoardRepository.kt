@@ -76,8 +76,26 @@ class BoardRepository(
         itemDao.markCompleted(id, now)
     }
 
+    suspend fun markItemsCompletedBySource(
+        sourceType: String,
+        sourceRef: String,
+        boardDate: String = todayBoardDate(),
+        now: Long = System.currentTimeMillis(),
+    ) {
+        itemDao.markCompletedBySource(sourceType, sourceRef, boardDate, now)
+    }
+
     suspend fun markItemDismissed(id: String, now: Long = System.currentTimeMillis()) {
         itemDao.markDismissed(id, now)
+    }
+
+    suspend fun markItemsDismissedBySource(
+        sourceType: String,
+        sourceRef: String,
+        boardDate: String = todayBoardDate(),
+        now: Long = System.currentTimeMillis(),
+    ) {
+        itemDao.markDismissedBySource(sourceType, sourceRef, boardDate, now)
     }
 
     suspend fun getItem(id: String): BoardItemEntity? = itemDao.getById(id)

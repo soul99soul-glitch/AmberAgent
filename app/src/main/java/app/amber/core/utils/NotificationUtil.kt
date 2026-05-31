@@ -17,6 +17,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -64,6 +65,8 @@ data class NotificationActionConfig(
     val icon: Int = 0,
     val title: String,
     val intent: PendingIntent,
+    val remoteInput: RemoteInput? = null,
+    val allowGeneratedReplies: Boolean = true,
 )
 
 data class XiaomiSuperIslandConfig(
@@ -159,7 +162,16 @@ object NotificationUtil {
                 ContextCompat.getDrawable(context, iconRes)?.toNotificationBitmap()?.let { setLargeIcon(it) }
             }
             config.actions.forEach { action ->
-                addAction(action.icon, action.title, action.intent)
+                if (action.remoteInput == null) {
+                    addAction(action.icon, action.title, action.intent)
+                } else {
+                    addAction(
+                        NotificationCompat.Action.Builder(action.icon, action.title, action.intent)
+                            .addRemoteInput(action.remoteInput)
+                            .setAllowGeneratedReplies(action.allowGeneratedReplies)
+                            .build()
+                    )
+                }
             }
             config.progressMax?.let { max ->
                 setProgress(max, config.progress.coerceIn(0, max), config.progressIndeterminate)

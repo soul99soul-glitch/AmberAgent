@@ -18,6 +18,7 @@ import app.amber.core.files.SkillManager
 import app.amber.core.files.SkillFrontmatterParser
 import app.amber.core.files.SkillMetadata
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.util.zip.ZipInputStream
 
 fun createSkillTools(
@@ -145,23 +146,34 @@ fun createSkillTools(
 }
 
 private fun wrapSkillForMobileRuntime(skillName: String, filePath: String?, body: String): String {
+    return buildSkillMobileRuntimePrompt(skillName, filePath, body)
+}
+
+internal fun buildSkillMobileRuntimePrompt(skillName: String, filePath: String?, body: String): String {
     val pathLabel = filePath?.takeIf { it.isNotBlank() } ?: "SKILL.md"
     return buildString {
         appendLine("[AmberAgent Mobile Runtime — applies to the skill content below]")
         appendLine("You are running inside AmberAgent on an Android phone/tablet — NOT desktop Claude Code, NOT Codex, NOT a CLI environment.")
         appendLine("These mobile constraints OVERRIDE any conflicting instruction in the skill body:")
         appendLine("- The user has no physical keyboard, no mouse, no system shell. Never write \"press ← →\", \"F for fullscreen\", \"S for speaker mode\", \"Ctrl+C to quit\", or any keyboard/mouse hint into your visible reply or into widget content.")
-        appendLine("- There is no system browser to open .html / .pdf / .pptx files for preview. Anything visual must render inside the chat as a show-widget block (SVG, HTML, vchart, slides) so it appears as a card in the conversation timeline.")
-        appendLine("- For multi-page presentations / decks / PPT / 幻灯片 / 演示文稿, emit one show-widget deck preview as the final visible artifact. Use renderer \"${GuizangHtmlDeckValidator.RENDERER}\" with the full live deck HTML in spec.html. Do NOT generate a .pptx file as the only deliverable; do NOT pack a multi-page deck into a single SVG grid; do NOT turn PPT requests into MiniApps.")
+        appendLine("- There is no system browser to open .html / .pdf / .pptx files for preview. Visual previews should render inside the chat as show-widget blocks (SVG, HTML, vchart, slides) so they appear as cards in the conversation timeline.")
+        appendLine("- For multi-page presentations / decks / PPT / 幻灯片 / 演示文稿, emit one final show-widget deck preview only after the deck HTML is complete. Use renderer \"${GuizangHtmlDeckValidator.RENDERER}\" with the full live deck HTML in spec.html. During generation, use short progress text or a tiny SVG widget_code cover/status; never emit partial spec.html. Do NOT generate a .pptx file as the only deliverable; do NOT pack a multi-page deck into a single SVG grid; do NOT turn PPT requests into MiniApps.")
         appendLine("- Do NOT recommend running npm/pip/curl/python or installing desktop tooling unless the skill explicitly invokes the in-app terminal_execute tool (Alpine sandbox).")
         appendLine("- File outputs go to /workspace via file_write; users browse them through the in-app file sheet, not through Finder/Explorer.")
         appendLine("- If the skill describes a desktop-only workflow, translate it into the mobile equivalent: replace \"open in PowerPoint\" with \"emit a show-widget deck preview\", \"open in browser\" with \"emit the appropriate show-widget renderer\", etc.")
         appendLine("- IMPORTANT about use_skill paths: many skills installed via download only ship the SKILL.md file — the references/, scripts/, assets/ subfolders mentioned in the SKILL.md links may NOT exist locally. Do NOT chain a second use_skill(path=...) call just because SKILL.md links to it; treat SKILL.md as self-contained instructions and only retry with a path if a previous call confirms that file exists.")
         if (skillName.contains("guizang-ppt", ignoreCase = true)) {
-            appendLine("- guizang-ppt-skill SPECIAL MOBILE ADAPTER: the default and preferred output is a `show-widget` using `renderer:\"${GuizangHtmlDeckValidator.RENDERER}\"`, not renderer:\"slides\", not widget_code HTML, not a MiniApp, and not a standalone saved HTML page. Always give the user an inline PPT preview card in the chat.")
+            appendLine("- guizang-ppt-skill SPECIAL MOBILE ADAPTER: the default and preferred final output is a complete `show-widget` using `renderer:\"${GuizangHtmlDeckValidator.RENDERER}\"`, not renderer:\"slides\", not widget_code HTML, not a MiniApp, and not a standalone saved HTML page. Give the user an inline PPT preview card in the chat after the HTML is complete; while generating, show only concise progress or a tiny SVG cover/status.")
             appendLine("- Required full_html skeleton: `spec.html` contains one `<div id=\"deck\">` wrapper and 6-10 `<section class=\"slide ...\" data-animate=\"...\">...</section>` pages copied from/adapted to the guizang template style. `widget_code` is only a tiny static SVG cover.")
             appendLine("- Runtime scripts must be AmberAgent bundled assets: Lucide `<script src=\"${GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL}\"></script>` and Motion `await import('${GuizangHtmlDeckValidator.LOCAL_MOTION_URL}')`. Do NOT use unpkg/jsdelivr/skypack/CDN script URLs.")
             appendLine("- Keep the skill's look directly in HTML/CSS: magazine/Swiss typography, grid layout, canvas/WebGL/ASCII backgrounds, Motion data-animate recipes, lucide `<i data-lucide=\"...\">` icons, touch-friendly swipe. Do NOT add Android bridge calls, popups, downloads, file/content/intent/android_asset URLs, flat non-deck pages, or keyboard-only instructions.")
+        }
+        if (skillName.contains("guizang-social-card", ignoreCase = true)) {
+            appendLine("- guizang-social-card-skill SPECIAL MOBILE ADAPTER: default chat preview output is one complete `show-widget` using `renderer:\"${GuizangHtmlDeckValidator.RENDERER}\"`. Do not output raw HTML as ordinary Markdown/code, a MiniApp, or a standalone saved HTML page as the only deliverable.")
+            appendLine("- Required social-card full_html skeleton: `spec.html` contains one `<div id=\"deck\">` wrapper. Each card is one deck page: `<section class=\"slide social-card poster xhs\">...</section>`, `<section class=\"slide social-card poster wide\">...</section>`, or `<section class=\"slide social-card poster square\">...</section>`. A single social card is a one-slide deck; a carousel is a multi-slide deck.")
+            appendLine("- `widget_code` is only a tiny static SVG cover/status thumbnail. Keep progress visible with concise text or the tiny cover; emit the full_html show-widget only after `spec.html` is complete, and never emit a partial or truncated `spec.html`.")
+            appendLine("- Preview and export are separate: for normal \"show me / preview / make a card\" requests, render the inline full_html preview in chat. Only create /workspace files, PNG/JPG exports, or screenshot workflows when the user explicitly asks to export, save, share, or download image files.")
+            appendLine("- Social-card HTML must stay mobile-native: inline CSS, touch-friendly sizing, no external CSS/CDN/runtime scripts, no iframe/form/nav/download/popups, no file/content/intent/android_asset URLs, and no desktop/browser/keyboard instructions.")
         }
         appendLine()
         appendLine("Skill: $skillName  ($pathLabel)")
@@ -205,7 +217,7 @@ private fun skillValidateTool(skillManager: SkillManager, workspaceManager: Work
         val name = input.jsonObject["name"]?.jsonPrimitive?.contentOrNull
         val workspacePath = input.jsonObject["workspace_path"]?.jsonPrimitive?.contentOrNull
         val files = when {
-            !name.isNullOrBlank() -> mapOf("SKILL.md" to (skillManager.readSkillContent(name) ?: ""))
+            !name.isNullOrBlank() -> collectInstalledSkillFiles(skillManager, name)
             !workspacePath.isNullOrBlank() -> collectWorkspaceSkillFiles(workspaceManager, workspacePath)
             else -> error("name or workspace_path is required")
         }
@@ -358,7 +370,27 @@ private suspend fun collectWorkspaceSkillFiles(workspaceManager: WorkspaceManage
     return files
 }
 
-private fun unzipSkillFiles(bytes: ByteArray): Map<String, String> {
+private fun collectInstalledSkillFiles(skillManager: SkillManager, name: String): Map<String, String> =
+    collectSkillFilesFromDirectory(skillManager.getSkillDir(name))
+
+internal fun collectSkillFilesFromDirectory(dir: File?): Map<String, String> {
+    if (dir == null || !dir.exists() || !dir.isDirectory) return emptyMap()
+    val root = runCatching { dir.canonicalFile }.getOrNull() ?: return emptyMap()
+    val files = linkedMapOf<String, String>()
+    dir.walkTopDown()
+        .filter { it.isFile }
+        .forEach { file ->
+            val canonical = runCatching { file.canonicalFile }.getOrNull() ?: return@forEach
+            if (!canonical.isSameOrInside(root)) return@forEach
+            val relative = canonical.relativeTo(root).invariantSeparatorsPath
+            val name = relative.canonicalSkillFileName()
+            if (name.isBlank() || name.contains("..") || !isLikelyTextSkillFile(name)) return@forEach
+            files[name] = canonical.readText()
+        }
+    return files
+}
+
+internal fun unzipSkillFiles(bytes: ByteArray): Map<String, String> {
     val files = linkedMapOf<String, String>()
     ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
         while (true) {
@@ -381,10 +413,14 @@ private fun isLikelyTextSkillFile(name: String): Boolean {
         lower.endsWith(".md") ||
         lower.endsWith(".md.txt") ||
         lower.endsWith(".json") ||
+        lower.endsWith(".html") ||
+        lower.endsWith(".htm") ||
+        lower.endsWith(".css") ||
         lower.endsWith(".txt") ||
         lower.endsWith(".yaml") ||
         lower.endsWith(".yml") ||
         lower.endsWith(".js") ||
+        lower.endsWith(".mjs") ||
         lower.endsWith(".ts") ||
         lower.endsWith(".py") ||
         lower.endsWith(".sh")
@@ -406,4 +442,10 @@ private fun String.canonicalSkillFileName(): String {
 
         else -> normalized
     }
+}
+
+private fun File.isSameOrInside(root: File): Boolean {
+    val rootPath = root.canonicalFile.path
+    val currentPath = canonicalFile.path
+    return currentPath == rootPath || currentPath.startsWith(rootPath + File.separator)
 }

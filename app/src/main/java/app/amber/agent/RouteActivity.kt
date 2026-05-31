@@ -148,6 +148,7 @@ import app.amber.feature.ui.pages.stats.StatsPage
 import app.amber.feature.ui.pages.webview.WebViewPage
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
+import app.amber.core.utils.base64Encode
 import app.amber.core.utils.CrashHandler
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.inject
@@ -166,6 +167,10 @@ class RouteActivity : ComponentActivity() {
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
+
+    companion object {
+        const val EXTRA_OPEN_CHAT_PROMPT = "openChatPrompt"
+    }
 
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -269,6 +274,9 @@ class RouteActivity : ComponentActivity() {
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
         }
+        taskSessionScreenFromIntent(intent)?.let { screen ->
+            navStack?.add(screen)
+        }
         if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
             navStack?.add(Screen.SettingAgentMemory)
         }
@@ -299,6 +307,16 @@ class RouteActivity : ComponentActivity() {
         )
     }
 
+    private fun taskSessionScreenFromIntent(intent: Intent): Screen.Chat? {
+        val prompt = intent.getStringExtra(EXTRA_OPEN_CHAT_PROMPT)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return Screen.Chat(
+            id = Uuid.random().toString(),
+            text = prompt.base64Encode(),
+        )
+    }
+
     @Composable
     fun AppRoutes() {
         val toastState = rememberToasterState()
@@ -312,6 +330,9 @@ class RouteActivity : ComponentActivity() {
             }
             if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
                 return@remember Screen.TodayBoard
+            }
+            taskSessionScreenFromIntent(intent)?.let { screen ->
+                return@remember screen
             }
             deepReadScreenFromIntent(intent)?.let { screen ->
                 return@remember screen

@@ -886,24 +886,24 @@ class GenerationHandler(
             return """
                 **Visible Full HTML Deck Repair**
                 The previous output did not produce a valid full_html deck: $issue
-                Reply in visible content immediately with exactly one fenced `show-widget` JSON block. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
+                Reply in visible content immediately with exactly one fenced `show-widget` JSON block, but do not begin the block until the full JSON can be completed in this response. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
                 Required JSON shape:
                 - `renderer` must be `"${GuizangHtmlDeckValidator.RENDERER}"`.
                 - `widget_code` is only a static SVG cover preview.
                 - `spec.html` is the full live deck HTML as one JSON string.
                 - `spec.html` must contain `<div id="deck">` and one or more `<section class="slide ...">` pages.
                 - Scripts may only use `${GuizangHtmlDeckValidator.LOCAL_MOTION_URL}` and `${GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL}`. Do not use CDN script URLs.
-                - Preserve the requested PPT/deck content and style; keep the JSON valid.
+                - Preserve the requested PPT/deck content and style; keep the JSON valid, complete, and compact enough to fit. Never emit partial spec.html.
             """.trimIndent()
         }
         if (requirement.expectSlides) {
             return """
                 **Visible Slide Deck Repair**
                 The previous output did not produce a valid deck card: $issue
-                Reply in visible content immediately with exactly one fenced `show-widget` JSON block. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
+                Reply in visible content immediately with exactly one fenced `show-widget` JSON block, but do not begin the block until the full JSON can be completed in this response. Do not output a MiniApp, standalone webpage, generic HTML app, Markdown-only answer, or hidden-only reasoning.
                 Use renderer `"${GuizangHtmlDeckValidator.RENDERER}"`.
                 Put a complete mobile-readable HTML deck in `spec.html` with `<div id="deck">` and `<section class="slide ...">` pages.
-                Keep the deck concise and the JSON valid.
+                Keep the deck concise and the JSON valid. Never emit partial spec.html.
             """.trimIndent()
         }
         return """

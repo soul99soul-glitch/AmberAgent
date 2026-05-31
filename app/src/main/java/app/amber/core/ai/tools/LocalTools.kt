@@ -18,11 +18,13 @@ import app.amber.feature.tools.ToolRegistry
 import app.amber.feature.tools.WorkspaceArtifactTools
 import app.amber.feature.tools.WorkspaceTools
 import app.amber.feature.prompts.AgentPromptConfigRepository
+import app.amber.feature.board.BoardOpportunityTools
 import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentImageGenerationModel
 import app.amber.core.repository.ImageGenerationRepository
 import app.amber.feature.webview.WebViewOperationStore
+import org.koin.core.context.GlobalContext
 import kotlin.uuid.Uuid
 
 class LocalTools(
@@ -179,6 +181,9 @@ class LocalTools(
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
         tools.add(agentPromptConfigTool)
+        if (options.contains(LocalToolOption.SystemAccess)) {
+            tools.addAll(boardOpportunityTools())
+        }
         tools.addAll(deepReadPlaybookTools.getTools())
         tools.add(deepReadOpenTool)
 
@@ -192,5 +197,10 @@ class LocalTools(
 
         return tools
     }
+
+    private fun boardOpportunityTools(): List<Tool> =
+        runCatching {
+            GlobalContext.get().get<BoardOpportunityTools>().getTools()
+        }.getOrDefault(emptyList())
 
 }

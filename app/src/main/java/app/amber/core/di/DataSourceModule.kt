@@ -122,7 +122,8 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "amber_agent")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-                        .addCallback(object : RoomDatabase.Callback() {
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     val dictDir = SimpleDictManager.extractDict(context)
                     val cursor = db.query("SELECT jieba_dict(?)", arrayOf(dictDir.absolutePath))
@@ -252,6 +253,22 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().boardItemDao()
+    }
+
+    single {
+        get<AppDatabase>().boardTaskDao()
+    }
+
+    single {
+        get<AppDatabase>().boardTaskEventDao()
+    }
+
+    single {
+        get<AppDatabase>().opportunityDao()
+    }
+
+    single {
+        get<AppDatabase>().referenceAnchorDao()
     }
 
     single {

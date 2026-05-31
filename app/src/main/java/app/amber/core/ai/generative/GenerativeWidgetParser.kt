@@ -56,6 +56,8 @@ object GenerativeWidgetParser {
         "todo",
     )
     private val json = Json { ignoreUnknownKeys = true }
+    private const val INCOMPLETE_FULL_HTML_MESSAGE =
+        "可视化预览没有生成完整，已隐藏未完成的 HTML 内容。请重新生成或缩短内容。"
 
     private val partialFenceEndRegex = Regex("""(?m)^[ \t]*`{3}[ \t]*(?:show-widget|widget|generative-ui)[^\r\n]*$""")
 
@@ -106,7 +108,10 @@ object GenerativeWidgetParser {
                     segments += GenerativeWidgetSegment.Loading
                     return segments
                 }
-                appendTextSegment(segments, content.substring(marker.range.first))
+                val widgetFragment = content.substring(marker.range.first)
+                if (!appendIncompleteFullHtmlMessage(segments, widgetFragment)) {
+                    appendTextSegment(segments, widgetFragment)
+                }
                 return segments
             }
 
@@ -119,7 +124,14 @@ object GenerativeWidgetParser {
                     cursor = skipTrailingFence(content, jsonEnd + 1)
                 } else {
                     val fallbackEnd = skipTrailingFence(content, jsonEnd + 1)
-                    appendTextSegment(segments, content.substring(marker.range.first, fallbackEnd))
+                    val widgetFragment = content.substring(marker.range.first, fallbackEnd)
+                    if (streaming && looksLikeFullHtmlWidgetFragment(widgetFragment)) {
+                        segments += GenerativeWidgetSegment.Loading
+                        return segments
+                    }
+                    if (!appendIncompleteFullHtmlMessage(segments, widgetFragment)) {
+                        appendTextSegment(segments, widgetFragment)
+                    }
                     cursor = fallbackEnd
                 }
                 continue
@@ -135,7 +147,10 @@ object GenerativeWidgetParser {
                 return segments
             }
 
-            appendTextSegment(segments, content.substring(marker.range.first))
+            val widgetFragment = content.substring(marker.range.first)
+            if (!appendIncompleteFullHtmlMessage(segments, widgetFragment)) {
+                appendTextSegment(segments, widgetFragment)
+            }
             return segments
         }
 
@@ -149,6 +164,35 @@ object GenerativeWidgetParser {
         if (foundWidgetMarker) return segments
         parseStandaloneFullHtmlWidget(content)?.let { return listOf(it) }
         return listOf(GenerativeWidgetSegment.Text(content))
+    }
+
+    private fun appendIncompleteFullHtmlMessage(
+        segments: MutableList<GenerativeWidgetSegment>,
+        widgetFragment: String,
+    ): Boolean {
+        if (!looksLikeFullHtmlWidgetFragment(widgetFragment)) return false
+        appendTextSegment(segments, INCOMPLETE_FULL_HTML_MESSAGE)
+        return true
+    }
+
+    private fun looksLikeFullHtmlWidgetFragment(widgetFragment: String): Boolean {
+        val lower = widgetFragment.take(4_096).lowercase()
+        val namesFullHtmlRenderer = "\"renderer\"" in lower &&
+            ("\"${GuizangHtmlDeckValidator.RENDERER}\"" in lower || "\"guizang_html\"" in lower)
+        val carriesDeckHtml = "\"spec\"" in lower && "\"html\"" in lower
+        val carriesLegacyDeckHtml = "\"widget_code\"" in lower && looksLikeDeckHtmlFragment(lower)
+        return namesFullHtmlRenderer || carriesDeckHtml || carriesLegacyDeckHtml
+    }
+
+    private fun looksLikeDeckHtmlFragment(lower: String): Boolean {
+        return "<!doctype html" in lower ||
+            "<html" in lower ||
+            "<div id=\\\"deck\\\"" in lower ||
+            "<div id='deck'" in lower ||
+            "class=\\\"slides\\\"" in lower ||
+            "class='slides'" in lower ||
+            "class=\\\"deck\\\"" in lower ||
+            "class='deck'" in lower
     }
 
     private fun appendTextSegment(segments: MutableList<GenerativeWidgetSegment>, content: String) {

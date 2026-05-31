@@ -12,7 +12,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import app.amber.core.ai.mcp.McpManager
@@ -233,6 +232,10 @@ class DocRadar(
 
     // ---- Document fetching (MCP-based, future: direct Feishu API) ----
 
+    suspend fun fetchPlainTextForAnalysis(url: String): String? = withContext(Dispatchers.IO) {
+        fetchDocContent(url)?.plainText
+    }
+
     private data class FetchedContent(
         val plainText: String,
         val contentHash: String,
@@ -247,7 +250,7 @@ class DocRadar(
                 serverId = tool.first,
                 serverName = null,
                 toolName = tool.second,
-                args = args as JsonObject,
+                args = args,
             )
             val text = parts.filterIsInstance<app.amber.ai.ui.UIMessagePart.Text>()
                 .joinToString("\n") { it.text }

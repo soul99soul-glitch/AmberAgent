@@ -262,9 +262,18 @@ class ChatCompletionsAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isMiMo = isMiMoProvider(providerSetting, host, params.model.modelId)
+        val forceReasoningContentForToolCalls =
+            shouldForceReasoningContentForToolCalls(providerSetting, host, params.model, params.reasoningLevel)
         return buildJsonObject {
             put("model", params.model.modelId)
-            put("messages", buildMessages(messages, preserveHistoricalReasoningContent = isMiMo))
+            put(
+                "messages",
+                buildMessages(
+                    messages = messages,
+                    preserveHistoricalReasoningContent = isMiMo,
+                    forceReasoningContentForToolCalls = forceReasoningContentForToolCalls,
+                )
+            )
 
             if (isModelAllowTemperature(params.model)) {
                 if (params.temperature != null) put("temperature", params.temperature)
@@ -452,6 +461,7 @@ class ChatCompletionsAPI(
     private fun buildMessages(
         messages: List<UIMessage>,
         preserveHistoricalReasoningContent: Boolean,
+        forceReasoningContentForToolCalls: Boolean,
     ) = buildJsonArray {
         val filteredMessages = messages.filter { it.isValidToUpload() }
         val lastUserIndex = filteredMessages.indexOfLast { it.role == MessageRole.USER }
@@ -461,6 +471,7 @@ class ChatCompletionsAPI(
                 addAssistantMessages(
                     message = message,
                     includeReasoning = preserveHistoricalReasoningContent || index > lastUserIndex,
+                    forceReasoningContentForToolCalls = forceReasoningContentForToolCalls,
                 )
             } else {
                 addNonAssistantMessage(message)
@@ -480,6 +491,20 @@ class ChatCompletionsAPI(
             lowerModelId.contains("mimo")
     }
 
+    private fun shouldForceReasoningContentForToolCalls(
+        providerSetting: ProviderSetting.OpenAI,
+        host: String,
+        model: Model,
+        reasoningLevel: ReasoningLevel,
+    ): Boolean {
+        if (!reasoningLevel.isEnabled) return false
+        if (!model.abilities.contains(ModelAbility.REASONING)) return false
+        val lowerModelId = model.modelId.lowercase()
+        return providerSetting.brand == OpenAIBrand.DEEPSEEK ||
+            host == "api.deepseek.com" ||
+            lowerModelId.contains("deepseek")
+    }
+
     private fun Request.Builder.addOpenAICompatibleAuthHeader(
         providerSetting: ProviderSetting.OpenAI,
         token: String,
@@ -494,7 +519,11 @@ class ChatCompletionsAPI(
         }
     }
 
-    private fun JsonArrayBuilder.addAssistantMessages(message: UIMessage, includeReasoning: Boolean) {
+    private fun JsonArrayBuilder.addAssistantMessages(
+        message: UIMessage,
+        includeReasoning: Boolean,
+        forceReasoningContentForToolCalls: Boolean,
+    ) {
         val groups = groupPartsByToolBoundary(message.parts)
         val contentBuffer = mutableListOf<UIMessagePart>()
         var reasoningPart: UIMessagePart.Reasoning? = null
@@ -518,7 +547,8 @@ class ChatCompletionsAPI(
                     buildAssistantMessageJson(
                         contentParts = contentBuffer,
                         tools = group.tools,
-                        reasoningPart = reasoningPart
+                        reasoningPart = reasoningPart,
+                        forceReasoningContentForToolCalls = forceReasoningContentForToolCalls,
                     )?.let { assistantMessage ->
                         add(assistantMessage)
                     }
@@ -545,7 +575,8 @@ class ChatCompletionsAPI(
             buildAssistantMessageJson(
                 contentParts = contentBuffer,
                 tools = emptyList(),
-                reasoningPart = reasoningPart
+                reasoningPart = reasoningPart,
+                forceReasoningContentForToolCalls = forceReasoningContentForToolCalls,
             )?.let { assistantMessage ->
                 add(assistantMessage)
             }
@@ -555,7 +586,8 @@ class ChatCompletionsAPI(
     private fun buildAssistantMessageJson(
         contentParts: List<UIMessagePart>,
         tools: List<UIMessagePart.Tool>,
-        reasoningPart: UIMessagePart.Reasoning?
+        reasoningPart: UIMessagePart.Reasoning?,
+        forceReasoningContentForToolCalls: Boolean,
     ): JsonObject? {
         val hasUsableContent = contentParts.any { part ->
             when (part) {
@@ -565,7 +597,9 @@ class ChatCompletionsAPI(
             }
         }
         val hasReasoning = !reasoningPart?.reasoning.isNullOrBlank()
-        val shouldEmitReasoningContent = hasReasoning || reasoningPart?.hasExplicitReasoningContentField() == true
+        val shouldEmitReasoningContent = hasReasoning ||
+            reasoningPart?.hasExplicitReasoningContentField() == true ||
+            (forceReasoningContentForToolCalls && tools.isNotEmpty())
         if (!hasUsableContent && !shouldEmitReasoningContent && tools.isEmpty()) {
             return null
         }

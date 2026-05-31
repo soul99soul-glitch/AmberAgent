@@ -48,6 +48,79 @@ class GenerativeWidgetParserTest {
     }
 
     @Test
+    fun streamsFullHtmlProgressInsteadOfRawJson() {
+        val segments = GenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Deck","renderer":"full_html","spec":{"html":"<!DOCTYPE html><html><body><div id=\"deck\"><section
+            """.trimIndent(),
+            streaming = true,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals("Intro", (segments[0] as GenerativeWidgetSegment.Text).content)
+        assertTrue(segments[1] is GenerativeWidgetSegment.Widget || segments[1] is GenerativeWidgetSegment.Loading)
+    }
+
+    @Test
+    fun streamsFullHtmlCoverWidgetInsteadOfRawJson() {
+        val segments = GenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Deck","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>D
+            """.trimIndent(),
+            streaming = true,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals("Intro", (segments[0] as GenerativeWidgetSegment.Text).content)
+        val widget = segments[1] as GenerativeWidgetSegment.Widget
+        assertEquals("Deck", widget.title)
+        assertTrue(widget.widgetCode.contains("<svg"))
+        assertFalse(widget.complete)
+    }
+
+    @Test
+    fun hidesTruncatedFinalFullHtmlPayload() {
+        val segments = GenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Deck","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>D</text></svg>","spec":{"html":"<!DOCTYPE html><html><body><div id=\"deck\"><section
+            """.trimIndent(),
+            streaming = false,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals("Intro", (segments[0] as GenerativeWidgetSegment.Text).content)
+        val failure = (segments[1] as GenerativeWidgetSegment.Text).content
+        assertTrue(failure.contains("可视化预览没有生成完整"))
+        assertFalse(failure.contains("widget_code"))
+        assertFalse(failure.contains("<section"))
+    }
+
+    @Test
+    fun hidesTruncatedLegacyDeckHtmlPayload() {
+        val segments = GenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Deck","renderer":"html","widget_code":"<!DOCTYPE html><html><body><div id=\"deck\"><section
+            """.trimIndent(),
+            streaming = false,
+        )
+
+        assertEquals(2, segments.size)
+        assertEquals("Intro", (segments[0] as GenerativeWidgetSegment.Text).content)
+        val failure = (segments[1] as GenerativeWidgetSegment.Text).content
+        assertTrue(failure.contains("可视化预览没有生成完整"))
+        assertFalse(failure.contains("widget_code"))
+        assertFalse(failure.contains("<section"))
+    }
+
+    @Test
     fun parsesWidgetFenceAliases() {
         listOf("widget", "generative-ui").forEach { fence ->
             val segments = GenerativeWidgetParser.parse(
@@ -239,6 +312,47 @@ class GenerativeWidgetParserTest {
         assertTrue(widget.specJson!!.contains("<section class=\\\"slide dark\\\">A</section>"))
         assertTrue(widget.specJson.contains("guizang-ppt-skill"))
         assertTrue(widget.widgetCode.contains("<svg"))
+    }
+
+    @Test
+    fun recoversSocialCardSetAsFullHtmlDeck() {
+        val html = """
+            <!DOCTYPE html>
+            <html><body><div id="card-set"><section class="poster xhs">Card</section></div></body></html>
+        """.trimIndent()
+        val content = """
+            ```show-widget
+            {"title":"Cards","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>C</text></svg>","spec":{"html":${jsonString(html)},"source":"guizang-social-card-skill"}}
+            ```
+        """.trimIndent()
+
+        val widget = GenerativeWidgetParser.parse(content, streaming = false).single() as GenerativeWidgetSegment.Widget
+        val deck = GuizangHtmlDeckValidator.normalizeSpecJson(widget.specJson!!)!!
+        val runtimeHtml = GuizangHtmlDeckValidator.prepareRuntimeHtml(deck.html)
+
+        assertEquals("full_html", widget.renderer)
+        assertTrue(runtimeHtml.contains("id=\"card-set\" data-guizang-deck"))
+        assertTrue(runtimeHtml.contains("class=\"poster xhs slide social-card\""))
+    }
+
+    @Test
+    fun fullHtmlQualityGateRejectsUnsafeSocialCardSet() {
+        val requirement = GenerativeUiWidgetRequirement(
+            required = true,
+            expectSlides = true,
+            expectFullHtmlDeck = true,
+        )
+        val html = """<!DOCTYPE html><html><body><div id="card-set"><section class="poster xhs"><iframe src="x"></iframe></section></div></body></html>"""
+        val content = """
+            ```show-widget
+            {"title":"Unsafe","renderer":"full_html","widget_code":"<svg viewBox=\"0 0 20 20\"><text>C</text></svg>","spec":{"html":${jsonString(html)},"source":"guizang-social-card-skill"}}
+            ```
+        """.trimIndent()
+
+        assertTrue(
+            GenerativeWidgetParser.widgetQualityIssue(content, requirement)!!
+                .contains("embedded frames are not allowed")
+        )
     }
 
     @Test
