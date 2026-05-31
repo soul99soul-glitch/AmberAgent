@@ -76,8 +76,8 @@ object GuizangHtmlDeckValidator {
         RegexOption.IGNORE_CASE,
     )
     private val dataGuizangDeckRegex = Regex("""\bdata-guizang-deck(?:\s|=|>)""", RegexOption.IGNORE_CASE)
-    private val pageOpenTagRegex = Regex("""<(section|article)\b[^>]*>""", RegexOption.IGNORE_CASE)
     private val socialPageOpenTagRegex = Regex("""<(section|article|div)\b[^>]*>""", RegexOption.IGNORE_CASE)
+    private val pageBoundaryTagRegex = Regex("""</?\s*(section|article|div)\b[^>]*>""", RegexOption.IGNORE_CASE)
     private val socialPageIntentRegex = Regex("""\b(?:poster|xhs|wide|square|social-card)\b""", RegexOption.IGNORE_CASE)
     private val socialCardBlockRegex = Regex(
         """(?is)<(?:section|article)\b(?=[^>]*\bclass\s*=\s*(?:"[^"]*\b(?:poster|xhs|wide|square|social-card)\b[^"]*"|'[^']*\b(?:poster|xhs|wide|square|social-card)\b[^']*'|[^\s>]*\b(?:poster|xhs|wide|square|social-card)\b[^\s>]*))[^>]*>.*?</(?:section|article)>""",
@@ -122,6 +122,12 @@ object GuizangHtmlDeckValidator {
     private data class BlockedPattern(
         val regex: Regex,
         val reason: String,
+    )
+
+    private data class OrphanPageBlock(
+        val range: IntRange,
+        val value: String,
+        val socialCard: Boolean,
     )
 
     fun normalizeSpecJson(specJson: String): DeckSpec? {
@@ -240,20 +246,15 @@ object GuizangHtmlDeckValidator {
     private fun normalizeDeckStructure(html: String): String {
         val normalizedContainers = normalizeDeckContainerSlides(normalizeSocialCardDeck(html))
         if (normalizedContainers != html) return normalizedContainers
-        val slideBlocks = slideBlockRegex.findAll(html).toList()
-        val orphanBlocks = if (slideBlocks.isNotEmpty()) {
-            slideBlocks
-        } else {
-            socialCardBlockRegex.findAll(html).toList()
-        }
+        val orphanBlocks = collectOrphanPageBlocks(html)
         if (orphanBlocks.isEmpty()) return html
         val first = orphanBlocks.first().range.first
         val last = orphanBlocks.last().range.last
-        val slides = orphanBlocks.joinToString(separator = "\n") { match ->
-            if (slideBlocks.isNotEmpty()) {
-                match.value
+        val slides = orphanBlocks.joinToString(separator = "\n") { block ->
+            if (block.socialCard) {
+                normalizeSocialCardPageBlock(block.value)
             } else {
-                normalizeSocialCardPageBlock(match.value)
+                block.value
             }
         }
         return buildString {
@@ -271,11 +272,10 @@ object GuizangHtmlDeckValidator {
     private fun normalizeDeckContainerSlides(html: String): String =
         replaceElementBlocks(html, deckContainerOpenTagRegex) { openTag, body, closeTag ->
             val opening = addDeckIdIfMissing(openTag)
-            val normalizedBody = if (slideElementRegex.containsMatchIn(body)) {
-                body
-            } else {
-                body.replace(pageOpenTagRegex) { match ->
-                    addClassTokenToOpeningTag(match.value, "slide")
+            val normalizedBody = normalizeDirectChildPageOpenTags(body) { tagName, pageOpenTag ->
+                when (tagName) {
+                    "section", "article" -> addClassTokenToOpeningTag(pageOpenTag, "slide")
+                    else -> pageOpenTag
                 }
             }
             opening + normalizedBody + closeTag
@@ -284,9 +284,7 @@ object GuizangHtmlDeckValidator {
     private fun normalizeSocialCardDeck(html: String): String =
         replaceElementBlocks(html, socialDeckContainerOpenTagRegex) { openTag, body, closeTag ->
             val opening = addDataGuizangDeck(openTag)
-            val normalizedBody = body.replace(socialPageOpenTagRegex) { match ->
-                val tagName = match.groupValues[1].lowercase()
-                val pageOpenTag = match.value
+            val normalizedBody = normalizeDirectChildPageOpenTags(body) { tagName, pageOpenTag ->
                 val shouldNormalize = tagName != "div" || hasSocialPageIntent(pageOpenTag)
                 if (shouldNormalize) {
                     addClassTokenToOpeningTag(pageOpenTag, "slide", "social-card")
@@ -296,6 +294,59 @@ object GuizangHtmlDeckValidator {
             }
             opening + normalizedBody + closeTag
         }
+
+    private fun collectOrphanPageBlocks(html: String): List<OrphanPageBlock> {
+        val blocks = mutableListOf<OrphanPageBlock>()
+
+        fun add(candidate: OrphanPageBlock) {
+            val index = blocks.indexOfFirst { existing -> existing.range.overlaps(candidate.range) }
+            if (index < 0) {
+                blocks += candidate
+                return
+            }
+            val existing = blocks[index]
+            if (candidate.socialCard && !existing.socialCard) {
+                blocks[index] = existing.copy(socialCard = true)
+            }
+        }
+
+        slideBlockRegex.findAll(html).forEach { match ->
+            add(OrphanPageBlock(match.range, match.value, socialCard = false))
+        }
+        socialCardBlockRegex.findAll(html).forEach { match ->
+            add(OrphanPageBlock(match.range, match.value, socialCard = true))
+        }
+        return blocks.sortedBy { it.range.first }
+    }
+
+    private fun IntRange.overlaps(other: IntRange): Boolean =
+        first <= other.last && other.first <= last
+
+    private fun normalizeDirectChildPageOpenTags(
+        html: String,
+        transform: (tagName: String, openTag: String) -> String,
+    ): String {
+        val output = StringBuilder()
+        var cursor = 0
+        var depth = 0
+        pageBoundaryTagRegex.findAll(html).forEach { match ->
+            val tag = match.value
+            val tagName = match.groupValues[1].lowercase()
+            val closing = tag.trimStart().startsWith("</")
+            output.append(html.substring(cursor, match.range.first))
+            if (closing) {
+                depth = (depth - 1).coerceAtLeast(0)
+                output.append(tag)
+            } else {
+                output.append(if (depth == 0) transform(tagName, tag) else tag)
+                if (!tag.trimEnd().endsWith("/>")) depth += 1
+            }
+            cursor = match.range.last + 1
+        }
+        if (output.isEmpty()) return html
+        output.append(html.substring(cursor))
+        return output.toString()
+    }
 
     private fun replaceElementBlocks(
         html: String,

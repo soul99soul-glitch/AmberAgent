@@ -163,6 +163,24 @@ class GuizangHtmlDeckValidatorTest {
     }
 
     @Test
+    fun onlyRepairsDirectDeckChildrenAsSlides() {
+        val html = """
+            <div id="deck">
+              <section>
+                <section class="caption">Nested</section>
+              </section>
+            </div>
+        """.trimIndent()
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(html)
+
+        assertTrue(normalized.contains("""<section class="slide">"""))
+        assertTrue(normalized.contains("""<section class="caption">Nested</section>"""))
+        assertFalse(normalized.contains("class=\"caption slide\""))
+    }
+
+    @Test
     fun repairsSocialCardSetWithoutRenamingItsCssAnchor() {
         val html = """
             <div id="card-set">
@@ -174,6 +192,39 @@ class GuizangHtmlDeckValidatorTest {
         val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(html)
 
         assertTrue(normalized.contains("""<div id="card-set" data-guizang-deck>"""))
+        assertTrue(normalized.contains("""<section class="poster xhs slide social-card">Card</section>"""))
+    }
+
+    @Test
+    fun onlyRepairsDirectSocialCardChildrenAsSlides() {
+        val html = """
+            <div id="card-set">
+              <section class="poster xhs">
+                <article class="caption">Nested</article>
+              </section>
+            </div>
+        """.trimIndent()
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(html)
+
+        assertTrue(normalized.contains("""<section class="poster xhs slide social-card">"""))
+        assertTrue(normalized.contains("""<article class="caption">Nested</article>"""))
+        assertFalse(normalized.contains("class=\"caption slide social-card\""))
+    }
+
+    @Test
+    fun wrapsMixedOrphanSlidesAndSocialCardsTogether() {
+        val html = """
+            <section class="slide">Intro</section>
+            <section class="poster xhs">Card</section>
+        """.trimIndent()
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        val normalized = GuizangHtmlDeckValidator.prepareRuntimeHtml(html)
+
+        assertTrue(normalized.contains("""<div id="deck">"""))
+        assertTrue(normalized.contains("""<section class="slide">Intro</section>"""))
         assertTrue(normalized.contains("""<section class="poster xhs slide social-card">Card</section>"""))
     }
 
