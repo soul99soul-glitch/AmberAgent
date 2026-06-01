@@ -12,9 +12,9 @@
 </div>
 
 <div align="center">
+  <img src="docs/img/amberagent-home.jpg" alt="AmberAgent home screen" width="240" />
   <img src="docs/img/amberagent-chat.jpg" alt="AmberAgent chat with subagents" width="240" />
   <img src="docs/img/amberagent-board.jpg" alt="AmberAgent Today Board" width="240" />
-  <img src="docs/img/amberagent-settings.jpg" alt="AmberAgent display settings" width="240" />
 </div>
 
 ## What Is AmberAgent?

@@ -12,9 +12,9 @@
 </div>
 
 <div align="center">
+  <img src="docs/img/amberagent-home.jpg" alt="AmberAgent 首頁" width="240" />
   <img src="docs/img/amberagent-chat.jpg" alt="AmberAgent SubAgent 聊天介面" width="240" />
   <img src="docs/img/amberagent-board.jpg" alt="AmberAgent 今日看板" width="240" />
-  <img src="docs/img/amberagent-settings.jpg" alt="AmberAgent 顯示設定" width="240" />
 </div>
 
 ## AmberAgent 是什麼？
