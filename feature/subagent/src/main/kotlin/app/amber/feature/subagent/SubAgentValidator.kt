@@ -99,9 +99,18 @@ object SubAgentValidator {
             require(requestedName.isNotBlank()) { "custom_subagent.name is required" }
             requestedName
         }
-        val id = normalizeId(rawName)
         val description = custom.string("description")
         val systemPrompt = custom.string("system_prompt")
+        val id = normalizeId(rawName).ifBlank {
+            fallbackDynamicId(
+                seed = listOf(
+                    requestedName,
+                    input["task"]?.jsonObject?.stringOrBlank("objective").orEmpty(),
+                    description,
+                    systemPrompt,
+                ).joinToString("|")
+            )
+        }
         validateNarrowDynamicRole(id, description, systemPrompt)
 
         val explicitTools = custom["tool_allowlist"]?.jsonArray
@@ -198,6 +207,9 @@ object SubAgentValidator {
             .replace(Regex("[^a-z0-9\\-]+"), "-")
             .replace(Regex("-+"), "-")
             .trim('-')
+
+    private fun fallbackDynamicId(seed: String): String =
+        "dynamic-${Integer.toUnsignedString(seed.hashCode(), 36)}"
 
     private fun isGenericName(id: String): Boolean =
         genericNameParts.any { id.contains(it, ignoreCase = true) }

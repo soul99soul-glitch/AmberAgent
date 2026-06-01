@@ -400,7 +400,7 @@ internal fun AgentToolCallCapsule(
         val reserveStatusSlot = approvalActions == null
         Box {
             Row(
-                modifier = Modifier.padding(start = 3.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
+                modifier = Modifier.padding(start = 7.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
@@ -487,7 +487,7 @@ private fun V3ToolStatusBadge(
         AgentToolStatus.RUNNING -> Color.Transparent to theme.toolDoneBg
         AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to statusIconInk
         AgentToolStatus.FAILED -> theme.contextHigh to statusIconInk
-        AgentToolStatus.CANCELLED -> theme.inkSoft to statusIconInk
+        AgentToolStatus.CANCELLED -> Color.Transparent to theme.inkSoft
     }
     if (status == AgentToolStatus.RUNNING) {
         RunningToolSpinner(
@@ -500,6 +500,7 @@ private fun V3ToolStatusBadge(
         modifier = modifier.requiredSize(16.dp),
         shape = androidx.compose.foundation.shape.CircleShape,
         color = bg,
+        border = if (status == AgentToolStatus.CANCELLED) BorderStroke(1.dp, ink) else null,
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (status == AgentToolStatus.SUCCEEDED) {
@@ -510,6 +511,13 @@ private fun V3ToolStatusBadge(
                     modifier = Modifier.size(10.dp),
                 )
             } else if (status == AgentToolStatus.FAILED) {
+                Icon(
+                    imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.size(10.dp),
+                )
+            } else if (status == AgentToolStatus.CANCELLED) {
                 Icon(
                     imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,
                     contentDescription = null,

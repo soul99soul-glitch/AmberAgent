@@ -9,6 +9,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.google.firebase.crashlytics.crashlytics
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
@@ -64,6 +66,7 @@ const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 class AmberAgentApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        ensureFirebaseInitialized()
         startKoin {
             androidLogger()
             androidContext(this@AmberAgentApp)
@@ -373,6 +376,17 @@ class AmberAgentApp : Application() {
         cleanupChatService()
         super.onTerminate()
         get<AppScope>().cancel()
+    }
+
+    private fun ensureFirebaseInitialized() {
+        if (FirebaseApp.getApps(this).isNotEmpty()) return
+        val options = FirebaseOptions.Builder()
+            .setApplicationId("1:000000000000:android:0000000000000000000000")
+            .setApiKey("local-firebase-disabled")
+            .setProjectId("amberagent-local")
+            .build()
+        FirebaseApp.initializeApp(this, options)
+        Log.w(TAG, "FirebaseApp initialized with local fallback options; google-services config is missing for this package.")
     }
 }
 

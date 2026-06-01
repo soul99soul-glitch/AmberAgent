@@ -29,19 +29,19 @@ fun String.asBuildConfigString(): String =
 val xiaomiXmsAppId = projectProperty("xiaomiXmsAppId", "XIAOMI_XMS_APP_ID")
 val baseApplicationId = "app.amber.agent"
 
-// Build types that share the parallel-install UI contract — must each call
-// `applyNotionLikeUi(...)` in the `buildTypes {}` block below to set
-// applicationIdSuffix + VERSION/XMS/OAuth BuildConfig fields consistently.
+// Build types that share the Amber UI/runtime contract — must each call
+// `applyAmberUiBuildConfig(...)` in the `buildTypes {}` block below to set
+// optional applicationIdSuffix + VERSION/XMS/OAuth BuildConfig fields consistently.
 // See the afterEvaluate parity check at file end for why.
-val parallelInstallBuildTypes = setOf("notion")
+val amberUiBuildTypes = setOf("notion")
 
-// Populated by `applyNotionLikeUi(...)` invocations; compared against
-// `parallelInstallBuildTypes` after configuration.
-val parallelInstallApplied = mutableSetOf<String>()
+// Populated by `applyAmberUiBuildConfig(...)` invocations; compared against
+// `amberUiBuildTypes` after configuration.
+val amberUiBuildConfigApplied = mutableSetOf<String>()
 val googleServicesPackageByVariant = linkedMapOf(
     "release" to baseApplicationId,
     "debug" to "$baseApplicationId.debug",
-    "notion" to "$baseApplicationId.notion",
+    "notion" to baseApplicationId,
     "baseline" to "$baseApplicationId.debug",
 )
 
@@ -139,15 +139,12 @@ android {
         }
     }
 
-    // Parallel-install buildType helper. Any buildType that ships as a
-    // separate APK alongside `release` (different applicationIdSuffix → own
-    // data dir, no DataStore/Room collision) MUST call this so VERSION /
-    // XMS / OAuth BuildConfig fields stay consistent. Recorded in
-    // [parallelInstallApplied] and verified by the afterEvaluate parity
-    // check at file end.
-    val applyNotionLikeUi: com.android.build.api.dsl.ApplicationBuildType.(String) -> Unit = { packageSuffix ->
-        parallelInstallApplied.add(name)
-        applicationIdSuffix = packageSuffix
+    // Amber UI buildType helper. Build types using the custom Amber UI resource
+    // set call this so VERSION / XMS / OAuth BuildConfig fields stay consistent.
+    // An empty packageSuffix intentionally keeps the canonical applicationId.
+    val applyAmberUiBuildConfig: com.android.build.api.dsl.ApplicationBuildType.(String) -> Unit = { packageSuffix ->
+        amberUiBuildConfigApplied.add(name)
+        applicationIdSuffix = packageSuffix.ifEmpty { null }
         buildConfigField("String", "VERSION_NAME", "\"${defaultConfig.versionName}\"")
         buildConfigField("String", "VERSION_CODE", "\"${defaultConfig.versionCode}\"")
         buildConfigField("Boolean", "XIAOMI_XMS_APP_ID_CONFIGURED", xiaomiXmsAppId.isNotBlank().toString())
@@ -184,7 +181,7 @@ android {
         create("notion") {
             initWith(getByName("debug"))
             matchingFallbacks.add("debug")
-            applyNotionLikeUi(".notion")
+            applyAmberUiBuildConfig("")
         }
         create("baseline") {
             initWith(getByName("release"))
@@ -412,25 +409,25 @@ afterEvaluate {
 }
 
 // ---------------------------------------------------------------------------
-// Parallel-install buildType parity check.
+// Amber UI buildType parity check.
 //
-// Parallel-install variants (different applicationIdSuffix, separate data dir)
-// must each call `applyNotionLikeUi(...)` so VERSION/XMS/OAuth BuildConfig
-// fields stay consistent with the canonical app shape. This afterEvaluate
-// compares the declared set in [parallelInstallBuildTypes] against the helper
-// call recorder [parallelInstallApplied]; any mismatch fails configure time.
+// Amber UI variants must each call `applyAmberUiBuildConfig(...)` so
+// VERSION/XMS/OAuth BuildConfig fields stay consistent with the canonical app
+// shape. This afterEvaluate compares the declared set in [amberUiBuildTypes]
+// against the helper call recorder [amberUiBuildConfigApplied]; any mismatch
+// fails configure time.
 // ---------------------------------------------------------------------------
 afterEvaluate {
-    val missing = parallelInstallBuildTypes - parallelInstallApplied
+    val missing = amberUiBuildTypes - amberUiBuildConfigApplied
     check(missing.isEmpty()) {
-        "These buildTypes are declared parallel-install but did NOT call applyNotionLikeUi(): $missing.\n" +
+        "These buildTypes are declared Amber UI variants but did NOT call applyAmberUiBuildConfig(): $missing.\n" +
             "    → Open app/build.gradle.kts, find the buildType {} block for each,\n" +
-            "      and call applyNotionLikeUi(\".<suffix>\")."
+            "      and call applyAmberUiBuildConfig(\"\" or \".<suffix>\")."
     }
-    val unexpected = parallelInstallApplied - parallelInstallBuildTypes
+    val unexpected = amberUiBuildConfigApplied - amberUiBuildTypes
     check(unexpected.isEmpty()) {
-        "These buildTypes called applyNotionLikeUi() but are NOT in parallelInstallBuildTypes: $unexpected.\n" +
-            "    → Either remove the call, or add each name to parallelInstallBuildTypes."
+        "These buildTypes called applyAmberUiBuildConfig() but are NOT in amberUiBuildTypes: $unexpected.\n" +
+            "    → Either remove the call, or add each name to amberUiBuildTypes."
     }
 }
 

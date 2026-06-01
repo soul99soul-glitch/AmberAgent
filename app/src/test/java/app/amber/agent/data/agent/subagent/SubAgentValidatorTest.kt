@@ -147,6 +147,21 @@ class SubAgentValidatorTest {
     }
 
     @Test
+    fun rosterModeDynamicRoleAllowsNonLatinDisplayName() {
+        val input = inputWithCustomSubagent(name = "新闻员")
+
+        val result = SubAgentValidator.resolveDefinition(
+            input = input,
+            setting = setting,
+            availableToolNames = setOf("file_read"),
+        )
+
+        assertEquals("新闻员", result.definition.name)
+        assertTrue(result.definition.id.startsWith("dynamic-"))
+        assertTrue(result.definition.dynamic)
+    }
+
+    @Test
     fun dynamicRoleToolProfileNarrowsToWebRead() {
         val input = inputWithCustomSubagent(
             toolProfile = "web_read",
