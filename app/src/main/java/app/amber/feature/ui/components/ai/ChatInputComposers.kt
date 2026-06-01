@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.FullScreen
@@ -137,6 +139,7 @@ internal fun TextInputRow(
     ) {
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
         val slashQuery = state.textContent.text.toString().slashCommandQuery()
         val allSlashCommands = remember(
             quickMessages,
@@ -158,7 +161,11 @@ internal fun TextInputRow(
             }.orEmpty()
         }
         val receiveContentListener = remember(
-            settings.displaySetting.pasteLongTextAsFile, settings.displaySetting.pasteLongTextThreshold
+            settings.displaySetting.pasteLongTextAsFile,
+            settings.displaySetting.pasteLongTextThreshold,
+            filesManager,
+            scope,
+            state,
         ) {
             ReceiveContentListener { transferableContent ->
                 when {
@@ -166,11 +173,13 @@ internal fun TextInputRow(
                         transferableContent.consume { item ->
                             val uri = item.uri
                             if (uri != null) {
-                                state.addImages(
-                                    filesManager.createChatFilesByContents(
-                                        listOf(uri)
+                                scope.launch {
+                                    state.addImages(
+                                        filesManager.createChatFilesByContents(
+                                            listOf(uri)
+                                        )
                                     )
-                                )
+                                }
                             }
                             uri != null
                         }
@@ -180,8 +189,10 @@ internal fun TextInputRow(
                         transferableContent.consume { item ->
                             val text = item.text?.toString()
                             if (text != null && text.length > settings.displaySetting.pasteLongTextThreshold) {
-                                val document = filesManager.createChatTextFile(text)
-                                state.addFiles(listOf(document))
+                                scope.launch {
+                                    val document = filesManager.createChatTextFile(text)
+                                    state.addFiles(listOf(document))
+                                }
                                 true
                             } else {
                                 false

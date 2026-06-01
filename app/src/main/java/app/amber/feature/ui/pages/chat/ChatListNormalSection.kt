@@ -61,6 +61,7 @@ import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -711,7 +712,14 @@ internal fun ChatListNormal(
     // matching RikkaHub's simpler bottom-follow feel.
     val showPinnedAgentWorkingIndicator = false
     val streamingVisibleEvents = remember(conversation.id) {
-        MutableSharedFlow<String>(extraBufferCapacity = 1)
+        if (PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW) {
+            MutableSharedFlow<String>(
+                extraBufferCapacity = 1,
+                onBufferOverflow = BufferOverflow.DROP_OLDEST,
+            )
+        } else {
+            MutableSharedFlow<String>(extraBufferCapacity = 1)
+        }
     }
     fun requestStreamingBottomFollow(reason: String) {
         streamingVisibleEvents.tryEmit(reason)
@@ -723,7 +731,10 @@ internal fun ChatListNormal(
     ) {
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(streamingVisibleEvents, conversation.id) {
-                val bottomFollowEvents = if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL) {
+                val bottomFollowEvents = if (
+                    PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
+                    PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
+                ) {
                     streamingVisibleEvents.conflate()
                 } else {
                     streamingVisibleEvents
@@ -738,7 +749,10 @@ internal fun ChatListNormal(
                         followMode == TimelineFollowMode.FollowingBottom &&
                         !userScrollInTimeline
                     if (stillFollowing) {
-                        if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL) {
+                        if (
+                            PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
+                            PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
+                        ) {
                             scrollToTimelineBottom("stream-$reason", smoothLargeMove = false)
                         } else {
                             requestTimelineBottom("stream-$reason")
@@ -763,7 +777,10 @@ internal fun ChatListNormal(
                         "tokenSuffix=${latestRenderToken.takeLast(40)} → ${if (willFollow) "SCROLL" else "SKIP"}"
                 )
                 if (willFollow) {
-                    if (PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL) {
+                    if (
+                        PerfFlags.USE_UNIFIED_STREAMING_BOTTOM_FOLLOW ||
+                        PerfFlags.STREAMING_IMMEDIATE_CONTENT_REVEAL
+                    ) {
                         requestStreamingBottomFollow("chunk")
                     } else {
                         requestTimelineBottom("chunk")

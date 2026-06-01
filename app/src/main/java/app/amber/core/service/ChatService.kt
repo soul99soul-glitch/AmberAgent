@@ -492,10 +492,13 @@ class ChatService(
         return contextEngine.compactLifecycleStates.map { it[key] ?: CompactLifecycleState.idle() }
     }
 
+    // UI pending-message mutations stay non-blocking: ConversationSession.onPendingMessagesChanged
+    // feeds the single async persistence channel. A process kill in the tiny gap before that
+    // worker flushes may revive the old pending list; generation and dequeue paths still use
+    // durable persistence when they need it.
     fun cancelPendingUserMessage(conversationId: Uuid, messageId: String) {
         val session = getOrCreateSession(conversationId)
         if (session.cancelPendingUserMessage(messageId)) {
-            persistCurrentPendingMessagesDurably(conversationId, session)
             recordPendingMessageEvent(conversationId, event = "cancel", messageId = messageId)
         }
     }
@@ -505,7 +508,6 @@ class ChatService(
         val count = session.pendingUserMessages.value.size
         if (count > 0) {
             session.clearPendingUserMessages()
-            persistCurrentPendingMessagesDurably(conversationId, session)
             recordPendingMessageEvent(conversationId, event = "clear", count = count)
         }
     }
@@ -513,7 +515,6 @@ class ChatService(
     fun movePendingUserMessage(conversationId: Uuid, messageId: String, offset: Int) {
         val session = getOrCreateSession(conversationId)
         if (session.movePendingUserMessage(messageId, offset)) {
-            persistCurrentPendingMessagesDurably(conversationId, session)
             recordPendingMessageEvent(
                 conversationId = conversationId,
                 event = "move",
@@ -2187,8 +2188,8 @@ class ChatService(
         return conversation.copy(messageNodes = updatedNodes)
     }
 
-    private fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {
-        fun copyLocalFileIfNeeded(url: String): String {
+    private suspend fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {
+        suspend fun copyLocalFileIfNeeded(url: String): String {
             if (!url.startsWith("file:")) return url
             val copied = filesManager.createChatFilesByContents(listOf(url.toUri())).firstOrNull()
             return copied?.toString() ?: url

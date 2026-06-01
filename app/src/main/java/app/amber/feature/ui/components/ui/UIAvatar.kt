@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,7 @@ import app.amber.agent.R
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Avatar
 import app.amber.feature.ui.hooks.rememberAvatarShape
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 @Composable
@@ -117,14 +119,17 @@ fun UIAvatar(
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            val localUris = filesManager.createChatFilesByContents(listOf(it))
-            localUris.firstOrNull()?.let { localUri ->
-                onUpdate(Avatar.Image(localUri.toString()))
+            scope.launch {
+                val localUris = filesManager.createChatFilesByContents(listOf(it))
+                localUris.firstOrNull()?.let { localUri ->
+                    onUpdate(Avatar.Image(localUri.toString()))
+                }
             }
         }
     }

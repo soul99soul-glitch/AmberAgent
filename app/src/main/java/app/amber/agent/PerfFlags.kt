@@ -66,4 +66,11 @@ object PerfFlags {
      * the immediate path is better.
      */
     const val STREAMING_IMMEDIATE_CONTENT_REVEAL = false
+
+    /**
+     * Streaming bottom-follow A/B — route chunk and visible-frame follow
+     * requests through one conflated stream, then snap/settle at most once per
+     * frame. Default keeps the legacy direct requestScroll path.
+     */
+    const val USE_UNIFIED_STREAMING_BOTTOM_FOLLOW = false
 }

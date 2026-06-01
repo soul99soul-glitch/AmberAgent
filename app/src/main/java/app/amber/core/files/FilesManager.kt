@@ -124,7 +124,11 @@ class FilesManager(
     fun getFile(entity: ManagedFileEntity): File =
         File(context.filesDir, entity.relativePath)
 
-    fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
+    suspend fun createChatFilesByContents(uris: List<Uri>): List<Uri> = withContext(Dispatchers.IO) {
+        createChatFilesByContentsBlocking(uris)
+    }
+
+    private fun createChatFilesByContentsBlocking(uris: List<Uri>): List<Uri> {
         val newUris = mutableListOf<Uri>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
@@ -214,29 +218,37 @@ class FilesManager(
         }
 
     fun deleteChatFiles(uris: List<Uri>) {
-        // Files under the workspace mirror are user-visible to Agent tools as
-        // `/workspace/uploads/<name>` (and may have been moved/renamed inside the
-        // workspace by the user or the Agent itself). Conversation deletion or
-        // attachment removal must NOT drag those files into the bin — leave them in
-        // place and let the user manage workspace storage explicitly.
-        val workspaceMirrorPrefix = context.filesDir
-            .resolve("amberagent/workspace-mirror")
-            .absolutePath + "/"
-        val relativePaths = mutableSetOf<String>()
-        uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
-            val file = uri.toFile()
-            if (file.absolutePath.startsWith(workspaceMirrorPrefix)) {
-                return@forEach
+        appScope.launch(Dispatchers.IO) {
+            // Files under the workspace mirror are user-visible to Agent tools as
+            // `/workspace/uploads/<name>` (and may have been moved/renamed inside the
+            // workspace by the user or the Agent itself). Conversation deletion or
+            // attachment removal must NOT drag those files into the bin — leave them in
+            // place and let the user manage workspace storage explicitly.
+            val workspaceMirrorPrefix = context.filesDir
+                .resolve("amberagent/workspace-mirror")
+                .absolutePath + "/"
+            val relativePaths = mutableSetOf<String>()
+            uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
+                runCatching {
+                    val file = uri.toFile()
+                    if (file.absolutePath.startsWith(workspaceMirrorPrefix)) {
+                        return@runCatching
+                    }
+                    getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                }.onFailure {
+                    Log.e(TAG, "deleteChatFiles: Failed to delete $uri", it)
+                    Logging.log(TAG, "deleteChatFiles: Failed $uri ${it.message} | ${it.stackTraceToString()}")
+                }
             }
-            getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
-            if (file.exists()) {
-                file.delete()
-            }
-        }
-        if (relativePaths.isNotEmpty()) {
-            appScope.launch(Dispatchers.IO) {
-                relativePaths.forEach { path ->
+            relativePaths.forEach { path ->
+                runCatching {
                     repository.deleteByPath(path)
+                }.onFailure {
+                    Log.e(TAG, "deleteChatFiles: Failed to forget $path", it)
+                    Logging.log(TAG, "deleteChatFiles: Failed $path ${it.message} | ${it.stackTraceToString()}")
                 }
             }
         }
@@ -253,7 +265,7 @@ class FilesManager(
         Pair(count, size)
     }
 
-    fun createChatTextFile(text: String): UIMessagePart.Document {
+    suspend fun createChatTextFile(text: String): UIMessagePart.Document = withContext(Dispatchers.IO) {
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
@@ -262,7 +274,7 @@ class FilesManager(
         val file = dir.resolve(fileName)
         file.writeText(text)
         trackUploadFile(file = file, displayName = "pasted_text.txt", mimeType = "text/plain")
-        return UIMessagePart.Document(
+        return@withContext UIMessagePart.Document(
             url = file.toUri().toString(),
             fileName = "pasted_text.txt",
             mime = "text/plain"

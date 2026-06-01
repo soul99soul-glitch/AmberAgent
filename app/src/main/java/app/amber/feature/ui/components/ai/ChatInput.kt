@@ -323,6 +323,20 @@ fun ChatInput(
         chatModel?.findProvider(settings.providers)
     }
 
+    fun addImagesFromUris(uris: List<Uri>, onComplete: () -> Unit = {}) {
+        scope.launch {
+            state.addImages(filesManager.createChatFilesByContents(uris))
+            onComplete()
+        }
+    }
+
+    fun deleteTempFileAsync(file: File?) {
+        if (file == null) return
+        scope.launch(Dispatchers.IO) {
+            file.delete()
+        }
+    }
+
     suspend fun refreshUsage() {
         val openAIProvider = chatProvider as? ProviderSetting.OpenAI
         if (openAIProvider == null) {
@@ -353,11 +367,12 @@ fun ChatInput(
     var cameraOutputFile by remember { mutableStateOf<File?>(null) }
     val (_, launchCameraCrop) = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            state.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
-            dismissExpand()
+            addImagesFromUris(listOf(croppedUri)) {
+                dismissExpand()
+            }
         },
         onCleanup = {
-            cameraOutputFile?.delete()
+            deleteTempFileAsync(cameraOutputFile)
             cameraOutputFile = null
             cameraOutputUri = null
         }
@@ -365,16 +380,23 @@ fun ChatInput(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captureSuccessful ->
         if (captureSuccessful && cameraOutputUri != null) {
             if (settings.displaySetting.skipCropImage) {
-                state.addImages(filesManager.createChatFilesByContents(listOf(cameraOutputUri!!)))
-                cameraOutputFile?.delete()
-                cameraOutputFile = null
-                cameraOutputUri = null
-                dismissExpand()
+                val capturedUri = cameraOutputUri!!
+                val capturedFile = cameraOutputFile
+                addImagesFromUris(listOf(capturedUri)) {
+                    deleteTempFileAsync(capturedFile)
+                    if (cameraOutputFile == capturedFile) {
+                        cameraOutputFile = null
+                    }
+                    if (cameraOutputUri == capturedUri) {
+                        cameraOutputUri = null
+                    }
+                    dismissExpand()
+                }
             } else {
                 launchCameraCrop(cameraOutputUri!!)
             }
         } else {
-            cameraOutputFile?.delete()
+            deleteTempFileAsync(cameraOutputFile)
             cameraOutputFile = null
             cameraOutputUri = null
         }
@@ -391,11 +413,12 @@ fun ChatInput(
     var preCropTempFile by remember { mutableStateOf<File?>(null) }
     val (_, launchImageCrop) = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            state.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
-            dismissExpand()
+            addImagesFromUris(listOf(croppedUri)) {
+                dismissExpand()
+            }
         },
         onCleanup = {
-            preCropTempFile?.delete()
+            deleteTempFileAsync(preCropTempFile)
             preCropTempFile = null
         }
     )
@@ -404,24 +427,30 @@ fun ChatInput(
             if (selectedUris.isNotEmpty()) {
                 Log.d("ImagePickButton", "Selected URIs: $selectedUris")
                 if (settings.displaySetting.skipCropImage) {
-                    state.addImages(filesManager.createChatFilesByContents(selectedUris))
-                    dismissExpand()
+                    addImagesFromUris(selectedUris) {
+                        dismissExpand()
+                    }
                 } else {
                     if (selectedUris.size == 1) {
                         val tempFile = File(context.appTempFolder, "pick_temp_${System.currentTimeMillis()}.jpg")
-                        runCatching {
-                            context.contentResolver.openInputStream(selectedUris.first())?.use { input ->
-                                tempFile.outputStream().use { output -> input.copyTo(output) }
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    context.contentResolver.openInputStream(selectedUris.first())?.use { input ->
+                                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                                    }
+                                }
+                                preCropTempFile = tempFile
+                                launchImageCrop(tempFile.toUri())
+                            }.onFailure {
+                                Log.e("ImagePickButton", "Failed to copy image to temp, falling back", it)
+                                launchImageCrop(selectedUris.first())
                             }
-                            preCropTempFile = tempFile
-                            launchImageCrop(tempFile.toUri())
-                        }.onFailure {
-                            Log.e("ImagePickButton", "Failed to copy image to temp, falling back", it)
-                            launchImageCrop(selectedUris.first())
                         }
                     } else {
-                        state.addImages(filesManager.createChatFilesByContents(selectedUris))
-                        dismissExpand()
+                        addImagesFromUris(selectedUris) {
+                            dismissExpand()
+                        }
                     }
                 }
             } else {
@@ -433,8 +462,10 @@ fun ChatInput(
     val videoPickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
             if (selectedUris.isNotEmpty()) {
-                state.addVideos(filesManager.createChatFilesByContents(selectedUris))
-                dismissExpand()
+                scope.launch {
+                    state.addVideos(filesManager.createChatFilesByContents(selectedUris))
+                    dismissExpand()
+                }
             }
         }
 
@@ -445,11 +476,15 @@ fun ChatInput(
                 // Capture display names from the SAF URIs *before* the copy mangles them
                 // into UUID-prefixed cache files; without this the chat-message Audio chip
                 // would only have the UUID to show.
-                val originalNames = selectedUris.map {
-                    filesManager.getFileNameFromUri(it) ?: it.lastPathSegment.orEmpty()
+                scope.launch {
+                    val originalNames = withContext(Dispatchers.IO) {
+                        selectedUris.map {
+                            filesManager.getFileNameFromUri(it) ?: it.lastPathSegment.orEmpty()
+                        }
+                    }
+                    state.addAudios(filesManager.createChatFilesByContents(selectedUris), originalNames)
+                    dismissExpand()
                 }
-                state.addAudios(filesManager.createChatFilesByContents(selectedUris), originalNames)
-                dismissExpand()
             }
         }
 
@@ -457,23 +492,33 @@ fun ChatInput(
     val filePickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNotEmpty()) {
-                val documents = uris.mapNotNull { uri ->
-                    val fileName = filesManager.getFileNameFromUri(uri) ?: "file"
-                    val mime = filesManager.getFileMimeType(uri) ?: "application/octet-stream"
-                    val localUri = filesManager.createChatFilesByContents(listOf(uri)).firstOrNull()
-                    if (localUri != null) {
-                        UIMessagePart.Document(url = localUri.toString(), fileName = fileName, mime = mime)
-                    } else {
+                scope.launch {
+                    val failedNames = mutableListOf<String>()
+                    val documents = uris.mapNotNull { uri ->
+                        val fileName = withContext(Dispatchers.IO) {
+                            filesManager.getFileNameFromUri(uri) ?: "file"
+                        }
+                        val mime = withContext(Dispatchers.IO) {
+                            filesManager.getFileMimeType(uri) ?: "application/octet-stream"
+                        }
+                        val localUri = filesManager.createChatFilesByContents(listOf(uri)).firstOrNull()
+                        if (localUri != null) {
+                            UIMessagePart.Document(url = localUri.toString(), fileName = fileName, mime = mime)
+                        } else {
+                            failedNames.add(fileName)
+                            null
+                        }
+                    }
+                    failedNames.forEach { fileName ->
                         toaster.show(
                             context.getString(R.string.chat_input_file_upload_failed, fileName),
                             type = ToastType.Error
                         )
-                        null
                     }
-                }
-                if (documents.isNotEmpty()) {
-                    state.addFiles(documents)
-                    dismissExpand()
+                    if (documents.isNotEmpty()) {
+                        state.addFiles(documents)
+                        dismissExpand()
+                    }
                 }
             }
         }
