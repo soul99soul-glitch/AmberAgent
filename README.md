@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/brand/amberagent-mark.svg" alt="AmberAgent app icon" width="100" />
+  <img src="docs/icon.png" alt="AmberAgent app icon" width="100" />
   <h1>AmberAgent</h1>
 
   <p>
@@ -12,7 +12,9 @@
 </div>
 
 <div align="center">
-  <img src="docs/img/amberagent-overview.svg" alt="AmberAgent mobile agent runtime overview" width="900" />
+  <img src="docs/img/amberagent-chat.jpg" alt="AmberAgent chat with subagents" width="240" />
+  <img src="docs/img/amberagent-board.jpg" alt="AmberAgent Today Board" width="240" />
+  <img src="docs/img/amberagent-settings.jpg" alt="AmberAgent display settings" width="240" />
 </div>
 
 ## What Is AmberAgent?

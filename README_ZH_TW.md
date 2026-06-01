@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/brand/amberagent-mark.svg" alt="AmberAgent 應用圖示" width="100" />
+  <img src="docs/icon.png" alt="AmberAgent 應用圖示" width="100" />
   <h1>AmberAgent</h1>
 
   <p>
@@ -12,7 +12,9 @@
 </div>
 
 <div align="center">
-  <img src="docs/img/amberagent-overview.svg" alt="AmberAgent 行動端 Agent Runtime 概覽" width="900" />
+  <img src="docs/img/amberagent-chat.jpg" alt="AmberAgent SubAgent 聊天介面" width="240" />
+  <img src="docs/img/amberagent-board.jpg" alt="AmberAgent 今日看板" width="240" />
+  <img src="docs/img/amberagent-settings.jpg" alt="AmberAgent 顯示設定" width="240" />
 </div>
 
 ## AmberAgent 是什麼？
