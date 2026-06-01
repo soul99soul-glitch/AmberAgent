@@ -1,42 +1,77 @@
 <div align="center">
-  <img src="docs/icon.png" alt="App 圖標" width="100" />
+  <img src="docs/icon.png" alt="AmberAgent 應用圖示" width="100" />
   <h1>AmberAgent</h1>
 
-一個原生Android LLM 聊天客戶端，支持切換不同的供應商進行聊天 🤖💬
+  <p>
+    一個個人非商業 Android Agent Runtime，用來探索行動端優先的 AI 工作流。
+  </p>
 
-點擊加入我們的Discord伺服器 👉 [【AmberAgent】](https://discord.gg/9weBqxe5c4)
-
-[English](README.md) | 繁體中文 | [简体中文](README_ZH_CN.md)
-
+  <p>
+    <a href="README.md">English</a> | <a href="README_ZH_CN.md">简体中文</a> | 繁體中文
+  </p>
 </div>
 
 <div align="center">
-  <img src="docs/img/chat.png" alt="Chat Interface" width="150" />
-  <img src="docs/img/desktop.png" alt="Models Picker" width="450" />
+  <img src="docs/img/chat.png" alt="聊天介面" width="150" />
+  <img src="docs/img/desktop.png" alt="模型選擇器" width="450" />
 </div>
 
-## ✨ 貢獻
+## AmberAgent 是什麼？
 
-本項目使用[Android Studio](https://developer.android.com/studio)開發，歡迎提交PR
+AmberAgent 是一個個人開源 Android 專案，目標是探索手機上的 AI Agent Runtime 應該是什麼樣子。它最初源自
+[RikkaHub](https://github.com/rikkahub/rikkahub) 的深度 fork，目前圍繞 Agent 工作流獨立維護和演進，包括工具呼叫、
+SubAgent、深度閱讀、本地優先狀態、行動端 UI，以及外部執行時實驗。
 
-技術棧文檔:
+本專案不是 RikkaHub 官方版本，也不是官方繼任專案。專案會保留上游來源說明和授權義務，並保持個人非商業研究與學習專案的定位。
 
-- [Kotlin](https://kotlinlang.org/) (開發語言)
-- [Koin](https://insert-koin.io/) (依賴注入)
-- [Jetpack Compose](https://developer.android.com/jetpack/compose) (UI 框架)
-- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore?hl=zh-cn#preferences-datastore) (
-  偏好數據存儲)
-- [Room](https://developer.android.com/training/data-storage/room) (數據庫)
-- [Coil](https://coil-kt.github.io/coil/) (圖片加載)
-- [Material You](https://m3.material.io/) (UI 設計)
-- [Navigation Compose](https://developer.android.com/develop/ui/compose/navigation) (導航)
-- [Okhttp](https://square.github.io/okhttp/) (HTTP 客戶端)
-- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) (Json序列化)
-- [compose-icons/lucide](https://composeicons.com/icon-libraries/lucide) (圖標庫)
+## 目前重點
 
-> [!TIP]
-> 你需要在 `app` 資料夾下添加 `google-services.json` 檔案才能構建應用。
+- 行動端優先的聊天與 Agent 執行體驗。
+- SubAgent 與固定/動態角色協作工作流。
+- 深度閱讀、來源收集、分節寫作和報告式輸出。
+- 搜尋、檔案、瀏覽器式卡片、本地應用能力等工具執行介面。
+- 豐富生成物預覽，包括 live HTML / PPT 風格內容。
+- 可驗證執行的外部 CLI 席位實驗。
+- 用於保存個人配置和工作區狀態的同步與備份流程。
 
-## 📄 許可證
+## 專案狀態
 
-[License](LICENSE)
+AmberAgent 仍然是一個快速演進的實驗性程式碼庫。它既包含從 RikkaHub 繼承而來的基礎能力，也包含大量獨立重構和新的 Agent
+Runtime 工作。使用時請預期會有邊角問題、本地配置要求和較快迭代。
+
+## 構建
+
+使用 Android Studio，或在倉庫根目錄執行：
+
+```bash
+./gradlew :app:assembleNotion
+```
+
+部分雲端能力需要本地私有配置檔案，例如 `app/google-services.json`。這些檔案不會提交到倉庫。缺少這些私有憑據時，應用仍可用於本地開發構建，
+但 Firebase / Google 相關能力可能受限，取決於配置檔案是否包含目前構建包名對應的 client。
+
+## 貢獻
+
+歡迎小而聚焦的 issue 和 PR，尤其是可復現崩潰、bug 報告、文件和測試。由於專案仍在把 Agent 架構從繼承的聊天客戶端基礎中逐步分離，
+大規模順手重寫會比較難審查。
+
+技術棧：
+
+- [Kotlin](https://kotlinlang.org/)
+- [Jetpack Compose](https://developer.android.com/jetpack/compose)
+- [Koin](https://insert-koin.io/)
+- [Room](https://developer.android.com/training/data-storage/room)
+- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore)
+- [OkHttp](https://square.github.io/okhttp/)
+- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization)
+- [Coil](https://coil-kt.github.io/coil/)
+- [Material You](https://m3.material.io/)
+
+## 來源說明
+
+AmberAgent 是 [RikkaHub](https://github.com/rikkahub/rikkahub) 的深度 fork。程式碼庫中的部分程式碼、架構、資源和歷史設計來源於
+RikkaHub，並繼續遵守原專案的授權和署名要求。AmberAgent 特有的 Agent 能力與後續重構由本倉庫獨立維護。
+
+## 授權
+
+請查看 [LICENSE](LICENSE)。本專案保留 RikkaHub 派生程式碼的上游授權義務。AmberAgent 目前作為個人非商業開源專案維護。
