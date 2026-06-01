@@ -721,6 +721,8 @@ class SyncArchiveManager(
         val CONVERSATION_TABLES = setOf(
             "conversationentity",
             "message_node",
+            "message_node_stat",
+            "message_day_stat",
             "conversation_compact",
             "conversation_context_event",
         )
@@ -734,6 +736,8 @@ class SyncArchiveManager(
         val SYNC_TABLES = listOf(
             "conversationentity",
             "message_node",
+            "message_node_stat",
+            "message_day_stat",
             "conversation_compact",
             "conversation_context_event",
             "memoryentity",
@@ -747,10 +751,22 @@ class SyncArchiveManager(
             "feishu_doc_snapshot",
             "feishu_doc_change",
             "feishu_doc_dependency",
+            "doc_subscription",
+            "doc_change_log",
             "board_signal",
             "board_item",
+            "opportunity",
+            "board_task",
+            "board_task_event",
+            "reference_anchor",
             "board_focus_rule",
             "board_weight",
+            "daily_review",
+            "mini_app",
+            "mini_app_grant",
+            "mini_app_version",
+            "mini_app_audit_log",
+            "mini_app_shared_data",
             // Hot-list/provider caches and deep-read article caches are ephemeral;
             // only user-authored custom source configuration belongs in sync.
             "hot_list_source",

@@ -11,21 +11,34 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.Buffer
+import okio.BufferedSink
+import okio.ForwardingSink
+import okio.buffer
 import java.io.File
+import java.net.URLEncoder
 
 class GoogleDriveAppDataClient(
     private val httpClient: OkHttpClient,
     private val json: Json,
 ) {
     suspend fun findLatest(accessToken: String): GoogleDriveFile? {
+        return listSnapshots(accessToken, pageSize = 1).firstOrNull()
+    }
+
+    suspend fun listSnapshots(accessToken: String, pageSize: Int = DEFAULT_SNAPSHOT_PAGE_SIZE): List<GoogleDriveFile> {
+        val query = "trashed=false and (name='$SYNC_FILE_NAME' or name contains '$SYNC_FILE_PREFIX')"
         val request = Request.Builder()
             .url(
                 "https://www.googleapis.com/drive/v3/files" +
                     "?spaces=appDataFolder" +
-                    "&q=name%3D%27$SYNC_FILE_NAME%27%20and%20trashed%3Dfalse" +
-                    "&fields=files(id,name,modifiedTime,size,version)"
+                    "&pageSize=$pageSize" +
+                    "&orderBy=modifiedTime%20desc" +
+                    "&q=${query.urlEncoded()}" +
+                    "&fields=files(id,name,modifiedTime,size,version,appProperties)"
             )
             .addHeader("Authorization", "Bearer $accessToken")
             .get()
@@ -37,7 +50,6 @@ class GoogleDriveAppDataClient(
         }
         return json.decodeFromString<GoogleDriveListResponse>(body)
             .files
-            .maxByOrNull { it.modifiedTime.orEmpty() }
     }
 
     suspend fun downloadToFile(accessToken: String, fileId: String, targetFile: File) {
@@ -59,11 +71,25 @@ class GoogleDriveAppDataClient(
         }
     }
 
-    suspend fun upload(accessToken: String, archiveFile: File, existingFileId: String?): GoogleDriveFile {
+    suspend fun upload(
+        accessToken: String,
+        archiveFile: File,
+        fileName: String = SYNC_FILE_NAME,
+        appProperties: Map<String, String> = emptyMap(),
+        existingFileId: String?,
+        onProgress: ((uploadedBytes: Long, totalBytes: Long) -> Unit)? = null,
+    ): GoogleDriveFile {
         val metadata = buildJsonObject {
-            put("name", SYNC_FILE_NAME)
+            put("name", fileName)
             if (existingFileId.isNullOrBlank()) {
                 putJsonArray("parents") { add("appDataFolder") }
+            }
+            if (appProperties.isNotEmpty()) {
+                put("appProperties", buildJsonObject {
+                    appProperties.forEach { (key, value) ->
+                        put(key, value)
+                    }
+                })
             }
         }.toString()
         val body = MultipartBody.Builder()
@@ -76,14 +102,19 @@ class GoogleDriveAppDataClient(
             )
             .build()
         val url = if (existingFileId.isNullOrBlank()) {
-            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime,size,version"
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime,size,version,appProperties"
         } else {
-            "https://www.googleapis.com/upload/drive/v3/files/$existingFileId?uploadType=multipart&fields=id,name,modifiedTime,size,version"
+            "https://www.googleapis.com/upload/drive/v3/files/$existingFileId?uploadType=multipart&fields=id,name,modifiedTime,size,version,appProperties"
+        }
+        val requestBody = if (onProgress != null) {
+            ProgressRequestBody(body, onProgress)
+        } else {
+            body
         }
         val request = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Bearer $accessToken")
-            .method(if (existingFileId.isNullOrBlank()) "POST" else "PATCH", body)
+            .method(if (existingFileId.isNullOrBlank()) "POST" else "PATCH", requestBody)
             .build()
         val response = httpClient.newCall(request).await()
         val raw = response.body.string()
@@ -91,6 +122,19 @@ class GoogleDriveAppDataClient(
             throwDriveError("upload", response.code, raw, accessToken)
         }
         return json.decodeFromString<GoogleDriveFile>(raw)
+    }
+
+    suspend fun delete(accessToken: String, fileId: String) {
+        val request = Request.Builder()
+            .url("https://www.googleapis.com/drive/v3/files/$fileId")
+            .addHeader("Authorization", "Bearer $accessToken")
+            .delete()
+            .build()
+        val response = httpClient.newCall(request).await()
+        val body = response.body.string()
+        if (!response.isSuccessful) {
+            throwDriveError("delete", response.code, body, accessToken)
+        }
     }
 
     private fun throwDriveError(action: String, code: Int, body: String, accessToken: String): Nothing {
@@ -119,6 +163,37 @@ class GoogleDriveAppDataClient(
 
     companion object {
         const val SYNC_FILE_NAME = "amberagent-sync.amberbackup"
+        const val SYNC_FILE_PREFIX = "amberagent-sync-"
+        const val DEFAULT_SNAPSHOT_PAGE_SIZE = 20
+    }
+}
+
+private fun String.urlEncoded(): String = URLEncoder.encode(this, Charsets.UTF_8.name())
+
+private class ProgressRequestBody(
+    private val delegate: RequestBody,
+    private val onProgress: (uploadedBytes: Long, totalBytes: Long) -> Unit,
+) : RequestBody() {
+    override fun contentType() = delegate.contentType()
+
+    override fun contentLength(): Long = delegate.contentLength()
+
+    override fun isDuplex(): Boolean = delegate.isDuplex()
+
+    override fun isOneShot(): Boolean = delegate.isOneShot()
+
+    override fun writeTo(sink: BufferedSink) {
+        val totalBytes = runCatching { contentLength() }.getOrDefault(-1L)
+        var uploadedBytes = 0L
+        val countingSink = object : ForwardingSink(sink) {
+            override fun write(source: Buffer, byteCount: Long) {
+                super.write(source, byteCount)
+                uploadedBytes += byteCount
+                onProgress(uploadedBytes, totalBytes)
+            }
+        }.buffer()
+        delegate.writeTo(countingSink)
+        countingSink.flush()
     }
 }
 
@@ -157,7 +232,23 @@ data class GoogleDriveFile(
     val modifiedTime: String? = null,
     val size: String? = null,
     val version: Long? = null,
+    val appProperties: Map<String, String> = emptyMap(),
 ) {
     val revisionKey: String
         get() = version?.toString() ?: modifiedTime ?: id
+
+    val backupCreatedAt: Long?
+        get() = appProperties["createdAt"]?.toLongOrNull()
+
+    val backupVersionName: String
+        get() = appProperties["appVersionName"].orEmpty()
+
+    val backupVersionCode: Long?
+        get() = appProperties["appVersionCode"]?.toLongOrNull()
+
+    val backupDeviceLabel: String
+        get() = appProperties["deviceLabel"].orEmpty()
+
+    val archiveVersion: Int?
+        get() = appProperties["archiveVersion"]?.toIntOrNull()
 }

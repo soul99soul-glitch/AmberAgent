@@ -66,7 +66,7 @@ fun googleOAuthConfigured(packageName: String): Boolean {
         .mapNotNull { it as? Map<*, *> }
         .mapNotNull { it["client_type"]?.toString() }
         .toSet()
-    return "1" in clientTypes && "3" in clientTypes
+    return "1" in clientTypes
 }
 
 plugins {

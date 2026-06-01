@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.backup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -44,10 +46,12 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Alignment
+import app.amber.core.sync.core.CURRENT_ARCHIVE_VERSION
 import app.amber.core.sync.core.SYNC_ARCHIVE_MIME
 import app.amber.core.sync.core.SyncMode
 import app.amber.core.sync.core.SyncPreview
 import app.amber.core.sync.core.SyncSettings
+import app.amber.core.sync.google.GoogleDriveFile
 import app.amber.core.sync.local.LocalBackupRepository
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -74,7 +78,7 @@ private val BackupStatusDateFormat by lazy {
  * happened yet (i.e. `lastBackupVersionName` is still its default blank).
  */
 private fun formatBackupStatus(syncSettings: SyncSettings): String {
-    if (syncSettings.lastBackupVersionName.isBlank()) return "暂无备份"
+    if (syncSettings.lastBackupVersionName.isBlank()) return "暂无成功备份"
     val latestAt = maxOf(
         syncSettings.lastUploadAt,
         syncSettings.lastDownloadAt,
@@ -86,7 +90,37 @@ private fun formatBackupStatus(syncSettings: SyncSettings): String {
     if (syncSettings.lastBackupDeviceLabel.isNotBlank()) {
         parts += syncSettings.lastBackupDeviceLabel
     }
-    return parts.joinToString(separator = " · ")
+    return "最近成功：" + parts.joinToString(separator = " · ")
+}
+
+@Composable
+private fun BackupStatusContent(
+    syncSettings: SyncSettings,
+    activity: BackupActivity?,
+) {
+    if (activity == null) {
+        Text(formatBackupStatus(syncSettings))
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(activity.title)
+        if (activity.detail.isNotBlank()) {
+            Text(
+                activity.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        val progress = activity.progress
+        if (progress == null) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        } else {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,9 +132,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val googleSession by vm.googleSession.collectAsState()
     val googleMessage by vm.googleMessage.collectAsState()
     val localMessage by vm.localMessage.collectAsState()
+    val backupActivity by vm.backupActivity.collectAsState()
     val pendingGoogleAuthorization by vm.pendingGoogleAuthorization.collectAsState()
     val pendingCloudRestore by vm.pendingCloudRestore.collectAsState()
     val cloudConflict by vm.cloudConflict.collectAsState()
+    val cloudSnapshots by vm.cloudSnapshots.collectAsState()
+    val cloudSnapshotPickerVisible by vm.cloudSnapshotPickerVisible.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var pendingGoogleAction by remember { mutableStateOf<GoogleSyncAction?>(null) }
     var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -118,6 +155,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     // unrelated upload/download operations also complete.
     var restoreInFlight by remember { mutableStateOf(false) }
     var showRestoreSuccessDialog by remember { mutableStateOf(false) }
+    val googleAvailable = vm.googleConfigStatus.available
     val hasGoogleConnection = googleSession != null ||
         (settings.syncSettings.googleEnabled && settings.syncSettings.googleAccountEmail.isNotBlank())
 
@@ -217,79 +255,101 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         ) {
             CardGroup(title = { Text("Google Drive") }) {
                 item(
-                    onClick = { vm.connectGoogle() },
+                    onClick = if (googleAvailable) {
+                        { vm.connectGoogle() }
+                    } else {
+                        null
+                    },
                     leadingContent = { Icon(HugeIcons.Database02, contentDescription = null) },
                     headlineContent = { Text("Google 账号") },
                     supportingContent = {
                         Text(
                             when {
-                                operationState is UiState.Loading -> "正在处理..."
+                                !googleAvailable -> vm.googleConfigStatus.reason
                                 googleMessage.isNotBlank() -> googleMessage
                                 googleSession != null -> "已连接：${googleSession?.label.orEmpty()}"
                                 hasGoogleConnection -> "上次连接：${settings.syncSettings.googleAccountEmail}"
                                 settings.syncSettings.googleAccountEmail.isNotBlank() ->
                                     "上次连接：${settings.syncSettings.googleAccountEmail}"
-                                vm.googleConfigStatus.reason.isNotBlank() -> "Google 同步暂不可用"
+                                vm.googleConfigStatus.reason.isNotBlank() -> vm.googleConfigStatus.reason
                                 else -> "登录后即可上传和下载同步快照"
                             }
                         )
                     },
                     trailingContent = {
-                        if (operationState is UiState.Loading) {
-                            // Visible "something is happening" cue — user reported
-                            // not being able to tell when an upload or download
-                            // was actually in progress.
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Text(
-                                if (hasGoogleConnection) "已连接" else "连接",
-                                color = if (hasGoogleConnection) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
+                        Text(
+                            when {
+                                !googleAvailable -> "不可用"
+                                hasGoogleConnection -> "已连接"
+                                else -> "连接"
+                            },
+                            color = if (googleAvailable && hasGoogleConnection) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
                     }
                 )
                 item(
                     leadingContent = { Icon(HugeIcons.CloudSavingDone01, contentDescription = null) },
                     headlineContent = { Text("备份状态") },
                     supportingContent = {
-                        Text(formatBackupStatus(settings.syncSettings))
+                        BackupStatusContent(
+                            syncSettings = settings.syncSettings,
+                            activity = backupActivity,
+                        )
+                    },
+                    trailingContent = {
+                        backupActivity?.let { activity ->
+                            val progress = activity.progress
+                            if (progress == null) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Text("${(progress * 100).toInt()}%")
+                            }
+                        }
                     },
                 )
                 item(
-                    onClick = {
-                        if (googleSession == null) {
-                            pendingGoogleAction = GoogleSyncAction.Upload
-                            vm.connectGoogle()
-                        } else {
-                            vm.uploadGoogle(SyncMode.FULL, passphrase = "")
+                    onClick = if (googleAvailable) {
+                        {
+                            if (googleSession == null) {
+                                pendingGoogleAction = GoogleSyncAction.Upload
+                                vm.connectGoogle()
+                            } else {
+                                vm.uploadGoogle(SyncMode.FULL, passphrase = "")
+                            }
                         }
+                    } else {
+                        null
                     },
                     leadingContent = { Icon(HugeIcons.Upload02, contentDescription = null) },
                     headlineContent = { Text("上传") },
                     supportingContent = {
-                        Text("把当前数据保存到 Google Drive")
+                        Text(if (googleAvailable) "把当前数据保存到 Google Drive" else "Google Drive 尚未配置")
                     }
                 )
                 item(
-                    onClick = {
-                        if (googleSession == null) {
-                            pendingGoogleAction = GoogleSyncAction.Download
-                            vm.connectGoogle()
-                        } else {
-                            vm.downloadGooglePreview()
+                    onClick = if (googleAvailable) {
+                        {
+                            if (googleSession == null) {
+                                pendingGoogleAction = GoogleSyncAction.Download
+                                vm.connectGoogle()
+                            } else {
+                                vm.downloadGooglePreview()
+                            }
                         }
+                    } else {
+                        null
                     },
                     leadingContent = { Icon(HugeIcons.Download04, contentDescription = null) },
                     headlineContent = { Text("下载") },
                     supportingContent = {
-                        Text("从 Google Drive 恢复到这台设备")
+                        Text(if (googleAvailable) "从 Google Drive 恢复到这台设备" else "Google Drive 尚未配置")
                     }
                 )
             }
@@ -324,6 +384,14 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             }
             Spacer(Modifier.height(12.dp))
         }
+    }
+
+    if (cloudSnapshotPickerVisible) {
+        CloudSnapshotPickerDialog(
+            snapshots = cloudSnapshots,
+            onDismiss = { vm.dismissCloudSnapshotPicker() },
+            onSelect = { vm.downloadGoogleSnapshot(it) },
+        )
     }
 
     importPreview?.let { preview ->
@@ -405,6 +473,95 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun CloudSnapshotPickerDialog(
+    snapshots: List<GoogleDriveFile>,
+    onDismiss: () -> Unit,
+    onSelect: (GoogleDriveFile) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择云端快照") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                snapshots.forEachIndexed { index, snapshot ->
+                    val unsupported = snapshot.archiveVersion?.let { it != CURRENT_ARCHIVE_VERSION } == true
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !unsupported) { onSelect(snapshot) }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(formatCloudSnapshotTitle(snapshot))
+                            Text(
+                                formatCloudSnapshotDetail(snapshot, unsupported),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            if (unsupported) "不支持" else "选择",
+                            color = if (unsupported) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                        )
+                    }
+                    if (index != snapshots.lastIndex) {
+                        HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+private fun formatCloudSnapshotTitle(snapshot: GoogleDriveFile): String {
+    val createdAt = snapshot.backupCreatedAt?.let {
+        BackupStatusDateFormat.format(Date(it))
+    } ?: snapshot.modifiedTime?.take(16)?.replace('T', ' ') ?: "未知时间"
+    val version = snapshot.backupVersionName.ifBlank { "未知版本" }
+    return "$createdAt · $version"
+}
+
+private fun formatCloudSnapshotDetail(snapshot: GoogleDriveFile, unsupported: Boolean): String {
+    val parts = mutableListOf<String>()
+    if (snapshot.backupDeviceLabel.isNotBlank()) parts += snapshot.backupDeviceLabel
+    formatDriveSize(snapshot.size)?.let { parts += it }
+    snapshot.archiveVersion?.let { archiveVersion ->
+        parts += if (unsupported) {
+            "备份格式 v$archiveVersion 不兼容"
+        } else {
+            "备份格式 v$archiveVersion"
+        }
+    }
+    if (parts.isEmpty()) parts += snapshot.name
+    return parts.joinToString(separator = " · ")
+}
+
+private fun formatDriveSize(size: String?): String? {
+    val bytes = size?.toLongOrNull() ?: return null
+    val mib = bytes / (1024.0 * 1024.0)
+    return if (mib >= 1.0) {
+        String.format(Locale.getDefault(), "%.1f MB", mib)
+    } else {
+        "${bytes / 1024} KB"
     }
 }
 

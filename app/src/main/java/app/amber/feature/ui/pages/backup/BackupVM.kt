@@ -51,9 +51,14 @@ class BackupVM(
     val googleSession = MutableStateFlow<GoogleDriveAuthSession?>(null)
     val googleMessage = MutableStateFlow("")
     val localMessage = MutableStateFlow("")
+    val backupActivity = MutableStateFlow<BackupActivity?>(null)
     val pendingGoogleAuthorization = MutableStateFlow<PendingIntent?>(null)
     val pendingCloudRestore = MutableStateFlow(false)
     val cloudConflict = MutableStateFlow<GoogleCloudConflict?>(null)
+    val cloudSnapshots = MutableStateFlow<List<GoogleDriveFile>>(emptyList())
+    val cloudSnapshotPickerVisible = MutableStateFlow(false)
+    // Build-time Google services config is static for this process; keep the
+    // status as a value so Compose does not imply live revalidation support.
     val googleConfigStatus: GoogleOAuthConfigStatus = googleOAuthConfigGate.status()
 
     private var pendingCloudRestoreFile: File? = null
@@ -87,6 +92,7 @@ class BackupVM(
     }
 
     fun connectGoogle() {
+        if (googleUnavailable()) return
         if (googleAuthorizationInFlight) return
         googleAuthorizationInFlight = true
         viewModelScope.launch {
@@ -163,6 +169,7 @@ class BackupVM(
     }
 
     fun uploadGoogle(mode: SyncMode, passphrase: String, overwrite: Boolean = false) {
+        if (googleUnavailable()) return
         val session = googleSession.value
         if (session == null) {
             connectGoogle()
@@ -182,26 +189,56 @@ class BackupVM(
         // passphraseProtected flag based on this substitution.
         val resolvedPassphrase = passphrase.ifBlank { NO_PASSPHRASE_FALLBACK }
         val request = SyncExportRequest(mode = mode, passphrase = resolvedPassphrase)
+        startGoogleUpload(session, request, overwrite)
+    }
+
+    private fun startGoogleUpload(
+        session: GoogleDriveAuthSession,
+        request: SyncExportRequest,
+        overwrite: Boolean,
+    ) {
+        if (googleUnavailable()) return
+        val uploadTitle = if (overwrite) "正在覆盖云端快照" else "正在上传云端快照"
+        var lastUploadPercent: Int? = null
+        var emittedUnknownProgress = false
         viewModelScope.launch {
             operationState.value = UiState.Loading
+            backupActivity.value = BackupActivity(
+                title = if (overwrite) "准备覆盖云端快照" else "准备上传云端快照",
+                detail = "正在连接 Google Drive",
+            )
             runCatching {
                 val activeSession = refreshGoogleSessionForOperation() ?: session
-                val remote = googleDriveSyncRepository.findLatest(activeSession)
-                val localRevision = settings.value.syncSettings.lastRemoteRevision
-                if (!overwrite && remote != null && remote.revisionKey != localRevision) {
-                    pendingCloudUploadRequest = request
-                    cloudConflict.value = GoogleCloudConflict(
-                        remoteFile = remote,
-                        localRevision = localRevision,
-                    )
-                    operationState.value = UiState.Idle
-                    return@launch
-                }
+                backupActivity.value = BackupActivity(
+                    title = uploadTitle,
+                    detail = "正在生成加密备份文件",
+                )
                 googleDriveSyncRepository.upload(
                     session = activeSession,
                     request = request,
-                    existingFileId = remote?.id,
-                    expectedRemoteRevision = remote?.revisionKey,
+                    onProgress = { uploadedBytes, totalBytes ->
+                        if (totalBytes > 0L) {
+                            val percent = ((uploadedBytes.toDouble() / totalBytes.toDouble()) * 100)
+                                .toInt()
+                                .coerceIn(0, 100)
+                            if (percent != lastUploadPercent) {
+                                lastUploadPercent = percent
+                                backupActivity.value = BackupActivity(
+                                    title = uploadTitle,
+                                    detail = "$percent%",
+                                    progress = percent / 100f,
+                                )
+                            }
+                        } else {
+                            if (!emittedUnknownProgress) {
+                                emittedUnknownProgress = true
+                                backupActivity.value = BackupActivity(
+                                    title = uploadTitle,
+                                    detail = "正在上传...",
+                                )
+                            }
+                        }
+                    },
                 )
             }.onSuccess { result ->
                 val manifest = result.preview.manifest
@@ -212,7 +249,7 @@ class BackupVM(
                             googleAccountEmail = googleSession.value?.accountEmail ?: session.accountEmail,
                             googleAccountId = googleSession.value?.accountId ?: session.accountId,
                             googleDisplayName = googleSession.value?.displayName ?: session.displayName,
-                            mode = mode,
+                            mode = request.mode,
                             lastUploadAt = System.currentTimeMillis(),
                             lastRemoteRevision = result.file.revisionKey,
                             lastError = "",
@@ -222,9 +259,11 @@ class BackupVM(
                         )
                     )
                 }
-                googleMessage.value = "已上传到 Google Drive：${session.label}"
+                googleMessage.value = ""
+                backupActivity.value = null
                 operationState.value = UiState.Success(result.preview)
             }.onFailure { error ->
+                backupActivity.value = null
                 operationState.value = UiState.Error(error)
                 googleMessage.value = "云端上传失败：${error.message.orEmpty()}"
                 recordGoogleDriveError(error)
@@ -234,18 +273,26 @@ class BackupVM(
 
     fun confirmOverwriteCloud() {
         val request = pendingCloudUploadRequest ?: return
+        if (googleUnavailable()) return
+        val session = googleSession.value ?: run {
+            connectGoogle()
+            googleMessage.value = "请先完成 Google Drive 授权，再覆盖云端快照。"
+            return
+        }
         pendingCloudUploadRequest = null
         cloudConflict.value = null
-        uploadGoogle(request.mode, request.passphrase, overwrite = true)
+        startGoogleUpload(session, request, overwrite = true)
     }
 
     fun dismissCloudConflict() {
         pendingCloudUploadRequest = null
         cloudConflict.value = null
+        backupActivity.value = null
         operationState.value = UiState.Idle
     }
 
     fun downloadGooglePreview() {
+        if (googleUnavailable()) return
         val session = googleSession.value
         if (session == null) {
             connectGoogle()
@@ -254,22 +301,72 @@ class BackupVM(
         }
         viewModelScope.launch {
             operationState.value = UiState.Loading
+            backupActivity.value = BackupActivity(
+                title = "正在读取云端快照",
+                detail = "正在获取 Google Drive 列表",
+            )
             runCatching {
-                googleDriveSyncRepository.downloadLatest(refreshGoogleSessionForOperation() ?: session)
+                googleDriveSyncRepository.listSnapshots(refreshGoogleSessionForOperation() ?: session)
+            }.onSuccess { snapshots ->
+                backupActivity.value = null
+                if (snapshots.isEmpty()) {
+                    operationState.value = UiState.Error(IllegalStateException("Google Drive 云端还没有同步快照"))
+                    googleMessage.value = "Google Drive 云端还没有同步快照"
+                } else {
+                    cloudSnapshots.value = snapshots
+                    cloudSnapshotPickerVisible.value = true
+                    googleMessage.value = ""
+                    operationState.value = UiState.Idle
+                }
+            }.onFailure { error ->
+                backupActivity.value = null
+                operationState.value = UiState.Error(error)
+                googleMessage.value = "云端列表读取失败：${error.message.orEmpty()}"
+                recordGoogleDriveError(error)
+            }
+        }
+    }
+
+    fun downloadGoogleSnapshot(file: GoogleDriveFile) {
+        if (googleUnavailable()) return
+        val session = googleSession.value
+        if (session == null) {
+            connectGoogle()
+            googleMessage.value = "请先完成 Google Drive 授权，再下载云端快照。"
+            return
+        }
+        viewModelScope.launch {
+            cloudSnapshotPickerVisible.value = false
+            operationState.value = UiState.Loading
+            backupActivity.value = BackupActivity(
+                title = "正在下载云端快照",
+                detail = file.name,
+            )
+            runCatching {
+                googleDriveSyncRepository.download(
+                    session = refreshGoogleSessionForOperation() ?: session,
+                    file = file,
+                )
             }.onSuccess { result ->
+                backupActivity.value = null
                 pendingCloudRestoreFile?.delete()
                 pendingCloudRestoreFile = result.archiveFile
                 pendingCloudRestoreRevision = result.file.revisionKey
                 pendingCloudRestore.value = true
                 pendingImportPreview.value = result.preview
-                googleMessage.value = "已读取云端快照，确认后可恢复。"
+                googleMessage.value = ""
                 operationState.value = UiState.Success(result.preview)
             }.onFailure { error ->
+                backupActivity.value = null
                 operationState.value = UiState.Error(error)
                 googleMessage.value = "云端下载失败：${error.message.orEmpty()}"
                 recordGoogleDriveError(error)
             }
         }
+    }
+
+    fun dismissCloudSnapshotPicker() {
+        cloudSnapshotPickerVisible.value = false
     }
 
     fun restoreGoogle(
@@ -319,7 +416,7 @@ class BackupVM(
                     )
                 }
                 pendingCloudRestoreRevision = ""
-                googleMessage.value = "已恢复云端备份，建议重启应用以确保所有数据生效。"
+                googleMessage.value = ""
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
@@ -437,9 +534,14 @@ class BackupVM(
         pendingCloudRestoreFile = null
         pendingCloudRestore.value = false
         pendingCloudRestoreRevision = ""
+        cloudSnapshotPickerVisible.value = false
     }
 
     private suspend fun restoreGoogleSessionIfPossible() {
+        if (!googleConfigStatus.available) {
+            googleMessage.value = googleConfigStatus.reason
+            return
+        }
         val syncSettings = settingsStore.settingsFlow.value.syncSettings
         if (!syncSettings.googleEnabled || syncSettings.googleAccountEmail.isBlank()) return
         if (googleAuthorizationInFlight || googleSession.value != null) return
@@ -463,6 +565,7 @@ class BackupVM(
     }
 
     private suspend fun refreshGoogleSessionForOperation(): GoogleDriveAuthSession? {
+        if (!googleConfigStatus.available) return null
         val syncSettings = settingsStore.settingsFlow.value.syncSettings
         if (!syncSettings.googleEnabled && googleSession.value == null) return null
         return runCatching {
@@ -527,9 +630,23 @@ class BackupVM(
         }
         recordError(error)
     }
+
+    private fun googleUnavailable(): Boolean {
+        if (googleConfigStatus.available) return false
+        val error = IllegalStateException(googleConfigStatus.reason)
+        googleMessage.value = googleConfigStatus.reason
+        operationState.value = UiState.Error(error)
+        return true
+    }
 }
 
 data class GoogleCloudConflict(
     val remoteFile: GoogleDriveFile,
     val localRevision: String,
+)
+
+data class BackupActivity(
+    val title: String,
+    val detail: String = "",
+    val progress: Float? = null,
 )

@@ -14,6 +14,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import app.amber.core.sync.core.SyncArchiveManager
 import app.amber.core.sync.core.SyncExportRequest
+import app.amber.core.sync.core.SyncManifest
 import app.amber.core.sync.core.SyncPreview
 import app.amber.core.sync.core.SyncRestoreRequest
 import app.amber.core.sync.core.SYNC_ARCHIVE_EXTENSION
@@ -47,39 +48,30 @@ class GoogleDriveSyncRepository(
         driveClient.findLatest(session.accessToken)
     }
 
+    suspend fun listSnapshots(session: GoogleDriveAuthSession): List<GoogleDriveFile> = withContext(Dispatchers.IO) {
+        driveClient.listSnapshots(session.accessToken, pageSize = CLOUD_SNAPSHOT_LIST_PAGE_SIZE)
+    }
+
     suspend fun upload(
         session: GoogleDriveAuthSession,
         request: SyncExportRequest,
-        existingFileId: String?,
-        expectedRemoteRevision: String?,
+        onProgress: ((uploadedBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): GoogleDriveUploadResult = withContext(Dispatchers.IO) {
-        val latest = driveClient.findLatest(session.accessToken)
-        when {
-            existingFileId.isNullOrBlank() && latest != null -> {
-                error("Google Drive 云端快照刚刚发生变化，请重新确认后再上传。")
-            }
-
-            !existingFileId.isNullOrBlank() && latest?.id != existingFileId -> {
-                error("Google Drive 云端快照刚刚发生变化，请重新确认后再上传。")
-            }
-
-            !existingFileId.isNullOrBlank() &&
-                latest?.id == existingFileId &&
-                expectedRemoteRevision != null &&
-                latest.revisionKey != expectedRemoteRevision -> {
-                error("Google Drive 云端快照刚刚发生变化，请重新确认后再上传。")
-            }
-        }
         val archiveFile = archiveManager.createArchiveFile(request)
         try {
+            val preview = archiveManager.inspectArchive(archiveFile)
             val file = driveClient.upload(
                 accessToken = session.accessToken,
                 archiveFile = archiveFile,
-                existingFileId = existingFileId,
+                fileName = snapshotFileName(preview.manifest),
+                appProperties = preview.manifest.toDriveAppProperties(),
+                existingFileId = null,
+                onProgress = onProgress,
             )
+            pruneOldSnapshots(session.accessToken)
             GoogleDriveUploadResult(
                 file = file,
-                preview = archiveManager.inspectArchive(archiveFile, file.name),
+                preview = preview.copy(fileName = file.name),
             )
         } finally {
             archiveFile.delete()
@@ -89,6 +81,24 @@ class GoogleDriveSyncRepository(
     suspend fun downloadLatest(session: GoogleDriveAuthSession): GoogleDriveDownloadResult = withContext(Dispatchers.IO) {
         val file = driveClient.findLatest(session.accessToken)
             ?: error("Google Drive 云端还没有同步快照")
+        val archiveFile = createTempArchiveFile("google-download")
+        try {
+            driveClient.downloadToFile(session.accessToken, file.id, archiveFile)
+            GoogleDriveDownloadResult(
+                file = file,
+                archiveFile = archiveFile,
+                preview = archiveManager.inspectArchive(archiveFile, file.name),
+            )
+        } catch (error: Throwable) {
+            archiveFile.delete()
+            throw error
+        }
+    }
+
+    suspend fun download(
+        session: GoogleDriveAuthSession,
+        file: GoogleDriveFile,
+    ): GoogleDriveDownloadResult = withContext(Dispatchers.IO) {
         val archiveFile = createTempArchiveFile("google-download")
         try {
             driveClient.downloadToFile(session.accessToken, file.id, archiveFile)
@@ -122,6 +132,30 @@ class GoogleDriveSyncRepository(
         val dir = File(context.cacheDir, "sync-google").apply { mkdirs() }
         return File.createTempFile("amber-$prefix-", ".$SYNC_ARCHIVE_EXTENSION", dir)
     }
+
+    private suspend fun pruneOldSnapshots(accessToken: String) {
+        val snapshots = driveClient.listSnapshots(accessToken, pageSize = CLOUD_SNAPSHOT_LIST_PAGE_SIZE)
+            .sortedByDescending { it.snapshotSortKey() }
+        snapshots.drop(CLOUD_SNAPSHOT_LIMIT).forEach { snapshot ->
+            driveClient.delete(accessToken, snapshot.id)
+        }
+    }
+
+    private fun snapshotFileName(manifest: SyncManifest): String =
+        "${GoogleDriveAppDataClient.SYNC_FILE_PREFIX}${manifest.createdAt}.$SYNC_ARCHIVE_EXTENSION"
+
+    private fun SyncManifest.toDriveAppProperties(): Map<String, String> = mapOf(
+        "archiveVersion" to archiveVersion.toString(),
+        "appVersionName" to appVersionName,
+        "appVersionCode" to appVersionCode.toString(),
+        "createdAt" to createdAt.toString(),
+        "deviceId" to deviceId,
+        "deviceLabel" to deviceLabel,
+        "mode" to mode.name,
+    ).filterValues { it.isNotBlank() }
+
+    private fun GoogleDriveFile.snapshotSortKey(): String =
+        backupCreatedAt?.toString()?.padStart(20, '0') ?: modifiedTime.orEmpty()
 
     private fun AuthorizationResult.toAuthorizationOutcome(): GoogleDriveAuthorizationOutcome {
         if (hasResolution()) {
@@ -159,6 +193,8 @@ class GoogleDriveSyncRepository(
 
     companion object {
         const val DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"
+        const val CLOUD_SNAPSHOT_LIMIT = 5
+        private const val CLOUD_SNAPSHOT_LIST_PAGE_SIZE = 20
     }
 }
 
