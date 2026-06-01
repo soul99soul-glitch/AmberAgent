@@ -3,7 +3,7 @@
   <h1>AmberAgent</h1>
 
   <p>
-    一個個人 Android Agent Runtime，用來探索行動端優先的 AI 工作流、深度閱讀、SubAgent 與本地工具呼叫。
+    一個面向手機使用場景的個人 Android Agent 應用，重點是對話、深度閱讀、SubAgent 和本地工具呼叫。
   </p>
 
   <p>
@@ -12,32 +12,32 @@
 </div>
 
 <div align="center">
-  <img src="docs/img/amberagent-home.jpg" alt="AmberAgent 首頁" width="240" />
-  <img src="docs/img/amberagent-chat.jpg" alt="AmberAgent SubAgent 聊天介面" width="240" />
-  <img src="docs/img/amberagent-board.jpg" alt="AmberAgent 今日看板" width="240" />
+  <img src="docs/img/amberagent-home-blue.jpg" alt="AmberAgent 首頁" width="240" />
+  <img src="docs/img/amberagent-chat-blue.jpg" alt="AmberAgent SubAgent 聊天介面" width="240" />
+  <img src="docs/img/amberagent-board-blue.jpg" alt="AmberAgent 今日看板" width="240" />
 </div>
 
 ## AmberAgent 是什麼？
 
-AmberAgent 是一個個人開源 Android 專案，目標是探索手機上的 AI Agent Runtime 應該是什麼樣子。它最初源自
-[RikkaHub](https://github.com/rikkahub/rikkahub) 的深度 fork，目前圍繞 Agent 工作流獨立維護和演進，包括工具呼叫、
-SubAgent、深度閱讀、本地優先狀態、行動端 UI，以及外部執行時實驗。
+AmberAgent 是一個個人開源 Android 專案，用來探索 AI Agent 在手機上可以怎樣工作。它最初源自
+[RikkaHub](https://github.com/rikkahub/rikkahub) 的深度 fork，現在主要圍繞工具呼叫、SubAgent、深度閱讀、本地狀態、
+行動端 UI，以及本地開發工具接入這些方向繼續演進。
 
 本專案不是 RikkaHub 官方版本，也不是官方繼任專案。專案會保留上游來源說明和授權義務，並保持個人非商業研究與學習專案的定位。
 
 ## 專案亮點
 
-- **行動端 Agent Runtime**：聊天不是簡單的訊息列表，而是 Agent 執行介面，包含可見工具呼叫、可取消執行、生成物展示，以及真正保留在裝置上的狀態。
-- **SubAgent 工作流**：固定角色和動態角色可以拆分任務、回報工具進度，並把協作結果回到同一段對話裡。
-- **今日看板與深度閱讀**：熱點收集、來源抓取、結構規劃、分節寫作、證據記錄和報告式閱讀都作為一等 Android 流程來做。
-- **工具與生成物 UI**：搜尋、檔案、本地裝置能力、瀏覽器式卡片、PPT 風格預覽和 live HTML 生成物都盡量以行動端原生互動承載。
-- **外部執行時實驗**：Gemini CLI、Antigravity CLI、Codex CLI、Claude Code、Kimi CLI 等本地 CLI 會在可探測、可驗證執行時作為可選議會席位參與。
-- **個人連續性**：設定、Provider、Prompt、工作區狀態、同步和備份流程，都圍繞長期個人 Agent 工作區設計。
+- **能看見過程的 Agent 對話**：工具呼叫、取消狀態、卡片結果和執行狀態都會留在對話裡，而不是只顯示一段最終回覆。
+- **SubAgent 分工**：固定角色和動態角色可以拆分任務、回報進度，再把結果合回同一段對話。
+- **今日看板與深度閱讀**：從熱點收集、來源抓取，到結構規劃、分節寫作和證據記錄，盡量把長文章閱讀做成手機上可用的流程。
+- **適合手機的工具介面**：搜尋結果、檔案、本地裝置操作、瀏覽器式卡片、PPT 預覽和 live HTML，都盡量用更適合 Android 的方式展示。
+- **可選的本地 CLI 席位**：Gemini CLI、Antigravity CLI、Codex CLI、Claude Code、Kimi CLI 等工具，會在可探測、可登入、可驗證執行時參與模型議會。
+- **長期自用的工作區**：Provider、Prompt、設定、工作區狀態、同步和備份都按長期使用來設計，而不是一次性會話資料。
 
 ## 專案狀態
 
-AmberAgent 仍然是一個快速演進的實驗性程式碼庫。它既包含從 RikkaHub 繼承而來的基礎能力，也包含大量獨立重構和新的 Agent
-Runtime 工作。它更適合作為個人研究應用和程式碼庫，而不是已經打磨完成的終端使用者發行版。
+AmberAgent 仍然是一個快速變化的實驗性程式碼庫。它既有從 RikkaHub 繼承來的基礎，也有大量獨立重構和新的 Agent 能力。使用時請預期會有邊角問題、
+本地配置要求和偶爾的破壞性變化。它更像個人研究應用和程式碼庫，還不是一個已經打磨完成的終端使用者發行版。
 
 ## 構建
 

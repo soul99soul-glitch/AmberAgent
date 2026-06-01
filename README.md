@@ -3,7 +3,7 @@
   <h1>AmberAgent</h1>
 
   <p>
-    A personal Android agent runtime for mobile-first AI workflows, deep reading, subagents, and local tool use.
+    A personal Android app for agent-style chat, deep reading, SubAgents, and local tools on a phone.
   </p>
 
   <p>
@@ -12,41 +12,41 @@
 </div>
 
 <div align="center">
-  <img src="docs/img/amberagent-home.jpg" alt="AmberAgent home screen" width="240" />
-  <img src="docs/img/amberagent-chat.jpg" alt="AmberAgent chat with subagents" width="240" />
-  <img src="docs/img/amberagent-board.jpg" alt="AmberAgent Today Board" width="240" />
+  <img src="docs/img/amberagent-home-blue.jpg" alt="AmberAgent home screen" width="240" />
+  <img src="docs/img/amberagent-chat-blue.jpg" alt="AmberAgent chat with subagents" width="240" />
+  <img src="docs/img/amberagent-board-blue.jpg" alt="AmberAgent Today Board" width="240" />
 </div>
 
 ## What Is AmberAgent?
 
-AmberAgent is a personal open-source Android project exploring what an AI agent runtime can feel like on a phone. It
-started as a deep fork of [RikkaHub](https://github.com/rikkahub/rikkahub) and is now independently maintained around
-agent-oriented workflows: tool use, subagents, deep reading, local-first state, mobile UI, and external runtime
-experiments.
+AmberAgent is a personal open-source Android project for exploring what AI agent workflows can feel like when they are
+designed for a phone first. It started as a deep fork of [RikkaHub](https://github.com/rikkahub/rikkahub) and is now
+maintained around tool use, SubAgents, deep reading, local state, mobile UI, and experiments with local developer
+runtimes.
 
 This repository is not an official RikkaHub release or successor. Upstream attribution and license obligations are
 preserved, and the project remains a non-commercial personal research and learning project.
 
 ## Highlights
 
-- **Mobile agent runtime**: chat is treated as an execution surface, with visible tool calls, cancellable runs,
-  generated artifacts, and state that belongs on the device rather than only in a remote web session.
-- **SubAgent workflows**: fixed and dynamic roles can split work, report tool progress, and return coordinated results
-  back into the conversation.
-- **Today Board and deep reading**: hot-list collection, source gathering, outline planning, section writing, evidence
-  tracking, and report-style reading are built as first-class Android flows.
-- **Tool and artifact UI**: search, files, local device capabilities, browser-like cards, PPT-style previews, and live
-  HTML artifacts are rendered as mobile-native interaction surfaces.
-- **External runtime experiments**: local CLI participants such as Gemini CLI, Antigravity CLI, Codex CLI, Claude Code,
-  and Kimi CLI are being explored as opt-in council seats when they can be probed and run safely.
-- **Personal continuity**: settings, providers, prompts, workspace state, sync, and backup flows are designed for a
-  long-lived personal agent workspace.
+- **Agent chat that shows its work**: tool calls, cancellations, generated cards, and run state stay visible in the
+  conversation instead of being hidden behind a plain message bubble.
+- **SubAgents for role-based work**: fixed or dynamic roles can split a task, report progress, and bring their results
+  back into one chat.
+- **Today Board and deep reading**: AmberAgent can collect hot topics, gather sources, plan a reading structure, write
+  sections, and keep evidence attached to the report.
+- **Mobile tool surfaces**: search results, files, local device actions, browser-like cards, slide previews, and live
+  HTML are shown in forms that make sense on Android.
+- **Optional local CLI seats**: Gemini CLI, Antigravity CLI, Codex CLI, Claude Code, and Kimi CLI are being tested as
+  council participants when they can be detected, authenticated, and run in a controlled way.
+- **A long-lived personal workspace**: providers, prompts, settings, workspace state, sync, and backups are treated as
+  part of the app, not throwaway session data.
 
 ## Project Status
 
-AmberAgent is an experimental, fast-moving codebase. It contains substantial inherited RikkaHub foundations alongside
-large independent changes and new agent-runtime work. Expect sharp edges, local configuration requirements, and rapid
-iteration. It is useful as a personal research app and codebase, not as a polished end-user distribution.
+AmberAgent is experimental and moves quickly. It still contains substantial RikkaHub-derived foundations alongside
+large independent changes. Expect rough edges, local configuration requirements, and occasional breakage. It is a
+personal research app and codebase, not a polished end-user distribution.
 
 ## Building
 
