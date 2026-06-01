@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/icon.png" alt="AmberAgent 应用图标" width="100" />
+  <img src="docs/brand/amberagent-mark.svg" alt="AmberAgent 应用图标" width="100" />
   <h1>AmberAgent</h1>
 
   <p>
@@ -12,8 +12,7 @@
 </div>
 
 <div align="center">
-  <img src="docs/img/chat.png" alt="聊天界面" width="150" />
-  <img src="docs/img/desktop.png" alt="模型选择器" width="450" />
+  <img src="docs/img/amberagent-overview.svg" alt="AmberAgent 移动端 Agent Runtime 概览" width="900" />
 </div>
 
 ## AmberAgent 是什么？

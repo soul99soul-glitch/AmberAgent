@@ -1,0 +1,13 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AmberAgent mark</title>
+  <desc id="desc">A stylized amber document and agent signal mark for AmberAgent.</desc>
+  <rect width="256" height="256" rx="56" fill="#F7F4EC"/>
+  <path d="M60 74C60 60.745 70.745 50 84 50H143L196 103V182C196 195.255 185.255 206 172 206H84C70.745 206 60 195.255 60 182V74Z" fill="#FFF9EE"/>
+  <path d="M143 50V91C143 97.627 148.373 103 155 103H196" fill="#FFE0A3"/>
+  <path d="M60 74C60 60.745 70.745 50 84 50H143L196 103V182C196 195.255 185.255 206 172 206H84C70.745 206 60 195.255 60 182V74Z" stroke="#27231D" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M143 50V91C143 97.627 148.373 103 155 103H196" stroke="#27231D" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M88 126H154" stroke="#27231D" stroke-width="10" stroke-linecap="round"/>
+  <path d="M88 154H134" stroke="#27231D" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="166" cy="164" r="20" fill="#F0B84F" stroke="#27231D" stroke-width="8"/>
+  <path d="M166 135V117M166 211V193M137 164H119M213 164H195" stroke="#27231D" stroke-width="8" stroke-linecap="round"/>
+</svg>
