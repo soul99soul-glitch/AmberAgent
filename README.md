@@ -3,7 +3,7 @@
   <h1>AmberAgent</h1>
 
   <p>
-    A personal, non-commercial Android agent runtime for mobile-first AI workflows.
+    A personal Android agent runtime for mobile-first AI workflows, deep reading, subagents, and local tool use.
   </p>
 
   <p>
@@ -27,21 +27,26 @@ experiments.
 This repository is not an official RikkaHub release or successor. Upstream attribution and license obligations are
 preserved, and the project remains a non-commercial personal research and learning project.
 
-## Current Focus
+## Highlights
 
-- Mobile-first chat and agent execution on Android.
-- Subagents and role-based multi-agent workflows.
-- Deep reading, source collection, section writing, and report-style output.
-- Tool execution surfaces for search, files, browser-like cards, and local app capabilities.
-- Rich generated artifacts, including live HTML/PPT-style previews.
-- External CLI seats for local developer tools where they can be safely probed and run.
-- Sync and backup flows for preserving personal configuration and workspace state.
+- **Mobile agent runtime**: chat is treated as an execution surface, with visible tool calls, cancellable runs,
+  generated artifacts, and state that belongs on the device rather than only in a remote web session.
+- **SubAgent workflows**: fixed and dynamic roles can split work, report tool progress, and return coordinated results
+  back into the conversation.
+- **Today Board and deep reading**: hot-list collection, source gathering, outline planning, section writing, evidence
+  tracking, and report-style reading are built as first-class Android flows.
+- **Tool and artifact UI**: search, files, local device capabilities, browser-like cards, PPT-style previews, and live
+  HTML artifacts are rendered as mobile-native interaction surfaces.
+- **External runtime experiments**: local CLI participants such as Gemini CLI, Antigravity CLI, Codex CLI, Claude Code,
+  and Kimi CLI are being explored as opt-in council seats when they can be probed and run safely.
+- **Personal continuity**: settings, providers, prompts, workspace state, sync, and backup flows are designed for a
+  long-lived personal agent workspace.
 
 ## Project Status
 
 AmberAgent is an experimental, fast-moving codebase. It contains substantial inherited RikkaHub foundations alongside
 large independent changes and new agent-runtime work. Expect sharp edges, local configuration requirements, and rapid
-iteration.
+iteration. It is useful as a personal research app and codebase, not as a polished end-user distribution.
 
 ## Building
 
@@ -51,6 +56,7 @@ Use Android Studio or Gradle from the repository root:
 ./gradlew :app:assembleNotion
 ```
 
+`Notion` is a historical build-type name in this repository; the current AmberAgent package target is `app.amber.agent`.
 For local development, some cloud-backed features require private configuration files that are intentionally not
 committed, such as `app/google-services.json`. The app can be built for local development without shipping those
 private credentials, but Firebase/Google-related features may be limited unless the file contains clients for the
